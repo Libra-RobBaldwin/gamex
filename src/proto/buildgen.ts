@@ -700,10 +700,114 @@ function office(k: Kit, l: Lot, r: () => number) {
   return { name: `${name} · ${floors} storeys`, detail: [L.wall[1], WIN_NAME[L.win], ...extras].join(' · ') };
 }
 
+// ---------------- more towers: the same kit, put together differently ----------------
+// Massing (how the volume is shaped) × skin (what it's clad in) × crown (how it meets the sky) ×
+// extras (fins, sky gardens, a helipad) — each chosen separately, so no two skylines repeat.
+type Massing = 'round' | 'twist' | 'stacked' | 'twin' | 'tapered' | 'cross';
+const SKINS: { win: Win; skin: Skin; name: string; frame: string }[] = [
+  { win: 'curtain', skin: 'glass', name: 'glass', frame: '#2d3338' },
+  { win: 'ribbon', skin: 'concrete', name: 'concrete bands', frame: '#2d3338' },
+  { win: 'grid', skin: 'stone', name: 'stone grid', frame: '#2d3338' },
+  { win: 'picture', skin: 'brick', name: 'brick', frame: '#2d3338' },
+  { win: 'door', skin: 'render', name: 'white balconied', frame: '#2d3338' },
+  { win: 'ribbon', skin: 'metal', name: 'metal panels', frame: '#2d3338' },
+];
+function fins(k: Kit, W: number, D: number, y0: number, y1: number, m: THREE.Material) {
+  // slim vertical fins down the front and back faces
+  const n = Math.max(3, Math.round(W / 3));
+  for (let i = 0; i <= n; i++) for (const z of [D / 2 + 0.25, -D / 2 - 0.25]) k.box(-W / 2 + (W * i) / n, y0, z, 0.25, y1 - y0, 0.5, m);
+}
+function crownOf(k: Kit, W: number, D: number, y: number, r: () => number, glassM: THREE.Material, extras: string[]) {
+  const c = r();
+  if (c < 0.2) { k.prismN(0, 0, 0.35, 6, y, 3, plain('#c3c8cc'), 16, plain('#d9dde0')); extras.push('mast'); }
+  else if (c < 0.4) {
+    // helipad: a painted disc on the roof
+    k.cap(rect(0, 0, W - 1, D - 1), y + 0.05, plain('#5d6166'));
+    k.prismN(0, 0, Math.min(W, D) * 0.35, 16, y + 0.06, 0.04, plain('#e0c14a'));
+    k.box(-1.2, y + 0.1, 0, 0.5, 0.04, 3, plain('#f4f4f0')); k.box(1.2, y + 0.1, 0, 0.5, 0.04, 3, plain('#f4f4f0')); k.box(0, y + 0.1, 0, 2.4, 0.04, 0.5, plain('#f4f4f0'));
+    extras.push('helipad');
+  } else if (c < 0.6) { k.frustum(0, 0, W, D, W * 0.3, D * 0.3, y, Math.min(W, D) * 0.5, glassM, plain('#6a7076')); extras.push('glass pyramid'); }
+  else if (c < 0.8) {
+    // a roof garden behind a glass balustrade
+    k.cap(rect(0, 0, W - 1, D - 1), y + 0.05, lawnM(1.04));
+    for (let i = 0; i < 4; i++) tree(k, (r() - 0.5) * (W - 4), (r() - 0.5) * (D - 4), 0.6, r);
+    k.walls(rect(0, 0, W - 0.2, D - 0.2), true, y, 1, 1.1, 0, railM());
+    extras.push('roof garden');
+  } else { for (let i = 0; i < 3; i++) k.box((r() - 0.5) * W * 0.5, y, (r() - 0.5) * D * 0.5, 2 + r() * 3, 1.5 + r() * 2, 2 + r() * 2, plain('#9aa0a4')); extras.push('plant room'); }
+}
+function modernTower(k: Kit, l: Lot, r: () => number, massing: Massing) {
+  const W = l.w, D = Math.min(l.d, 18), extras: string[] = [];
+  k.foot = { w: W, d: D };
+  const S = pick(r, SKINS);
+  const col = S.skin === 'glass' ? pick(r, GLASS) : pick(r, skinPalette(S.skin));
+  const face = facade(S.win, S.skin, col[0], S.frame);
+  const glassM = facade('curtain', 'glass', pick(r, GLASS)[0], '#2d3338');
+  const fh = S.win === 'door' ? 3 : 3.5;
+  const floors = Math.max(10, Math.round(l.h / fh));
+  // a podium of shops or a glazed lobby, so the street level is lively
+  const podF = r() < 0.5 ? 1 : 2, podH = 4.2;
+  const pod = r() < 0.5 ? facade('shop', 'stone', '#ddd3bb', '#2d3338', pick(r, FASCIA)) : facade('lobby', 'stone', '#ddd3bb', '#2d3338');
+  k.block(0, 0, W + 1.5, D + 1.5, 0, podF, podH, 4.5, pod, pod, blank(look(r, 'stone', 'none', '#2d3338', ['#ddd3bb', 'stone'])), plain('#8a8f94'));
+  const base = podF * podH, top = base + (floors - podF) * fh;
+  let y = top;
+  if (massing === 'round') {
+    const R = Math.min(W, D) / 2, n = 16, pts: XZ[] = [];
+    for (let i = 0; i < n; i++) { const a = (-i / n) * Math.PI * 2; pts.push([Math.cos(a) * R, Math.sin(a) * R]); }
+    k.walls(pts, true, base, floors - podF, fh, 2.5, face);
+    k.cap(pts, top, plain('#6a7076'));
+    extras.push('round');
+  } else if (massing === 'twist') {
+    // every floor turned a little further than the one below
+    const turn = (0.8 + r() * 1.6) * (Math.PI / 180) * (r() < 0.5 ? 1 : -1);
+    const s = Math.min(W, D) * 0.92;
+    for (let f = 0; f < floors - podF; f++) k.at(0, 0, turn * f, () => k.block(0, 0, s, s, base + f * fh, 1, fh, 3, face, face, face, f === floors - podF - 1 ? plain('#6a7076') : undefined));
+    extras.push(`twisting ${Math.round(Math.abs(turn) * (floors - podF) * 180 / Math.PI)}°`);
+  } else if (massing === 'stacked') {
+    // boxes of four floors, each slid across the one below
+    let yy = base;
+    for (let f = podF, i = 0; f < floors; f += 4, i++) {
+      const n = Math.min(4, floors - f), dx = (i % 2 ? 1 : -1) * W * 0.12, dz = (i % 3 === 1 ? 1 : -1) * D * 0.1;
+      k.block(dx, dz, W * 0.82, D * 0.82, yy, n, fh, 3, i % 2 ? face : glassM, face, face, plain('#6a7076'));
+      yy += n * fh;
+    }
+    y = yy;
+    extras.push('stacked boxes');
+  } else if (massing === 'twin') {
+    // two slim towers joined by a sky bridge
+    const w2 = W * 0.42, h2 = Math.round((floors - podF) * (0.75 + r() * 0.2));
+    k.block(-W * 0.29, 0, w2, D * 0.8, base, floors - podF, fh, 3, face, face, face, plain('#6a7076'));
+    k.block(W * 0.29, 0, w2, D * 0.8, base, h2, fh, 3, face, face, face, plain('#6a7076'));
+    const by = base + Math.round(h2 * 0.6) * fh;
+    k.block(0, 0, W * 0.2, D * 0.4, by, 2, fh, 3, glassM, glassM, glassM, plain('#6a7076'));
+    extras.push('twin towers', 'sky bridge');
+  } else if (massing === 'tapered') {
+    // narrowing as it rises
+    let yy = base;
+    const steps = Math.ceil((floors - podF) / 3);
+    for (let i = 0; i < steps; i++) {
+      const n = Math.min(3, floors - podF - i * 3), sc = 1 - (i / steps) * 0.45;
+      k.block(0, 0, W * sc, D * sc, yy, n, fh, 3, face, face, face, i === steps - 1 ? plain('#6a7076') : undefined);
+      yy += n * fh;
+    }
+    y = yy;
+    extras.push('tapering');
+  } else {
+    // cross plan: two slabs through each other, with notches of balconies
+    k.block(0, 0, W, D * 0.45, base, floors - podF, fh, 3, face, face, face, plain('#6a7076'));
+    k.block(0, 0, W * 0.45, D, base, floors - podF - 2, fh, 3, face, face, face, plain('#6a7076'));
+    extras.push('cross plan');
+  }
+  if (r() < 0.35 && massing !== 'round' && massing !== 'twist') { fins(k, W * 0.82, D * 0.82, base, y, plain(pick(r, ['#c9cdd0', '#2d3338', '#b0633e', '#e8e6e0']))); extras.push('vertical fins'); }
+  if (massing !== 'twin') crownOf(k, massing === 'round' ? Math.min(W, D) * 0.7 : massing === 'tapered' ? W * 0.55 : W * 0.8, massing === 'tapered' ? D * 0.55 : D * 0.8, y, r, glassM, extras);
+  const names: Record<Massing, string> = { round: 'Round tower', twist: 'Twisting tower', stacked: 'Stacked tower', twin: 'Twin towers', tapered: 'Tapering tower', cross: 'Cross-plan tower' };
+  return { name: `${names[massing]} · ${floors} storeys`, detail: [S.name, ...extras].join(' · ') };
+}
+
 function tower(k: Kit, l: Lot, r: () => number) {
   const W = l.w, D = Math.min(l.d, 18), extras: string[] = [];
   k.foot = { w: W, d: D };
-  const arch = pick(r, ['glass', 'resi', 'deco', 'glass'] as const);
+  const arch = pick(r, ['glass', 'resi', 'deco', 'round', 'twist', 'stacked', 'twin', 'tapered', 'cross', 'glass', 'round', 'stacked'] as const);
+  if (arch !== 'glass' && arch !== 'resi' && arch !== 'deco') return modernTower(k, l, r, arch);
   const fh = arch === 'resi' ? 3 : 3.6;
   const floors = Math.max(8, Math.round(l.h / fh));
   let L: Look, name: string;
@@ -1222,23 +1326,25 @@ export function makeRegion(reg: RegionShape): BuiltShape {
   const block = (n: number) => cells.find((c) => { for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (!inR(c.x + i * S, c.z + j * S)) return false; return true; });
   const notes: string[] = [`${Math.round(cells.length * S * S)} m²`];
   const railings = () => { for (const [x0, z0, x1, z1] of reg.roadEdges) k.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.max(0.05, Math.abs(x1 - x0)), 1.1, Math.max(0.05, Math.abs(z1 - z0)), plain('#23262a')); };
-  const trees = (p: number, s = 0.9) => { let n = 0; for (const c of cells) if (r() < p) { tree(k, c.x + (r() - 0.5) * S * 0.6, c.z + (r() - 0.5) * S * 0.6, s + r() * 0.4, r); n++; } return n; };
+  const keep: { x: number; z: number; r: number }[] = [];
+  const clear = (x: number, z: number) => keep.every((o) => Math.hypot(x - o.x, z - o.z) > o.r);
+  const trees = (p: number, s = 0.9) => { let n = 0; for (const c of cells) if (r() < p && clear(c.x, c.z)) { tree(k, c.x + (r() - 0.5) * S * 0.6, c.z + (r() - 0.5) * S * 0.6, s + r() * 0.4, r); n++; } return n; };
   if (reg.kind === 'verge' || reg.kind === 'grounds') {
     for (const c of cells) if (r() < 0.6) sphere(k, c.x + (r() - 0.5) * 2, 0.6, c.z + (r() - 0.5) * 2, 0.8 + r() * 0.5, plain(pick(r, LEAVES)), 6, 3, 0.8);
     trees(0.3, 0.8);
     notes.push('shrubs and trees');
   } else if (reg.kind === 'pocket' || reg.kind === 'park') {
+    const pond = reg.kind === 'park' ? block(4) : undefined;
+    if (pond) { keep.push({ x: pond.x + 1.5 * S, z: pond.z + 1.5 * S, r: S * 1.6 + 2 }); k.prismN(pond.x + 1.5 * S, pond.z + 1.5 * S, S * 1.6, 18, 0, 0.1, plain('#cfc7a8')); k.prismN(pond.x + 1.5 * S, pond.z + 1.5 * S, S * 1.4, 18, 0, 0.14, plain('#4f93c4')); notes.push('pond'); }
     // a path across the longer way, benches along it
     const xs = cells.map((c) => c.x), zs = cells.map((c) => c.z);
     const alongX = Math.max(...xs) - Math.min(...xs) >= Math.max(...zs) - Math.min(...zs);
-    const path = cells.filter((c) => (alongX ? Math.abs(c.z - centre.z) < 0.1 : Math.abs(c.x - centre.x) < 0.1));
+    const path = cells.filter((c) => (alongX ? Math.abs(c.z - centre.z) < 0.1 : Math.abs(c.x - centre.x) < 0.1) && clear(c.x, c.z));
     for (const c of path) alongX ? flat(k, c.x - h, c.z - 1.2, c.x + h, c.z + 1.2, 0.075, gravelM()) : flat(k, c.x - 1.2, c.z - h, c.x + 1.2, c.z + h, 0.075, gravelM());
     path.forEach((c, i) => { if (i % 2 === 1) bench(k, alongX ? c.x : c.x + 2, alongX ? c.z + 2 : c.z, alongX); });
-    const pond = reg.kind === 'park' ? block(4) : undefined;
-    if (pond) { k.prismN(pond.x + 1.5 * S, pond.z + 1.5 * S, S * 1.6, 18, 0, 0.1, plain('#cfc7a8')); k.prismN(pond.x + 1.5 * S, pond.z + 1.5 * S, S * 1.4, 18, 0, 0.14, plain('#4f93c4')); notes.push('pond'); }
     const tn = trees(reg.kind === 'park' ? 0.3 : 0.4);
-    for (const c of cells) if (r() < 0.12) flat(k, c.x - 1.5, c.z - 1, c.x + 1.5, c.z + 1, 0.07, bedM());
-    if (reg.kind === 'park' && cells.length > 80) { k.prismN(centre.x, centre.z + S, 3.2, 8, 0, 0.6, plain('#c9c2b4')); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; k.box(centre.x + Math.cos(a) * 2.8, 0.6, centre.z + S + Math.sin(a) * 2.8, 0.15, 2.6, 0.15, plain('#2e5a45')); } k.prismN(centre.x, centre.z + S, 3.6, 8, 3.2, 0.2, plain('#2e5a45'), 1.4, plain('#2e5a45')); notes.push('bandstand'); }
+    for (const c of cells) if (r() < 0.12 && clear(c.x, c.z)) flat(k, c.x - 1.5, c.z - 1, c.x + 1.5, c.z + 1, 0.07, bedM());
+    if (reg.kind === 'park' && cells.length > 80 && clear(centre.x, centre.z + S)) { k.prismN(centre.x, centre.z + S, 3.2, 8, 0, 0.6, plain('#c9c2b4')); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; k.box(centre.x + Math.cos(a) * 2.8, 0.6, centre.z + S + Math.sin(a) * 2.8, 0.15, 2.6, 0.15, plain('#2e5a45')); } k.prismN(centre.x, centre.z + S, 3.6, 8, 3.2, 0.2, plain('#2e5a45'), 1.4, plain('#2e5a45')); notes.push('bandstand'); }
     railings();
     notes.push(`${tn} trees`, 'benches', 'railings');
   } else if (reg.kind === 'playground') {

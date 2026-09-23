@@ -1,7 +1,11 @@
 // 3D prototype: free-form roads, plots along any street, buses and cars, rotating camera.
 import * as THREE from 'three';
 import './proto.css';
-import { BAY, DEFAULT_OPTS, Network, ROADS, bayWeight, kerbOf, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
+import { DEFAULT_OPTS, Network, ROADS, kerbOf, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
+import { FORM_NAME, design, laneOptions, legsAt, moveOf, rescore, slipClear, type Form, type Junction, type Slip } from './junction';
+import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, type RoadFilter } from './catalog';
+import { GRADES } from './grade';
+import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
 import { GRADE_STEPS } from './grade';
 import { Traffic, rushLabel, type Places } from './traffic';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -24,7 +28,7 @@ const rand = rng(99);
 
 // ---------------- three setup ----------------
 const canvas = $<HTMLCanvasElement>('#c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, stencil: true });
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -108,6 +112,8 @@ grassTex.repeat.set(60, 60);
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND * 2.6, BOUND * 2.6), new THREE.MeshLambertMaterial({ map: grassTex }));
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
+// the ground leaves out any cutting a road or railway runs down into (they mark the stencil first)
+{ const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
 scene.add(ground);
 const beach = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 7, 72), new THREE.MeshLambertMaterial({ color: '#d9c894' }));
 beach.rotation.x = -Math.PI / 2;
@@ -170,288 +176,30 @@ function refreshTrees() {
 
 
 // ---------------- roads ----------------
-const paveMat = new THREE.MeshLambertMaterial({ color: '#bdb8ad', polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-const asphaltMat = new THREE.MeshLambertMaterial({ color: '#484c52', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-const lineMat = new THREE.MeshLambertMaterial({ color: '#f1f1f1', polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
 const roadGroup = new THREE.Group();
 scene.add(roadGroup);
-
-class Flat {
-  pos: number[] = [];
-  // a strip of half-width hw following a path, mitred at the bends
-  ribbon(path: P[], hw: number, y: number) {
-    const n = path.length;
-    const side: P[] = [];
-    for (let i = 0; i < n; i++) {
-      const a = path[Math.max(0, i - 1)], b = path[Math.min(n - 1, i + 1)];
-      const L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-      side.push({ x: -(b.z - a.z) / L, z: (b.x - a.x) / L });
-    }
-    for (let i = 1; i < n; i++) {
-      const p = path[i - 1], q = path[i], s0 = side[i - 1], s1 = side[i];
-      const a = { x: p.x + s0.x * hw, z: p.z + s0.z * hw }, b = { x: q.x + s1.x * hw, z: q.z + s1.z * hw };
-      const c = { x: q.x - s1.x * hw, z: q.z - s1.z * hw }, d = { x: p.x - s0.x * hw, z: p.z - s0.z * hw };
-      const yp = (p.y ?? 0) + y, yq = (q.y ?? 0) + y;
-      this.tri3(a.x, yp, a.z, b.x, yq, b.z, c.x, yq, c.z);
-      this.tri3(a.x, yp, a.z, c.x, yq, c.z, d.x, yp, d.z);
-    }
-  }
-  // a strip between two sideways offsets (left of the path's direction is positive), which may vary
-  strip(path: P[], off: (i: number) => [number, number], y: number) {
-    const n = path.length;
-    const nl = path.map((_, i) => {
-      const a = path[Math.max(0, i - 1)], b = path[Math.min(n - 1, i + 1)], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-      return { x: (b.z - a.z) / L, z: -(b.x - a.x) / L };
-    });
-    for (let i = 1; i < n; i++) {
-      const p = path[i - 1], q = path[i], [a0, a1] = off(i - 1), [b0, b1] = off(i);
-      const yp = (p.y ?? 0) + y, yq = (q.y ?? 0) + y;
-      const P0 = [p.x + nl[i - 1].x * a0, p.z + nl[i - 1].z * a0], P1 = [p.x + nl[i - 1].x * a1, p.z + nl[i - 1].z * a1];
-      const Q0 = [q.x + nl[i].x * b0, q.z + nl[i].z * b0], Q1 = [q.x + nl[i].x * b1, q.z + nl[i].z * b1];
-      this.tri3(P0[0], yp, P0[1], Q0[0], yq, Q0[1], Q1[0], yq, Q1[1]);
-      this.tri3(P0[0], yp, P0[1], Q1[0], yq, Q1[1], P1[0], yp, P1[1]);
-    }
-  }
-  // dashes along a line at a (varying) sideways offset
-  dashes(path: P[], off: (t: number) => number, t0: number, t1: number, len: number, gap: number, w: number, y: number) {
-    for (let t = t0; t + len <= t1; t += len + gap) { const sp = subPath(path, t, t + len); this.strip(sp, (i) => { const o = off(t + (len * i) / (sp.length - 1 || 1)); return [o - w, o + w]; }, y); }
-  }
-  disc(c: P, r: number, y: number, n = 20) {
-    y += c.y ?? 0;
-    for (let i = 0; i < n; i++) {
-      const a0 = (i / n) * Math.PI * 2, a1 = ((i + 1) / n) * Math.PI * 2;
-      this.tri(c.x, c.z, c.x + Math.cos(a1) * r, c.z + Math.sin(a1) * r, c.x + Math.cos(a0) * r, c.z + Math.sin(a0) * r, y);
-    }
-  }
-  ring(c: P, r0: number, r1: number, y: number, n = 24) {
-    for (let i = 0; i < n; i++) {
-      const a0 = (i / n) * Math.PI * 2, a1 = ((i + 1) / n) * Math.PI * 2;
-      const p = (a: number, r: number) => [c.x + Math.cos(a) * r, c.z + Math.sin(a) * r] as const;
-      const [x0, z0] = p(a0, r0), [x1, z1] = p(a1, r0), [x2, z2] = p(a1, r1), [x3, z3] = p(a0, r1);
-      this.tri(x0, z0, x1, z1, x2, z2, y);
-      this.tri(x0, z0, x2, z2, x3, z3, y);
-    }
-  }
-  tri(x0: number, z0: number, x1: number, z1: number, x2: number, z2: number, y: number) {
-    // keep triangles facing up
-    const cross = (x1 - x0) * (z2 - z0) - (z1 - z0) * (x2 - x0);
-    if (cross > 0) this.pos.push(x0, y, z0, x2, y, z2, x1, y, z1);
-    else this.pos.push(x0, y, z0, x1, y, z1, x2, y, z2);
-  }
-  // same, for a triangle that may slope
-  tri3(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, x2: number, y2: number, z2: number) {
-    const cross = (x1 - x0) * (z2 - z0) - (z1 - z0) * (x2 - x0);
-    if (cross > 0) this.pos.push(x0, y0, z0, x2, y2, z2, x1, y1, z1);
-    else this.pos.push(x0, y0, z0, x1, y1, z1, x2, y2, z2);
-  }
-  mesh(mat: THREE.Material) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.computeVertexNormals();
-    const m = new THREE.Mesh(g, mat);
-    m.receiveShadow = true;
-    return m;
-  }
-}
-
-// Bridges and ramps: deck edges (retaining walls near the ground), underside, parapets, piers.
-const concreteMat = new THREE.MeshLambertMaterial({ color: '#b9b5ac', side: THREE.DoubleSide });
-const parapetMat = new THREE.MeshLambertMaterial({ color: '#dcd8d0', side: THREE.DoubleSide });
-class Solid {
-  pos: number[] = [];
-  quad(a: number[], b: number[], c: number[], d: number[]) { this.pos.push(...a, ...b, ...c, ...a, ...c, ...d); }
-  box(cx: number, cz: number, ux: number, uz: number, along: number, across: number, y0: number, y1: number) {
-    const c = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => [cx + ux * along * i - uz * across * j, cz + uz * along * i + ux * across * j]);
-    for (let k = 0; k < 4; k++) { const p = c[k], q = c[(k + 1) % 4]; this.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]]); }
-    this.quad([c[0][0], y1, c[0][1]], [c[1][0], y1, c[1][1]], [c[2][0], y1, c[2][1]], [c[3][0], y1, c[3][1]]);
-  }
-  mesh(mat: THREE.Material) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.computeVertexNormals();
-    const m = new THREE.Mesh(g, mat);
-    m.castShadow = true; m.receiveShadow = true;
-    return m;
-  }
-}
-const DECK = 1.2;
-function structures(path: P[], body: Solid, rails: Solid | null, HALF: number) {
-  const n = path.length;
-  if (!path.some((p) => (p.y ?? 0) > 0.05)) return;
-  const side = path.map((_, i) => {
-    const a = path[Math.max(0, i - 1)], b = path[Math.min(n - 1, i + 1)], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-    return { x: -(b.z - a.z) / L, z: (b.x - a.x) / L };
-  });
-  const Y = (i: number) => path[i].y ?? 0;
-  for (let i = 1; i < n; i++) {
-    if (Y(i - 1) < 0.05 && Y(i) < 0.05) continue;
-    const p = path[i - 1], q = path[i], s0 = side[i - 1], s1 = side[i];
-    const t0 = Y(i - 1) + 0.15, t1 = Y(i) + 0.15, b0 = Math.max(0, Y(i - 1) - DECK), b1 = Math.max(0, Y(i) - DECK);
-    for (const k of [1, -1]) {
-      const e0 = [p.x + s0.x * HALF * k, p.z + s0.z * HALF * k], e1 = [q.x + s1.x * HALF * k, q.z + s1.z * HALF * k];
-      body.quad([e0[0], b0, e0[1]], [e1[0], b1, e1[1]], [e1[0], t1, e1[1]], [e0[0], t0, e0[1]]);
-      if (rails && Y(i - 1) > 1.5 && Y(i) > 1.5) rails.quad([e0[0], t0, e0[1]], [e1[0], t1, e1[1]], [e1[0], t1 + 1, e1[1]], [e0[0], t0 + 1, e0[1]]);
-    }
-    if (b0 > 0 || b1 > 0) {
-      const l0 = [p.x + s0.x * HALF, p.z + s0.z * HALF], r0 = [p.x - s0.x * HALF, p.z - s0.z * HALF];
-      const l1 = [q.x + s1.x * HALF, q.z + s1.z * HALF], r1 = [q.x - s1.x * HALF, q.z - s1.z * HALF];
-      body.quad([l0[0], b0, l0[1]], [l1[0], b1, l1[1]], [r1[0], b1, r1[1]], [r0[0], b0, r0[1]]);
-    }
-  }
-  if (!rails) return;
-  // piers every 24 m where the deck is high enough to need them
-  const L = pathLength(path);
-  for (let t = 12; t < L; t += 24) {
-    const q = pointAt(path, t);
-    if (q.y < 2.6) continue;
-    body.box(q.x, q.z, q.ux, q.uz, 0.7, 0.9, 0, q.y - DECK);
-    body.box(q.x, q.z, q.ux, q.uz, 0.8, HALF - 0.6, q.y - DECK - 0.9, q.y - DECK);
-  }
-}
-
-const halfOfType = (t: RoadType) => { const d = ROADS[t]; return kerbOf(d) + d.pave + d.verge; };
-const vergeMat = new THREE.MeshLambertMaterial({ color: '#6f9a4a', polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-const medianMat = new THREE.MeshLambertMaterial({ color: '#9d9a92', polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-const yellowMat = new THREE.MeshLambertMaterial({ color: '#e8c33a', polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
-const barrierMat = new THREE.MeshLambertMaterial({ color: '#a9adb0', side: THREE.DoubleSide });
-const shelterGlass = new THREE.MeshLambertMaterial({ color: '#b9d6e2', transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide });
-const shelterFrame = new THREE.MeshLambertMaterial({ color: '#2e3136', side: THREE.DoubleSide });
-const stopRed = new THREE.MeshLambertMaterial({ color: '#c9302c', side: THREE.DoubleSide });
-
-// The cross-section of a road at distance t along it, allowing for bus lay-bys: where one is cut
-// in, that side's kerb moves out (into the pavement, and into bought land) and its lanes narrow.
-function section(s: RSeg, t: number) {
-  const d = net.def(s), K = kerbOf(d);
-  const side = () => ({ kerb: K, lane: K - d.shoulder, back: K + d.pave + d.verge, bay: 0 });
-  const L = side(), R = side();
-  for (const st of s.stops) {
-    const w = bayWeight(st, t);
-    if (!w || st.kind !== 'layby') continue;
-    const x = st.side === 1 ? L : R;
-    x.kerb += (st.take.pave + st.take.land) * w;
-    x.back += st.take.land * w;
-    x.lane -= st.take.lane * w;
-    x.bay = Math.max(x.bay, w);
-  }
-  return { d, L, R };
-}
-
-// Extra points along a road near its stops, so kerb lines can bend smoothly.
-function finePath(s: RSeg) {
-  const path = net.path(s);
-  if (!s.stops.length) return path;
-  const L = pathLength(path), out: P[] = [];
-  const cuts = new Set<number>([0, L]);
-  let acc = 0;
-  for (let i = 1; i < path.length - 1; i++) { acc += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z); cuts.add(acc); }
-  for (const st of s.stops) { const [a, b] = stopSpan(st); for (let t = Math.max(0, a - 2); t <= Math.min(L, b + 2); t += 1.5) cuts.add(t); }
-  for (const t of [...cuts].sort((x, y) => x - y)) { const q = pointAt(path, t); out.push({ x: q.x, z: q.z, y: q.y }); }
-  return out;
-}
-
-function arcs(path: P[]) {
-  const a = [0];
-  for (let i = 1; i < path.length; i++) a.push(a[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z));
-  return a;
-}
-
-function shelter(solid: { glass: Solid; frame: Solid; red: Solid }, path: P[], t: number, off: number) {
-  const q = pointAt(path, t), nx = q.uz, nz = -q.ux; // left of travel
-  const sx = Math.sign(off);
-  const at = (a: number, o: number) => [q.x + q.ux * a + nx * o, q.z + q.uz * a + nz * o];
-  const back = off + sx * 1.3, front = off + sx * 0.1, y = q.y;
-  // back pane, end panes and roof
-  const b0 = at(-2, back), b1 = at(2, back);
-  solid.glass.quad([b0[0], y + 0.1, b0[1]], [b1[0], y + 0.1, b1[1]], [b1[0], y + 2.3, b1[1]], [b0[0], y + 2.3, b0[1]]);
-  for (const e of [-2, 2]) { const p0 = at(e, back), p1 = at(e, front + sx * 0.4); solid.glass.quad([p0[0], y + 0.1, p0[1]], [p1[0], y + 0.1, p1[1]], [p1[0], y + 2.3, p1[1]], [p0[0], y + 2.3, p0[1]]); }
-  solid.frame.box((at(0, (back + front) / 2))[0], (at(0, (back + front) / 2))[1], q.ux, q.uz, 2.15, 0.8, y + 2.3, y + 2.45);
-  for (const e of [-2, 2]) { const p = at(e, back); solid.frame.box(p[0], p[1], q.ux, q.uz, 0.05, 0.05, y, y + 2.3); }
-  // the stop flag: a pole with a red and white sign
-  const f = at(3.2, front - sx * 0.2);
-  solid.frame.box(f[0], f[1], q.ux, q.uz, 0.05, 0.05, y, y + 3);
-  solid.red.box(f[0], f[1], q.ux, q.uz, 0.03, 0.35, y + 2.4, y + 2.95);
-}
-
-function rebuildRoads() {
-  for (const c of [...roadGroup.children]) { roadGroup.remove(c); (c as THREE.Mesh).geometry.dispose(); }
-  const pave = new Flat(), asph = new Flat(), lines = new Flat(), verge = new Flat(), median = new Flat(), yellow = new Flat();
-  const body = new Solid(), rails = new Solid(), barrier = new Solid();
-  const furn = { glass: new Solid(), frame: new Solid(), red: new Solid() };
-  const trees: THREE.BufferGeometry[] = [];
-  for (const s of net.segs.values()) {
-    const d = net.def(s), path = finePath(s), A = arcs(path), L = A[A.length - 1];
-    const sec = A.map((t) => section(s, t));
-    structures(path, body, rails, net.half(s));
-    // pavements or verges, then the carriageway
-    const surface = d.pave > 0 ? pave : verge;
-    surface.strip(path, (i) => [sec[i].L.kerb, sec[i].L.back], 0.15);
-    surface.strip(path, (i) => [-sec[i].R.back, -sec[i].R.kerb], 0.15);
-    if (d.median > 0) {
-      asph.strip(path, (i) => [d.median / 2, sec[i].L.kerb], 0.25);
-      asph.strip(path, (i) => [-sec[i].R.kerb, -d.median / 2], 0.25);
-      (s.type === 'motorway' ? verge : median).strip(path, () => [-d.median / 2, d.median / 2], 0.27);
-    } else asph.strip(path, (i) => [-sec[i].R.kerb, sec[i].L.kerb], 0.25);
-    // lines, kept clear of junctions
-    const trimA = net.segsAt(s.a).length > 2 ? net.nodeHalf(s.a) + 1 : 0, trimB = net.segsAt(s.b).length > 2 ? net.nodeHalf(s.b) + 1 : 0;
-    const secAt = (t: number) => section(s, t);
-    if (d.median === 0) {
-      // centre line sits midway between the lane edges (it moves over where lanes are narrowed)
-      lines.dashes(path, (t) => { const x = secAt(t); return (x.L.lane - x.R.lane) / 2; }, trimA + 1, L - trimB, 3, 3, 0.07, 0.35);
-    } else {
-      for (const k of [1, -1]) {
-        const edge = (t: number) => (k === 1 ? secAt(t).L.lane : secAt(t).R.lane);
-        for (let n = 1; n < d.lanes; n++) lines.dashes(path, (t) => k * (d.median / 2 + ((edge(t) - d.median / 2) * n) / d.lanes), trimA + 1, L - trimB, 4, 5, 0.07, 0.35);
-        // solid edge lines by the central reservation and the hard shoulder (one long dash each)
-        const run = L - trimA - trimB - 2;
-        if (run > 1) {
-          lines.dashes(path, () => k * (d.median / 2 + 0.25), trimA + 1, L - trimB, run, 1, 0.07, 0.35);
-          if (d.shoulder) lines.dashes(path, (t) => k * edge(t), trimA + 1, L - trimB, run, 1, 0.1, 0.35);
-        }
-      }
-      // central barrier, stopping short of junctions
-      for (let i = 1; i < path.length; i++) {
-        if (A[i - 1] < trimA || A[i] > L - trimB) continue;
-        const p = path[i - 1], q = path[i];
-        barrier.quad([p.x, (p.y ?? 0) + 0.25, p.z], [q.x, (q.y ?? 0) + 0.25, q.z], [q.x, (q.y ?? 0) + 1.05, q.z], [p.x, (p.y ?? 0) + 1.05, p.z]);
-      }
-    }
-    // bus stops: yellow bay markings, the lay-by's edge line, a shelter
-    for (const st of s.stops) {
-      const [a, b] = stopSpan(st), k = st.side;
-      const kerb = (t: number) => k * (k === 1 ? secAt(t).L.kerb : secAt(t).R.kerb);
-      const laneE = (t: number) => k * (k === 1 ? secAt(t).L.lane : secAt(t).R.lane);
-      const s0 = st.s - BAY.stand / 2, s1 = st.s + BAY.stand / 2;
-      const inner = st.kind === 'layby' ? laneE : (t: number) => kerb(t) - k * 3;
-      yellow.dashes(path, (t) => kerb(t) - k * 0.3, s0, s1, 1, 0.01, 0.1, 0.36);
-      yellow.dashes(path, inner, s0, s1, 1, 0.01, 0.1, 0.36);
-      for (const t of [s0, s1]) { const sp = subPath(path, t - 0.1, t + 0.1); yellow.strip(sp, () => { const x = [inner(t), kerb(t) - k * 0.3].sort((p, q) => p - q); return [x[0], x[1]]; }, 0.36); }
-      if (st.kind === 'layby') lines.dashes(path, laneE, a, b, 1, 1, 0.1, 0.35);
-      shelter(furn, path, st.s, kerb(st.s) + k * 0.2);
-    }
-    // avenues get street trees along the pavement
-    if (d.trees) for (const k of [1, -1]) for (let t = trimA + 8; t < L - trimB - 4; t += 14) {
-      const x = secAt(t), side = k === 1 ? x.L : x.R;
-      if (side.bay > 0 || side.back - side.kerb < 3) continue;
-      const q = pointAt(path, t), o = k * (side.kerb + 1.4);
-      const px = q.x + q.uz * o, pz = q.z - q.ux * o;
-      trees.push(new THREE.CylinderGeometry(0.18, 0.25, 3, 5).translate(px, q.y + 1.5, pz), new THREE.IcosahedronGeometry(2.2, 0).translate(px, q.y + 4.4, pz));
-    }
-  }
+// ---------------- junctions ----------------
+// Every junction designs itself (see junction.ts) whenever the roads meeting there change; a
+// junction the player has customised keeps their choices as long as its roads stay the same.
+const junctions = new Map<number, Junction>();
+let seenAt: (node: number) => Map<string, number> | undefined = () => undefined;
+const geoFor = (node: number) => ({ slipFits: (sl: Slip) => slipClear(net, sl, node) });
+function redesignJunctions() {
+  for (const id of [...junctions.keys()]) if (!net.nodes.has(id) || legsAt(net, id).length < 3) junctions.delete(id);
   for (const n of net.nodes.values()) {
-    const segs = net.segsAt(n.id);
-    const kerb = Math.max(ROADS.street.lane, ...segs.map((s) => kerbOf(net.def(s)))), back = net.nodeHalf(n.id);
-    (segs.every((s) => net.def(s).pave === 0) ? verge : pave).disc(n, back, 0.15);
-    asph.disc(n, kerb, 0.25);
+    const legs = legsAt(net, n.id);
+    if (legs.length < 3) continue;
+    const old = junctions.get(n.id);
+    const same = old && old.legs.length === legs.length && legs.every((l) => old.legs.includes(l.seg.id));
+    if (same && !old!.auto) continue;
+    const j = design(net, n.id, geoFor(n.id), seenAt(n.id));
+    if (j) junctions.set(n.id, j);
   }
-  const add = (f: Flat | Solid, m: THREE.Material) => { if (f.pos.length) roadGroup.add(f.mesh(m)); };
-  add(pave, paveMat); add(asph, asphaltMat); add(lines, lineMat); add(verge, vergeMat); add(median, medianMat); add(yellow, yellowMat);
-  add(body, concreteMat); add(rails, parapetMat); add(barrier, barrierMat);
-  add(furn.glass, shelterGlass); add(furn.frame, shelterFrame); add(furn.red, stopRed);
-  if (trees.length) {
-    const trunk = mergeGeometries(trees.filter((_, i) => i % 2 === 0).map((g) => g.toNonIndexed())), crown = mergeGeometries(trees.filter((_, i) => i % 2 === 1).map((g) => g.toNonIndexed()));
-    for (const [g, m] of [[trunk, trunkMat], [crown, crownMat]] as const) if (g) { const mesh = new THREE.Mesh(g, m); mesh.castShadow = true; roadGroup.add(mesh); }
-    for (const g of trees) g.dispose();
-  }
+}
+let lamps: Lamp[] = [];
+function rebuildRoads() {
+  redesignJunctions();
+  lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   onRoadsChanged();
 }
 
@@ -599,6 +347,9 @@ function seedTown() {
   // a motorway along the south edge, reached from the estate by a dual carriageway
   road({ x: -510, z: -470 }, { x: 510, z: -470 }, undefined, as('motorway'));
   road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
+  // a main line railway along the north, lifted over the high road, and a road tunnel under the lake
+  net.build({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
+  road({ x: 250, z: -450 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 });
   for (const s of net.segs.values()) queuePlots([s.id]);
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
@@ -606,7 +357,7 @@ function seedTown() {
 }
 
 // ---------------- UI ----------------
-type Mode = 'look' | 'road' | 'stop';
+type Mode = 'look' | 'road' | 'rail' | 'stop';
 type RoadKind = 'straight' | 'curve' | 'smooth';
 let mode: Mode = 'look';
 let roadKind: RoadKind = 'straight';
@@ -617,7 +368,11 @@ let dragging = false;
 let draftCheck: Check | null = null;
 let trace: P[] = []; // curve tool: where the finger has been during a drag
 const opts: RoadOpts = { ...DEFAULT_OPTS };
-const HEIGHTS = [['auto', '⛰️ Auto height'], ['level', '➖ Keep level'], ['up', '↗️ Climb']] as const;
+const lastType = { road: 'street', rail: 'rail-main' };
+const HEIGHTS = [['auto', '⛰️ Auto'], ['level', '➖ Level'], ['up', '↗️ Climb']] as const;
+const CROSS = [['junction', '✚ Join'], ['bridge', '🌉 Over'], ['tunnel', '🚇 Under']] as const;
+const cls = () => (mode === 'rail' ? 'rail' : 'road') as 'road' | 'rail';
+const short = (id: string) => ({ street: 'Street', avenue: 'Avenue', dual: 'Dual', motorway: 'Motorway', 'rail-branch': 'Branch', 'rail-main': 'Main line', 'rail-hs': 'High speed', 'rail-light': 'Light rail', 'rail-rack': 'Rack' } as Record<string, string>)[id] ?? ROADS[id].family;
 
 $('#ui').innerHTML = `
   <div id="info" class="glass"><b>Tracks &amp; Towns · 3D test</b><div id="stats"></div></div>
@@ -628,14 +383,14 @@ $('#ui').innerHTML = `
     <button id="top" title="Top-down view">🗺️</button>
   </div>
   <div id="card" class="glass hidden"></div>
-  <div id="sheet" class="glass hidden"></div>
+  <div id="panel" class="glass hidden"></div>
   <div id="dock">
     <div id="hint"></div>
     <div id="bp" class="glass hidden"></div>
     <div id="grade" class="glass hidden">
-      <button id="g-h"></button><button id="g-g"></button><button id="g-x"></button>
+      <button id="g-h"></button><button id="g-g"></button><span id="g-x" class="seg"></span>
     </div>
-    <div id="rtype" class="glass hidden">${(Object.keys(ROADS) as RoadType[]).map((k) => `<button data-r="${k}"><i>${ROADS[k].icon}</i>${ROADS[k].label}</button>`).join('')}</div>
+    <div id="rtype" class="glass hidden"></div>
     <div id="kinds" class="glass hidden">
       <button data-k="straight"><i>📏</i>Straight</button>
       <button data-k="curve"><i>⤵️</i>Curve</button>
@@ -644,9 +399,9 @@ $('#ui').innerHTML = `
     <div id="tools" class="glass">
       <button data-t="look"><i>👆</i>Look</button>
       <button data-t="road"><i>🛣️</i>Road</button>
-      <button data-t="stop"><i>🚏</i>Bus stop</button>
-      <button data-t="bus"><i>🚌</i>Add bus</button>
-      <button data-t="cars"><i>🚦</i><span id="tlvl">Traffic</span></button>
+      <button data-t="rail"><i>🚆</i>Rail</button>
+      <button data-t="stop"><i>🚏</i>Stop</button>
+      <button data-t="veh"><i>🚌</i>Vehicles</button>
       <button data-t="reset"><i>🔄</i>Reset</button>
     </div>
   </div>`;
@@ -660,12 +415,16 @@ function draftChanged() {
 function clearDraft() { draft = null; picks = []; draftChanged(); hint(); }
 
 function setMode(m: Mode) {
+  const building = m === 'road' || m === 'rail';
+  if (building && (mode === 'road' || mode === 'rail') && m !== mode) lastType[mode] = opts.type;
   mode = m;
   document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.classList.toggle('on', b.dataset.t === m));
-  $('#kinds').classList.toggle('hidden', m !== 'road');
-  $('#rtype').classList.toggle('hidden', m !== 'road');
-  closeSheet();
-  $('#grade').classList.toggle('hidden', m !== 'road');
+  for (const id of ['#kinds', '#rtype', '#grade']) $(id).classList.toggle('hidden', !building);
+  closePanel();
+  if (building) {
+    if (m === 'rail' && opts.cross === 'junction') opts.cross = 'bridge';
+    setType(lastType[m]);
+  }
   clearDraft();
 }
 function setKind(k: RoadKind) {
@@ -677,63 +436,79 @@ function hint(text?: string) {
   let t = text;
   if (t === undefined) {
     if (mode === 'stop') t = 'Tap a road, on the side you want the stop · the bus will call there';
-    else if (mode !== 'road') t = 'Drag to move · pinch to zoom · twist to turn · two fingers up/down to tilt · tap a building';
+    else if (mode !== 'road' && mode !== 'rail') t = 'Drag to move · pinch to zoom · twist to turn · two fingers up/down to tilt · tap a building';
     else if (draft) t = 'Drag the white handles to adjust, then Build';
-    else if (roadKind === 'straight') t = 'Drag to draw a straight road · snaps to 15° and to other roads';
-    else if (roadKind === 'smooth') t = 'Drag from a road: the new road curves smoothly out of it';
+    else if (roadKind === 'straight') t = mode === 'rail' ? 'Drag to lay track · tap a junction to see how it works' : 'Drag to draw a road · tap a junction to redesign it';
+    else if (roadKind === 'smooth') t = 'Drag from a road: the new one curves smoothly out of it';
     else t = ['Drag along the curve you want · or tap start, bend, end', '2/3 · Tap the bend point: the curve pulls towards it', '3/3 · Tap where the curve ends'][picks.length];
   }
   $('#hint').textContent = t;
 }
 document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.addEventListener('click', () => {
   const t = b.dataset.t!;
-  if (t === 'look' || t === 'road' || t === 'stop') return setMode(t);
-  if (t === 'bus') { traffic.addBus(); hint('Bus added. It wanders the roads and calls at every stop on its side.'); }
-  if (t === 'cars') {
-    level = (level + 1) % LEVELS.length;
-    $('#tlvl').textContent = LEVELS[level][0];
-    hint(`Traffic: ${LEVELS[level][0].toLowerCase()} · cars come from homes, jobs, shops and works, and follow the clock`);
-  }
+  if (t === 'look' || t === 'road' || t === 'rail' || t === 'stop') return setMode(t);
+  if (t === 'veh') return openVehicles();
   if (t === 'reset') location.reload();
 }));
-// height, gradient and crossing options apply live to the blueprint
+
+// ---- the options row: height, gradient, and what happens where the route crosses something ----
+function gradeSteps() {
+  const d = ROADS[opts.type];
+  const base = d.cls === 'rail' ? (d.rack ? [0.05, 0.1, 0.15, 0.2] : [0.01, 0.015, 0.025, 0.035, 0.06]) : GRADE_STEPS;
+  const s = base.filter((g) => g <= d.maxGrade + 1e-9);
+  return s.length ? s : [d.maxGrade];
+}
+const pctTxt = (g: number) => { const v = g * 100; return `${Math.abs(v - Math.round(v)) > 0.01 ? v.toFixed(1) : Math.round(v)}%`; };
 function renderGrade() {
   $('#g-h').textContent = HEIGHTS.find((h) => h[0] === opts.height)![1];
-  $('#g-g').textContent = `∠ ${Math.round(opts.grade * 100)}% max`;
-  $('#g-x').textContent = opts.cross === 'junction' ? '✚ Junctions' : '🌉 Bridge over';
+  $('#g-g').textContent = `∠ ${pctTxt(opts.grade)}`;
+  $('#g-x').innerHTML = CROSS.filter(([k]) => k !== 'junction' || true).map(([k, label]) => `<button data-x="${k}" class="${opts.cross === k ? 'on' : ''}">${label}</button>`).join('');
+  $('#g-x').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+    opts.cross = b.dataset.x as RoadOpts['cross'];
+    renderGrade(); draftChanged();
+    const sp = ROADS[opts.type].cls === 'rail' ? GRADES.rail : GRADES.road;
+    hint({
+      junction: mode === 'rail' ? 'Track you cross joins up (points); roads are always bridged' : 'Roads you cross at the same height become junctions (they design themselves)',
+      bridge: `Goes over what it crosses — ${sp.clear} m clearance over roads and rail, ${sp.water} m over water`,
+      tunnel: `Goes under what it crosses — a cutting near the surface, a bored tunnel deeper, ${sp.under} m under water`,
+    }[opts.cross]);
+  }));
 }
-const gradeNote = {
-  auto: 'Auto height: stays low, climbs only to clear what it crosses',
-  level: 'Keep level: holds the starting height all the way',
-  up: 'Climb: rises at the chosen gradient the whole way',
-};
 $('#g-h').addEventListener('click', () => {
   opts.height = HEIGHTS[(HEIGHTS.findIndex((h) => h[0] === opts.height) + 1) % HEIGHTS.length][0];
-  renderGrade(); draftChanged(); hint(gradeNote[opts.height]);
+  renderGrade(); draftChanged();
+  hint({ auto: 'Auto: stays near the ground, climbing or diving only to clear what it crosses', level: 'Level: holds the starting height all the way', up: 'Climb: rises at the chosen gradient the whole way' }[opts.height]);
 });
 $('#g-g').addEventListener('click', () => {
-  opts.grade = GRADE_STEPS[(GRADE_STEPS.indexOf(opts.grade) + 1) % GRADE_STEPS.length];
+  const steps = gradeSteps();
+  opts.grade = steps[(steps.indexOf(opts.grade) + 1) % steps.length];
   renderGrade(); draftChanged();
-  hint(`Steepest gradient ${Math.round(opts.grade * 100)}% (roads allow up to ${Math.round(opts.spec.max * 100)}%): gentler means longer ramps`);
+  const d = ROADS[opts.type];
+  hint(d.cls === 'rail'
+    ? `Steepest ${pctTxt(opts.grade)} (this line allows ${pctTxt(d.maxGrade)}) · intercity trains manage 3%, local trains 3.5%, light rail 7%, rack railcars 20%`
+    : `Steepest ${pctTxt(opts.grade)} (a ${d.mph} mph road allows ${pctTxt(d.maxGrade)}) · gentler means longer ramps`);
 });
-$('#g-x').addEventListener('click', () => {
-  opts.cross = opts.cross === 'junction' ? 'bridge' : 'junction';
-  renderGrade(); draftChanged();
-  hint(opts.cross === 'bridge' ? `Roads you cross are bridged, with ${opts.spec.clear} m clearance` : 'Roads you cross at the same height become junctions');
-});
-renderGrade();
 function setType(t: RoadType) {
   opts.type = t;
-  opts.grade = Math.min(opts.grade, ROADS[t].maxGrade);
-  document.querySelectorAll<HTMLButtonElement>('#rtype button').forEach((b) => b.classList.toggle('on', b.dataset.r === t));
+  const steps = gradeSteps();
+  if (!steps.includes(opts.grade)) opts.grade = steps[steps.length - 1];
+  renderTypes();
   renderGrade();
   draftChanged();
 }
-document.querySelectorAll<HTMLButtonElement>('#rtype button').forEach((b) => b.addEventListener('click', () => {
-  setType(b.dataset.r as RoadType);
-  const d = ROADS[opts.type];
-  hint(`${d.label}: ${d.blurb} · ${Math.round(halfOfType(opts.type) * 2)} m wide · £${d.cost}/m`);
-}));
+// presets as chips; anything else in the catalogue is a filter away
+function renderTypes() {
+  const ids = mode === 'rail' ? RAIL_PRESETS : PRESETS;
+  const chips = ids.includes(opts.type) ? ids : [opts.type, ...ids.slice(0, 3)];
+  $('#rtype').innerHTML = chips.map((k) => `<button data-r="${k}" class="${k === opts.type ? 'on' : ''}"><i>${ROADS[k].icon}</i>${short(k)}</button>`).join('') + (mode === 'rail' ? '' : `<button data-more="1"><i>⋯</i>More</button>`);
+  $('#rtype').style.gridTemplateColumns = `repeat(${chips.length + (mode === 'rail' ? 0 : 1)}, 1fr)`;
+  $('#rtype').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.more) return openRoadPicker();
+    setType(b.dataset.r!);
+    const d = ROADS[opts.type];
+    hint(`${d.label}: ${d.blurb} · ${Math.round(halfOfType(opts.type) * 2)} m wide · £${d.cost.toLocaleString('en-GB')}/m`);
+  }));
+}
 document.querySelectorAll<HTMLButtonElement>('#kinds button').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.k as RoadKind)));
 $('#rotL').addEventListener('click', () => { goal = { az: view.az - Math.PI / 4 }; });
 $('#rotR').addEventListener('click', () => { goal = { az: view.az + Math.PI / 4 }; });
@@ -741,6 +516,194 @@ $('#compass').addEventListener('click', () => { goal = { az: view.az + wrap(HOME
 $('#top').addEventListener('click', () => {
   goal = { el: view.el > 1.2 ? HOME.el : EL_MAX };
 });
+
+// ---------------- the side panel ----------------
+// Detail opens in a column down the right; the camera turns so the thing you picked sits in the
+// clear space beside it (a road runs straight up the screen), so you can see what each choice does.
+let panelKind: 'junction' | 'stop' | 'roads' | 'vehicles' | null = null;
+const panelWidth = () => Math.min(canvas.clientWidth * 0.56, 320);
+function openPanel(kind: typeof panelKind, html: string) {
+  panelKind = kind;
+  const el = $('#panel');
+  el.innerHTML = `<div class="ph"><span>${html.split('\u0001')[0]}</span><button id="px">✕</button></div>${html.split('\u0001')[1] ?? ''}`;
+  el.classList.remove('hidden');
+  document.body.classList.add('paneled');
+  $('#px').addEventListener('click', closePanel);
+  $('#card').classList.add('hidden');
+}
+function closePanel() {
+  $('#panel').classList.add('hidden');
+  document.body.classList.remove('paneled');
+  panelKind = null;
+  stopPreview = null;
+  if (editJ !== null) { editJ = null; rebuildRoads(); }
+  drawGhost();
+}
+const closeSheet = closePanel;
+// Put p in the middle of the free space; if `dir` is given, turn so it runs up the screen.
+function focusOn(p: P, h: number, dir?: P, el?: number) {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  let az = view.az;
+  if (dir) {
+    const a = Math.atan2(-dir.x, -dir.z);
+    az = [a, a + Math.PI].map((v) => view.az + wrap(v - view.az)).sort((x, y) => Math.abs(x - view.az) - Math.abs(y - view.az))[0];
+  }
+  const save = { ...view };
+  Object.assign(view, { az, h, x: p.x, z: p.z, el: el ?? view.el });
+  placeCamera();
+  const g = groundAt((W - panelWidth() - 8) / 2, H * 0.44);
+  Object.assign(view, save);
+  placeCamera();
+  goal = { az, h, x: p.x - (g.x - p.x), z: p.z - (g.z - p.z), ...(el ? { el } : {}) };
+}
+
+// ---- road picker: a few filters over the whole catalogue ----
+const filt: RoadFilter = {};
+const FAMILIES = ['Street', 'Avenue', 'Boulevard', 'Arterial', 'Rural', 'Dual', 'Motorway'] as const;
+function roadSvg(d: RoadDef, W = 132, H = 14) {
+  const parts: { w: number; c: string }[] = [];
+  const side = (rev: boolean) => {
+    const s = [
+      { w: d.pave, c: '#bdb8ad' }, { w: d.verge, c: '#6f9a4a' }, { w: d.parking, c: '#6a6e74' }, { w: d.cycle, c: '#3f8a52' }, { w: d.bus, c: '#9c4238' }, { w: d.shoulder, c: '#55595f' },
+      ...Array.from({ length: d.lanes }, () => ({ w: d.lane, c: '#44484e' })),
+    ];
+    return rev ? s.reverse() : s;
+  };
+  parts.push(...side(false), { w: d.median, c: d.medianKind === 'grass' || d.medianKind === 'trees' ? '#6f9a4a' : '#9d9a92' }, ...side(true));
+  const tot = parts.reduce((t, p) => t + p.w, 0) || 1;
+  let x = 0;
+  const rects = parts.filter((p) => p.w > 0).map((p) => { const r = `<rect x="${((x / tot) * W).toFixed(1)}" y="0" width="${((p.w / tot) * W + 0.3).toFixed(1)}" height="${H}" fill="${p.c}"/>`; x += p.w; return r; });
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="rs">${rects.join('')}</svg>`;
+}
+function openRoadPicker() {
+  const chips = <T,>(label: string, key: keyof RoadFilter, vals: readonly T[], show: (v: T) => string) =>
+    `<div class="fl"><span>${label}</span>${[undefined, ...vals].map((v) => `<button data-f="${String(key)}" data-v="${v === undefined ? '' : String(v)}" class="${filt[key] === v ? 'on' : ''}">${v === undefined ? 'Any' : show(v)}</button>`).join('')}</div>`;
+  const tri = (key: 'trees' | 'bus' | 'cycle' | 'parking', icon: string) => `<button data-t3="${key}" class="${filt[key] === true ? 'on' : filt[key] === false ? 'no' : ''}">${icon}${filt[key] === true ? ' ✓' : filt[key] === false ? ' ✕' : ''}</button>`;
+  const list = filterRoads(filt);
+  openPanel('roads', `🛣️ Choose a road \u0001
+    ${chips('Kind', 'family', FAMILIES, (f) => f)}
+    ${chips('Lanes each way', 'lanes', [1, 2, 3, 4], (n) => String(n))}
+    ${chips('Speed', 'mph', [20, 30, 40, 50, 60, 70], (n) => `${n}`)}
+    <div class="fl"><span>With</span>${tri('trees', '🌳')}${tri('bus', '🚌')}${tri('cycle', '🚲')}${tri('parking', '🅿️')}</div>
+    <div class="cnt">${list.length} of ${Object.values(ROADS).filter((d) => d.cls === 'road').length} road types</div>
+    <div class="rl">${list.map((d) => `<button data-pick="${d.id}" class="${d.id === opts.type ? 'on' : ''}"><b>${d.label}</b>${roadSvg(d)}<small>${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost.toLocaleString('en-GB')}/m · ${d.blurb}</small></button>`).join('')}</div>`);
+  const el = $('#panel');
+  el.querySelectorAll<HTMLButtonElement>('[data-f]').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.f as keyof RoadFilter, v = b.dataset.v!;
+    (filt as Record<string, unknown>)[k] = v === '' ? undefined : k === 'family' ? v : Number(v);
+    openRoadPicker();
+  }));
+  el.querySelectorAll<HTMLButtonElement>('[data-t3]').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.t3 as 'trees';
+    filt[k] = filt[k] === undefined ? true : filt[k] === true ? false : undefined;
+    openRoadPicker();
+  }));
+  el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => b.addEventListener('click', () => {
+    setType(b.dataset.pick!);
+    closePanel();
+    const d = ROADS[opts.type];
+    hint(`${d.label} · ${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost}/m`);
+  }));
+}
+
+// ---- vehicles: buses, trains, how busy the roads are ----
+function openVehicles() {
+  openPanel('vehicles', `🚌 Vehicles \u0001
+    <div class="grp"><b>Buses</b><small>Wander the roads and call at every stop on their side</small><button data-add="bus" class="primary">＋ Add a bus</button></div>
+    <div class="grp"><b>Trains</b><small>Each runs only on track it can manage: rack, electric wires, gradient</small>
+      ${Object.values(TRAINS).map((t) => `<button data-train="${t.id}"><b>${t.icon} ${t.label}</b><small>${t.blurb}</small></button>`).join('')}</div>
+    <div class="grp"><b>Background traffic</b><small>Cars come from homes, jobs, shops and works, and follow the clock</small>
+      <div class="row3">${LEVELS.map(([n], i) => `<button data-lvl="${i}" class="${i === level ? 'on' : ''}">${n === 'Traffic' ? 'Normal' : n}</button>`).join('')}</div></div>`);
+  const el = $('#panel');
+  el.querySelector('[data-add="bus"]')!.addEventListener('click', () => { traffic.addBus(); hint('Bus added'); });
+  el.querySelectorAll<HTMLButtonElement>('[data-train]').forEach((b) => b.addEventListener('click', () => {
+    const t = TRAINS[b.dataset.train!];
+    hint(traffic.addTrain(t.id) ? `${t.label} added` : `No track a ${t.label.toLowerCase()} can use${t.needsWires ? ' — it needs electrified line' : t.rack ? '' : ' — too steep, or rack only'}`);
+  }));
+  el.querySelectorAll<HTMLButtonElement>('[data-lvl]').forEach((b) => b.addEventListener('click', () => { level = +b.dataset.lvl!; openVehicles(); }));
+}
+
+// ---- junctions: tap one in Road mode ----
+let editJ: number | null = null;
+function junctionNear(p: P) {
+  let best: number | null = null, bd = Infinity;
+  for (const j of junctions.values()) {
+    if (j.form === 'join' || j.form === 'merge') continue;
+    const n = net.node(j.node), d = Math.hypot(n.x - p.x, n.z - p.z);
+    if (d < Math.max(10, j.R, net.nodeHalf(j.node)) + 2 && d < bd) { bd = d; best = j.node; }
+  }
+  return best;
+}
+function openJunction(node: number) {
+  editJ = node;
+  const j = junctions.get(node)!, n = net.node(node);
+  focusOn(n, Math.max(70, j.R * 5), undefined, 1.15);
+  rebuildRoads();
+  renderJunction();
+}
+const pctFull = (d: number) => `${Math.round(d * 100)}%`;
+function renderJunction() {
+  if (editJ === null) return;
+  const j = junctions.get(editJ)!;
+  const legs = legsAt(net, editJ);
+  const seen = traffic.seen.get(editJ), counted = seen ? [...seen.values()].reduce((t, v) => t + v, 0) : 0;
+  const geo = geoFor(editJ);
+  const forms: Form[] = legs.length === 3 ? ['priority', 'signals', 'mini', 'roundabout'] : ['roundabout', 'mini', 'signals', 'priority'];
+  const auto = design(net, editJ, geo, seen)!;
+  const alt = forms.map((f) => ({ f, j: rescore(net, j, geo, { form: f }) }));
+  const bar = (dos: number) => `<i class="bar"><i style="width:${Math.min(100, dos * 100)}%;background:${dos < 0.7 ? '#35c46b' : dos < 0.9 ? '#e0a526' : '#e5483b'}"></i></i>`;
+  openPanel('junction', `🚦 ${FORM_NAME[j.form]} \u0001
+    <div class="score">${bar(j.score.dos)}<div><b>Busiest lane ${pctFull(j.score.dos)} full</b><small>${j.score.busiest || 'all approaches'} · takes about ${Math.round(Math.min(j.score.capacity, 9999)).toLocaleString('en-GB')} vehicles an hour</small></div></div>
+    <small class="sub">${j.auto ? '✨ Designed automatically for the best flow' : '✋ Your design'} · ${counted > 60 ? `tuned on ${counted} vehicles counted here` : 'on estimated traffic (it retunes as cars are counted)'}</small>
+    ${j.complex ? '<div class="warn">A big junction: consider splitting it, or grade-separating the busiest road</div>' : ''}
+    <div class="grp"><b>Form</b>
+      <button data-form="auto" class="${j.auto ? 'on' : ''}">✨ Best for flow <small>${FORM_NAME[auto.form]}${auto.slip ? ' + slip' : ''} · ${pctFull(auto.score.dos)}</small></button>
+      ${alt.map(({ f, j: a }) => `<button data-form="${f}" class="${!j.auto && j.form === f ? 'on' : ''}">${FORM_NAME[f]} <small>${pctFull(a.score.dos)} busiest lane</small></button>`).join('')}
+    </div>
+    ${j.form === 'priority' || j.form === 'signals' ? `<button data-slip="1" class="${j.slip ? 'on' : ''}">↰ Left-turn slip lane ${j.slip ? '✓' : ''}</button>` : ''}
+    <div class="grp"><b>Lanes</b><small>Tap an arrow on the road to change what a lane is for. The design above is already the best balance for the traffic.</small>
+      <button data-opt="1">↺ Re-optimise lanes</button></div>`);
+  const el = $('#panel');
+  el.querySelectorAll<HTMLButtonElement>('[data-form]').forEach((b) => b.addEventListener('click', () => {
+    const f = b.dataset.form!;
+    junctions.set(editJ!, f === 'auto' ? auto : rescore(net, j, geo, { form: f as Form }));
+    rebuildRoads(); renderJunction();
+  }));
+  el.querySelector('[data-slip]')?.addEventListener('click', () => { junctions.set(editJ!, rescore(net, j, geo, { form: j.form, slip: !j.slip })); rebuildRoads(); renderJunction(); });
+  el.querySelector('[data-opt]')!.addEventListener('click', () => { junctions.set(editJ!, { ...rescore(net, j, geo, { form: j.form, slip: !!j.slip }), auto: j.auto }); rebuildRoads(); renderJunction(); });
+}
+// arrow positions on the road for the junction being edited (for tapping)
+function laneArrows() {
+  if (editJ === null) return [];
+  const j = junctions.get(editJ)!, n = net.node(editJ);
+  const out: { p: P; seg: number; i: number }[] = [];
+  for (const leg of legsAt(net, editJ)) {
+    const lineAt = j.form === 'roundabout' || j.form === 'mini' ? j.R + 0.3 : j.reach[leg.seg.id] ?? 0;
+    (j.lanes[leg.seg.id] ?? []).forEach((_, i) => {
+      const c = laneCentre(net, leg.seg, i), a = lineAt + 7.4;
+      out.push({ p: { x: n.x + leg.dir.x * a - leg.dir.z * c, z: n.z + leg.dir.z * a + leg.dir.x * c, y: n.y }, seg: leg.seg.id, i });
+    });
+  }
+  return out;
+}
+function arrowTap(sx: number, sy: number) {
+  const hit = laneArrows().map((a) => ({ a, d: Math.hypot(toScreen(a.p).x - sx, toScreen(a.p).y - sy) })).sort((x, y) => x.d - y.d)[0];
+  if (!hit || hit.d > 34) return false;
+  const j = junctions.get(editJ!)!, legs = legsAt(net, editJ!);
+  const leg = legs.find((l) => l.seg.id === hit.a.seg)!;
+  const moves = [...new Set(legs.filter((o) => o !== leg && !(j.slip && j.slip.from === leg.seg.id && j.slip.to === o.seg.id)).map((o) => moveOf(leg, o)))];
+  const optsL = laneOptions(moves);
+  const cur = j.lanes[hit.a.seg][hit.a.i].join('');
+  const next = optsL[(optsL.findIndex((o) => o.join('') === cur) + 1) % optsL.length];
+  const lanes = { ...j.lanes, [hit.a.seg]: j.lanes[hit.a.seg].map((l, i) => (i === hit.a.i ? next : l)) };
+  const before = j.score.dos;
+  const nj = rescore(net, j, geoFor(editJ!), { form: j.form, slip: !!j.slip, lanes });
+  junctions.set(editJ!, nj);
+  rebuildRoads(); renderJunction();
+  const name = (m: string[]) => m.map((x) => ({ L: 'left', S: 'ahead', R: 'right' } as Record<string, string>)[x]).join(' + ');
+  hint(`Lane ${hit.a.i + 1}: ${name(next)} · busiest lane ${pctFull(nj.score.dos)} (was ${pctFull(before)})`);
+  return true;
+}
 
 // what a road would knock down, in words
 function demolitionSummary(lots: Lot[]) {
@@ -868,7 +831,7 @@ function drawGhost() {
     }
   }
   if (stopPreview) {
-    const { seg, t, side } = stopPreview, probe = { id: 0, s: t, side, kind: 'layby' as const, take: { pave: 0, lane: 0, land: 0 } };
+    const { seg, t, side } = stopPreview, probe = { id: 0, s: t, side, kind: 'layby' as const, take: { pave: 0, lane: 0, land: 0, park: 0 } };
     const [a, b] = stopSpan(probe), path = net.path(seg), K = kerbOf(net.def(seg));
     const sp = subPath(path, Math.max(0, a), Math.min(pathLength(path), b));
     const pf = new Flat();
@@ -915,7 +878,6 @@ function showCard(b: Built | null) {
 
 // ---------------- bus stops ----------------
 let stopPreview: { seg: RSeg; t: number; side: 1 | -1 } | null = null;
-function closeSheet() { $('#sheet').classList.add('hidden'); stopPreview = null; drawGhost(); }
 function stopAt(p: P) {
   for (const seg of net.segs.values()) for (const stop of seg.stops) {
     const q = closestOnPath(p, net.path(seg));
@@ -968,24 +930,23 @@ function crossSvg(d: RoadDef, plan: StopPlan) {
 }
 
 function stopTap(p: P) {
-  const q = net.nearestSeg(p, 30);
+  const q = net.nearestSeg(p, 30, (x) => net.def(x).cls === 'road');
   if (!q) { hint('Tap on a road'); return; }
   const side = net.sideOf(q.seg, p);
   const res = net.planStop(q.seg.id, q.s, side);
-  const el = $('#sheet');
   stopPreview = { seg: q.seg, t: q.s, side };
   drawGhost();
-  if (res.reason) {
-    el.innerHTML = `<div class="row"><b>🚏 Can’t put a stop here</b><button id="sx">Close</button></div><div class="bad">${res.reason}</div>`;
-  } else {
+  // turn the road to run up the screen beside the panel, so the lay-by can be seen as it's chosen
+  focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
+  if (res.reason) openPanel('stop', `🚏 Can’t put a stop here <div class="bad">${res.reason}</div>`);
+  else {
     const d = net.def(q.seg);
-    el.innerHTML = `<div class="row"><b>🚏 Bus stop on this ${d.label.toLowerCase()}</b><button id="sx">Close</button></div>` +
+    openPanel('stop', `🚏 Stop on this ${d.family.toLowerCase()} ` +
       res.plans.map((pl, i) => `<div class="plan${pl.ok ? '' : ' no'}"><div class="row"><b>${pl.title}</b><span style="color:var(--gold)">${money(pl.cost)}</span></div>
         ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${pl.blocked}</div>` : ''}
-        <button class="primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>Build ${pl.kind === 'kerb' ? 'kerbside stop' : 'lay-by'}</button></div>`).join('');
+        <button class="primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</button></div>`).join(''));
   }
-  el.classList.remove('hidden');
-  $('#sx').addEventListener('click', closeSheet);
+  const el = $('#panel');
   el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
     const pl = res.plans[+b.dataset.plan!];
     net.addStop(q.seg.id, q.s, side, pl);
@@ -1047,7 +1008,7 @@ function startPan(x: number, y: number) {
   vel = [];
 }
 function handleUnder(x: number, y: number) {
-  if (mode !== 'road') return null;
+  if (mode !== 'road' && mode !== 'rail') return null;
   let best: 'a' | 'b' | 'c' | null = null, bd = 34;
   for (const h of handles()) { const s = toScreen(h.p); const d = Math.hypot(s.x - x, s.y - y); if (d < bd) { bd = d; best = h.key; } }
   return best;
@@ -1055,13 +1016,13 @@ function handleUnder(x: number, y: number) {
 // move a blueprint handle to a new spot, re-snapping it
 function moveHandle(key: 'a' | 'b' | 'c', raw: P) {
   if (!draft) {
-    if (key === 'a' && picks[0]) picks[0] = net.snapStart(raw, tol());
+    if (key === 'a' && picks[0]) picks[0] = net.snapStart(raw, tol(), cls());
     if (key === 'c' && picks[0] && picks[1]) picks[1] = net.snapAngle(picks[0], raw);
     drawGhost();
     return;
   }
-  if (key === 'a') draft.a = net.snapStart(raw, tol());
-  if (key === 'b') draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight');
+  if (key === 'a') draft.a = net.snapStart(raw, tol(), cls());
+  if (key === 'b') draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight', cls());
   if (key === 'c') draft.c = { ...raw };
   draftChanged();
 }
@@ -1074,10 +1035,10 @@ function fitCurve(a: P, b: P, tr: P[]): P | undefined {
 }
 function curveTap(raw: P) {
   if (draft) return;
-  if (picks.length === 0) picks = [net.snapStart(raw, tol())];
+  if (picks.length === 0) picks = [net.snapStart(raw, tol(), cls())];
   else if (picks.length === 1) picks.push(net.snapAngle(picks[0], raw));
   else {
-    const b = net.snapEnd(picks[0], raw, tol(), true);
+    const b = net.snapEnd(picks[0], raw, tol(), true, cls());
     draft = { a: picks[0], c: { x: picks[1].x, z: picks[1].z }, b };
     picks = [];
     draftChanged();
@@ -1135,9 +1096,9 @@ canvas.addEventListener('pointermove', (e) => {
   if (gesture === 'maybe' && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 8) {
     // straight and smooth roads are drawn by dragging; the curve tool uses taps, so dragging pans
     // (the curve tool draws on a drag too, unless you've started placing it by taps)
-    gesture = mode === 'road' && !draft && !(roadKind === 'curve' && picks.length) ? 'draw' : 'pan';
+    gesture = (mode === 'road' || mode === 'rail') && !draft && !(roadKind === 'curve' && picks.length) ? 'draw' : 'pan';
     if (gesture === 'draw') {
-      const a = net.snapStart(groundAt(downAt.x, downAt.y), tol());
+      const a = net.snapStart(groundAt(downAt.x, downAt.y), tol(), cls());
       draft = { a, b: { ...a } };
       trace = [a];
       dragging = true;
@@ -1149,7 +1110,7 @@ canvas.addEventListener('pointermove', (e) => {
     if (vel.length > 6) vel.shift();
   } else if (gesture === 'draw' && draft) {
     const raw = groundAt(e.clientX, e.clientY);
-    draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight');
+    draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight', cls());
     if (roadKind === 'curve') { trace.push(raw); draft.c = fitCurve(draft.a, draft.b, trace); }
     draftChanged();
   }
@@ -1179,7 +1140,10 @@ const end = (e: PointerEvent) => {
     if (dt > 0 && now - b.t < 80) fling = { vx: (b.x - a.x) / dt, vz: (b.z - a.z) / dt };
   }
   if (gesture === 'maybe' && now - downAt.t < 400) {
-    if (mode === 'road' && roadKind === 'curve') curveTap(groundAt(e.clientX, e.clientY));
+    const g0 = groundAt(e.clientX, e.clientY);
+    if ((mode === 'road' || mode === 'rail') && editJ !== null && arrowTap(e.clientX, e.clientY)) { /* lane changed */ }
+    else if (mode === 'road' && !draft && !picks.length && junctionNear(g0) !== null) openJunction(junctionNear(g0)!);
+    else if ((mode === 'road' || mode === 'rail') && roadKind === 'curve') curveTap(g0);
     else if (mode === 'stop') stopTap(groundAt(e.clientX, e.clientY));
     else if (mode === 'look') {
       const g = groundAt(e.clientX, e.clientY), st = stopAt(g);
@@ -1252,8 +1216,11 @@ refreshInfill();
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
+traffic.junctions = junctions;
+seenAt = (node) => traffic.seen.get(node);
 onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; };
 for (let i = 0; i < 4; i++) traffic.addBus();
+for (const t of ['intercity', 'dmu']) traffic.addTrain(t);
 let clock = 7 * 60; // minutes since midnight: a day passes in six minutes
 let places: Places | null = null;
 function getPlaces(): Places {
@@ -1310,12 +1277,13 @@ function frame(now: number) {
   traffic.generate(getPlaces(), hour, LEVELS[level][1], now);
   traffic.generate(getPlaces(), hour, LEVELS[level][1], now);
   traffic.update(dt, now);
+  for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, now) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
   const pop = buildings.reduce((s, b) => s + (USE[b.lot.kind].unit === 'jobs' ? 0 : USE[b.lot.kind].pop), 0);
   const rush = rushLabel(hour);
-  $('#stats').textContent = `🕗 ${hhmm(clock)}${rush ? ` ${rush}` : ''} · 🚗 ${traffic.live} · 🚌 ${traffic.buses} · pop ${pop.toLocaleString('en-GB')}`;
+  $('#stats').textContent = `🕗 ${hhmm(clock)}${rush ? ` ${rush}` : ''} · 🚗 ${traffic.live} · 🚌 ${traffic.buses} · 🚆 ${traffic.trains.length} · pop ${pop.toLocaleString('en-GB')}`;
   renderer.render(scene, cam);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, growAll: () => { for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, growAll: () => { for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };

@@ -77,4 +77,31 @@ describe('heights and gradients', () => {
     const up = solveProfile(100, 0, undefined, 0.04, [], 'up');
     expect(up.y[up.y.length - 1]).toBeCloseTo(4);
   });
+
+  it('tunnels: under a road it crosses, and deep under water', () => {
+    const n = new Network((p) => p.x > 100 && p.x < 180);
+    n.build({ x: -100, z: 0 }, { x: 100, z: 0 });
+    const under = n.check({ x: 0, z: -150 }, { x: 0, z: 150 }, undefined, { ...DEFAULT_OPTS, cross: 'tunnel' });
+    expect(under.ok).toBe(true);
+    expect(pointAt(under.path, 150).y).toBeLessThanOrEqual(-GRADES.road.clear + 1e-6);
+    expect(under.tunnels).toBe(1);
+    const lake = n.check({ x: -150, z: 60 }, { x: 420, z: 60 }, undefined, { ...DEFAULT_OPTS, cross: 'tunnel', grade: 0.08 });
+    expect(lake.ok).toBe(true);
+    expect(pointAt(lake.path, 290).y).toBeLessThanOrEqual(-GRADES.road.under + 1e-6);
+    expect(lake.path[0].y).toBe(0);
+  });
+
+  it('railways climb far less steeply than roads, unless they are rack railways', () => {
+    const n = new Network();
+    n.build({ x: -200, z: 0 }, { x: 200, z: 0 });
+    const opts = (type: string, grade: number) => ({ ...DEFAULT_OPTS, cross: 'bridge' as const, type, grade });
+    // 7.8 m of clearance for the wires at 2.5% needs 312 m of run-up; we only have ~130 m
+    expect(n.check({ x: 0, z: -140 }, { x: 0, z: 400 }, undefined, opts('rail-main', 0.08)).reason).toMatch(/Can't climb/);
+    const rack = n.check({ x: 0, z: -140 }, { x: 0, z: 400 }, undefined, opts('rail-rack', 0.2));
+    expect(rack.ok).toBe(true);
+    expect(rack.profile!.maxY).toBeGreaterThanOrEqual(GRADES.rail.clear - 1e-6);
+    // road and rail never meet at a junction
+    const s = n.snapStart({ x: 50, z: 1 }, 5, 'rail');
+    expect(s.seg).toBeUndefined();
+  });
 });

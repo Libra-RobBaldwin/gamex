@@ -26,7 +26,7 @@ describe('road types and bus stops', () => {
     const n = new Network();
     const [a] = n.build({ x: 0, z: 0 }, { x: 200, z: 0 }, undefined, as('avenue'));
     const lay = n.planStop(a, 100, -1).plans[1];
-    expect(lay.take).toEqual({ pave: 3, lane: 0, land: 0 });
+    expect(lay.take).toMatchObject({ pave: 3, lane: 0, land: 0 });
     const [m] = n.build({ x: 0, z: 300 }, { x: 400, z: 300 }, undefined, as('motorway'));
     expect(n.planStop(m, 200, 1).reason).toMatch(/motorway/);
     expect(n.planStop(a, 5, 1).reason).toMatch(/junction|end/);
