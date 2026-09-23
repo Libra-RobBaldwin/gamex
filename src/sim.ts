@@ -94,6 +94,18 @@ interface Catch {
 }
 
 const LOAD_TIME = 2;
+export const MAX_BRIDGE = 3; // longest run of water tiles a bridge may cross
+export const UNDO_REFUND = 0.5;
+
+export type BuildProblem = 'water' | 'blocked' | 'sharp' | 'cross';
+export const PROBLEM_TEXT: Record<BuildProblem, string> = {
+  water: `Too much water. Bridges can span at most ${3} tiles of water.`,
+  blocked: 'Buildings or industry in the way. Demolish them first or go round.',
+  sharp: 'Too sharp. Rail, metro and motorways can only turn 45° per tile.',
+  cross: 'That diagonal would cross another diagonal.',
+};
+
+export interface BuildRecord { layer: Layer; edges: { n: number; d: number; old: number }[]; cost: number; name: string }
 const ROAD_CAP = [0, 3, 8];
 const ROAD_SPEED = [0, 1, 1.6];
 
@@ -119,6 +131,7 @@ export class Game {
   events: GameEvent[] = [];
   quiet = false;
   onDeliver: ((d: Delivery) => void) | null = null;
+  history: BuildRecord[] = []; // recent constructions, for undo
   version = 0; // bumps on any network/building change (renderer caches)
   private catchments = new Map<number, Catch>();
   private coverCount = new Uint8Array(0);
@@ -569,57 +582,140 @@ export class Game {
   }
 
   // ---------------- building ----------------
-  // Validates a traced stroke of nodes; returns edges that can be built and the cost.
-  planStroke(nodes: number[], kind: BuildKind) {
+  // Validates a traced stroke of nodes; returns edges that can be built, the cost, and where
+  // (and why) it first goes wrong. `prevDir` carries the heading from a stroke this one continues.
+  planStroke(nodes: number[], kind: BuildKind, prevDir = -1, skip?: Set<number>, openEnd = false, startRun = -1) {
     const b = BUILD[kind];
     const g = this.grid(b.layer);
     const edges: { n: number; d: number }[] = [];
     let cost = 0;
-    let bad = -1; // index of first node after which the stroke is invalid
-    let lastDir = -1;
+    let bad = -1; // index of the node where the stroke becomes invalid
+    let reason: BuildProblem | null = null;
+    let lastDir = prevDir;
     const smooth = kind !== 'street';
-    for (let i = 0; i + 1 < nodes.length; i++) {
+    const surface = b.layer !== 'metro';
+    const water = (t: number) => this.s.terrain[t] === T_WATER;
+    let run = startRun >= 0 ? startRun : nodes.length && water(nodes[0]) && !g.any(nodes[0]) ? MAX_BRIDGE + 1 : 0; // water tiles in a row
+    if (surface && run > MAX_BRIDGE) { bad = 0; reason = 'water'; }
+    for (let i = 0; bad < 0 && i + 1 < nodes.length; i++) {
       const a = nodes[i], c = nodes[i + 1];
       const d = dirBetween(this.s.w, a, c);
-      let ok = d >= 0;
-      if (ok && smooth && lastDir >= 0) {
+      let why: BuildProblem | null = d < 0 ? 'blocked' : null;
+      if (!why && smooth && lastDir >= 0) {
         const turn = (d - lastDir + 8) & 7;
-        ok = turn === 0 || turn === 1 || turn === 7;
+        if (turn !== 0 && turn !== 1 && turn !== 7) why = 'sharp';
       }
-      if (ok && b.layer !== 'metro') ok = this.surfaceFree(a) && this.surfaceFree(c);
-      if (ok && d % 2 === 1) {
-        if (b.layer === 'metro') ok = !crossingDiagonal(this.metro, a, d);
-        else ok = !crossingDiagonal(this.road, a, d) && !crossingDiagonal(this.rail, a, d);
+      if (!why && surface) {
+        if (!this.surfaceFree(a) || !this.surfaceFree(c)) why = 'blocked';
+        else if (d % 2 === 1) {
+          // don't let diagonals squeeze between two blocked corners
+          const b1 = this.road.neighbour(a, (d + 7) & 7), b2 = this.road.neighbour(a, (d + 1) & 7);
+          if (b1 >= 0 && b2 >= 0 && !this.surfaceFree(b1) && !this.surfaceFree(b2)) why = 'blocked';
+        }
+        if (!why) {
+          run = water(c) ? run + 1 : 0;
+          if (run > MAX_BRIDGE && !g.get(a, d)) why = 'water';
+        }
       }
-      if (!ok) { bad = i; break; }
+      if (!why && d % 2 === 1) {
+        const crossed = b.layer === 'metro' ? crossingDiagonal(this.metro, a, d) : crossingDiagonal(this.road, a, d) || crossingDiagonal(this.rail, a, d);
+        if (crossed) why = 'cross';
+      }
+      if (why) { bad = i; reason = why; break; }
       lastDir = d;
       const cur = g.get(a, d);
       if (cur === b.value || (b.layer === 'road' && cur === 2)) continue;
-      const water = this.s.terrain[a] === T_WATER || this.s.terrain[c] === T_WATER;
-      cost += b.cost * DLEN[d] * (water && b.layer !== 'metro' ? BRIDGE_MULT : 1);
+      const slot = g.slot(a, d);
+      if (skip?.has(slot)) continue;
+      skip?.add(slot);
+      const wet = water(a) || water(c);
+      cost += b.cost * DLEN[d] * (wet && surface ? BRIDGE_MULT : 1);
       edges.push({ n: a, d });
     }
-    return { edges, cost: Math.round(cost), bad };
+    // a bridge has to come back to land
+    const last = nodes[nodes.length - 1];
+    if (bad < 0 && surface && !openEnd && nodes.length > 1 && water(last) && !g.any(last)) { bad = nodes.length - 2; reason = 'water'; }
+    return { edges, cost: Math.round(cost), bad, reason, lastDir, run };
   }
 
-  buildStroke(nodes: number[], kind: BuildKind): string | null {
+  // Plans several strokes together (a blueprint). Strokes that start where the last one ended
+  // keep its heading, so rail curves are checked across the join.
+  planBlueprint(strokes: number[][], kind: BuildKind) {
+    const skip = new Set<number>();
+    const out = { edges: [] as { n: number; d: number }[], cost: 0, strokes: [] as { bad: number; reason: BuildProblem | null }[], tiles: 0 };
+    let prevEnd = -1, prevDir = -1, prevRun = 0;
+    strokes.forEach((st, k) => {
+      const next = strokes[k + 1];
+      const joined = st[0] === prevEnd;
+      const p = this.planStroke(st, kind, joined ? prevDir : -1, skip, !!next && next[0] === st[st.length - 1], joined ? prevRun : -1);
+      prevRun = p.run;
+      out.edges.push(...p.edges);
+      out.cost += p.cost;
+      out.strokes.push({ bad: p.bad, reason: p.reason });
+      prevEnd = st[st.length - 1];
+      prevDir = p.lastDir;
+    });
+    out.tiles = out.edges.length;
+    return out;
+  }
+
+  buildBlueprint(strokes: number[][], kind: BuildKind): string | null {
     const b = BUILD[kind];
-    if (!this.has(b.tech)) return `${b.name} isn't unlocked yet — take on a challenge that grants it.`;
-    const plan = this.planStroke(nodes, kind);
-    if (!plan.edges.length) return plan.bad >= 0 ? (kind === 'street' ? 'Blocked — clear buildings first.' : 'Too sharp! Rail, metro and motorways can only turn 45° per tile.') : null;
+    if (!this.has(b.tech)) return `${b.name} isn't unlocked yet. Take on a challenge that grants it.`;
+    const plan = this.planBlueprint(strokes, kind);
+    const problem = plan.strokes.find((x) => x.bad >= 0);
+    if (problem) return PROBLEM_TEXT[problem.reason!];
+    if (!plan.edges.length) return 'Nothing new to build there.';
     if (this.s.money < plan.cost) return `Not enough money (£${plan.cost.toLocaleString()} needed).`;
     const g = this.grid(b.layer);
+    const rec: BuildRecord = { layer: b.layer, edges: [], cost: plan.cost, name: b.name };
     for (const e of plan.edges) {
+      rec.edges.push({ n: e.n, d: e.d, old: g.get(e.n, e.d) });
       g.set(e.n, e.d, b.value);
       for (const t of [e.n, g.neighbour(e.n, e.d)]) {
         if (b.layer !== 'metro' && this.s.terrain[t] === T_FOREST) this.s.terrain[t] = 0;
         this.s.rubble = this.s.rubble.filter((r) => r !== t);
       }
     }
+    this.history.push(rec);
+    if (this.history.length > 30) this.history.shift();
     this.s.money -= plan.cost;
     this.markDirty();
     this.rerouteAll();
     return null;
+  }
+
+  // Single stroke build (used by tests and scripts).
+  buildStroke(nodes: number[], kind: BuildKind): string | null {
+    return this.buildBlueprint([nodes], kind);
+  }
+
+  lastBuild(): BuildRecord | undefined { return this.history[this.history.length - 1]; }
+
+  // Reverses the most recent construction, refunding half of what it cost.
+  undoBuild(): string {
+    const rec = this.history[this.history.length - 1];
+    if (!rec) return 'Nothing to undo.';
+    const g = this.grid(rec.layer);
+    const touched = new Set<number>();
+    for (const e of rec.edges) { touched.add(e.n); touched.add(g.neighbour(e.n, e.d)); }
+    // refuse if a station depends on track that would disappear
+    const saved = rec.edges.map((e) => g.get(e.n, e.d));
+    for (const e of rec.edges) g.set(e.n, e.d, e.old);
+    const orphan = this.s.stations.find((st) => {
+      const n = this.idx(st.x, st.y);
+      return touched.has(n) && STATIONS[st.kind].layer === rec.layer && STATIONS[st.kind].place !== 'offroad' && !g.any(n);
+    });
+    if (orphan) {
+      rec.edges.forEach((e, i) => g.set(e.n, e.d, saved[i]));
+      return `${orphan.name} stands on it. Demolish the station first.`;
+    }
+    this.history.pop();
+    const refund = Math.floor(rec.cost * UNDO_REFUND);
+    this.s.money += refund;
+    this.markDirty();
+    this.rerouteAll();
+    return `Removed the last ${rec.name.toLowerCase()} build. Refunded £${refund.toLocaleString()} of £${rec.cost.toLocaleString()}.`;
   }
 
   // Checks a station placement; returns an error, or the details needed to build it.

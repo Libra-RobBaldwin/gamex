@@ -7,7 +7,7 @@ import { T_FOREST, T_SAND, T_WATER, valueNoise, rng } from './world';
 export interface Float { x: number; y: number; text: string; color: string; t: number }
 
 export interface Overlay {
-  stroke: { nodes: number[]; bad: number; color: string } | null;
+  strokes: { nodes: number[]; bad: number; color: string }[];
   catchment: { x: number; y: number; r: number } | null;
   selStation: number | null;
   selVehicle: number | null;
@@ -317,25 +317,44 @@ export class Renderer {
       selV.path.forEach((n, i) => { const x = (n % s.w) + 0.5, y = Math.floor(n / s.w) + 0.5; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
       ctx.stroke();
     }
-    if (ov.stroke && ov.stroke.nodes.length) {
-      const pts = ov.stroke.nodes.map((n) => ({ x: (n % s.w) + 0.5, y: Math.floor(n / s.w) + 0.5 }));
+    for (const sk of ov.strokes) {
+      if (sk.nodes.length < 1) continue;
+      const pts = sk.nodes.map((n) => ({ x: (n % s.w) + 0.5, y: Math.floor(n / s.w) + 0.5 }));
+      const upto = sk.bad < 0 ? pts.length : sk.bad + 1;
+      // blueprint tint under each planned tile
+      ctx.fillStyle = sk.color.replace(/[\d.]+\)$/, '0.16)');
+      for (const p of pts.slice(0, upto)) ctx.fillRect(p.x - 0.5, p.y - 0.5, 1, 1);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.lineWidth = 0.34;
-      const upto = ov.stroke.bad < 0 ? pts.length : ov.stroke.bad + 1;
-      ctx.strokeStyle = ov.stroke.color;
+      ctx.lineWidth = 0.3;
+      ctx.strokeStyle = sk.color;
       ctx.beginPath();
       pts.slice(0, upto).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
       ctx.stroke();
+      ctx.setLineDash([0.14, 0.12]);
+      ctx.lineWidth = 0.05;
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.stroke();
+      ctx.setLineDash([]);
       if (upto < pts.length) {
-        ctx.strokeStyle = 'rgba(255,60,50,0.75)';
+        ctx.lineWidth = 0.3;
+        ctx.strokeStyle = 'rgba(255,60,50,0.8)';
         ctx.beginPath();
         pts.slice(upto - 1).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.stroke();
+        const b = pts[Math.min(pts.length - 1, upto)];
+        ctx.fillStyle = 'rgba(255,60,50,0.35)';
+        ctx.fillRect(b.x - 0.5, b.y - 0.5, 1, 1);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 0.06;
+        ctx.beginPath();
+        ctx.moveTo(b.x - 0.18, b.y - 0.18); ctx.lineTo(b.x + 0.18, b.y + 0.18);
+        ctx.moveTo(b.x + 0.18, b.y - 0.18); ctx.lineTo(b.x - 0.18, b.y + 0.18);
         ctx.stroke();
       }
       for (const p of [pts[0], pts[pts.length - 1]]) {
         ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(p.x, p.y, 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, 0.11, 0, Math.PI * 2); ctx.fill();
       }
     }
 

@@ -6,7 +6,7 @@ import {
 import { Renderer, type Float, type Overlay } from './render';
 import { load, save, wipe } from './save';
 import { Scenarios, type Offer, type ScenarioDef } from './scenarios';
-import { Game, loadOf, newGame, type Station, type Vehicle } from './sim';
+import { Game, PROBLEM_TEXT, UNDO_REFUND, loadOf, newGame, type Station, type Vehicle } from './sim';
 import type { Industry, Town } from './world';
 
 type Tool = 'look' | 'road' | 'rail' | 'station' | 'line' | 'clear';
@@ -44,6 +44,7 @@ class App {
   sel: { kind: 'station' | 'vehicle' | 'industry' | 'town' | 'challenge' | 'menu'; id?: number } | null = null;
   floats: Float[] = [];
   stroke: { nodes: number[]; bad: number; color: string } | null = null;
+  blueprint: number[][] = [];
   catchPreview: { x: number; y: number; r: number } | null = null;
   speed = 1;
   last = performance.now();
@@ -92,6 +93,7 @@ class App {
       <div id="dock">
         <div id="hint"></div>
         <div id="route" class="glass hidden"></div>
+        <div id="buildbar" class="glass hidden"></div>
         <div id="sub"></div>
         <div id="tools" class="glass">
           <button data-tool="look"><i>👆</i>Inspect</button>
@@ -120,6 +122,7 @@ class App {
     this.lineStops = [];
     if (t !== 'line') this.vehicleType = null;
     this.stroke = null;
+    if (t !== 'road' && t !== 'rail') this.blueprint = [];
     this.catchPreview = null;
     document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
     if (t === 'road' && !['street', 'motorway'].includes(this.buildKind)) this.buildKind = 'street';
@@ -127,6 +130,7 @@ class App {
     this.renderSub();
     this.renderHint();
     this.renderRoute();
+    this.renderBuildBar();
     if (t !== 'look') this.close();
   }
 
@@ -161,7 +165,7 @@ class App {
     }
     sub.innerHTML = html;
     sub.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
-      if (b.dataset.b) this.buildKind = b.dataset.b as BuildKind;
+      if (b.dataset.b && b.dataset.b !== this.buildKind) { this.buildKind = b.dataset.b as BuildKind; this.blueprint = []; this.renderBuildBar(); }
       if (b.dataset.sg) return this.stationPicker(b.dataset.sg);
       if (b.dataset.vg) return this.vehiclePicker(b.dataset.vg as VehicleGroup);
       this.renderSub();
@@ -176,8 +180,8 @@ class App {
     if (t === 'road' || t === 'rail') {
       const d = BUILD[this.buildKind];
       h.textContent = this.buildKind === 'street'
-        ? 'Drag to build streets · two fingers to move the map'
-        : `Drag to build ${d.name.toLowerCase()} · max 45° turn per tile`;
+        ? 'Drag to draw a street blueprint · two fingers to move the map'
+        : `Drag to draw a ${d.name.toLowerCase()} blueprint · max 45° turn per tile`;
     } else if (t === 'station') {
       const d = STATIONS[this.stationKind];
       h.textContent = d.place === 'site' ? 'Tap the centre of a clear 3×3 site'
@@ -572,9 +576,10 @@ class App {
     const updateStroke = () => {
       const g = this.game;
       if (this.tool === 'clear') { this.stroke = { nodes, bad: -1, color: 'rgba(255,80,60,0.6)' }; return; }
-      const plan = g.planStroke(nodes, this.buildKind);
-      this.stroke = { nodes, bad: plan.bad, color: g.s.money >= plan.cost ? 'rgba(90,220,140,0.55)' : 'rgba(255,170,40,0.6)' };
-      this.renderHint(`${BUILD[this.buildKind].name}: ${money(plan.cost)}${plan.bad >= 0 ? (this.buildKind === 'street' ? ' · blocked' : ' · too sharp / blocked') : ''}`);
+      const plan = g.planBlueprint([...this.blueprint, nodes], this.buildKind);
+      const mine = plan.strokes[plan.strokes.length - 1];
+      this.stroke = { nodes, bad: mine.bad, color: 'rgba(76,195,255,0.6)' };
+      this.renderHint(mine.bad >= 0 ? PROBLEM_TEXT[mine.reason!] : `Blueprint: ${plan.tiles} tiles · ${money(plan.cost)} · lift to add, then Build`);
     };
     const drawing = () => this.tool === 'road' || this.tool === 'rail' || this.tool === 'clear';
 
@@ -640,6 +645,7 @@ class App {
       const quick = performance.now() - start.t < 600;
       if (gesture === 'maybe' && quick && e.type === 'pointerup') this.tap(e.clientX, e.clientY);
       else if (gesture === 'draw' && e.type === 'pointerup') this.commitStroke(nodes);
+      if (gesture === 'draw') this.renderBuildBar();
       gesture = 'none';
       nodes = [];
       this.stroke = null;
@@ -664,8 +670,48 @@ class App {
     const g = this.game;
     if (nodes.length < 2) return;
     if (this.tool === 'clear') { if (!g.bulldozeStroke(nodes)) this.toast('Nothing to remove along there.'); return; }
-    const err = g.buildStroke(nodes, this.buildKind);
-    if (err) this.toast(err);
+    // road and rail strokes go into the blueprint; nothing is built until you press Build
+    this.blueprint.push(nodes.slice());
+  }
+
+  renderBuildBar() {
+    const el = $('#buildbar');
+    const g = this.game;
+    const last = g.lastBuild();
+    if ((this.tool !== 'road' && this.tool !== 'rail') || (!this.blueprint.length && !last)) { el.classList.add('hidden'); return; }
+    let html = '';
+    if (this.blueprint.length) {
+      const plan = g.planBlueprint(this.blueprint, this.buildKind);
+      const bad = plan.strokes.find((x) => x.bad >= 0);
+      const short = g.s.money < plan.cost;
+      html = `<div class="bl"><b>📐 Blueprint</b><span>${plan.tiles} tile${plan.tiles === 1 ? '' : 's'} of ${BUILD[this.buildKind].name.toLowerCase()} · <b class="gold">${money(plan.cost)}</b></span></div>
+        ${bad ? `<div class="bad small">${esc(PROBLEM_TEXT[bad.reason!])} Undo the red part.</div>` : short ? '<div class="bad small">Not enough money for all of it.</div>' : ''}
+        <div class="rbtns"><button data-b="undo">↶ Undo</button><button data-b="clear">Clear</button><button class="primary" data-b="build" ${bad || short || !plan.tiles ? 'disabled' : ''}>Build · ${money(plan.cost)}</button></div>`;
+    } else if (last) {
+      html = `<div class="bl"><span class="muted">Last build: ${last.edges.length} tile${last.edges.length === 1 ? '' : 's'} of ${last.name.toLowerCase()}</span></div>
+        <div class="rbtns"><button data-b="undobuild">↶ Undo build (refund ${money(Math.floor(last.cost * UNDO_REFUND))})</button></div>`;
+    }
+    el.innerHTML = html;
+    el.classList.remove('hidden');
+    el.querySelectorAll<HTMLButtonElement>('[data-b]').forEach((b) => b.addEventListener('click', () => {
+      const a = b.dataset.b;
+      if (a === 'undo') this.blueprint.pop();
+      if (a === 'clear') this.blueprint = [];
+      if (a === 'build') {
+        const err = g.buildBlueprint(this.blueprint, this.buildKind);
+        if (err) this.toast(err);
+        else { this.toast(`Built ${BUILD[this.buildKind].name.toLowerCase()}`); this.blueprint = []; }
+      }
+      if (a === 'undobuild' && last) {
+        const refund = Math.floor(last.cost * UNDO_REFUND);
+        return this.modal(`<h2>Undo last build?</h2><p>This removes the last ${esc(last.name.toLowerCase())} you built (${last.edges.length} tiles). It cost ${money(last.cost)}; you get <b>${money(refund)}</b> back.</p><button class="danger" data-m="y">Undo build</button> <button data-m="n">Keep it</button>`, (m) => {
+          if (m === 'y') this.toast(g.undoBuild());
+          this.renderBuildBar();
+        });
+      }
+      this.renderBuildBar();
+      this.renderHint();
+    }));
   }
 
   tap(sx: number, sy: number) {
@@ -726,6 +772,16 @@ class App {
     }
   }
 
+  blueprintOverlay() {
+    const out: { nodes: number[]; bad: number; color: string }[] = [];
+    if (this.blueprint.length) {
+      const plan = this.game.planBlueprint(this.blueprint, this.buildKind);
+      this.blueprint.forEach((nodes, i) => out.push({ nodes, bad: plan.strokes[i].bad, color: 'rgba(76,195,255,0.6)' }));
+    }
+    if (this.stroke) out.push(this.stroke);
+    return out;
+  }
+
   // ---------------- loop ----------------
   frame(now: number) {
     const dt = Math.min(0.25, (now - this.last) / 1000);
@@ -758,7 +814,7 @@ class App {
       if (this.sel && this.sel.kind !== 'menu') this.renderSheet();
     }
     const ov: Overlay = {
-      stroke: this.stroke,
+      strokes: this.blueprintOverlay(),
       catchment: this.catchPreview,
       selStation: this.sel?.kind === 'station' ? this.sel.id! : null,
       lineStops: this.tool === 'line' ? this.lineStops : this.sel?.kind === 'vehicle' ? (g.s.vehicles.find((v) => v.id === this.sel!.id)?.stops ?? []) : [],

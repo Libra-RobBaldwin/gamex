@@ -81,6 +81,67 @@ describe('network rules', () => {
   });
 });
 
+describe('building rules', () => {
+  const withWater = (cols: number[]) => {
+    const st = flat();
+    for (let y = 0; y < st.h; y++) for (const x of cols) st.terrain[y * st.w + x] = 1;
+    return new Game(st);
+  };
+
+  it('allows short bridges but not open sea', () => {
+    const g = withWater([10, 11, 12]);
+    expect(g.planStroke(line(g, 6, 8, 14), 'street').bad).toBe(-1);
+    const sea = withWater([10, 11, 12, 13, 14]);
+    const p = sea.planStroke(line(sea, 6, 8, 16), 'street');
+    expect(p.bad).toBeGreaterThanOrEqual(0);
+    expect(p.reason).toBe('water');
+    // can't end a road out in the water
+    const q = g.planStroke(line(g, 6, 8, 11), 'street');
+    expect(q.reason).toBe('water');
+    // a blueprint may continue a bridge in the next stroke
+    expect(g.planBlueprint([line(g, 6, 8, 11), line(g, 6, 11, 14)], 'street').strokes.every((x) => x.bad < 0)).toBe(true);
+  });
+
+  it('never builds through buildings, not even partly', () => {
+    const g = new Game(flat());
+    const before = g.s.road.reduce((a, v) => a + (v ? 1 : 0), 0);
+    expect(g.buildStroke(line(g, 1, 0, 8), 'street')).toMatch(/in the way/);
+    expect(g.s.road.reduce((a, v) => a + (v ? 1 : 0), 0)).toBe(before);
+    // diagonals can't squeeze between two buildings
+    const s2 = flat();
+    s2.bld[5 * s2.w + 7] = 1; s2.bld[6 * s2.w + 6] = 1;
+    const g2 = new Game(s2);
+    expect(g2.planStroke([g2.idx(6, 5), g2.idx(7, 6)], 'street').reason).toBe('blocked');
+  });
+
+  it('blueprints join strokes and check rail curves across the join', () => {
+    const g = new Game(flat());
+    const a = line(g, 6, 5, 9);
+    const ok = [g.idx(9, 6), g.idx(10, 7), g.idx(11, 8)];
+    const sharp = [g.idx(9, 6), g.idx(9, 7), g.idx(9, 8)];
+    expect(g.planBlueprint([a, ok], 'rail').strokes.map((x) => x.bad)).toEqual([-1, -1]);
+    expect(g.planBlueprint([a, sharp], 'rail').strokes[1].reason).toBe('sharp');
+    // shared edges are only charged once
+    expect(g.planBlueprint([a, a], 'street').cost).toBe(g.planBlueprint([a], 'street').cost);
+  });
+
+  it('undo removes the last build for half the money back', () => {
+    const g = new Game(flat());
+    const m0 = g.s.money;
+    g.buildBlueprint([line(g, 6, 5, 15)], 'street');
+    const cost = m0 - g.s.money;
+    expect(cost).toBe(250 * 10);
+    expect(g.undoBuild()).toMatch(/Refunded/);
+    expect(g.road.any(g.idx(10, 6))).toBe(false);
+    expect(g.s.money).toBe(m0 - cost / 2);
+    // refuses while a stop stands on it
+    g.buildBlueprint([line(g, 6, 5, 15)], 'street');
+    g.placeStation(10, 6, 'bus_stop');
+    expect(g.undoBuild()).toMatch(/Demolish the station/);
+    expect(g.road.any(g.idx(10, 6))).toBe(true);
+  });
+});
+
 describe('economy', () => {
   it('buses carry passengers between towns and towns grow', () => {
     const g = new Game(flat());

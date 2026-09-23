@@ -247,3 +247,6 @@ button.icon { width: 44px; height: 40px; padding: 0; font-size: 15px; border-rad
 .sb { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
 .sb i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 .tags { display: flex; flex-wrap: wrap; gap: 2px; }
+#buildbar { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+#buildbar.hidden { display: none; }
+.bl { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; align-items: baseline; flex-wrap: wrap; }
