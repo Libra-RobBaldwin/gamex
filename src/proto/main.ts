@@ -475,8 +475,8 @@ document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.a
   if (t === 'cars') { for (let i = 0; i < 5; i++) addVehicle(false); hint('Five cars added.'); }
   if (t === 'reset') location.reload();
 }));
-$('#rotL').addEventListener('click', () => { goal = { az: view.az + Math.PI / 4 }; });
-$('#rotR').addEventListener('click', () => { goal = { az: view.az - Math.PI / 4 }; });
+$('#rotL').addEventListener('click', () => { goal = { az: view.az - Math.PI / 4 }; });
+$('#rotR').addEventListener('click', () => { goal = { az: view.az + Math.PI / 4 }; });
 $('#compass').addEventListener('click', () => { goal = { az: view.az + wrap(HOME.az - view.az), el: HOME.el }; });
 $('#top').addEventListener('click', () => {
   goal = { el: view.el > 1.2 ? HOME.el : EL_MAX };
@@ -616,7 +616,7 @@ canvas.addEventListener('pointermove', (e) => {
     // rotation only kicks in after a deliberate twist, so pinching doesn't wobble
     if (!two.rotating && Math.abs(rot) > ROT_START) { two.rotating = true; two.rotOff = Math.sign(rot) * ROT_START; }
     view.h = Math.max(H_MIN, Math.min(H_MAX, two.h0 / scale));
-    view.az = two.az0 - (two.rotating ? rot - two.rotOff : 0);
+    view.az = two.az0 + (two.rotating ? rot - two.rotOff : 0);
     keepUnder(two.anchor, m.x, m.y);
     return;
   }
