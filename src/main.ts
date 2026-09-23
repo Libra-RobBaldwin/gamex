@@ -1,15 +1,23 @@
 import './style.css';
 import {
-  BUILD, CARGO, INDUSTRIES, LEVEL_POP, OFFLINE_CAP_SECONDS, STATIONS, TECH_NAME, VEHICLES,
-  type BuildKind, type CargoId, type StationKind, type VehicleId,
+  BUILD, CARGO, GROUPS, INDUSTRIES, LEVEL_POP, OFFLINE_CAP_SECONDS, STATIONS, TECH_NAME, VEHICLES, canServe,
+  type BuildKind, type CargoId, type StationKind, type VehicleGroup, type VehicleId,
 } from './defs';
 import { Renderer, type Float, type Overlay } from './render';
 import { load, save, wipe } from './save';
 import { Scenarios, type Offer, type ScenarioDef } from './scenarios';
-import { Game, newGame, type Station, type Vehicle } from './sim';
+import { Game, loadOf, newGame, type Station, type Vehicle } from './sim';
 import type { Industry, Town } from './world';
 
 type Tool = 'look' | 'road' | 'rail' | 'station' | 'line' | 'clear';
+
+const STATION_GROUPS: { id: string; name: string; icon: string; kinds: StationKind[] }[] = [
+  { id: 'bus', name: 'Bus stops', icon: '🚏', kinds: ['bus_stop', 'bus_station', 'bus_interchange'] },
+  { id: 'freight', name: 'Freight', icon: '📦', kinds: ['loading_bay', 'lorry_depot'] },
+  { id: 'rail', name: 'Rail station', icon: '🚉', kinds: ['rail'] },
+  { id: 'metro', name: 'Metro', icon: 'Ⓜ️', kinds: ['metro'] },
+  { id: 'air', name: 'Airport', icon: '✈️', kinds: ['airport'] },
+];
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -30,9 +38,9 @@ class App {
   r: Renderer;
   tool: Tool = 'look';
   buildKind: BuildKind = 'street';
-  stationKind: StationKind = 'road';
-  vehicleType: VehicleId = 'bus';
-  lineFirst: number | null = null;
+  stationKind: StationKind = 'bus_stop';
+  vehicleType: VehicleId | null = null;
+  lineStops: number[] = [];
   sel: { kind: 'station' | 'vehicle' | 'industry' | 'town' | 'challenge' | 'menu'; id?: number } | null = null;
   floats: Float[] = [];
   stroke: { nodes: number[]; bad: number; color: string } | null = null;
@@ -83,6 +91,7 @@ class App {
       <div id="toasts"></div>
       <div id="dock">
         <div id="hint"></div>
+        <div id="route" class="glass hidden"></div>
         <div id="sub"></div>
         <div id="tools" class="glass">
           <button data-tool="look"><i>👆</i>Inspect</button>
@@ -94,6 +103,7 @@ class App {
         </div>
       </div>
       <div id="sheet" class="glass hidden"></div>
+      <div id="picker" class="hidden"></div>
       <div id="modal" class="hidden"></div>`;
     document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) =>
       b.addEventListener('click', () => this.setTool(b.dataset.tool as Tool)));
@@ -107,7 +117,8 @@ class App {
 
   setTool(t: Tool) {
     this.tool = t;
-    this.lineFirst = null;
+    this.lineStops = [];
+    if (t !== 'line') this.vehicleType = null;
     this.stroke = null;
     this.catchPreview = null;
     document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
@@ -115,6 +126,7 @@ class App {
     if (t === 'rail' && !['rail', 'metro'].includes(this.buildKind)) this.buildKind = this.game.has('rail') ? 'rail' : 'metro';
     this.renderSub();
     this.renderHint();
+    this.renderRoute();
     if (t !== 'look') this.close();
   }
 
@@ -133,23 +145,25 @@ class App {
         return this.chip(d.name, locked ? '🔒 via challenge' : `${money(d.cost)}/tile`, k === this.buildKind, locked, `data-b="${k}"`);
       }).join('');
     } else if (this.tool === 'station') {
-      html = (Object.keys(STATIONS) as StationKind[]).map((k) => {
-        const d = STATIONS[k];
-        const locked = !g.has(d.tech);
-        return this.chip(d.name, locked ? '🔒 via challenge' : money(d.cost), k === this.stationKind, locked, `data-s="${k}"`);
+      html = STATION_GROUPS.map((grp) => {
+        const on = grp.kinds.includes(this.stationKind);
+        const locked = grp.kinds.every((k) => !g.has(STATIONS[k].tech));
+        const sub = locked ? '🔒 via challenge' : on ? STATIONS[this.stationKind].name : grp.kinds.length > 1 ? `${grp.kinds.length} types` : money(STATIONS[grp.kinds[0]].cost);
+        return this.chip(`${grp.icon} ${grp.name}`, sub, on, locked, `data-sg="${grp.id}"`);
       }).join('');
     } else if (this.tool === 'line') {
-      html = (Object.keys(VEHICLES) as VehicleId[]).map((k) => {
-        const d = VEHICLES[k];
-        const locked = !g.has(d.tech);
-        return this.chip(d.name, locked ? '🔒 via challenge' : `${money(d.cost)} · ${d.capacity} ${d.pax ? 'pax' : 't'}`, k === this.vehicleType, locked, `data-v="${k}"`);
+      html = GROUPS.map((grp) => {
+        const models = (Object.keys(VEHICLES) as VehicleId[]).filter((k) => VEHICLES[k].group === grp.id);
+        const locked = models.every((k) => !g.has(VEHICLES[k].tech));
+        const on = !!this.vehicleType && VEHICLES[this.vehicleType].group === grp.id;
+        return this.chip(`${grp.icon} ${grp.name}`, locked ? '🔒 via challenge' : on ? VEHICLES[this.vehicleType!].name : `${models.length} models`, on, locked, `data-vg="${grp.id}"`);
       }).join('');
     }
     sub.innerHTML = html;
     sub.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.b) this.buildKind = b.dataset.b as BuildKind;
-      if (b.dataset.s) this.stationKind = b.dataset.s as StationKind;
-      if (b.dataset.v) { this.vehicleType = b.dataset.v as VehicleId; this.lineFirst = null; }
+      if (b.dataset.sg) return this.stationPicker(b.dataset.sg);
+      if (b.dataset.vg) return this.vehiclePicker(b.dataset.vg as VehicleGroup);
       this.renderSub();
       this.renderHint();
     }));
@@ -164,12 +178,109 @@ class App {
       h.textContent = this.buildKind === 'street'
         ? 'Drag to build streets · two fingers to move the map'
         : `Drag to build ${d.name.toLowerCase()} · max 45° turn per tile`;
-    } else if (t === 'station') h.textContent = this.stationKind === 'airport' ? 'Tap the centre of a clear 3×3 site' : `Tap on ${this.stationKind === 'road' ? 'a road' : this.stationKind === 'rail' ? 'track' : 'a metro tunnel'} to place a ${STATIONS[this.stationKind].name.toLowerCase()}`;
-    else if (t === 'line') {
-      const d = VEHICLES[this.vehicleType];
-      h.textContent = this.lineFirst == null ? `${d.name}: tap the first ${STATIONS[d.station].name.toLowerCase()}` : `${d.name}: now tap the destination`;
+    } else if (t === 'station') {
+      const d = STATIONS[this.stationKind];
+      h.textContent = d.place === 'site' ? 'Tap the centre of a clear 3×3 site'
+        : d.place === 'kerb' ? `Tap a street (not a junction) to add a ${d.name.toLowerCase()}`
+        : d.place === 'offroad' ? `Tap a clear tile right beside a street${d.size > 1 ? ' (needs 2×2)' : ''}`
+        : `Tap ${this.stationKind === 'rail' ? 'track' : 'a metro tunnel'} to add a ${d.name.toLowerCase()}`;
+    } else if (t === 'line') {
+      if (!this.vehicleType) h.textContent = 'Choose a vehicle type';
+      else {
+        const d = VEHICLES[this.vehicleType];
+        h.textContent = !this.lineStops.length ? `${d.name}: tap the stops in the order to visit them` : 'Tap more stops, then Start service';
+      }
     } else if (t === 'clear') h.textContent = 'Tap to demolish · drag along track or road to remove it';
     else h.textContent = '';
+  }
+
+  renderRoute() {
+    const el = $('#route');
+    const g = this.game;
+    if (this.tool !== 'line' || !this.vehicleType || !this.lineStops.length) { el.classList.add('hidden'); return; }
+    const d = VEHICLES[this.vehicleType];
+    const stops = this.lineStops.map((id) => g.station(id)).filter((x): x is Station => !!x);
+    const err = stops.length >= 2 ? g.checkLine(this.vehicleType, stops) : null;
+    el.innerHTML = `<div class="stops">${stops.map((st, i) => `<span class="stop"><b>${i + 1}</b>${esc(st.name)}</span>`).join('<span class="arr">→</span>')}${stops.length >= 2 ? '<span class="arr">↺</span>' : ''}</div>
+      ${err ? `<div class="bad small">${esc(err)}</div>` : ''}
+      <div class="rbtns"><button data-r="undo">Undo</button><button data-r="cancel">Cancel</button>
+      <button class="primary" data-r="go" ${stops.length < 2 || err ? 'disabled' : ''}>Start service · ${money(d.cost)}</button></div>`;
+    el.classList.remove('hidden');
+    el.querySelectorAll<HTMLButtonElement>('[data-r]').forEach((b) => b.addEventListener('click', () => {
+      const r = b.dataset.r;
+      if (r === 'undo') this.lineStops.pop();
+      if (r === 'cancel') this.lineStops = [];
+      if (r === 'go') {
+        const e2 = g.buyVehicle(this.vehicleType!, stops);
+        if (e2) this.toast(e2);
+        else { this.toast(`${d.name} now running ${stops.map((x) => x.name).join(' → ')}`); this.lineStops = []; }
+      }
+      this.renderRoute();
+      this.renderHint();
+    }));
+  }
+
+  picker(title: string, cards: string, onPick: (id: string) => void) {
+    const el = $('#picker');
+    el.innerHTML = `<div class="pk glass"><div class="pkh"><h2>${title}</h2><button data-p="x" class="close">✕</button></div><div class="pkl">${cards}</div></div>`;
+    el.classList.remove('hidden');
+    el.querySelectorAll<HTMLElement>('[data-p]').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      el.classList.add('hidden');
+      if (b.dataset.p !== 'x') onPick(b.dataset.p!);
+    }));
+    el.onclick = (e) => { if (e.target === el) el.classList.add('hidden'); };
+  }
+
+  stat(label: string, value: string, frac: number) {
+    return `<div class="st"><span>${label}</span><div class="sb"><i style="width:${Math.round(Math.max(0.06, Math.min(1, frac)) * 100)}%"></i></div><b>${value}</b></div>`;
+  }
+
+  vehiclePicker(group: VehicleGroup, then?: () => void) {
+    const g = this.game;
+    const models = (Object.keys(VEHICLES) as VehicleId[]).filter((k) => VEHICLES[k].group === group);
+    const maxSp = Math.max(...models.map((k) => VEHICLES[k].speed));
+    const maxCap = Math.max(...models.map((k) => VEHICLES[k].capacity));
+    const maxRun = Math.max(...models.map((k) => VEHICLES[k].running));
+    const cards = models.map((k) => {
+      const d = VEHICLES[k];
+      const locked = !g.has(d.tech);
+      return `<div class="card ${locked ? 'locked' : ''} ${k === this.vehicleType ? 'on' : ''}" ${locked ? '' : `data-p="${k}"`}>
+        <img alt="" src="${this.r.thumbVehicle(k)}" />
+        <div class="cb"><div class="ch"><b>${d.name}</b><span class="price">${money(d.cost)}</span></div>
+        <div class="muted small">${locked ? `🔒 Unlocks with ${TECH_NAME[d.tech]}` : esc(d.blurb)}</div>
+        ${this.stat('Speed', `${Math.round(d.speed * 40)} km/h`, d.speed / maxSp)}
+        ${this.stat('Capacity', `${d.capacity}${d.pax ? ' pax' : ' t'}`, d.capacity / maxCap)}
+        ${this.stat('Running', `${money(d.running)}/min`, d.running / maxRun)}</div></div>`;
+    }).join('');
+    const name = GROUPS.find((x) => x.id === group)!.name;
+    this.picker(`Choose ${name.toLowerCase()}`, cards, (id) => {
+      this.vehicleType = id as VehicleId;
+      then?.();
+      this.renderSub();
+      this.renderHint();
+      this.renderRoute();
+    });
+  }
+
+  stationPicker(groupId: string) {
+    const g = this.game;
+    const grp = STATION_GROUPS.find((x) => x.id === groupId)!;
+    const cards = grp.kinds.map((k) => {
+      const d = STATIONS[k];
+      const locked = !g.has(d.tech);
+      const where = d.place === 'kerb' ? 'On the street' : d.place === 'offroad' ? `Beside the street${d.size > 1 ? ' · 2×2' : ''}` : d.place === 'site' ? '3×3 site' : 'On track';
+      return `<div class="card ${locked ? 'locked' : ''} ${k === this.stationKind ? 'on' : ''}" ${locked ? '' : `data-p="${k}"`}>
+        <img alt="" src="${this.r.thumbStation(k)}" />
+        <div class="cb"><div class="ch"><b>${d.name}</b><span class="price">${money(d.cost)}</span></div>
+        <div class="muted small">${locked ? `🔒 Unlocks with ${TECH_NAME[d.tech]}` : esc(d.blurb)}</div>
+        <div class="tags"><span class="tag">${where}</span><span class="tag ${d.turnaround ? 'blue' : ''}">${d.turnaround ? '↩ Turn round here' : '→ Drive through'}</span><span class="tag">${d.cargo === 'pax' ? 'Passengers' : d.cargo === 'freight' ? 'Freight' : 'Any cargo'}</span></div>
+        ${this.stat('Waiting space', num(d.cap), d.cap / 1200)}
+        ${this.stat('Catchment', `${d.radius} tiles`, d.radius / 5)}</div></div>`;
+    }).join('');
+    const pick = (id: string) => { this.stationKind = id as StationKind; this.renderSub(); this.renderHint(); };
+    if (grp.kinds.length === 1 && g.has(STATIONS[grp.kinds[0]].tech)) return pick(grp.kinds[0]);
+    this.picker(grp.name, cards, pick);
   }
 
   renderCard() {
@@ -328,17 +439,20 @@ class App {
       ${st.overflow > 1 ? `<div class="bad">${num(st.overflow)} gave up waiting. Add more capacity!</div>` : ''}
       ${c.industries.length ? `<h3>Industries</h3><div>${c.industries.map((i) => esc(i.name)).join(', ')}</div>` : ''}
       <h3>Vehicles (${vs.length})</h3>
-      ${vs.map((v) => `<div class="row"><span>${VEHICLES[v.type].name} → ${esc(g.station(v.stops[0] === st.id ? v.stops[1] : v.stops[0])?.name ?? '?')}</span><span class="${v.profit >= 0 ? 'ok' : 'bad'}">${money(v.profit)}</span></div>`).join('') || '<div class="muted">None yet.</div>'}
+      ${vs.map((v) => `<div class="row"><span>${VEHICLES[v.type].name} · ${v.stops.length} stops · ${loadOf(v)}/${VEHICLES[v.type].capacity}</span><span class="${v.profit >= 0 ? 'ok' : 'bad'}">${money(v.profit)}</span></div>`).join('') || '<div class="muted">None yet.</div>'}
       <div class="actions"><button class="primary" data-a="line-from" data-id="${st.id}">➕ New line from here</button><button data-a="demolish" data-id="${st.id}">🧨 Demolish</button></div>`;
   }
 
   vehicleHtml(v: Vehicle) {
     const g = this.game, d = VEHICLES[v.type];
-    const a = g.station(v.stops[0]), b = g.station(v.stops[1]), tgt = g.station(v.stops[v.target]);
-    const state = v.state === 'lost' ? '<span class="bad">No route. Check the track, or look for turns sharper than 45°.</span>'
+    const tgt = g.station(v.stops[v.target]);
+    const route = v.stops.map((id, i) => `<span class="stop ${i === v.target ? 'cur' : ''}"><b>${i + 1}</b>${esc(g.station(id)?.name ?? '?')}</span>`).join('<span class="arr">→</span>');
+    const state = v.state === 'lost'
+      ? `<span class="bad">No route. ${d.mode === 'road' ? 'Road vehicles can only turn round at a dead end or a bus station. Add a loop, a dead end or an off-road station.' : 'Check the track, or look for turns sharper than 45°.'}</span>`
       : v.state === 'load' ? `Loading at ${esc(tgt?.name ?? '')}` : `Heading to ${esc(tgt?.name ?? '')}`;
-    return `<h2>${d.name}</h2><div>${esc(a?.name ?? '?')} ⇄ ${esc(b?.name ?? '?')}</div><div>${state}</div>
-      <div>Carrying ${cargoList(v.cargo)} <span class="muted">(capacity ${d.capacity})</span></div>
+    const load = loadOf(v);
+    return `<h2>${d.name}</h2><div class="stops">${route}<span class="arr">↺</span></div><div>${state}</div>
+      <div>Carrying <b>${load}</b> / ${d.capacity}${d.pax ? ' passengers' : 't'} (${Math.round((load / d.capacity) * 100)}%)</div><div class="bar big"><i style="width:${Math.round((load / d.capacity) * 100)}%"></i></div>
       <div>Trips ${v.trips} · Profit <span class="${v.profit >= 0 ? 'ok' : 'bad'}">${money(v.profit)}</span> · Running ${money(d.running)}/min</div>
       <div class="actions"><button class="primary" data-a="clone" data-id="${v.id}">➕ Add another (${money(d.cost)})</button><button data-a="sell" data-id="${v.id}">Sell (+${money(d.cost / 2)})</button></div>`;
   }
@@ -395,18 +509,16 @@ class App {
     if (a === 'line-from') {
       const st = g.station(id)!;
       this.setTool('line');
-      const opts = (Object.keys(VEHICLES) as VehicleId[]).filter((k) => VEHICLES[k].station === st.kind && g.has(VEHICLES[k].tech));
-      const freight = g.catchment(st).industries.some((i) => INDUSTRIES[i.kind].produces);
-      const pick = opts.find((k) => VEHICLES[k].pax !== freight) ?? opts[0];
-      if (pick) this.vehicleType = pick;
-      this.lineFirst = st.id;
-      this.renderSub();
-      return this.renderHint();
+      const sd = STATIONS[st.kind];
+      const freight = sd.cargo === 'freight' || (sd.cargo === 'any' && g.catchment(st).industries.some((i) => INDUSTRIES[i.kind].produces));
+      const opts = (Object.keys(VEHICLES) as VehicleId[]).filter((k) => canServe(VEHICLES[k], sd) && VEHICLES[k].pax !== freight && g.has(VEHICLES[k].tech));
+      if (!opts.length) { this.toast('No unlocked vehicles can use this station yet.'); return; }
+      return this.vehiclePicker(VEHICLES[opts[0]].group, () => { this.lineStops = [st.id]; });
     }
     if (a === 'demolish') { const st = g.station(id)!; g.removeStation(st); this.toast(`Demolished ${st.name}`); return this.close(); }
     if (a === 'clone') {
       const v = g.s.vehicles.find((x) => x.id === id)!;
-      const err = g.buyVehicle(v.type, g.station(v.stops[0])!, g.station(v.stops[1])!);
+      const err = g.buyVehicle(v.type, v.stops.map((sid) => g.station(sid)!).filter(Boolean));
       this.toast(err ?? `Another ${VEHICLES[v.type].name} added`);
       return this.renderSheet();
     }
@@ -565,7 +677,7 @@ class App {
         const def = VEHICLES[v.type];
         const c = g.curveOf(v);
         const p = c.at(v.dist);
-        const alt = def.station === 'airport' && v.state === 'move' ? Math.min(1, (v.dist / c.length) * 5, (1 - v.dist / c.length) * 5) * 90 : 6;
+        const alt = def.mode === 'air' && v.state === 'move' ? Math.min(1, (v.dist / c.length) * 5, (1 - v.dist / c.length) * 5) * 90 : 6;
         const q = this.r.tileToScreen(p.x, p.y, alt);
         const d = Math.hypot(q.x - sx, q.y - sy);
         if (d < bd) { bd = d; best = v; }
@@ -604,14 +716,12 @@ class App {
     if (this.tool === 'line') {
       const st = g.stationAt(t.x, t.y) ?? g.airportAt(t.x, t.y);
       if (!st) return this.toast('Tap a station.');
+      if (!this.vehicleType) return this.toast('Choose a vehicle type first.');
       const def = VEHICLES[this.vehicleType];
-      if (st.kind !== def.station) return this.toast(`A ${def.name} needs a ${STATIONS[def.station].name.toLowerCase()}.`);
-      if (this.lineFirst == null) { this.lineFirst = st.id; return this.renderHint(); }
-      const a = g.station(this.lineFirst);
-      this.lineFirst = null;
-      if (!a) return this.renderHint();
-      const err = g.buyVehicle(this.vehicleType, a, st);
-      this.toast(err ?? `${def.name} now running ${a.name} ⇄ ${st.name}`);
+      if (!canServe(def, STATIONS[st.kind])) return this.toast(`A ${def.name} can't use a ${STATIONS[st.kind].name.toLowerCase()}.`);
+      if (this.lineStops[this.lineStops.length - 1] === st.id) return;
+      this.lineStops.push(st.id);
+      this.renderRoute();
       this.renderHint();
     }
   }
@@ -650,7 +760,8 @@ class App {
     const ov: Overlay = {
       stroke: this.stroke,
       catchment: this.catchPreview,
-      selStation: this.sel?.kind === 'station' ? this.sel.id! : this.lineFirst,
+      selStation: this.sel?.kind === 'station' ? this.sel.id! : null,
+      lineStops: this.tool === 'line' ? this.lineStops : this.sel?.kind === 'vehicle' ? (g.s.vehicles.find((v) => v.id === this.sel!.id)?.stops ?? []) : [],
       selVehicle: this.sel?.kind === 'vehicle' ? this.sel.id! : null,
       selIndustry: this.sel?.kind === 'industry' ? this.sel.id! : null,
       grid: this.tool !== 'look',

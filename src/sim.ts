@@ -1,10 +1,10 @@
 // Simulation: network building, stations, vehicles with congestion, towns that grow, industries.
 import {
   BRIDGE_MULT, BUILD, CARGO, DEMOLISH_BUILDING_COST, INDUSTRIES, LEVEL_POP, PAX_GEN, START_MONEY, START_TECH,
-  STATIONS, TOWN_ACCEPT_MIN_BUILDINGS, VEHICLES,
-  type BuildKind, type CargoId, type IndustryKind, type Layer, type StationKind, type Tech, type VehicleId,
+  STATIONS, TOWN_ACCEPT_MIN_BUILDINGS, VEHICLES, canServe,
+  type BuildKind, type CargoId, type IndustryKind, type Layer, type Mode, type StationKind, type Tech, type VehicleId,
 } from './defs';
-import { Curve, DLEN, EdgeGrid, Heap, crossingDiagonal, dirBetween } from './geo';
+import { Curve, DLEN, EdgeGrid, Heap, crossingDiagonal, dirBetween, opposite } from './geo';
 import { T_FOREST, T_WATER, generateWorld, makeIndustry, rng, type Industry, type Town } from './world';
 
 export interface Station {
@@ -16,18 +16,23 @@ export interface Station {
   waiting: Partial<Record<CargoId, number>>;
   dir: number;
   overflow: number;
+  foot?: number[]; // footprint tiles for off-road stations and airports
+  link?: number; // street node an off-road station's driveway joins
 }
+
+export interface Load { c: CargoId; n: number; from: number }
 
 export interface Vehicle {
   id: number;
   type: VehicleId;
-  stops: [number, number];
-  target: 0 | 1;
+  stops: number[]; // visited in order, then back to the first
+  target: number; // index into stops we're heading to / sitting at
+  heading: number; // direction of travel on arrival (-1 unknown)
   state: 'load' | 'move' | 'lost';
   timer: number;
   path: number[];
   dist: number;
-  cargo: Partial<Record<CargoId, number>>;
+  loads: Load[];
   profit: number;
   trips: number;
 }
@@ -92,6 +97,9 @@ const LOAD_TIME = 2;
 const ROAD_CAP = [0, 3, 8];
 const ROAD_SPEED = [0, 1, 1.6];
 
+export const layerOf = (m: Mode): Layer | null => (m === 'air' ? null : m);
+export const loadOf = (v: Vehicle) => v.loads.reduce((a, l) => a + l.n, 0);
+
 export function newGame(seed = (Math.random() * 2 ** 31) | 0): GameState {
   const g = generateWorld(seed);
   return {
@@ -115,7 +123,8 @@ export class Game {
   private catchments = new Map<number, Catch>();
   private coverCount = new Uint8Array(0);
   private tileStation = new Int32Array(0);
-  private airportTile = new Int32Array(0);
+  private footTile = new Int32Array(0);
+  private turnNodes = new Set<number>();
   private townPop: number[] = [];
   private townBuildings: number[] = [];
   private lineKinds = new Map<number, { pax: boolean; freight: boolean }>();
@@ -131,6 +140,15 @@ export class Game {
     this.rail = new EdgeGrid(s.w, s.h, s.rail);
     this.metro = new EdgeGrid(s.w, s.h, s.metro);
     this.rand = rng(s.seed ^ Math.floor(s.time));
+    // migrate older saves
+    for (const v of s.vehicles as (Vehicle & { cargo?: Partial<Record<CargoId, number>> })[]) {
+      if (!v.loads) {
+        const prev = v.stops[(v.target + v.stops.length - 1) % v.stops.length];
+        v.loads = (Object.entries(v.cargo ?? {}) as [CargoId, number][]).filter(([, n]) => n > 0).map(([c, n]) => ({ c, n, from: prev }));
+        delete v.cargo;
+      }
+      if (v.heading === undefined) v.heading = -1;
+    }
     this.rebuild();
   }
 
@@ -150,7 +168,7 @@ export class Game {
   airportAt(x: number, y: number): Station | undefined {
     if (!this.inBounds(x, y)) return;
     this.ensure();
-    const id = this.airportTile[this.idx(x, y)];
+    const id = this.footTile[this.idx(x, y)];
     return id >= 0 ? this.station(id) : undefined;
   }
   industryAt(x: number, y: number) {
@@ -179,7 +197,7 @@ export class Game {
   surfaceFree(n: number): boolean {
     this.ensure();
     const { x, y } = this.xy(n);
-    return this.s.bld[n] === 0 && !this.industryAt(x, y) && this.airportTile[n] < 0;
+    return this.s.bld[n] === 0 && !this.industryAt(x, y) && this.footTile[n] < 0;
   }
 
   private ensure() { if (this.dirty) this.rebuild(); }
@@ -188,11 +206,17 @@ export class Game {
   rebuild() {
     const s = this.s, N = s.w * s.h;
     this.tileStation = new Int32Array(N).fill(-1);
-    this.airportTile = new Int32Array(N).fill(-1);
+    this.footTile = new Int32Array(N).fill(-1);
+    this.turnNodes.clear();
     for (const st of s.stations) {
-      this.tileStation[this.idx(st.x, st.y)] = st.id;
-      if (st.kind === 'airport')
-        for (let y = st.y - 1; y <= st.y + 1; y++) for (let x = st.x - 1; x <= st.x + 1; x++) this.airportTile[this.idx(x, y)] = st.id;
+      const n = this.idx(st.x, st.y);
+      this.tileStation[n] = st.id;
+      if (st.kind === 'airport' && !st.foot) {
+        st.foot = [];
+        for (let y = st.y - 1; y <= st.y + 1; y++) for (let x = st.x - 1; x <= st.x + 1; x++) st.foot.push(this.idx(x, y));
+      }
+      for (const t of st.foot ?? []) { this.footTile[t] = st.id; this.tileStation[t] = st.id; }
+      if (STATIONS[st.kind].mode === 'road' && STATIONS[st.kind].turnaround) this.turnNodes.add(n);
     }
     this.townPop = s.towns.map(() => 0);
     this.townBuildings = s.towns.map(() => 0);
@@ -294,7 +318,7 @@ export class Game {
     // Road congestion: count vehicles per road edge
     this.occupancy.clear();
     for (const v of s.vehicles) {
-      if (v.state !== 'move' || VEHICLES[v.type].station !== 'road') continue;
+      if (v.state !== 'move' || VEHICLES[v.type].mode !== 'road') continue;
       const slot = this.currentSlot(v);
       if (slot >= 0) this.occupancy.set(slot, (this.occupancy.get(slot) ?? 0) + 1);
     }
@@ -349,7 +373,7 @@ export class Game {
       return;
     }
     let speed = def.speed;
-    if (def.station === 'road') {
+    if (def.mode === 'road') {
       const slot = this.currentSlot(v);
       if (slot >= 0) {
         const kind = this.road.data[slot] || 1;
@@ -364,7 +388,7 @@ export class Game {
 
   vehicleNode(v: Vehicle): number {
     if (v.state === 'move' && v.path.length > 1) {
-      if (VEHICLES[v.type].station === 'airport') return v.path[v.dist < this.curveOf(v).length / 2 ? 0 : 1];
+      if (VEHICLES[v.type].mode === 'air') return v.path[v.dist < this.curveOf(v).length / 2 ? 0 : 1];
       const p = this.curveOf(v).at(v.dist);
       return v.path[Math.min(v.path.length - 1, p.i)];
     }
@@ -375,15 +399,23 @@ export class Game {
 
   private depart(v: Vehicle) {
     const here = this.station(v.stops[v.target])!;
-    v.target = v.target === 0 ? 1 : 0;
+    v.target = (v.target + 1) % v.stops.length;
     this.routeFrom(v, this.idx(here.x, here.y));
+  }
+
+  // Direction a road vehicle must leave `node` in (8 = free to turn round here).
+  private startDir(v: Vehicle, node: number): number {
+    if (VEHICLES[v.type].mode !== 'road' || v.heading < 0) return 8;
+    if (this.turnNodes.has(node) || this.road.degree(node) <= 1) return 8;
+    return v.heading;
   }
 
   private routeFrom(v: Vehicle, from: number) {
     const def = VEHICLES[v.type];
     const to = this.station(v.stops[v.target])!;
     const toN = this.idx(to.x, to.y);
-    const path = def.station === 'airport' ? [from, toN] : this.findPath(STATIONS[def.station].layer!, from, toN);
+    const layer = layerOf(def.mode);
+    const path = !layer ? [from, toN] : this.findPath(layer, from, toN, this.startDir(v, from));
     if (!path) {
       v.state = 'lost';
       v.timer = 2;
@@ -398,14 +430,27 @@ export class Game {
 
   private arrive(v: Vehicle) {
     const st = this.station(v.stops[v.target])!;
-    const from = this.station(v.stops[v.target === 0 ? 1 : 0])!;
+    const prev = this.station(v.stops[(v.target + v.stops.length - 1) % v.stops.length])!;
+    const p = v.path;
+    if (p.length >= 2) v.heading = dirBetween(this.s.w, p[p.length - 2], p[p.length - 1]);
     v.state = 'load';
     v.timer = LOAD_TIME;
     v.path = [this.idx(st.x, st.y)];
     v.dist = 0;
     v.trips++;
-    this.unload(v, st, from);
-    this.load(v, st, from);
+    // fares are earned per leg for everything on board
+    let pay = 0;
+    const d = this.distance(st, prev);
+    for (const l of v.loads) pay += l.n * CARGO[l.c].pay * d;
+    if (pay > 0) {
+      pay = Math.round(pay);
+      this.s.money += pay;
+      this.s.earned += pay;
+      v.profit += pay;
+      this.emit({ t: 'money', x: st.x, y: st.y, amount: pay });
+    }
+    this.unload(v, st);
+    this.load(v, st);
   }
 
   distance(a: Station, b: Station) {
@@ -428,89 +473,91 @@ export class Game {
     seen.add(from.id);
     for (const v of this.s.vehicles) {
       if (!v.stops.includes(st.id) || VEHICLES[v.type].pax !== (c === 'pax')) continue;
-      const other = this.station(v.stops[0] === st.id ? v.stops[1] : v.stops[0]);
-      if (other && !seen.has(other.id) && this.wants(other, c, st, depth - 1, new Set(seen))) return true;
+      for (const id of v.stops) {
+        if (seen.has(id)) continue;
+        const other = this.station(id);
+        if (other && this.wants(other, c, st, depth - 1, new Set(seen))) return true;
+      }
     }
     return false;
   }
 
-  private unload(v: Vehicle, st: Station, from: Station) {
-    const d = this.distance(st, from);
-    let pay = 0;
-    for (const [c, amt] of Object.entries(v.cargo) as [CargoId, number][]) {
-      if (!amt) continue;
-      delete v.cargo[c];
-      const consumer = this.consumes(st, c);
-      const base = amt * CARGO[c].pay * d;
-      let transfer = false;
-      if (consumer === 'town') {
-        pay += base;
-        const pts = (c === 'pax' ? 1 : 3) * amt;
-        const towns = new Set([...this.catchment(st).towns, ...this.catchment(from).towns]);
-        for (const t of towns) { this.s.towns[t].growth += pts / towns.size; this.s.towns[t].served += amt / towns.size; }
-      } else if (consumer) {
-        consumer.input[c] = (consumer.input[c] ?? 0) + amt;
-        pay += base;
-      } else {
-        transfer = true;
-        st.waiting[c] = Math.min(STATIONS[st.kind].cap, (st.waiting[c] ?? 0) + amt);
-        pay += base * 0.5;
-      }
-      if (!transfer) this.s.delivered[c] = (this.s.delivered[c] ?? 0) + amt;
-      this.onDeliver?.({ cargo: c, amount: amt, from, to: st, vehicle: v, transfer });
-    }
-    if (pay > 0) {
-      pay = Math.round(pay);
-      this.s.money += pay;
-      this.s.earned += pay;
-      v.profit += pay;
-      this.emit({ t: 'money', x: st.x, y: st.y, amount: pay });
-    }
+  private otherStops(v: Vehicle, st: Station) {
+    return v.stops.filter((id) => id !== st.id).map((id) => this.station(id)).filter((x): x is Station => !!x);
   }
 
-  private load(v: Vehicle, st: Station, next: Station) {
+  private unload(v: Vehicle, st: Station) {
+    const keep: Load[] = [];
+    const others = this.otherStops(v, st);
+    for (const l of v.loads) {
+      const from = this.station(l.from) ?? st;
+      const consumer = l.from !== st.id ? this.consumes(st, l.c) : null;
+      if (consumer === 'town') {
+        const pts = (l.c === 'pax' ? 1 : 3) * l.n;
+        const towns = new Set([...this.catchment(st).towns, ...this.catchment(from).towns]);
+        for (const t of towns) { this.s.towns[t].growth += pts / towns.size; this.s.towns[t].served += l.n / towns.size; }
+      } else if (consumer) consumer.input[l.c] = (consumer.input[l.c] ?? 0) + l.n;
+      if (consumer) {
+        this.s.delivered[l.c] = (this.s.delivered[l.c] ?? 0) + l.n;
+        this.onDeliver?.({ cargo: l.c, amount: l.n, from, to: st, vehicle: v, transfer: false });
+      } else if (l.from === st.id) {
+        // came all the way round without finding anywhere to go
+      } else if (!others.some((o) => this.consumes(o, l.c)) && this.wants(st, l.c, from)) {
+        st.waiting[l.c] = Math.min(STATIONS[st.kind].cap, (st.waiting[l.c] ?? 0) + l.n);
+        this.onDeliver?.({ cargo: l.c, amount: l.n, from, to: st, vehicle: v, transfer: true });
+      } else keep.push(l);
+    }
+    v.loads = keep;
+  }
+
+  private load(v: Vehicle, st: Station) {
     const def = VEHICLES[v.type];
-    let space = def.capacity - Object.values(v.cargo).reduce((a, b) => a + (b ?? 0), 0);
+    let space = def.capacity - loadOf(v);
+    const others = this.otherStops(v, st);
     const avail = (Object.entries(st.waiting) as [CargoId, number][])
-      .filter(([c, n]) => n >= 1 && (c === 'pax') === def.pax && this.wants(next, c, st))
+      .filter(([c, n]) => n >= 1 && (c === 'pax') === def.pax && others.some((o) => this.wants(o, c, st)))
       .sort((a, b) => b[1] - a[1]);
     for (const [c, n] of avail) {
       if (space <= 0) break;
       const take = Math.min(space, Math.floor(n));
       st.waiting[c] = n - take;
-      v.cargo[c] = (v.cargo[c] ?? 0) + take;
+      const ex = v.loads.find((l) => l.c === c && l.from === st.id);
+      if (ex) ex.n += take; else v.loads.push({ c, n: take, from: st.id });
       space -= take;
     }
   }
 
-  // Dijkstra over the network. Rail-like layers limit turns to 45 degrees per node.
-  findPath(layer: Layer, from: number, to: number): number[] | null {
+  // Dijkstra over (node, heading) states. Rail and metro can only turn 45 degrees per node;
+  // road vehicles can take any turn but only U-turn at dead ends and turnaround stations.
+  findPath(layer: Layer, from: number, to: number, startDir = 8): number[] | null {
     const g = this.grid(layer);
     const N = this.s.w * this.s.h;
     const smooth = layer !== 'road';
-    const S = smooth ? 9 : 1; // state = node * 9 + (incoming dir, 8 = none)
+    const S = 9; // state = node * 9 + incoming dir (8 = none)
     const dist = new Float64Array(N * S).fill(Infinity);
     const prev = new Int32Array(N * S).fill(-1);
     const heap = new Heap();
-    const s0 = from * S + (smooth ? 8 : 0);
+    const s0 = from * S + startDir;
     dist[s0] = 0;
     heap.push(0, s0);
     let goal = -1;
     while (heap.size) {
       const [dcur, st] = heap.pop();
       if (dcur > dist[st]) continue;
-      const n = Math.floor(st / S), inDir = smooth ? st % S : 8;
-      if (n === to) { goal = st; break; }
+      const n = Math.floor(st / S), inDir = st % S;
+      if (n === to && st !== s0) { goal = st; break; }
+      if (n === to && from === to) { goal = st; break; }
+      const canTurn = !smooth && (inDir === 8 || this.turnNodes.has(n) || g.degree(n) <= 1);
       for (let d = 0; d < 8; d++) {
         const val = g.get(n, d);
         if (!val) continue;
-        if (smooth && inDir !== 8) {
+        if (inDir !== 8) {
           const turn = (d - inDir + 8) & 7;
-          if (turn !== 0 && turn !== 1 && turn !== 7) continue;
+          if (smooth ? turn !== 0 && turn !== 1 && turn !== 7 : turn === 4 && !canTurn) continue;
         }
         const m = g.neighbour(n, d);
-        const cost = DLEN[d] / (layer === 'road' ? ROAD_SPEED[val] : 1);
-        const ns = m * S + (smooth ? d : 0);
+        const cost = DLEN[d] / (layer === 'road' ? ROAD_SPEED[val] : 1) + (d === opposite(inDir) ? 0.6 : 0);
+        const ns = m * S + d;
         const nd = dcur + cost;
         if (nd < dist[ns]) { dist[ns] = nd; prev[ns] = st; heap.push(nd, ns); }
       }
@@ -575,30 +622,81 @@ export class Game {
     return null;
   }
 
-  placeStation(x: number, y: number, kind: StationKind): string | null {
+  // Checks a station placement; returns an error, or the details needed to build it.
+  planStation(x: number, y: number, kind: StationKind): string | { dir: number; foot?: number[]; link?: number } {
     const def = STATIONS[kind];
     if (!this.has(def.tech)) return `${def.name}s aren't unlocked yet.`;
     if (!this.inBounds(x, y)) return 'Out of bounds.';
     const n = this.idx(x, y);
     if (this.stationAt(x, y)) return 'There is already a station here.';
     if (this.s.terrain[n] === T_WATER) return 'Stations can\'t go on water.';
-    let dir = 0;
-    if (kind === 'airport') {
+    const clear = (t: number) => t >= 0 && this.s.terrain[t] !== T_WATER && this.surfaceFree(t) && !this.road.any(t) && !this.rail.any(t) && this.tileStation[t] < 0;
+    if (def.place === 'site') {
+      const foot: number[] = [];
       for (let yy = y - 1; yy <= y + 1; yy++)
         for (let xx = x - 1; xx <= x + 1; xx++) {
           if (!this.inBounds(xx, yy)) return 'Too close to the edge.';
           const t = this.idx(xx, yy);
-          if (this.s.terrain[t] === T_WATER || !this.surfaceFree(t) || this.road.any(t) || this.rail.any(t) || this.tileStation[t] >= 0)
-            return 'An airport needs a clear 3×3 site (no roads, rails or buildings).';
+          if (!clear(t)) return 'An airport needs a clear 3×3 site (no roads, rails or buildings).';
+          foot.push(t);
         }
-    } else {
-      const g = this.grid(def.layer!);
-      if (!g.any(n)) return `Build ${kind === 'road' ? 'a road' : kind === 'rail' ? 'track' : 'a metro tunnel'} here first.`;
-      for (let d = 0; d < 8; d++) if (g.get(n, d)) { dir = d; break; }
+      return { dir: 0, foot };
     }
+    if (def.place === 'kerb') {
+      let deg = 0, dir = 0;
+      for (let d = 0; d < 8; d++) {
+        const v = this.road.get(n, d);
+        if (!v) continue;
+        if (v === 2) return 'Stops can\'t go on a motorway.';
+        deg++;
+        dir = d;
+      }
+      if (!deg) return `A ${def.name.toLowerCase()} goes on a street. Tap a street tile.`;
+      if (deg > 2) return 'Too close to a junction. Pick a plain stretch of street.';
+      if (this.footTile[n] >= 0) return 'That\'s a station driveway.';
+      return { dir };
+    }
+    if (def.place === 'offroad') {
+      if (!clear(n)) return `A ${def.name.toLowerCase()} needs a clear tile right beside a street (not on it).`;
+      let rd = -1;
+      for (const d of [0, 2, 4, 6]) {
+        const m = this.road.neighbour(n, d);
+        if (m < 0 || this.footTile[m] >= 0) continue;
+        let street = false;
+        for (let e = 0; e < 8; e++) if (this.road.get(m, e) === 1) street = true;
+        if (street) { rd = d; break; }
+      }
+      if (rd < 0) return `Place the ${def.name.toLowerCase()} right next to a street.`;
+      const foot = [n];
+      if (def.size === 2) {
+        const back = this.road.neighbour(n, opposite(rd));
+        let ok = false;
+        for (const side of [(rd + 2) & 7, (rd + 6) & 7]) {
+          const a = this.road.neighbour(n, side), b = back >= 0 ? this.road.neighbour(back, side) : -1;
+          if (clear(back) && clear(a) && clear(b)) { foot.push(back, a, b); ok = true; break; }
+        }
+        if (!ok) return 'A bus interchange needs a clear 2×2 site beside the street.';
+      }
+      return { dir: rd, foot, link: this.road.neighbour(n, rd) };
+    }
+    const g = this.grid(def.layer!);
+    if (!g.any(n)) return `Build ${kind === 'rail' ? 'track' : 'a metro tunnel'} here first.`;
+    for (let d = 0; d < 8; d++) if (g.get(n, d)) return { dir: d };
+    return { dir: 0 };
+  }
+
+  placeStation(x: number, y: number, kind: StationKind): string | null {
+    const def = STATIONS[kind];
+    const plan = this.planStation(x, y, kind);
+    if (typeof plan === 'string') return plan;
     if (this.s.money < def.cost) return `Not enough money (£${def.cost.toLocaleString()} needed).`;
     this.s.money -= def.cost;
-    const st: Station = { id: this.s.nextId++, kind, x, y, name: this.stationName(x, y, kind), waiting: {}, dir, overflow: 0 };
+    const n = this.idx(x, y);
+    if (plan.link !== undefined) {
+      this.road.set(n, plan.dir, 1); // the driveway
+      if (this.s.terrain[n] === T_FOREST) this.s.terrain[n] = 0;
+    }
+    const st: Station = { id: this.s.nextId++, kind, x, y, name: this.stationName(x, y, kind), waiting: {}, dir: plan.dir, overflow: 0, foot: plan.foot, link: plan.link };
     this.s.stations.push(st);
     this.markDirty();
     return null;
@@ -607,39 +705,57 @@ export class Game {
   private stationName(x: number, y: number, kind: StationKind) {
     const town = this.s.towns.reduce((b, t) => (Math.hypot(t.cx - x, t.cy - y) < Math.hypot(b.cx - x, b.cy - y) ? t : b), this.s.towns[0]);
     const ind = this.s.industries.find((i) => Math.hypot(i.x + 0.5 - x, i.y + 0.5 - y) < 4);
-    if (kind === 'airport') return `${town.name} International`;
-    if (ind && kind !== 'metro') return `${ind.name} ${kind === 'rail' ? 'Sidings' : 'Depot'}`;
-    const suffix: Record<string, string[]> = {
-      road: ['Bus Station', 'High Street', 'Market Square', 'Park Road', 'Church Lane', 'Station Road'],
+    const used = new Set(this.s.stations.map((s) => s.name));
+    const pick = (base: string, list: string[]) => {
+      for (const suf of list) { const nm = suf ? `${base} ${suf}` : base; if (!used.has(nm)) return nm; }
+      return `${base} ${list[0]} ${this.s.stations.length}`;
+    };
+    if (kind === 'airport') return pick(`${town.name}`, ['International', 'Airport', 'City Airport']);
+    if (ind && kind !== 'metro' && STATIONS[kind].cargo !== 'pax') return pick(ind.name, [kind === 'rail' ? 'Sidings' : kind === 'lorry_depot' ? 'Lorry Depot' : 'Loading Bay', 'Yard', 'Gate']);
+    const lists: Partial<Record<StationKind, string[]>> = {
+      bus_stop: ['High Street', 'Market Square', 'Park Road', 'Church Lane', 'Station Road', 'The Green', 'Mill Lane', 'Victoria Road', 'Kings Road', 'Queens Parade'],
+      bus_station: ['Bus Station', 'Coach Station', 'Bus Garage'],
+      bus_interchange: ['Interchange', 'Transport Hub'],
+      loading_bay: ['Goods Yard', 'Trade Park', 'Loading Bay'],
+      lorry_depot: ['Lorry Depot', 'Distribution Centre', 'Freight Yard'],
+      road: ['Stop', 'Road Stop'],
       rail: ['Central', 'Parkway', 'North', 'Junction', 'Road', 'East'],
       metro: ['Central', 'Market Street', 'Riverside', 'University', 'Docklands', 'Park'],
     };
-    const used = new Set(this.s.stations.map((s) => s.name));
-    for (const suf of suffix[kind]) {
-      const name = `${town.name} ${suf}`;
-      if (!used.has(name)) return name;
-    }
-    return `${town.name} ${kind === 'metro' ? 'Metro' : 'Stop'} ${this.s.stations.length}`;
+    return pick(town.name, lists[kind] ?? ['Stop']);
   }
 
-  buyVehicle(type: VehicleId, a: Station, b: Station): string | null {
+  // Checks a proposed line; returns an error or null.
+  checkLine(type: VehicleId, stops: Station[]): string | null {
     const def = VEHICLES[type];
     if (!this.has(def.tech)) return `${def.name}s aren't unlocked yet.`;
-    if (a.id === b.id) return 'Pick two different stations.';
-    if (a.kind !== def.station || b.kind !== def.station) return `A ${def.name} runs between two ${STATIONS[def.station].name.toLowerCase()}s.`;
-    const layer = STATIONS[def.station].layer;
-    if (layer && !this.findPath(layer, this.idx(a.x, a.y), this.idx(b.x, b.y)))
-      return layer === 'road' ? 'Those stations aren\'t connected by road.' : 'No route — check the track joins up without sharp turns.';
+    if (stops.length < 2) return 'Pick at least two stops.';
+    for (const st of stops) if (!canServe(def, STATIONS[st.kind])) return `A ${def.name} can't use ${st.name} (${STATIONS[st.kind].name.toLowerCase()}).`;
+    const layer = layerOf(def.mode);
+    for (let i = 0; i < stops.length; i++) {
+      const a = stops[i], b = stops[(i + 1) % stops.length];
+      if (a.id === b.id) return 'The same stop twice in a row.';
+      if (layer && !this.findPath(layer, this.idx(a.x, a.y), this.idx(b.x, b.y)))
+        return layer === 'road' ? `${a.name} and ${b.name} aren't connected by road.` : `No route from ${a.name} to ${b.name}. Check the track joins up without sharp turns.`;
+    }
+    return null;
+  }
+
+  buyVehicle(type: VehicleId, stops: Station[]): string | null {
+    const def = VEHICLES[type];
+    const err = this.checkLine(type, stops);
+    if (err) return err;
     if (this.s.money < def.cost) return `Not enough money (£${def.cost.toLocaleString()} needed).`;
     this.s.money -= def.cost;
+    const a = stops[0];
     const v: Vehicle = {
-      id: this.s.nextId++, type, stops: [a.id, b.id], target: 0, state: 'load', timer: 0.5,
-      path: [this.idx(a.x, a.y)], dist: 0, cargo: {}, profit: -def.cost, trips: 0,
+      id: this.s.nextId++, type, stops: stops.map((s) => s.id), target: 0, heading: -1, state: 'load', timer: 0.5,
+      path: [this.idx(a.x, a.y)], dist: 0, loads: [], profit: -def.cost, trips: 0,
     };
     this.s.vehicles.push(v);
     this.linesDirty = true;
     this.ensureLines();
-    this.load(v, a, b);
+    this.load(v, a);
     return null;
   }
 
@@ -655,6 +771,7 @@ export class Game {
   removeStation(st: Station) {
     for (const v of this.vehiclesAt(st)) this.sellVehicle(v);
     this.s.stations = this.s.stations.filter((x) => x !== st);
+    if (st.link !== undefined) { this.road.set(this.idx(st.x, st.y), st.dir, 0); this.rerouteAll(); }
     this.s.money += Math.floor(STATIONS[st.kind].cost * 0.4);
     this.markDirty();
   }
@@ -711,7 +828,7 @@ export class Game {
   private rerouteAll() {
     for (const v of this.s.vehicles) {
       const def = VEHICLES[v.type];
-      const layer = STATIONS[def.station].layer;
+      const layer = layerOf(def.mode);
       if (!layer) continue;
       if (v.state === 'lost') { v.timer = 0; continue; }
       if (v.state !== 'move') continue;
@@ -750,7 +867,7 @@ export class Game {
     const free = tiles.filter((i) => {
       if (s.bld[i] || s.terrain[i] === T_WATER || this.road.any(i) || this.rail.any(i)) return false;
       const { x, y } = this.xy(i);
-      if (this.industryAt(x, y) || this.tileStation[i] >= 0 || this.airportTile[i] >= 0) return false;
+      if (this.industryAt(x, y) || this.tileStation[i] >= 0 || this.footTile[i] >= 0) return false;
       for (let d = 0; d < 8; d++) {
         const m = this.road.neighbour(i, d);
         if (m >= 0 && (this.road.any(m) || s.bldTown[m] === t.id)) return true;

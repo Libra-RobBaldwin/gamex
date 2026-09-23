@@ -1,5 +1,6 @@
 // Challenge system: a board of scenarios to choose from, one active at a time, on a shared map.
-import { CHAINS, INDUSTRIES, STATIONS, VEHICLES, type CargoId, type StationKind, type Tech, type VehicleId } from './defs';
+import { CHAINS, INDUSTRIES, STATIONS, VEHICLES, type CargoId, type Mode, type Tech, type VehicleGroup } from './defs';
+import { layerOf } from './sim';
 import type { Delivery, Game, ScenarioState, Station } from './sim';
 import type { Town } from './world';
 
@@ -39,13 +40,12 @@ function between(g: Game, d: Delivery, a: number, b: number) {
   return (covers(g, d.from, a) && covers(g, d.to, b)) || (covers(g, d.from, b) && covers(g, d.to, a));
 }
 
-function hasLine(g: Game, kinds: StationKind[], a: (s: Station) => boolean, b: (s: Station) => boolean, types?: VehicleId[]) {
+function hasLine(g: Game, modes: Mode[], a: (s: Station) => boolean, b: (s: Station) => boolean, groups?: VehicleGroup[]) {
   return g.s.vehicles.some((v) => {
     const def = VEHICLES[v.type];
-    if (!kinds.includes(def.station) || (types && !types.includes(v.type))) return false;
-    const s0 = g.station(v.stops[0]), s1 = g.station(v.stops[1]);
-    if (!s0 || !s1) return false;
-    return (a(s0) && b(s1)) || (a(s1) && b(s0));
+    if (!modes.includes(def.mode) || (groups && !groups.includes(def.group))) return false;
+    const sts = v.stops.map((id) => g.station(id)).filter((x): x is Station => !!x);
+    return sts.some((x, i) => a(x) && sts.some((y, j) => j !== i && b(y)));
   });
 }
 
@@ -165,7 +165,7 @@ export const SCENARIOS: ScenarioDef[] = [
       flag('Train line between the towns', hasLine(g, ['rail'], (s) => covers(g, s, st.params.a), (s) => covers(g, s, st.params.b))),
       deliverObj(st, 'pax', 'Rail passengers between them', 400),
     ],
-    onDeliver: (g, st, d) => { if (d.cargo === 'pax' && VEHICLES[d.vehicle.type].station === 'rail' && between(g, d, st.params.a, st.params.b)) bump(st, 'pax', d.amount); },
+    onDeliver: (g, st, d) => { if (d.cargo === 'pax' && VEHICLES[d.vehicle.type].mode === 'rail' && between(g, d, st.params.a, st.params.b)) bump(st, 'pax', d.amount); },
   },
   {
     id: 'heavy_haul', kind: 'story', icon: '🚂', unlocks: ['freight'],
@@ -218,7 +218,7 @@ export const SCENARIOS: ScenarioDef[] = [
         deliverObj(st, 'x', 'Road passengers or goods between them', 300),
       ];
     },
-    onDeliver: (g, st, d) => { if (VEHICLES[d.vehicle.type].station === 'road' && between(g, d, st.params.a, st.params.b)) bump(st, 'x', d.amount); },
+    onDeliver: (g, st, d) => { if (VEHICLES[d.vehicle.type].mode === 'road' && between(g, d, st.params.a, st.params.b)) bump(st, 'x', d.amount); },
   },
   {
     id: 'metro', kind: 'story', icon: 'Ⓜ️', unlocks: ['metro'],
@@ -274,7 +274,7 @@ export const SCENARIOS: ScenarioDef[] = [
     },
     onDeliver: (g, st, d) => {
       const ap = g.station(st.params.ap);
-      if (!ap || d.cargo !== 'pax' || !['rail', 'metro'].includes(VEHICLES[d.vehicle.type].station)) return;
+      if (!ap || d.cargo !== 'pax' || !['rail', 'metro'].includes(VEHICLES[d.vehicle.type].mode)) return;
       const near = (s: Station) => Math.hypot(s.x - ap.x, s.y - ap.y) <= 5;
       if (near(d.from) || near(d.to)) bump(st, 'pax', d.amount);
     },
@@ -332,7 +332,7 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'disaster', kind: 'disaster', icon: '⛈️', repeatable: true, unlocks: [], timed: 300,
     pick: (g) => {
       if (g.s.completed.length < 2) return null;
-      const cands = g.s.vehicles.filter((v) => ['road', 'rail'].includes(VEHICLES[v.type].station) && v.trips >= 2);
+      const cands = g.s.vehicles.filter((v) => ['road', 'rail'].includes(VEHICLES[v.type].mode) && v.trips >= 2);
       if (!cands.length) return null;
       const v = cands.sort((a, b) => b.trips * VEHICLES[b.type].capacity - a.trips * VEHICLES[a.type].capacity)[0];
       return { v: v.id, kind: Math.floor(g.s.time) % 3 };
@@ -348,7 +348,7 @@ export const SCENARIOS: ScenarioDef[] = [
       const v = g.s.vehicles.find((x) => x.id === p.v);
       if (!v) return 'That line no longer exists.';
       const a = g.station(v.stops[0])!, b = g.station(v.stops[1])!;
-      const layer = STATIONS[VEHICLES[v.type].station].layer!;
+      const layer = layerOf(VEHICLES[v.type].mode)!;
       const path = g.findPath(layer, g.idx(a.x, a.y), g.idx(b.x, b.y));
       if (!path || path.length < 6) return 'That line is too short to wreck.';
       const mid = Math.floor(path.length / 2);

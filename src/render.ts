@@ -1,7 +1,7 @@
 // Isometric canvas renderer: terrain, smooth roads/rails, 3D-ish buildings, industries, vehicles.
-import { STATIONS, VEHICLES } from './defs';
+import { STATIONS, VEHICLES, type StationKind, type VehicleId } from './defs';
 import { DX, DY, HH, HW, iso, isoInv, type Pt } from './geo';
-import type { Game, Station, Vehicle } from './sim';
+import { loadOf, type Game, type Station, type Vehicle } from './sim';
 import { T_FOREST, T_SAND, T_WATER, valueNoise, rng } from './world';
 
 export interface Float { x: number; y: number; text: string; color: string; t: number }
@@ -12,6 +12,7 @@ export interface Overlay {
   selStation: number | null;
   selVehicle: number | null;
   selIndustry: number | null;
+  lineStops: number[];
   grid: boolean;
   floats: Float[];
 }
@@ -247,9 +248,37 @@ export class Renderer {
         ctx.setLineDash([0.15, 0.12]);
         ctx.beginPath(); ctx.moveTo(st.x - 0.85, st.y + 0.875); ctx.lineTo(st.x + 1.85, st.y + 0.875); ctx.stroke();
         ctx.setLineDash([]);
-      } else if (st.kind === 'road') {
-        ctx.fillStyle = '#c7c3b8';
-        ctx.fillRect(st.x + 0.08, st.y + 0.08, 0.84, 0.84);
+      } else if (STATIONS[st.kind].place === 'offroad') {
+        for (const t of st.foot ?? [game.idx(st.x, st.y)]) {
+          const tx = t % s.w, ty = Math.floor(t / s.w);
+          ctx.fillStyle = st.kind === 'lorry_depot' ? '#8e9094' : '#c9c5bb';
+          ctx.fillRect(tx + 0.03, ty + 0.03, 0.94, 0.94);
+        }
+        if (st.kind !== 'lorry_depot') {
+          ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+          ctx.lineWidth = 0.025;
+          for (const t of st.foot ?? []) {
+            const tx = t % s.w, ty = Math.floor(t / s.w);
+            ctx.beginPath();
+            for (let k = 1; k < 4; k++) { ctx.moveTo(tx + k * 0.25, ty + 0.15); ctx.lineTo(tx + k * 0.25, ty + 0.45); }
+            ctx.stroke();
+          }
+        } else {
+          ctx.strokeStyle = '#e8c33a';
+          ctx.lineWidth = 0.03;
+          ctx.strokeRect(st.x + 0.12, st.y + 0.12, 0.76, 0.76);
+        }
+      } else if (st.kind === 'loading_bay') {
+        const d = st.dir, l = Math.hypot(DX[d], DY[d]);
+        const ux = DX[d] / l, uy = DY[d] / l;
+        ctx.strokeStyle = '#e8c33a';
+        ctx.lineWidth = 0.035;
+        for (const side of [-1, 1]) {
+          const cx = st.x + 0.5 - uy * 0.3 * side, cy = st.y + 0.5 + ux * 0.3 * side;
+          ctx.beginPath();
+          ctx.moveTo(cx - ux * 0.4, cy - uy * 0.4); ctx.lineTo(cx + ux * 0.4, cy + uy * 0.4);
+          ctx.stroke();
+        }
       }
     }
     // rubble
@@ -331,15 +360,25 @@ export class Renderer {
     for (const ind of s.industries) objs.push({ k: ind.x + ind.y + 2, draw: () => this.drawIndustry(ind.kind, ind.x, ind.y, now, ind.id === ov.selIndustry) });
     for (const st of s.stations) objs.push({ k: st.x + st.y + 1.2, draw: () => this.drawStation(st, st.id === ov.selStation) });
     const flying: Vehicle[] = [];
+    const tags: { x: number; y: number; z: number; n: number; cap: number; pax: boolean }[] = [];
+    const queue = new Map<number, number>();
     for (const v of s.vehicles) {
       const def = VEHICLES[v.type];
-      if (def.station === 'airport') { if (v.state === 'move') flying.push(v); continue; }
-      if (def.station === 'metro') continue;
-      const c = game.curveOf(v);
-      for (let car = 0; car < def.cars; car++) {
-        const p = c.at(v.dist - car * 0.62);
-        objs.push({ k: p.x + p.y, draw: () => this.drawVehicle(v, p, car, v.id === ov.selVehicle) });
+      if (def.mode === 'air') { if (v.state === 'move') flying.push(v); continue; }
+      if (def.mode === 'metro') continue;
+      let back = 0;
+      if (v.state === 'load' && def.mode === 'road') {
+        const key = v.stops[v.target];
+        const q = queue.get(key) ?? 0;
+        back = q;
+        queue.set(key, q + Renderer.plan(v.type).reduce((a, p) => a + p.len, 0) + 0.06);
       }
+      const parts = this.vehicleParts(v, back);
+      if (!parts.length) continue;
+      parts.forEach((pt) => objs.push({ k: pt.x + pt.y, draw: () => this.drawSegment(v.type, pt, loadOf(v) / def.capacity) }));
+      const mid = parts[Math.floor((parts.length - 1) / 2)];
+      tags.push({ x: mid.x, y: mid.y, z: def.height + 14, n: loadOf(v), cap: def.capacity, pax: def.pax });
+      if (v.id === ov.selVehicle) objs.push({ k: parts[0].x + parts[0].y + 0.01, draw: () => this.marker(parts[0].x, parts[0].y, def.height + 30) });
     }
     objs.sort((a, b) => a.k - b.k);
     for (const o of objs) o.draw();
@@ -347,7 +386,7 @@ export class Renderer {
     // metro trains as glowing dots on the tunnel overlay
     this.tileT();
     for (const v of s.vehicles) {
-      if (VEHICLES[v.type].station !== 'metro' || v.state !== 'move') continue;
+      if (VEHICLES[v.type].mode !== 'metro' || v.state !== 'move') continue;
       const p = game.curveOf(v).at(v.dist);
       ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(p.x, p.y, 0.16, 0, Math.PI * 2); ctx.fill();
@@ -382,6 +421,32 @@ export class Renderer {
         this.pill(`👥 ${w}`, p.x, p.y, col, '#fff', 11);
       }
     }
+    if (this.cam.zoom >= 0.6) {
+      for (const t of tags) {
+        const p = this.tileToScreen(t.x, t.y, t.z);
+        if (p.x < -40 || p.x > this.cssW + 40 || p.y < -40 || p.y > this.cssH + 40) continue;
+        this.loadTag(p.x, p.y, t.n, t.cap, t.pax);
+      }
+      for (const v of flying) {
+        const c = game.curveOf(v);
+        const q = c.at(v.dist);
+        const tt = c.length ? v.dist / c.length : 0;
+        const alt = Math.min(1, tt * 5, (1 - tt) * 5) * 90;
+        const p = this.tileToScreen(q.x, q.y, alt + 26);
+        this.loadTag(p.x, p.y, loadOf(v), VEHICLES[v.type].capacity, true);
+      }
+    }
+    ov.lineStops.forEach((id, i) => {
+      const st = game.station(id);
+      if (!st) return;
+      const p = this.tileToScreen(st.x + 0.5, st.y + 0.5, 34);
+      ctx.fillStyle = '#4cc3ff';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#062033';
+      ctx.font = '800 12px Inter, system-ui, sans-serif';
+      ctx.fillText(String(i + 1), p.x, p.y + 0.5);
+    });
     ctx.font = '600 15px Inter, system-ui, sans-serif';
     for (const f of ov.floats) {
       const p = this.tileToScreen(f.x, f.y, 30 + f.t * 30);
@@ -798,20 +863,66 @@ export class Renderer {
     this.isoT();
     const ctx = this.ctx;
     const x = st.x, y = st.y;
-    if (st.kind === 'road') {
-      this.box(x + 0.62, y + 0.1, x + 0.9, y + 0.38, 0, 9, '#4d6e8c', '#2f4a63');
-      const p = iso(x + 0.15, y + 0.85);
-      ctx.strokeStyle = '#555'; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - 16); ctx.stroke();
-      ctx.fillStyle = '#e8342a';
-      ctx.beginPath(); ctx.arc(p.x, p.y - 18, 4, 0, Math.PI * 2); ctx.fill();
-    } else if (st.kind === 'rail') {
-      const d = st.dir;
-      const l = Math.hypot(DX[d], DY[d]);
-      const ux = DX[d] / l, uy = DY[d] / l, nx = -uy, ny = ux;
+    const d = st.dir, l = Math.hypot(DX[d], DY[d]);
+    const ux = DX[d] / l, uy = DY[d] / l, nx = -uy, ny = ux;
+    const a = Math.atan2(uy, ux);
+    const kind = st.kind;
+    if (kind === 'bus_stop' || kind === 'road') {
+      // a shelter and flag on the left-hand kerb for each direction
+      for (const side of [1, -1]) {
+        const cx = x + 0.5 + nx * 0.33 * side * -1, cy = y + 0.5 + ny * 0.33 * side * -1;
+        this.obox(cx, cy, a, 0.26, 0.08, 0, 8, '#7fa7c4', '#3c5566', ['#9cc0d8', '#6d8fa6', '#9cc0d8', '#6d8fa6']);
+        const fx = cx + ux * 0.2 * side, fy = cy + uy * 0.2 * side;
+        const b = iso(fx, fy), t = iso(fx, fy, 15);
+        ctx.strokeStyle = '#5b6067'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+        // bus stop flag: white plate with a red band
+        ctx.fillStyle = '#f4f4f4';
+        ctx.fillRect(t.x - 2.6, t.y - 6, 5.2, 6);
+        ctx.fillStyle = '#d8342c';
+        ctx.fillRect(t.x - 2.6, t.y - 6, 5.2, 2);
+      }
+    } else if (kind === 'loading_bay') {
+      for (const side of [1, -1]) {
+        const cx = x + 0.5 - nx * 0.4 * side, cy = y + 0.5 - ny * 0.4 * side;
+        this.obox(cx + ux * 0.25, cy + uy * 0.25, a, 0.06, 0.06, 0, 5, '#f07c1e');
+        this.obox(cx - ux * 0.25, cy - uy * 0.25, a, 0.06, 0.06, 0, 5, '#f07c1e');
+      }
+    } else if (kind === 'bus_station') {
+      // canopy on posts beside the bays, with a small office
+      // office at the back, canopy over a passenger island beside the bay
+      this.obox(x + 0.5 - ux * 0.36 + nx * 0.3, y + 0.5 - uy * 0.36 + ny * 0.3, a, 0.2, 0.26, 0, 11, '#b95c3c', '#6b4a3a');
+      const cx = x + 0.5 + ux * 0.05 - nx * 0.3, cy = y + 0.5 + uy * 0.05 - ny * 0.3;
+      this.obox(cx, cy, a, 0.6, 0.16, 0, 1.5, '#d9d6cc');
+      for (const f of [-0.25, 0.25]) {
+        const b = iso(cx + ux * f, cy + uy * f), t = iso(cx + ux * f, cy + uy * f, 12);
+        ctx.strokeStyle = '#6b7079'; ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+      }
+      this.obox(cx, cy, a, 0.66, 0.3, 12, 2, '#e6e8ea', '#b9c3cc');
+    } else if (kind === 'bus_interchange') {
+      const foot = st.foot ?? [];
+      const xs = foot.map((t) => (t % this.game.s.w) + 0.5), ys = foot.map((t) => Math.floor(t / this.game.s.w) + 0.5);
+      const mx = xs.reduce((p, q) => p + q, 0) / (xs.length || 1), my = ys.reduce((p, q) => p + q, 0) / (ys.length || 1);
+      // terminal building at the back, long canopy over the bays
+      this.obox(mx - ux * 0.55, my - uy * 0.55, a, 0.55, 1.5, 0, 18, '#9ec3db', '#eef2f5');
+      this.bandsO(mx - ux * 0.55, my - uy * 0.55, a, 0.55, 1.5, 18, 6);
+      for (const f of [-0.6, 0, 0.6]) {
+        const px = mx + ux * 0.3 + nx * f, py = my + uy * 0.3 + ny * f;
+        const b = iso(px, py), t = iso(px, py, 15);
+        ctx.strokeStyle = '#6b7079'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+      }
+      this.obox(mx + ux * 0.3, my + uy * 0.3, a, 0.5, 1.6, 15, 2.5, '#f2f3f4', '#c6ccd2');
+    } else if (kind === 'lorry_depot') {
+      this.obox(x + 0.5 - ux * 0.22, y + 0.5 - uy * 0.22, a, 0.5, 0.8, 0, 16, '#b8b2a6', '#7b858e');
+      // roller doors on the side facing the yard
+      for (const f of [-0.22, 0.18]) this.obox(x + 0.5 + ux * 0.04 + nx * f, y + 0.5 + uy * 0.04 + ny * f, a, 0.012, 0.2, 1, 10, '#8a8f96');
+      for (const f of [-0.2, 0.2]) this.obox(x + 0.5 + ux * 0.28 + nx * f, y + 0.5 + uy * 0.28 + ny * f, a, 0.1, 0.1, 0, 4, '#a97f4f');
+    } else if (kind === 'rail') {
       for (const side of [-1, 1]) {
         const cx = x + 0.5 + nx * 0.36 * side, cy = y + 0.5 + ny * 0.36 * side;
-        const pts = [[-0.5, -0.07], [0.5, -0.07], [0.5, 0.07], [-0.5, 0.07]].map(([a, b]) => ({ x: cx + ux * a + nx * b, y: cy + uy * a + ny * b }));
+        const pts = [[-0.5, -0.07], [0.5, -0.07], [0.5, 0.07], [-0.5, 0.07]].map(([p, q]) => ({ x: cx + ux * p + nx * q, y: cy + uy * p + ny * q }));
         const z = 13;
         this.poly(pts.map((p) => iso(p.x, p.y, z)), '#7a8794');
         for (const q of [pts[0], pts[1]]) {
@@ -820,7 +931,7 @@ export class Renderer {
           ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
         }
       }
-    } else if (st.kind === 'metro') {
+    } else if (kind === 'metro') {
       this.box(x + 0.35, y + 0.35, x + 0.65, y + 0.65, 0, 7, '#2b3440', '#1b222b');
       const p = iso(x + 0.5, y + 0.5, 20);
       ctx.fillStyle = '#1f5fbf';
@@ -832,7 +943,7 @@ export class Renderer {
       ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
       const b = iso(x + 0.5, y + 0.5, 7);
       ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(p.x, p.y + 7); ctx.stroke();
-    } else if (st.kind === 'airport') {
+    } else if (kind === 'airport') {
       this.box(x - 0.9, y - 0.9, x + 0.6, y - 0.1, 0, 16, '#9ec3db', '#e9eef2');
       this.bands(x - 0.9, y - 0.9, x + 0.6, y - 0.1, 0, 16, 7, 'rgba(30,60,90,0.45)');
       this.box(x + 1.1, y - 0.8, x + 1.35, y - 0.55, 0, 38, '#d9dde1');
@@ -846,62 +957,225 @@ export class Renderer {
     }
   }
 
+  // Window bands on the visible faces of an oriented box.
+  private bandsO(cx: number, cy: number, a: number, len: number, wid: number, h: number, step: number) {
+    for (let z = step * 0.5; z + step * 0.4 < h; z += step) this.obox(cx, cy, a, len + 0.004, wid + 0.004, z, step * 0.4, 'rgba(0,0,0,0)', 'rgba(0,0,0,0)', undefined, 'rgba(35,60,90,0.5)');
+  }
+
   // Oriented box on the ground (tile coords) with height in pixels.
-  private obox(cx: number, cy: number, a: number, len: number, wid: number, z0: number, h: number, col: string, top?: string) {
+  // faces: colours for [left side, front, right side, back]; top 'none' skips the lid.
+  private obox(cx: number, cy: number, a: number, len: number, wid: number, z0: number, h: number, col: string, top?: string, faces?: string[], tint?: string) {
     const ux = Math.cos(a), uy = Math.sin(a), nx = -uy, ny = ux;
     const c = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => ({ x: cx + ux * len * 0.5 * i + nx * wid * 0.5 * j, y: cy + uy * len * 0.5 * i + ny * wid * 0.5 * j }));
     const bottom = c.map((p) => iso(p.x, p.y, z0)), topP = c.map((p) => iso(p.x, p.y, z0 + h));
     for (let i = 0; i < 4; i++) {
       const p = c[i], q = c[(i + 1) % 4];
-      // outward normal of this side in tile space
       const ex = q.x - p.x, ey = q.y - p.y;
       let ox = ey, oy = -ex;
-      if (ox * ((p.x + q.x) / 2 - cx) + oy * ((p.y + q.y) / 2 - cy) < 0) { ox = -ox; oy = -oy; } // make it point outward
+      if (ox * ((p.x + q.x) / 2 - cx) + oy * ((p.y + q.y) / 2 - cy) < 0) { ox = -ox; oy = -oy; }
       if (ox + oy <= 0) continue; // faces away from the camera
       const f = 0.72 + 0.25 * Math.max(0, (ox - oy) / (Math.hypot(ox, oy) * 1.414) + 0.5);
-      this.poly([bottom[i], bottom[(i + 1) % 4], topP[(i + 1) % 4], topP[i]], shade(col, f));
+      const fc = tint ?? faces?.[[0, 1, 2, 3][i]] ?? col;
+      this.poly([bottom[i], bottom[(i + 1) % 4], topP[(i + 1) % 4], topP[i]], fc.startsWith('#') ? shade(fc, f) : fc);
     }
-    this.poly(topP, top ?? shade(col, 1.08));
+    if (top !== 'none') this.poly(topP, top ?? shade(col, 1.08));
   }
 
-  private drawVehicle(v: Vehicle, p: { x: number; y: number; a: number }, car: number, sel: boolean) {
+  private marker(x: number, y: number, z: number) {
     this.isoT();
-    const def = VEHICLES[v.type];
-    let x = p.x, y = p.y;
-    if (def.station === 'road') {
-      // keep left, like the UK
-      x += Math.sin(p.a) * 0.12;
-      y -= Math.cos(p.a) * 0.12;
-    }
+    const q = iso(x, y, z);
     const ctx = this.ctx;
+    ctx.fillStyle = '#ffe23c';
+    ctx.beginPath(); ctx.moveTo(q.x, q.y + 7); ctx.lineTo(q.x - 6, q.y - 2); ctx.lineTo(q.x + 6, q.y - 2); ctx.fill();
+  }
+
+  private loadTag(x: number, y: number, n: number, cap: number, pax: boolean) {
+    const ctx = this.ctx;
+    const text = pax ? `${n}` : `${n}t`;
+    ctx.font = '700 11px Inter, system-ui, sans-serif';
+    const w = Math.max(30, ctx.measureText(text).width + 14), h = 19;
+    ctx.fillStyle = 'rgba(14,18,26,0.86)';
+    ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, 6); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y - 2.5);
+    const f = Math.max(0, Math.min(1, n / cap));
+    const bw = w - 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(x - bw / 2, y + 4, bw, 3);
+    ctx.fillStyle = f > 0.9 ? '#ff7a4d' : f > 0.6 ? '#ffc53d' : '#3ecf7a';
+    ctx.fillRect(x - bw / 2, y + 4, bw * f, 3);
+  }
+
+  // ---------- vehicles ----------
+  static plan(type: VehicleId): { len: number; kind: string }[] {
+    const d = VEHICLES[type];
+    switch (type) {
+      case 'bendy': return [{ len: 0.4, kind: 'bus' }, { len: 0.36, kind: 'busrear' }];
+      case 'hgv': return [{ len: 0.17, kind: 'tractor' }, { len: 0.5, kind: 'trailer' }];
+      case 'minibus': return [{ len: d.len, kind: 'minibus' }];
+      case 'decker': case 'decker_coach': return [{ len: d.len, kind: 'decker' }];
+      case 'coach': return [{ len: d.len, kind: 'coach' }];
+      case 'van': return [{ len: d.len, kind: 'van' }];
+      case 'truck': return [{ len: d.len, kind: 'truck' }];
+      case 'bus': return [{ len: d.len, kind: 'bus' }];
+      default: return Array.from({ length: d.cars }, (_, i) => ({ len: d.len, kind: i === 0 ? 'loco' : type === 'freight' ? 'wagon' : 'car' }));
+    }
+  }
+
+  private vehicleParts(v: Vehicle, back = 0) {
+    const def = VEHICLES[v.type];
+    const w = this.game.s.w;
+    const c = this.game.curveOf(v);
+    const moving = v.path.length > 1 && c.length > 0;
+    const n0 = v.path[0];
+    const ha = v.heading >= 0 ? Math.atan2(DY[v.heading], DX[v.heading]) : 0;
+    const at = (d: number) => {
+      if (!moving) return { x: (n0 % w) + 0.5 + Math.cos(ha) * d, y: Math.floor(n0 / w) + 0.5 + Math.sin(ha) * d, a: ha };
+      if (d < 0) { const p = c.at(0); return { x: p.x + Math.cos(p.a) * d, y: p.y + Math.sin(p.a) * d, a: p.a }; }
+      return c.at(d);
+    };
+    const front = (moving ? v.dist : 0) - back;
+    let off = 0;
+    return Renderer.plan(v.type).map((sg, i) => {
+      const p = at(front - off - sg.len / 2);
+      off += sg.len + (def.mode === 'road' ? 0.02 : 0.05);
+      let x = p.x, y = p.y;
+      if (def.mode === 'road') { x += Math.sin(p.a) * 0.12; y -= Math.cos(p.a) * 0.12; } // keep left
+      return { x, y, a: p.a, len: sg.len, kind: sg.kind, i };
+    });
+  }
+
+  private drawSegment(type: VehicleId, p: { x: number; y: number; a: number; len: number; kind: string; i: number }, fill: number) {
+    this.isoT();
+    const def = VEHICLES[type];
+    const ctx = this.ctx;
+    const { x, y, a, len: L, kind } = p;
+    const ux = Math.cos(a), uy = Math.sin(a);
+    const W = def.mode === 'road' ? 0.2 : 0.25;
+    const H = def.height;
     const sh = iso(x, y);
     ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.beginPath(); ctx.ellipse(sh.x + 2, sh.y + 1, 9, 4, 0, 0, Math.PI * 2); ctx.fill();
-    if (def.station === 'road') {
-      if (v.type === 'truck' || v.type === 'hgv') {
-        const L = v.type === 'hgv' ? 0.5 : 0.36;
-        this.obox(x - Math.cos(p.a) * 0.06, y - Math.sin(p.a) * 0.06, p.a, L, 0.2, 1, 11, def.color2, '#f4f4f4');
-        this.obox(x + Math.cos(p.a) * (L / 2 + 0.02), y + Math.sin(p.a) * (L / 2 + 0.02), p.a, 0.13, 0.2, 1, 9, def.color);
-      } else {
-        const L = v.type === 'coach' ? 0.56 : 0.48;
-        this.obox(x, y, p.a, L, 0.2, 1, 10, def.color, shade(def.color, 1.12));
-        this.obox(x, y, p.a, L * 0.96, 0.205, 5, 3, '#23303c');
-      }
-    } else {
-      const loco = car === 0;
-      const col = loco ? def.color : v.type === 'freight' ? def.color2 : def.color;
-      this.obox(x, y, p.a, 0.56, 0.24, 1.5, v.type === 'freight' && !loco ? 8 : 11, col, loco ? shade(col, 1.1) : undefined);
-      if (v.type !== 'freight' || loco) this.obox(x, y, p.a, 0.54, 0.245, 6, 3, loco ? def.color2 : '#27313b');
-      if (v.type === 'freight' && !loco) {
-        const load = Object.values(v.cargo).reduce((a, b) => a + (b ?? 0), 0);
-        if (load > 0) this.obox(x, y, p.a, 0.46, 0.18, 9.5, 1, '#2d2d2d');
-      }
+    ctx.beginPath(); ctx.ellipse(sh.x + 2, sh.y + 1.5, L * 22 + 3, 5, 0, 0, Math.PI * 2); ctx.fill();
+    const body = def.color, trim = def.color2;
+    const glass = '#26343f', screen = '#557487';
+    const wheel = (f: number) => this.obox(x + ux * f, y + uy * f, a, 0.085, W + 0.014, 0, 3.4, '#1b1c1f', '#2a2b2e');
+    // stack horizontal slices bottom-up; only the last one gets a lid
+    const stack = (sl: [number, number, string, string?][], len = L, cx = x, cy = y, lid?: string) =>
+      sl.forEach(([z0, z1, col, front], k) => this.obox(cx, cy, a, len, W, z0, z1 - z0, col, k === sl.length - 1 ? lid ?? shade(body, 1.12) : 'none', front ? [col, front, col, col] : undefined));
+    const lights = (f: number, z: number) => this.obox(x + ux * f, y + uy * f, a, 0.012, W * 0.86, z, 1.6, '#fff4c2', 'none');
+    if (def.mode === 'road') {
+      wheel(L * 0.33);
+      wheel(-L * 0.33);
     }
-    if (sel && car === 0) {
-      const q = iso(x, y, 18);
-      ctx.fillStyle = '#ffe23c';
-      ctx.beginPath(); ctx.moveTo(q.x, q.y + 6); ctx.lineTo(q.x - 5, q.y - 2); ctx.lineTo(q.x + 5, q.y - 2); ctx.fill();
+    switch (kind) {
+      case 'bus': case 'busrear': case 'minibus': {
+        const gz = kind === 'minibus' ? 0.5 : 0.45;
+        stack([[1.2, H * 0.28, body], [H * 0.28, H * 0.36, trim], [H * 0.36, H * gz, body], [H * gz, H * 0.84, glass, kind === 'busrear' ? glass : screen], [H * 0.84, H, body]]);
+        if (kind !== 'busrear') lights(L / 2, 2.2);
+        this.obox(x - ux * L * 0.15, y - uy * L * 0.15, a, 0.12, 0.1, H, 1.8, '#c9ced3');
+        if (kind === 'busrear') this.obox(x + ux * (L / 2 + 0.01), y + uy * (L / 2 + 0.01), a, 0.03, W * 0.9, 1.5, H - 2, '#2d2f33');
+        break;
+      }
+      case 'decker':
+        stack([[1.2, H * 0.2, body], [H * 0.2, H * 0.42, glass, screen], [H * 0.42, H * 0.54, type === 'decker_coach' ? trim : body], [H * 0.54, H * 0.84, glass, screen], [H * 0.84, H, body]]);
+        lights(L / 2, 2.2);
+        break;
+      case 'coach':
+        stack([[1.2, H * 0.22, trim], [H * 0.22, H * 0.4, body], [H * 0.4, H * 0.86, glass, screen], [H * 0.86, H, body]]);
+        lights(L / 2, 2.2);
+        break;
+      case 'van': {
+        const cabF = L * 0.33;
+        stack([[1.2, H, body]], L * 0.66, x - ux * L * 0.17, y - uy * L * 0.17);
+        stack([[1.2, H * 0.5, body], [H * 0.5, H * 0.85, glass, screen], [H * 0.85, H * 0.92, body]], cabF, x + ux * (L / 2 - cabF / 2), y + uy * (L / 2 - cabF / 2));
+        lights(L / 2, 2.2);
+        break;
+      }
+      case 'truck': case 'tractor': {
+        const cab = kind === 'tractor' ? L : 0.15;
+        const cx = x + ux * (L / 2 - cab / 2), cy = y + uy * (L / 2 - cab / 2);
+        stack([[1.2, H * 0.5, body], [H * 0.5, H * 0.8, glass, screen], [H * 0.8, H * 0.95, body]], cab, cx, cy);
+        this.obox(x + ux * (L / 2 - 0.006), y + uy * (L / 2 - 0.006), a, 0.012, W * 0.86, 2, 1.6, '#fff4c2', 'none');
+        if (kind === 'truck') {
+          const bl = L - cab - 0.02, bx = x - ux * (cab + 0.02) / 2, by = y - uy * (cab + 0.02) / 2;
+          stack([[2.4, H * 0.62, trim], [H * 0.62, H * 0.74, body], [H * 0.74, H + 1, trim]], bl, bx, by, '#f6f6f6');
+        }
+        break;
+      }
+      case 'trailer':
+        wheel(-L * 0.18);
+        stack([[2.6, H * 0.6, trim], [H * 0.6, H * 0.72, body], [H * 0.72, H + 1, trim]], L, x, y, '#f6f6f6');
+        break;
+      case 'loco':
+        stack([[1.5, H * 0.45, body], [H * 0.45, H * 0.78, glass, screen], [H * 0.78, H, trim]]);
+        lights(L / 2, 2.5);
+        break;
+      case 'car':
+        stack([[1.5, H * 0.45, body], [H * 0.45, H * 0.78, glass], [H * 0.78, H, body]]);
+        break;
+      case 'wagon':
+        stack([[1.5, H, trim]], L, x, y, shade(trim, 0.7));
+        if (fill > 0.02) this.obox(x, y, a, L * 0.9, W * 0.8, H - 1, 1.2, '#2d2d2d', '#3a3632', undefined);
+        break;
     }
+  }
+
+  // A picture of a vehicle model, for the picker.
+  thumbVehicle(type: VehicleId): string {
+    return this.thumb(() => {
+      const parts = Renderer.plan(type);
+      const total = parts.reduce((s2, p) => s2 + p.len, 0);
+      let off = total / 2;
+      parts.forEach((sg, i) => { this.drawSegment(type, { x: off - sg.len / 2, y: 0, a: 0, len: sg.len, kind: sg.kind, i }, 0.7); off -= sg.len + 0.02; });
+    }, 1 + Math.max(0, VEHICLES[type].len * VEHICLES[type].cars - 0.6));
+  }
+
+  thumbStation(kind: StationKind): string {
+    return this.thumb(() => {
+      const st: Station = { id: -1, kind, x: -0.5, y: -0.5, name: '', waiting: {}, dir: 0, overflow: 0 };
+      const ctx = this.ctx;
+      const place = STATIONS[kind].place;
+      this.tileT();
+      ctx.fillStyle = '#7aa24f';
+      ctx.fillRect(-1.5, -1.5, 3, 3);
+      if (place === 'kerb' || place === 'offroad') {
+        ctx.fillStyle = '#50545a';
+        const ry = place === 'offroad' ? 0.5 : -0.2;
+        ctx.fillRect(-1.5, ry, 3, 0.42);
+        if (place === 'offroad') {
+          st.dir = 2;
+          st.y = -0.5;
+          ctx.fillStyle = kind === 'lorry_depot' ? '#8e9094' : '#c9c5bb';
+          ctx.fillRect(kind === 'bus_interchange' ? -1.5 : -0.47, kind === 'bus_interchange' ? -1.5 : -0.47, kind === 'bus_interchange' ? 2 : 0.94, kind === 'bus_interchange' ? 2 : 0.94);
+          if (kind === 'bus_interchange') st.foot = [];
+        }
+      }
+      if (kind === 'bus_interchange') {
+        // fake footprint centred on the tile
+        this.isoT();
+        this.obox(-0.55, 0, Math.PI / 2, 0.55, 1.5, 0, 18, '#9ec3db', '#eef2f5');
+        this.obox(0.3, 0, Math.PI / 2, 0.5, 1.6, 15, 2.5, '#f2f3f4', '#c6ccd2');
+        return;
+      }
+      this.drawStation(st, false);
+    }, 1.1);
+  }
+
+  private thumb(draw: () => void, scale: number): string {
+    const W = 150, H = 96;
+    const c = document.createElement('canvas');
+    c.width = W * 2; c.height = H * 2;
+    const saved = { ctx: this.ctx, k: this.k, ox: this.ox, oy: this.oy };
+    this.ctx = c.getContext('2d')!;
+    this.k = (2 * 2.3) / scale;
+    this.ox = W;
+    this.oy = H * 1.2;
+    try { draw(); } finally {
+      this.ctx = saved.ctx; this.k = saved.k; this.ox = saved.ox; this.oy = saved.oy;
+    }
+    return c.toDataURL();
   }
 
   private drawPlane(v: Vehicle, sel: boolean) {
