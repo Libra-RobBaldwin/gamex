@@ -55,7 +55,7 @@ describe('free-form roads', () => {
     const before = n.lots.length;
     n.build({ x: l.x, z: l.z - 40 }, { x: l.x, z: l.z + 40 });
     expect(n.lots.length).toBeLessThan(before);
-    expect(n.check({ x: 90, z: 20 }, { x: 160, z: 20 }).reason).toMatch(/Water/);
+    expect(n.check({ x: 90, z: 20 }, { x: 160, z: 20 }).reason).toMatch(/water/i);
   });
 
   it('builds curved roads through a control point', () => {

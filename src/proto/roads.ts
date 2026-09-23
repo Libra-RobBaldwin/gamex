@@ -8,15 +8,20 @@ export const COST_PER_M = 250;
 export const MIN_LEN = 10;
 export const MIN_RADIUS = 14; // tightest curve a road can take
 export const CLEAR_COST = 6000; // compulsory purchase per building
+export const RAISE_COST = 170; // extra per metre of road, per metre it's raised (embankment low, viaduct high)
 
-export interface RNode { id: number; x: number; z: number }
+import { GRADES, heightAt, solveProfile, type HeightMode, type Limit, type Profile, type Spec } from './grade';
+export type { HeightMode } from './grade';
+
+export interface RNode { id: number; x: number; z: number; y: number }
 // `mid` holds the interior points of a curved road, in order from a to b (empty when straight)
 export interface RSeg { id: number; a: number; b: number; mid: P[] }
 export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower';
 // `row` identifies the run of plots along one side of one street, so neighbours can share a style
 export interface Lot { id: number; x: number; z: number; rot: number; w: number; d: number; h: number; kind: LotKind; seg: number; seed: number; row: number }
 
-export interface P { x: number; z: number }
+// y is height above the ground in metres (0 when missing)
+export interface P { x: number; z: number; y?: number }
 export interface End extends P { node?: number; seg?: number }
 
 const dist = (a: P, b: P) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -65,22 +70,23 @@ export function pointAt(path: P[], s: number) {
     const a = path[i - 1], b = path[i], L = dist(a, b);
     if (s <= L || i === path.length - 1) {
       const t = L ? Math.max(0, Math.min(1, s / L)) : 0;
-      return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, ux: (b.x - a.x) / (L || 1), uz: (b.z - a.z) / (L || 1) };
+      const ya = a.y ?? 0, yb = b.y ?? 0;
+      return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, y: ya + (yb - ya) * t, ux: (b.x - a.x) / (L || 1), uz: (b.z - a.z) / (L || 1), grade: (yb - ya) / (L || 1) };
     }
     s -= L;
   }
   const p = path[0];
-  return { x: p.x, z: p.z, ux: 1, uz: 0 };
+  return { x: p.x, z: p.z, y: p.y ?? 0, ux: 1, uz: 0, grade: 0 };
 }
 
 // Closest point on a path, with its arc length.
 export function closestOnPath(p: P, path: P[]) {
-  let best = { d: Infinity, x: 0, z: 0, s: 0, ux: 1, uz: 0 };
+  let best = { d: Infinity, x: 0, z: 0, y: 0, s: 0, ux: 1, uz: 0 };
   let acc = 0;
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1], b = path[i], L = dist(a, b);
     const c = closestOnSeg(p, a, b);
-    if (c.d < best.d) best = { d: c.d, x: c.x, z: c.z, s: acc + c.t * L, ux: (b.x - a.x) / (L || 1), uz: (b.z - a.z) / (L || 1) };
+    if (c.d < best.d) best = { d: c.d, x: c.x, z: c.z, y: (a.y ?? 0) + ((b.y ?? 0) - (a.y ?? 0)) * c.t, s: acc + c.t * L, ux: (b.x - a.x) / (L || 1), uz: (b.z - a.z) / (L || 1) };
     acc += L;
   }
   return best;
@@ -92,11 +98,20 @@ export function subPath(path: P[], s0: number, s1: number): P[] {
   let acc = 0;
   for (let i = 1; i < path.length - 1; i++) {
     acc += dist(path[i - 1], path[i]);
-    if (acc > s0 + 1e-6 && acc < s1 - 1e-6) out.push({ x: path[i].x, z: path[i].z });
+    if (acc > s0 + 1e-6 && acc < s1 - 1e-6) out.push(path[i]);
   }
-  const e = pointAt(path, s1);
-  out.push({ x: e.x, z: e.z });
-  return out.map((q) => ({ x: q.x, z: q.z }));
+  out.push(pointAt(path, s1));
+  return out.map((q) => ({ x: q.x, z: q.z, y: q.y ?? 0 }));
+}
+
+// Extra points so a height profile can be carried along long straight pieces.
+export function densify(path: P[], step: number): P[] {
+  const out: P[] = [path[0]];
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i], n = Math.max(1, Math.ceil(dist(a, b) / step));
+    for (let k = 1; k <= n; k++) out.push({ x: a.x + ((b.x - a.x) * k) / n, z: a.z + ((b.z - a.z) * k) / n });
+  }
+  return out;
 }
 
 // Quadratic Bézier from a to b pulled towards control point c (the Cities: Skylines curve tool).
@@ -160,7 +175,9 @@ export function bandOf(path: P[], half = HALF) {
 
 const hitsBand = (band: ReturnType<typeof bandOf>, poly: P[], c: P, r: number) => band.some((b) => dist(b.c, c) < b.r + r && polysOverlap(b.poly, poly));
 
-export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; path: P[] }
+export interface RoadOpts { height: HeightMode; grade: number; cross: 'junction' | 'bridge'; spec: Spec }
+export const DEFAULT_OPTS: RoadOpts = { height: 'auto', grade: 0.06, cross: 'junction', spec: GRADES.road };
+export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; path: P[]; profile?: Profile; bridges: number; raised: number }
 
 export class Network {
   nodes = new Map<number, RNode>();
@@ -186,7 +203,7 @@ export class Network {
   pathFrom(s: RSeg, from: number) { const p = this.path(s); return from === s.a ? p : p.reverse(); }
   length(s: RSeg) { return pathLength(this.path(s)); }
 
-  addNode(x: number, z: number) { const n = { id: this.nextId++, x, z }; this.nodes.set(n.id, n); return n.id; }
+  addNode(x: number, z: number, y = 0) { const n = { id: this.nextId++, x, z, y }; this.nodes.set(n.id, n); return n.id; }
   addSeg(a: number, b: number, mid: P[] = []) {
     if (a === b) return -1;
     if (!mid.length) for (const s of this.segs.values()) if (!s.mid.length && ((s.a === a && s.b === b) || (s.a === b && s.b === a))) return s.id;
@@ -215,7 +232,7 @@ export class Network {
     const s = this.segs.get(segId)!;
     const path = this.path(s);
     const c = closestOnPath(p, path);
-    const n = this.addNode(c.x, c.z);
+    const n = this.addNode(c.x, c.z, c.y);
     this.segs.delete(segId);
     const L = pathLength(path);
     this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1));
@@ -299,26 +316,90 @@ export class Network {
     return [{ x: a.x, z: a.z }, { x: b.x, z: b.z }];
   }
 
-  // Check a proposed road. Buildings in the way are cleared at a cost; water, the map edge,
-  // tight curves and very short roads are refused.
-  check(a: End, b: End, ctrl?: P): Check {
-    const path = this.makePath(a, b, ctrl);
-    const length = pathLength(path);
-    const cost = Math.round(length * COST_PER_M);
-    const clears: Lot[] = [];
-    const res = (reason?: string): Check => ({ ok: !reason, reason, length, cost: reason ? cost : cost + clears.length * CLEAR_COST, clears, path });
-    if (length < MIN_LEN) return res('Too short');
-    if (minRadius(path) < MIN_RADIUS) return res('Curve too tight');
-    const steps = Math.max(20, Math.ceil(length / 4));
-    for (let k = 0; k <= steps; k++) {
-      const p = pointAt(path, (length * k) / steps);
-      if (this.isWater(p)) return res('Water in the way');
-      if (Math.abs(p.x) > this.bound || Math.abs(p.z) > this.bound) return res('Off the edge of the map');
+  // Every place a path crosses an existing road (or runs through a junction), with that road's height.
+  crossings(path: P[]) {
+    const cum = [0];
+    for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + dist(path[i - 1], path[i]));
+    const A = path[0], B = path[path.length - 1];
+    const out: { s: number; x: number; z: number; e: number; sin: number; seg?: number; node?: number }[] = [];
+    for (const n of this.nodes.values()) {
+      if (dist(n, A) < 1 || dist(n, B) < 1) continue;
+      const c = closestOnPath(n, path);
+      if (c.d < 0.75) out.push({ s: c.s, x: n.x, z: n.z, e: n.y, sin: 1, node: n.id });
     }
+    for (const s of this.segs.values()) {
+      const sp = this.path(s);
+      const e0 = sp[0], e1 = sp[sp.length - 1];
+      for (let i = 1; i < path.length; i++)
+        for (let j = 1; j < sp.length; j++) {
+          const h = intersect(path[i - 1], path[i], sp[j - 1], sp[j], true);
+          if (!h || [A, B, e0, e1].some((q) => dist(h, q) < 1)) continue;
+          const at = cum[i - 1] + h.t * (cum[i] - cum[i - 1]);
+          if (out.some((o) => Math.abs(o.s - at) < 0.5)) continue; // piece joints count once
+          const e = (sp[j - 1].y ?? 0) + ((sp[j].y ?? 0) - (sp[j - 1].y ?? 0)) * h.u;
+          const L1 = cum[i] - cum[i - 1] || 1, L2 = dist(sp[j - 1], sp[j]) || 1;
+          const sin = Math.abs(((path[i].x - path[i - 1].x) * (sp[j].z - sp[j - 1].z) - (path[i].z - path[i - 1].z) * (sp[j].x - sp[j - 1].x)) / (L1 * L2));
+          out.push({ s: at, x: h.x, z: h.z, e, sin, seg: s.id });
+        }
+    }
+    return out.sort((p, q) => p.s - q.s);
+  }
+
+  // Height of the road an end joins, if it joins one.
+  endHeight(e: End) {
+    if (e.node !== undefined && this.nodes.has(e.node)) return this.node(e.node).y;
+    if (e.seg !== undefined && this.segs.has(e.seg)) return closestOnPath(e, this.path(this.segs.get(e.seg)!)).y;
+    return undefined;
+  }
+
+  // Check a proposed road and work out its height profile. Buildings in the way are cleared at a
+  // cost; the map edge, tight curves, very short roads and impossible gradients are refused.
+  check(a: End, b: End, ctrl?: P, opts: RoadOpts = DEFAULT_OPTS): Check {
+    const flat = this.makePath(a, b, ctrl);
+    const length = pathLength(flat);
+    let cost = Math.round(length * COST_PER_M);
+    const clears: Lot[] = [];
+    let path = flat, profile: Profile | undefined, bridges = 0, raised = 0;
+    const res = (reason?: string): Check => ({ ok: !reason, reason, length, cost: reason ? cost : cost + clears.length * CLEAR_COST, clears, path, profile, bridges, raised });
+    if (length < MIN_LEN) return res('Too short');
+    if (minRadius(flat) < MIN_RADIUS) return res('Curve too tight');
+    const spec = opts.spec, G = Math.min(opts.grade, spec.max);
+    const limits: Limit[] = [];
+    // water has to be bridged with clearance for boats
+    const steps = Math.max(20, Math.ceil(length / 2));
+    let w0 = -1;
+    for (let k = 0; k <= steps; k++) {
+      const t = (length * k) / steps, p = pointAt(flat, t);
+      if (Math.abs(p.x) > this.bound || Math.abs(p.z) > this.bound) return res('Off the edge of the map');
+      const wet = this.isWater(p);
+      if (wet && w0 < 0) w0 = Math.max(0, t - length / steps); // from the last dry point
+      if (w0 >= 0 && (!wet || k === steps)) { limits.push({ s0: w0 - 3, s1: t + 3, lo: spec.water, why: 'the water' }); w0 = -1; }
+    }
+    // every road crossed: join it, go over it, or pass under it if it's already up high enough
+    for (const c of this.crossings(flat)) {
+      const half = Math.min(40, (HALF + 1.5) / Math.max(0.25, c.sin));
+      if (c.e >= spec.clear - 0.01) limits.push({ s0: c.s - half, s1: c.s + half, hi: c.e - spec.clear, why: 'the flyover' });
+      else if (opts.cross === 'junction') limits.push({ s0: c.s, s1: c.s, lo: c.e, hi: c.e, why: 'the junction' });
+      else limits.push({ s0: c.s - half, s1: c.s + half, lo: c.e + spec.clear, why: c.e > 0.5 ? 'the raised road' : 'the road below' });
+    }
+    profile = solveProfile(length, this.endHeight(a) ?? 0, this.endHeight(b), G, limits, opts.height);
+    if (!profile.ok) return res(profile.reason);
+    const pr = profile;
+    path = pr.maxY > 0.01 ? densify(flat, 3) : flat.map((p) => ({ ...p }));
+    let acc = 0, up = false;
+    path.forEach((p, i) => {
+      if (i) acc += dist(path[i - 1], p);
+      p.y = pr.maxY > 0.01 ? heightAt(pr, acc) : 0;
+      if (i && (p.y > 1.5 || (path[i - 1].y ?? 0) > 1.5)) raised += dist(path[i - 1], p);
+      if (i) cost += dist(path[i - 1], p) * ((p.y + (path[i - 1].y ?? 0)) / 2) * RAISE_COST;
+      if (p.y > 3 && !up) bridges++;
+      up = p.y > 3;
+    });
+    cost = Math.round(cost);
     // buildings in the way are compulsorily purchased and demolished
     const band = bandOf(path);
     for (const l of this.lots) if (hitsBand(band, rectCorners(l.x, l.z, l.rot, l.w, l.d), l, Math.hypot(l.w, l.d) / 2)) clears.push(l);
-    // don't allow a new road to run almost on top of an existing one
+    // don't allow a new road to run almost on top of an existing one at the same level
     for (const s of this.segs.values()) {
       const shared = [a.node, b.node].some((id) => id === s.a || id === s.b) || a.seg === s.id || b.seg === s.id;
       if (shared) continue;
@@ -327,47 +408,33 @@ export class Network {
         const m = { x: (path[i - 1].x + path[i].x) / 2, z: (path[i - 1].z + path[i].z) / 2 };
         if (path.length > 2 && (dist(m, a) < ROAD_W * 1.5 || dist(m, b) < ROAD_W * 1.5)) continue;
         const c = closestOnPath(m, sp);
+        if (c.d >= ROAD_W || Math.abs(c.y - ((path[i - 1].y ?? 0) + (path[i].y ?? 0)) / 2) > 3) continue;
         const ang = Math.abs(Math.sin(Math.atan2(path[i].z - path[i - 1].z, path[i].x - path[i - 1].x) - Math.atan2(c.uz, c.ux)));
-        if (c.d < ROAD_W && ang < 0.25) return res('Too close to another road');
+        if (ang < 0.25) return res('Too close to another road');
       }
     }
     return res();
   }
 
-  // Build a checked road; splits roads it starts/ends on or crosses, making junctions.
-  build(a: End, b: End, ctrl?: P): number[] {
-    const resolve = (e: End) => (e.node ?? (e.seg !== undefined && this.segs.has(e.seg) ? this.split(e.seg, e) : this.nearestNode(e, 0.5)?.id ?? this.addNode(e.x, e.z)));
-    const na = resolve(a);
-    const nb = resolve(b);
+  // Build a road; splits roads it starts/ends on, and those it crosses at the same height, into
+  // junctions. Roads crossed at a different height stay as bridges and underpasses.
+  build(a: End, b: End, ctrl?: P, opts: RoadOpts = DEFAULT_OPTS): number[] {
+    const path = this.check(a, b, ctrl, opts).path.map((p) => ({ ...p, y: p.y ?? 0 }));
+    const resolve = (e: End, y: number) => (e.node ?? (e.seg !== undefined && this.segs.has(e.seg) ? this.split(e.seg, e) : this.nearestNode(e, 0.5)?.id ?? this.addNode(e.x, e.z, y)));
+    const na = resolve(a, path[0].y);
+    const nb = resolve(b, path[path.length - 1].y);
     const A = this.node(na), B = this.node(nb);
-    const path = this.makePath(A, B, ctrl);
+    path[0] = { x: A.x, z: A.z, y: A.y };
+    path[path.length - 1] = { x: B.x, z: B.z, y: B.y };
     const L = pathLength(path);
-    const cum = [0];
-    for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + dist(path[i - 1], path[i]));
     const cuts: { s: number; node: number }[] = [];
-    const near = (p: P, ids: number[]) => ids.some((id) => dist(p, this.node(id)) < 1);
-    // existing junctions the new road runs straight through join it
-    for (const n of this.nodes.values()) {
-      if (n.id === na || n.id === nb) continue;
-      const c = closestOnPath(n, path);
-      if (c.d < 0.75 && c.s > 1 && c.s < L - 1) cuts.push({ s: c.s, node: n.id });
-    }
-    // crossings with existing roads become junctions (a curve may cross the same road twice)
-    for (let guard = 0; guard < 200; guard++) {
-      let hit: { s: number; seg: number; x: number; z: number } | null = null;
-      for (const s of this.segs.values()) {
-        const sp = this.path(s);
-        for (let i = 1; i < path.length && !hit; i++)
-          for (let j = 1; j < sp.length && !hit; j++) {
-            const h = intersect(path[i - 1], path[i], sp[j - 1], sp[j], true);
-            if (!h) continue;
-            if (near(h, [na, nb, s.a, s.b, ...cuts.map((c) => c.node)])) continue;
-            hit = { s: cum[i - 1] + h.t * (cum[i] - cum[i - 1]), seg: s.id, x: h.x, z: h.z };
-          }
-        if (hit) break;
-      }
-      if (!hit) break;
-      cuts.push({ s: hit.s, node: this.split(hit.seg, hit) });
+    for (const c of this.crossings(path)) {
+      if (Math.abs(pointAt(path, c.s).y - c.e) > 0.3) continue; // grade separated
+      if (c.node !== undefined) { cuts.push({ s: c.s, node: c.node }); continue; }
+      // the crossed road may already have been split by an earlier crossing
+      let seg: RSeg | undefined;
+      for (const s of this.segs.values()) { const q = closestOnPath(c, this.path(s)); if (q.d < 0.5 && Math.abs(q.y - c.e) < 0.3) { seg = s; break; } }
+      if (seg) cuts.push({ s: c.s, node: this.split(seg.id, c) });
     }
     cuts.sort((x, y) => x.s - y.s);
     const chain = [{ s: 0, node: na }, ...cuts, { s: L, node: nb }];
@@ -401,6 +468,8 @@ export class Network {
         const off = HALF + setback + d / 2;
         // the building's front faces the road, square to it at the middle of the plot
         const c = pointAt(path, t + w / 2);
+        // nothing fronts onto a bridge or a ramp
+        if (c.y > 1 || pointAt(path, t).y > 1 || pointAt(path, t + w).y > 1) { t += w; continue; }
         const cx = c.x - c.uz * off * side, cz = c.z + c.ux * off * side;
         const rot = Math.atan2(c.uz, c.ux);
         const h = kind === 'house' ? 6 : kind === 'terrace' ? 7 + this.rand() * 2 : kind === 'shop' ? 8 + this.rand() * 6 : kind === 'flats' ? 12 + this.rand() * 12 : kind === 'office' ? 16 + this.rand() * 14 : 30 + this.rand() * 45;
