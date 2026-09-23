@@ -112,4 +112,42 @@ describe('free-form roads', () => {
       for (let j = i + 1; j < lots.length; j++)
         expect(polysOverlap(rectCorners(lots[i].x, lots[i].z, lots[i].rot, lots[i].w, lots[i].d), rectCorners(lots[j].x, lots[j].z, lots[j].rot, lots[j].w, lots[j].d))).toBe(false);
   });
+
+  it('every building gets a plot: plots touch but never overlap, and stay off the roads', () => {
+    const n = new Network();
+    const ids = [...n.build({ x: -150, z: 0 }, { x: 150, z: 0 }), ...n.build({ x: 0, z: -150 }, { x: 0, z: 150 })];
+    for (const id of ids) for (const l of n.plotsFor(id, { x: 999, z: 999 })) if (n.lotFree(l)) { n.fitParcel(l); n.lots.push(l); }
+    expect(n.lots.length).toBeGreaterThan(20);
+    const shrink = (l: (typeof n.lots)[0]) => n.parcelRect(l, -0.35);
+    for (let i = 0; i < n.lots.length; i++) {
+      const a = n.lots[i];
+      expect(a.back).toBeGreaterThan(0);
+      for (let j = i + 1; j < n.lots.length; j++) expect(polysOverlap(shrink(a), shrink(n.lots[j]))).toBe(false);
+      // the plot behind the building never reaches a road
+      const rear = n.parcelRect({ ...a, front: 0 }, -0.35);
+      for (const s of n.segs.values()) {
+        const p = n.path(s);
+        expect(polysOverlap(rear, rectCorners((p[0].x + p[1].x) / 2, (p[0].z + p[1].z) / 2, Math.atan2(p[1].z - p[0].z, p[1].x - p[0].x), n.length(s), 12.4))).toBe(false);
+      }
+    }
+  });
+
+  it('industrial zones get works with yards; a road through a garden trims it', () => {
+    const n = new Network();
+    n.zoneAt = (p) => (p.z < -100 ? 'industrial' : 'town');
+    const [id] = n.build({ x: -150, z: -200 }, { x: 150, z: -200 });
+    const lots = n.plotsFor(id, { x: 999, z: 999 });
+    expect(lots.length).toBeGreaterThan(2);
+    expect(lots.every((l) => l.kind === 'industry' && l.w >= 26 && l.front >= 14)).toBe(true);
+    const m = new Network();
+    const [h] = m.build({ x: -100, z: 0 }, { x: 100, z: 0 });
+    const l = m.plotsFor(h, { x: 999, z: 999 }).find((x) => m.lotFree(x))!;
+    m.fitParcel(l); m.lots.push(l);
+    const deep = l.back;
+    // a new road running just behind the house
+    const c = m.parcelCentre(l), back = { x: c.x - Math.sin(l.rot) * -(l.d / 2 + deep), z: c.z + Math.cos(l.rot) * -(l.d / 2 + deep) };
+    m.build({ x: back.x - Math.cos(l.rot) * 60, z: back.z - Math.sin(l.rot) * 60 }, { x: back.x + Math.cos(l.rot) * 60, z: back.z + Math.sin(l.rot) * 60 });
+    expect(m.touched).toContain(l);
+    expect(l.back).toBeLessThan(deep);
+  });
 });

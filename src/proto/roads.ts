@@ -16,9 +16,17 @@ export type { HeightMode } from './grade';
 export interface RNode { id: number; x: number; z: number; y: number }
 // `mid` holds the interior points of a curved road, in order from a to b (empty when straight)
 export interface RSeg { id: number; a: number; b: number; mid: P[] }
-export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower';
+export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower' | 'industry';
 // `row` identifies the run of plots along one side of one street, so neighbours can share a style
-export interface Lot { id: number; x: number; z: number; rot: number; w: number; d: number; h: number; kind: LotKind; seg: number; seed: number; row: number }
+// The building sits at (x, z) facing the road; its plot (parcel) runs from the back of the pavement
+// (`front` metres in front of the building) to `back` metres behind it, and is `pw` wide, centred
+// `px` along from the building (the side gap holds a driveway or path).
+export interface Lot {
+  id: number; x: number; z: number; rot: number; w: number; d: number; h: number; kind: LotKind; seg: number; seed: number; row: number;
+  front: number; back: number; px: number; pw: number;
+}
+export type Zone = 'town' | 'industrial';
+const BACK: Record<LotKind, number> = { house: 14, terrace: 8, shop: 7, flats: 14, office: 13, tower: 10, industry: 16 };
 
 // y is height above the ground in metres (0 when missing)
 export interface P { x: number; z: number; y?: number }
@@ -187,6 +195,9 @@ export class Network {
   isWater: (p: P) => boolean;
   bound: number;
   private rand: () => number;
+  zoneAt: (p: P) => Zone = () => 'town';
+  // lots whose plots the last build() cut into (their gardens get trimmed)
+  touched: Lot[] = [];
 
   constructor(isWater: (p: P) => boolean = () => false, bound = 560, seed = 7) {
     this.isWater = isWater;
@@ -443,6 +454,8 @@ export class Network {
     // lots overlapping the new road (e.g. queued ones) are dropped
     const band = bandOf(path);
     this.lots = this.lots.filter((l) => !hitsBand(band, rectCorners(l.x, l.z, l.rot, l.w, l.d), l, Math.hypot(l.w, l.d) / 2));
+    this.touched = this.lots.filter((l) => hitsBand(band, this.parcelRect(l, -0.3), this.parcelCentre(l), this.parcelR(l)));
+    for (const l of this.touched) this.fitParcel(l);
     return made.filter((id) => id >= 0);
   }
 
@@ -460,25 +473,63 @@ export class Network {
         const m = pointAt(path, t);
         const dc = Math.hypot(m.x - centre.x, m.z - centre.z);
         const r = this.rand();
-        const kind: LotKind = dc < 60 ? (r < 0.3 ? 'tower' : r < 0.55 ? 'office' : 'flats') : dc < 110 ? (r < 0.45 ? 'shop' : r < 0.75 ? 'flats' : 'office') : dc < 170 ? 'terrace' : 'house';
-        const w = kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 6 + this.rand() * 1.5 : 12 + this.rand() * 6;
-        const d = kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 9 : 12 + this.rand() * 8;
+        const kind: LotKind = this.zoneAt(m) === 'industrial' ? 'industry'
+          : dc < 60 ? (r < 0.3 ? 'tower' : r < 0.55 ? 'office' : 'flats') : dc < 110 ? (r < 0.45 ? 'shop' : r < 0.75 ? 'flats' : 'office') : dc < 170 ? 'terrace' : 'house';
+        const w = kind === 'industry' ? 26 + this.rand() * 16 : kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 6 + this.rand() * 1.5 : 12 + this.rand() * 6;
+        const d = kind === 'industry' ? 20 + this.rand() * 12 : kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 9 : 12 + this.rand() * 8;
+        // the side gap belongs to the plot: a driveway for houses, a service lane for the rest
+        const gap = kind === 'terrace' ? 0.2 : kind === 'house' ? 3.4 + this.rand() * 1.4 : kind === 'industry' ? 6 : 3 + this.rand() * 3;
         if (t + w > L - HALF - 2) break;
-        const setback = kind === 'house' ? 4 : kind === 'terrace' ? 2 : 1;
-        const off = HALF + setback + d / 2;
+        const front = { house: 5.5, terrace: 2.2, shop: 4, flats: 6.5, office: 8, tower: 10, industry: 14 }[kind] + (kind === 'house' ? this.rand() * 2 : 0);
+        const off = HALF + front + d / 2;
         // the building's front faces the road, square to it at the middle of the plot
         const c = pointAt(path, t + w / 2);
         // nothing fronts onto a bridge or a ramp
         if (c.y > 1 || pointAt(path, t).y > 1 || pointAt(path, t + w).y > 1) { t += w; continue; }
         const cx = c.x - c.uz * off * side, cz = c.z + c.ux * off * side;
         const rot = Math.atan2(c.uz, c.ux);
-        const h = kind === 'house' ? 6 : kind === 'terrace' ? 7 + this.rand() * 2 : kind === 'shop' ? 8 + this.rand() * 6 : kind === 'flats' ? 12 + this.rand() * 12 : kind === 'office' ? 16 + this.rand() * 14 : 30 + this.rand() * 45;
-        const lot: Lot = { id: this.nextId++, x: cx, z: cz, rot: side === 1 ? rot + Math.PI : rot, w, d, h, kind, seg: segId, seed: this.rand(), row };
-        if (this.lotFree(lot, out)) out.push(lot);
-        t += w + (kind === 'terrace' ? 0.2 : 2 + this.rand() * 3);
+        const h = kind === 'house' ? 6 : kind === 'terrace' ? 7 + this.rand() * 2 : kind === 'shop' ? 8 + this.rand() * 6 : kind === 'flats' ? 12 + this.rand() * 12 : kind === 'office' ? 16 + this.rand() * 14 : kind === 'industry' ? 8 + this.rand() * 4 : 30 + this.rand() * 45;
+        // local +x runs along the road in the direction of travel for side -1, against it for side 1
+        const lot: Lot = { id: this.nextId++, x: cx, z: cz, rot: side === 1 ? rot + Math.PI : rot, w, d, h, kind, seg: segId, seed: this.rand(), row, front, back: BACK[kind], px: (side === -1 ? gap : -gap) / 2, pw: w + gap };
+        if (this.lotFree(lot, out)) { this.fitParcel(lot, out); out.push(lot); }
+        t += w + gap;
       }
     }
     return out;
+  }
+
+  // The plot as a rectangle (optionally grown or shrunk by `pad`).
+  parcelCentre(l: Lot): P {
+    const zc = (l.front - l.back) / 2, c = Math.cos(l.rot), s = Math.sin(l.rot);
+    return { x: l.x + l.px * c - zc * s, z: l.z + l.px * s + zc * c };
+  }
+  parcelRect(l: Lot, pad = 0) {
+    const c = this.parcelCentre(l);
+    return rectCorners(c.x, c.z, l.rot, l.pw + pad * 2, l.d + l.front + l.back + pad * 2);
+  }
+  parcelR(l: Lot) { return Math.hypot(l.pw, l.d + l.front + l.back) / 2; }
+
+  // Make the back garden as deep as it can be without running into other plots, roads or water.
+  fitParcel(l: Lot, extra: Lot[] = []) {
+    if (this.tryParcel(l, extra)) return true;
+    // a corner plot: give up the side gap (driveway) that runs into the side street
+    l.pw -= Math.abs(l.px) * 2; l.px = 0;
+    return this.tryParcel(l, extra);
+  }
+  private tryParcel(l: Lot, extra: Lot[]) {
+    const others = [...this.lots, ...extra].filter((o) => o !== l);
+    for (let back = BACK[l.kind]; back >= 0; back -= 1.5) {
+      l.back = Math.max(0.5, back);
+      const poly = this.parcelRect(l, -0.3), c = this.parcelCentre(l), r = this.parcelR(l);
+      if (poly.some((p) => this.isWater(p))) continue;
+      if (others.some((o) => dist(this.parcelCentre(o), c) < r + this.parcelR(o) && polysOverlap(poly, this.parcelRect(o)))) continue;
+      // the plot's own front edge meets its road; anything else it touches is a clash
+      const back0 = { ...l, front: 0 };
+      const rear = this.parcelRect(back0, -0.3);
+      if ([...this.segs.values()].some((s) => hitsBand(bandOf(this.path(s)), rear, this.parcelCentre(back0), r))) continue;
+      return true;
+    }
+    return false;
   }
 
   lotFree(l: Lot, extra: Lot[] = []) {
@@ -491,9 +542,11 @@ export class Network {
       // keep plots out of junction discs
       for (const n of [path[0], path[path.length - 1]]) if (poly.some((p) => dist(p, n) < HALF + 1) || dist(l, n) < HALF + l.d / 2) return false;
     }
+    // a building can't go on somebody else's plot (neighbouring plots may touch)
+    const foot = rectCorners(l.x, l.z, l.rot, l.w - 0.4, l.d - 0.4);
     for (const o of [...this.lots, ...extra]) {
-      if (dist(o, l) > r + Math.hypot(o.w, o.d) / 2) continue;
-      if (polysOverlap(poly, rectCorners(o.x, o.z, o.rot, o.w, o.d))) return false;
+      if (dist(this.parcelCentre(o), l) > r + this.parcelR(o)) continue;
+      if (polysOverlap(foot, this.parcelRect(o))) return false;
     }
     return true;
   }

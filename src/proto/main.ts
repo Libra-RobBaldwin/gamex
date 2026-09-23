@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import './proto.css';
 import { DEFAULT_OPTS, HALF, Network, ROAD_W, rng, closestOnPath, pointAt, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadOpts } from './roads';
 import { GRADE_STEPS } from './grade';
+import { Traffic, rushLabel, type Places } from './traffic';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { makeBuilding as generate, USE } from './buildgen';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -13,6 +15,9 @@ const LAKE = { x: 250, z: -190, r: 90 };
 const isWater = (p: P) => Math.hypot(p.x - LAKE.x, p.z - LAKE.z) < LAKE.r + 4;
 const BOUND = 520;
 const net = new Network(isWater, BOUND, 11);
+// an industrial estate south of the centre
+const INDUSTRIAL = (p: P) => p.z < -215 && Math.abs(p.x) < 280;
+net.zoneAt = (p) => (INDUSTRIAL(p) ? 'industrial' : 'town');
 const CENTRE = { x: 0, z: 0 };
 const rand = rng(99);
 
@@ -129,7 +134,13 @@ for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow 
 
 function treeBlocked(t: Tree) {
   for (const s of net.segs.values()) if (closestOnPath(t, net.path(s)).d < HALF + 3) return true;
-  for (const l of net.lots) if (Math.hypot(t.x - l.x, t.z - l.z) < Math.max(l.w, l.d) * 0.75 + 2) return true;
+  // plots have their own planting
+  for (const l of net.lots) {
+    const c = net.parcelCentre(l);
+    if (Math.hypot(t.x - c.x, t.z - c.z) > net.parcelR(l) + 3) continue;
+    const dx = t.x - c.x, dz = t.z - c.z, co = Math.cos(l.rot), si = Math.sin(l.rot);
+    if (Math.abs(dx * co + dz * si) < l.pw / 2 + 2 && Math.abs(-dx * si + dz * co) < (l.d + l.front + l.back) / 2 + 2) return true;
+  }
   return false;
 }
 
@@ -288,21 +299,91 @@ function rebuildRoads() {
   roadGroup.add(pave.mesh(paveMat), asph.mesh(asphaltMat), lines.mesh(lineMat));
   if (body.pos.length) roadGroup.add(body.mesh(concreteMat));
   if (rails.pos.length) roadGroup.add(rails.mesh(parapetMat));
+  onRoadsChanged();
 }
 
 // ---------------- buildings ----------------
-interface Built { lot: Lot; group: THREE.Group; born: number; height: number; name: string; detail: string; dying?: number }
+// Each building is generated once, then baked into world space. Settled buildings are merged into
+// 120 m chunks (one mesh per material per chunk) so a detailed town stays cheap to draw; only
+// buildings rising or being demolished are drawn on their own.
+interface Part { m: THREE.Material; g: THREE.BufferGeometry }
+interface Built { lot: Lot; born: number; height: number; name: string; detail: string; parts: Part[]; solo: THREE.Group | null; chunk: string | null; dying?: number }
 const buildings: Built[] = [];
 const cityGroup = new THREE.Group();
 scene.add(cityGroup);
+const CH = 120;
+const chunks = new Map<string, { members: Set<Built>; group: THREE.Group; dirty: boolean }>();
+
+function bake(l: Lot) {
+  const b = generate(l);
+  b.group.updateMatrixWorld(true);
+  const parts: Part[] = [];
+  for (const o of b.group.children) {
+    const mesh = o as THREE.Mesh;
+    parts.push({ m: mesh.material as THREE.Material, g: mesh.geometry.clone().applyMatrix4(mesh.matrixWorld) });
+    mesh.geometry.dispose();
+  }
+  return { height: b.height, name: b.name, detail: b.detail, parts };
+}
+function soloGroup(b: Built) {
+  const g = new THREE.Group();
+  for (const p of b.parts) { const m = new THREE.Mesh(p.g, p.m); m.castShadow = !(p.m as THREE.MeshLambertMaterial).transparent; m.receiveShadow = true; g.add(m); }
+  return g;
+}
+function toChunk(b: Built) {
+  if (b.solo) { cityGroup.remove(b.solo); b.solo = null; }
+  const key = `${Math.floor(b.lot.x / CH)},${Math.floor(b.lot.z / CH)}`;
+  let c = chunks.get(key);
+  if (!c) { c = { members: new Set(), group: new THREE.Group(), dirty: true }; chunks.set(key, c); cityGroup.add(c.group); }
+  c.members.add(b); c.dirty = true; b.chunk = key;
+}
+function fromChunk(b: Built) {
+  if (!b.chunk) return;
+  const c = chunks.get(b.chunk)!;
+  c.members.delete(b); c.dirty = true; b.chunk = null;
+}
+function rebuildChunk(c: { members: Set<Built>; group: THREE.Group; dirty: boolean }) {
+  for (const m of [...c.group.children]) { c.group.remove(m); (m as THREE.Mesh).geometry.dispose(); }
+  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  for (const b of c.members) for (const p of b.parts) { let l = byMat.get(p.m); if (!l) byMat.set(p.m, (l = [])); l.push(p.g); }
+  for (const [m, list] of byMat) {
+    const g = mergeGeometries(list, false);
+    if (!g) continue;
+    const mesh = new THREE.Mesh(g, m);
+    mesh.castShadow = !(m as THREE.MeshLambertMaterial).transparent;
+    mesh.receiveShadow = true;
+    c.group.add(mesh);
+  }
+  c.dirty = false;
+}
 
 let queue: Lot[] = [];
+let placesDirty = true;
+let onRoadsChanged = () => {};
+const LEVELS = [['Traffic', 1], ['Busy', 2], ['Quiet', 0.4]] as const;
+let level = 0;
 function spawnLot(l: Lot, animate = true) {
+  net.fitParcel(l);
   net.lots.push(l);
-  const b = generate(l);
-  if (animate) b.group.scale.y = 0.01;
-  cityGroup.add(b.group);
-  buildings.push({ lot: l, born: performance.now(), ...b });
+  const b: Built = { lot: l, born: performance.now(), solo: null, chunk: null, ...bake(l) };
+  buildings.push(b);
+  if (animate) { b.solo = soloGroup(b); b.solo.scale.y = 0.01; cityGroup.add(b.solo); }
+  else toChunk(b);
+  placesDirty = true;
+}
+// a plot got trimmed (a road went through its garden): landscape it again
+function regenerate(b: Built) {
+  fromChunk(b);
+  for (const p of b.parts) p.g.dispose();
+  Object.assign(b, bake(b.lot));
+  if (b.solo) { cityGroup.remove(b.solo); b.solo = null; }
+  toChunk(b);
+}
+function demolish(b: Built) {
+  fromChunk(b);
+  if (!b.solo) { b.solo = soloGroup(b); cityGroup.add(b.solo); }
+  b.dying = performance.now();
+  placesDirty = true;
 }
 const shortName = (b: Built) => b.name.split(' · ')[0];
 
@@ -341,28 +422,12 @@ function busMesh(color: string) {
   return g;
 }
 
-function carMesh(color: string) {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.9, 1.8), plainMat(color));
-  body.position.y = 0.85; body.castShadow = true;
-  const cab = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.75, 1.62), plainMat('#2b3640'));
-  cab.position.set(-0.3, 1.65, 0); cab.castShadow = true;
-  g.add(body, cab);
-  for (const [x, z] of [[1.3, 0.9], [1.3, -0.9], [-1.3, 0.9], [-1.3, -0.9]]) {
-    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.25, 10), plainMat('#1c1d20'));
-    w.rotation.x = Math.PI / 2;
-    w.position.set(x, 0.4, z);
-    g.add(w);
-  }
-  return g;
-}
-
 function addVehicle(bus: boolean) {
   const segs = [...net.segs.values()];
   if (!segs.length) return;
   const seg = segs[Math.floor(rand() * segs.length)];
   const colours = ['#c9302c', '#2f6fb8', '#f2f2f2', '#2b2b2b', '#e0a526', '#5a8f4a', '#8d8f93'];
-  const mesh = bus ? busMesh(rand() < 0.5 ? '#c9302c' : '#e8a21f') : carMesh(colours[Math.floor(rand() * colours.length)]);
+  const mesh = busMesh(bus ? (rand() < 0.5 ? '#c9302c' : '#e8a21f') : colours[Math.floor(rand() * colours.length)]);
   mesh.rotation.order = 'YZX'; // yaw, then pitch up and down the ramps
   scene.add(mesh);
   vehicles.push({ mesh, seg, from: rand() < 0.5 ? seg.a : seg.b, s: rand() * net.length(seg), speed: bus ? 11 : 14 + rand() * 4, heading: 0, bus });
@@ -418,6 +483,10 @@ function seedTown() {
   const over = { ...DEFAULT_OPTS, cross: 'bridge' as const };
   road({ x: -215, z: -150 }, { x: -215, z: 150 }, undefined, over); // a flyover across the main road
   road({ x: 40, z: -190 }, { x: 470, z: -190 }, undefined, over); // a bridge over the lake
+  // the industrial estate
+  road({ x: 0, z: -200 }, { x: 0, z: -380 });
+  road({ x: -190, z: -290 }, { x: 150, z: -290 });
+  road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 });
   for (const s of net.segs.values()) queuePlots([s.id]);
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
@@ -462,7 +531,7 @@ $('#ui').innerHTML = `
       <button data-t="look"><i>👆</i>Look</button>
       <button data-t="road"><i>🛣️</i>Road</button>
       <button data-t="bus"><i>🚌</i>Add bus</button>
-      <button data-t="cars"><i>🚗</i>Add cars</button>
+      <button data-t="cars"><i>🚦</i><span id="tlvl">Traffic</span></button>
       <button data-t="reset"><i>🔄</i>Reset</button>
     </div>
   </div>`;
@@ -502,7 +571,11 @@ document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.a
   const t = b.dataset.t!;
   if (t === 'look' || t === 'road') return setMode(t);
   if (t === 'bus') { addVehicle(true); hint('Bus added. It follows the roads and only turns round at dead ends.'); }
-  if (t === 'cars') { for (let i = 0; i < 5; i++) addVehicle(false); hint('Five cars added.'); }
+  if (t === 'cars') {
+    level = (level + 1) % LEVELS.length;
+    $('#tlvl').textContent = LEVELS[level][0];
+    hint(`Traffic: ${LEVELS[level][0].toLowerCase()} · cars come from homes, jobs, shops and works, and follow the clock`);
+  }
   if (t === 'reset') location.reload();
 }));
 // height, gradient and crossing options apply live to the blueprint
@@ -578,7 +651,8 @@ function renderBar() {
     const summary = doomed.size ? demolitionSummary([...doomed]) : null;
     const made = net.build(draft.a, draft.b, ctrlOf(draft), opts);
     // demolished buildings sink away rather than vanishing
-    for (const b of buildings) if (!net.lots.includes(b.lot) && !b.dying) b.dying = performance.now();
+    for (const b of buildings) if (!net.lots.includes(b.lot) && !b.dying) demolish(b);
+    for (const l of net.touched) { const b = buildings.find((x) => x.lot === l); if (b && !b.dying) regenerate(b); }
     draft = null;
     draftChanged();
     rebuildRoads();
@@ -679,9 +753,16 @@ function ndc(sx: number, sy: number) {
 function pickBuilding(sx: number, sy: number) {
   ray.setFromCamera(ndc(sx, sy), cam);
   const hit = ray.intersectObjects(cityGroup.children, true)[0];
-  let o: THREE.Object3D | null = hit?.object ?? null;
-  while (o && !o.userData.lot) o = o.parent;
-  return o ? buildings.find((b) => b.group === o) ?? null : null;
+  if (!hit) return null;
+  // the building whose footprint (or failing that, plot) the hit is on
+  const inside = (b: Built, pad: number, plot: boolean) => {
+    const l = b.lot, c = plot ? net.parcelCentre(l) : l, co = Math.cos(l.rot), si = Math.sin(l.rot);
+    const dx = hit.point.x - c.x, dz = hit.point.z - c.z;
+    const w = plot ? l.pw : l.w, d = plot ? l.d + l.front + l.back : l.d;
+    return Math.abs(dx * co + dz * si) < w / 2 + pad && Math.abs(-dx * si + dz * co) < d / 2 + pad;
+  };
+  const live = buildings.filter((b) => !b.dying);
+  return live.find((b) => inside(b, 1.5, false)) ?? live.find((b) => inside(b, 0.2, true)) ?? null;
 }
 function showCard(b: Built | null) {
   const el = $('#card');
@@ -937,10 +1018,29 @@ seedTown();
 rebuildRoads();
 refreshTrees();
 for (let i = 0; i < 4; i++) addVehicle(true);
-for (let i = 0; i < 14; i++) addVehicle(false);
 setMode('look');
 setKind('straight');
 resize();
+
+// ---------------- clock and traffic ----------------
+const traffic = new Traffic(net, scene, rng(5));
+onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; };
+let clock = 7 * 60; // minutes since midnight: a day passes in six minutes
+let places: Places | null = null;
+function getPlaces(): Places {
+  if (places && !placesDirty) return places;
+  placesDirty = false;
+  const live = buildings.filter((b) => !b.dying).map((b) => b.lot);
+  const home = (l: Lot) => l.kind === 'house' || l.kind === 'terrace' || l.kind === 'flats' || l.kind === 'tower';
+  return (places = {
+    homes: live.filter(home),
+    jobs: live.filter((l) => l.kind === 'office' || l.kind === 'shop' || l.kind === 'industry' || l.kind === 'tower'),
+    shops: live.filter((l) => l.kind === 'shop'),
+    works: live.filter((l) => l.kind === 'industry'),
+    weight: (l) => USE[l.kind].pop,
+  });
+}
+const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
 
 let last = performance.now();
 let growAt = 0;
@@ -962,18 +1062,31 @@ function frame(now: number) {
   }
   for (let i = buildings.length - 1; i >= 0; i--) {
     const b = buildings[i];
+    if (!b.solo) continue;
     if (b.dying) {
       const k = (now - b.dying) / 700;
-      b.group.scale.y = Math.max(0.01, 1 - k);
-      if (k >= 1) { cityGroup.remove(b.group); for (const m of b.group.children) (m as THREE.Mesh).geometry.dispose(); buildings.splice(i, 1); }
-    } else if (b.group.scale.y < 1) b.group.scale.y = Math.min(1, (now - b.born) / 700);
+      b.solo.scale.y = Math.max(0.01, 1 - k);
+      if (k >= 1) { cityGroup.remove(b.solo); for (const p of b.parts) p.g.dispose(); buildings.splice(i, 1); }
+    } else {
+      b.solo.scale.y = Math.min(1, (now - b.born) / 700);
+      if (b.solo.scale.y >= 1) toChunk(b); // settled: merge into its chunk
+    }
   }
+  // merge at most a couple of changed chunks a frame
+  let merged = 0;
+  for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
+  clock += dt * 4;
+  const hour = (clock / 60) % 24;
+  traffic.generate(getPlaces(), hour, LEVELS[level][1], now);
+  traffic.generate(getPlaces(), hour, LEVELS[level][1], now);
+  traffic.update(dt, now);
   moveVehicles(dt);
   const pop = buildings.reduce((s, b) => s + (USE[b.lot.kind].unit === 'jobs' ? 0 : USE[b.lot.kind].pop), 0);
-  $('#stats').textContent = `Population ${pop.toLocaleString('en-GB')} · ${buildings.length} buildings · ${vehicles.length} vehicles`;
+  const rush = rushLabel(hour);
+  $('#stats').textContent = `🕗 ${hhmm(clock)}${rush ? ` ${rush}` : ''} · 🚗 ${traffic.live} · pop ${pop.toLocaleString('en-GB')}`;
   renderer.render(scene, cam);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { net, view, vehicles, buildings, setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding };
+(window as unknown as { proto: unknown }).proto = { net, view, vehicles, buildings, setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, growAll: () => { for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };

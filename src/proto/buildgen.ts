@@ -16,6 +16,7 @@ const GLASS: Sw[] = [['#6f8fae', 'blue glass'], ['#5f827e', 'green glass'], ['#8
 const SLATE: Sw[] = [['#535c66', 'slate roof'], ['#474e57', 'dark slate roof']];
 const TILE: Sw[] = [['#9c463b', 'clay tile roof'], ['#b0633e', 'terracotta roof'], ['#6d5a50', 'brown tile roof']];
 const COPPER: Sw = ['#6f9a8a', 'copper roof'];
+const METALS: Sw[] = [['#8a969e', 'grey cladding'], ['#5f7f8f', 'blue cladding'], ['#b8bcbf', 'silver cladding'], ['#6b7f5a', 'green cladding'], ['#c9cdd0', 'white cladding'], ['#8c3b32', 'red cladding']];
 const METAL: Sw = ['#3f4449', 'standing-seam roof'];
 const FRAMES = ['#f4f4f0', '#f4f4f0', '#2d3338', '#2e5a45'];
 const DOORS = ['#2e4a6b', '#7a2d2d', '#2e5a45', '#222222', '#d9b43c', '#6b4b8a', '#f4f4f0', '#c9573a'];
@@ -24,7 +25,7 @@ const TRIM = '#ece6d8';
 const GRAVEL = '#8e8b86';
 
 type Win = 'none' | 'sash' | 'grid' | 'arched' | 'casement' | 'picture' | 'ribbon' | 'curtain' | 'punched' | 'door' | 'warehouse' | 'shop' | 'lobby';
-type Skin = 'brick' | 'render' | 'stone' | 'concrete' | 'timber' | 'glass';
+type Skin = 'brick' | 'render' | 'stone' | 'concrete' | 'timber' | 'glass' | 'metal';
 const WIN_NAME: Record<Win, string> = {
   none: '', sash: 'sash windows', grid: 'Georgian sash windows', arched: 'arched windows', casement: 'casement windows', picture: 'picture windows',
   ribbon: 'ribbon windows', curtain: 'curtain wall', punched: 'punched windows', door: 'balcony doors', warehouse: 'warehouse windows', shop: 'shopfront', lobby: 'glazed lobby',
@@ -70,6 +71,8 @@ function drawSkin(x: CanvasRenderingContext2D, r: () => number, skin: Skin, wall
     for (let i = 0; i < 260; i++) { x.fillStyle = `rgba(0,0,0,${r() * 0.06})`; x.fillRect(r() * 128, r() * 128, 1 + r() * 3, 1 + r() * 6); }
     x.fillStyle = shade(wall, 0.78);
     for (const v of [0, 64]) { x.fillRect(v, 0, 1, 128); x.fillRect(0, v, 128, 1); x.fillRect(0, v + 32, 128, 0.6); }
+  } else if (skin === 'metal') {
+    for (let bx = 0; bx < 128; bx += 5) { x.fillStyle = shade(wall, 0.78); x.fillRect(bx, 0, 1, 128); x.fillStyle = shade(wall, 1.12); x.fillRect(bx + 1.2, 0, 0.8, 128); }
   } else if (skin === 'glass') {
     const g = x.createLinearGradient(0, 0, 0, 128);
     g.addColorStop(0, shade(wall, 1.35)); g.addColorStop(0.5, wall); g.addColorStop(1, shade(wall, 0.8));
@@ -179,7 +182,9 @@ const stripeTex = (col: string) => tex(`s|${col}`, 32, 8, (x) => { x.fillStyle =
 // ---------------- materials ----------------
 const mats = new Map<string, THREE.Material>();
 const M = (key: string, make: () => THREE.Material) => { let m = mats.get(key); if (!m) { m = make(); mats.set(key, m); } return m; };
-const plain = (c: string) => M(`p|${c}`, () => new THREE.MeshLambertMaterial({ color: c }));
+// Plain colours all share one vertex-coloured material, so they merge into a single draw call.
+const PLAIN = new THREE.MeshLambertMaterial({ vertexColors: true });
+const plain = (c: string) => M(`p|${c}`, () => { const m = new THREE.MeshLambertMaterial({ color: c }); m.userData.tint = new THREE.Color(c); return m; });
 const facade = (win: Win, skin: Skin, wall: string, frame: string, fascia?: string) => M(`f|${win}|${skin}|${wall}|${frame}|${fascia}`, () => new THREE.MeshLambertMaterial({ map: facadeTex(win, skin, wall, frame, fascia) }));
 const roofM = (c: string) => M(`r|${c}`, () => new THREE.MeshLambertMaterial({ map: roofTex(c) }));
 const stripes = (c: string) => M(`s|${c}`, () => new THREE.MeshLambertMaterial({ map: stripeTex(c), side: THREE.DoubleSide }));
@@ -189,8 +194,10 @@ const railM = () => M('rail', () => new THREE.MeshLambertMaterial({ color: '#a9c
 type V = [number, number, number];
 type XZ = [number, number];
 
+const WHITE = new THREE.Color(1, 1, 1);
 class Geo {
-  p: number[] = []; n: number[] = []; uv: number[] = [];
+  p: number[] = []; n: number[] = []; uv: number[] = []; c: number[] = [];
+  col = WHITE;
   tri(a: V, b: V, c: V, ua: XZ, ub: XZ, uc: XZ) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
@@ -200,6 +207,7 @@ class Geo {
     this.p.push(...a, ...b, ...c);
     for (let i = 0; i < 3; i++) this.n.push(nx, ny, nz);
     this.uv.push(...ua, ...ub, ...uc);
+    for (let i = 0; i < 3; i++) this.c.push(this.col.r, this.col.g, this.col.b);
   }
   quad(a: V, b: V, c: V, d: V, u0 = 0, v0 = 0, u1 = 1, v1 = 1) {
     this.tri(a, b, c, [u0, v0], [u1, v0], [u1, v1]);
@@ -214,7 +222,16 @@ class Kit {
   byMat = new Map<THREE.Material, Geo>();
   private frames: { ox: number; oz: number; c: number; s: number }[] = [];
   top = 0;
-  g(m: THREE.Material) { let g = this.byMat.get(m); if (!g) { g = new Geo(); this.byMat.set(m, g); } return g; }
+  foot = { w: 0, d: 0 };
+  doorX: number | undefined;
+  g(m: THREE.Material) {
+    const tint = m.userData.tint as THREE.Color | undefined;
+    const key = tint ? PLAIN : m;
+    let g = this.byMat.get(key);
+    if (!g) { g = new Geo(); this.byMat.set(key, g); }
+    g.col = tint ?? WHITE;
+    return g;
+  }
   T(x: number, y: number, z: number): V {
     for (let i = this.frames.length - 1; i >= 0; i--) {
       const f = this.frames[i];
@@ -305,6 +322,7 @@ class Kit {
       bg.setAttribute('position', new THREE.Float32BufferAttribute(g.p, 3));
       bg.setAttribute('normal', new THREE.Float32BufferAttribute(g.n, 3));
       bg.setAttribute('uv', new THREE.Float32BufferAttribute(g.uv, 2));
+      bg.setAttribute('color', new THREE.Float32BufferAttribute(g.c, 3));
       const mesh = new THREE.Mesh(bg, m);
       const transparent = (m as THREE.MeshLambertMaterial).transparent;
       mesh.castShadow = !transparent;
@@ -317,6 +335,7 @@ class Kit {
 
 // ---------------- features ----------------
 function door(k: Kit, x: number, zf: number, col: string, w = 1.05, h = 2.2) {
+  k.doorX ??= x;
   k.box(x, 0, zf + 0.06, w + 0.3, h + 0.2, 0.1, plain(TRIM));
   k.box(x, 0, zf + 0.1, w, h, 0.1, plain(col));
   k.box(x, 0, zf + 0.35, w + 0.5, 0.18, 0.6, plain('#b9b3a8')); // step
@@ -392,7 +411,7 @@ function awning(k: Kit, x: number, zf: number, w: number, y: number, col: string
 export interface BuiltShape { group: THREE.Group; height: number; name: string; detail: string }
 
 interface Look { skin: Skin; wall: Sw; win: Win; frame: string }
-const skinPalette = (s: Skin): Sw[] => ({ brick: BRICK, render: RENDER, stone: STONE, concrete: CONC, timber: TIMBER, glass: GLASS }[s]);
+const skinPalette = (s: Skin): Sw[] => ({ brick: BRICK, render: RENDER, stone: STONE, concrete: CONC, timber: TIMBER, glass: GLASS, metal: METALS }[s]);
 const look = (r: () => number, skin: Skin, win: Win, frame = pick(r, FRAMES), wall = pick(r, skinPalette(skin))): Look => ({ skin, wall, win, frame });
 const fm = (l: Look, win: Win = l.win) => facade(win, l.skin, l.wall[0], l.frame);
 const blank = (l: Look) => facade('none', l.skin, l.wall[0], l.frame);
@@ -401,6 +420,7 @@ const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? '' : 's'}`;
 
 function house(k: Kit, l: Lot, r: () => number, rr: () => number) {
   const W = Math.min(l.w, 11), D = Math.min(l.d * 0.85, 10);
+  k.foot = { w: W, d: D };
   // streets are often built by one developer, so neighbours usually share an archetype
   const arch = rr() < 0.7 ? pick(rr, ['cottage', 'villa', 'semi', 'modern', 'bungalow', 'georgian'] as const) : pick(r, ['cottage', 'villa', 'semi', 'modern', 'bungalow', 'georgian'] as const);
   const zf = D / 2, doorCol = pick(r, DOORS), extras: string[] = [];
@@ -483,6 +503,7 @@ function house(k: Kit, l: Lot, r: () => number, rr: () => number) {
 
 function terrace(k: Kit, l: Lot, r: () => number, rr: () => number) {
   const W = l.w, D = l.d, zf = D / 2, doorCol = pick(r, DOORS), extras: string[] = [];
+  k.foot = { w: W, d: D };
   const arch = pick(rr, ['victorian', 'georgian', 'painted', 'townhouse', 'gabled'] as const);
   const doorLeft = rr() < 0.5 ? -1 : 1;
   let L: Look, roofName: string, name: string;
@@ -543,6 +564,7 @@ function terrace(k: Kit, l: Lot, r: () => number, rr: () => number) {
 
 function shop(k: Kit, l: Lot, r: () => number) {
   const W = l.w, D = Math.min(l.d, 14), zf = D / 2, extras: string[] = [];
+  k.foot = { w: W, d: D };
   const up = Math.max(1, Math.min(3, Math.round((l.h - 4) / 3)));
   const style = pick(r, ['victorian', 'render', 'stone', 'modern', 'deco'] as const);
   const L = style === 'victorian' ? look(r, 'brick', 'sash', '#f4f4f0') : style === 'render' ? look(r, 'render', 'casement', '#f4f4f0', r() < 0.5 ? pick(r, PASTEL) : undefined)
@@ -562,6 +584,7 @@ function shop(k: Kit, l: Lot, r: () => number) {
 
 function flats(k: Kit, l: Lot, r: () => number) {
   const W = l.w, D = Math.min(l.d, 16), zf = D / 2, extras: string[] = [];
+  k.foot = { w: W, d: D };
   const floors = Math.max(3, Math.round(l.h / 3)), fh = 3, top = floors * fh;
   const arch = pick(r, ['mansion', 'balcony', 'brutalist', 'scandi', 'deco', 'brick'] as const);
   let L: Look, roofName = 'flat roof', name: string;
@@ -632,6 +655,7 @@ function flats(k: Kit, l: Lot, r: () => number) {
 
 function office(k: Kit, l: Lot, r: () => number) {
   const W = l.w, D = Math.min(l.d, 18), extras: string[] = [];
+  k.foot = { w: W, d: D };
   const arch = pick(r, ['glass', 'ribbon', 'warehouse', 'classical'] as const);
   let L: Look, name: string, floors: number;
   if (arch === 'glass') {
@@ -677,6 +701,7 @@ function office(k: Kit, l: Lot, r: () => number) {
 
 function tower(k: Kit, l: Lot, r: () => number) {
   const W = l.w, D = Math.min(l.d, 18), extras: string[] = [];
+  k.foot = { w: W, d: D };
   const arch = pick(r, ['glass', 'resi', 'deco', 'glass'] as const);
   const fh = arch === 'resi' ? 3 : 3.6;
   const floors = Math.max(8, Math.round(l.h / fh));
@@ -730,6 +755,319 @@ function tower(k: Kit, l: Lot, r: () => number) {
   return { name: `${name} · ${floors} storeys`, detail: [L.wall[1], WIN_NAME[L.win], ...extras].join(' · ') };
 }
 
+// ---------------- industry ----------------
+const PAINT = '#f2f2ee';
+const CONTAINERS = ['#b0463a', '#2f6f9e', '#d69a2d', '#3f7a4a', '#8a8f94', '#5a3f7a'];
+const CAR_COLS = ['#c9302c', '#2f6fb8', '#f2f2f2', '#2b2b2b', '#8d8f93', '#e0a526', '#5a8f4a', '#6b2f4a', '#b8bcbf', '#f2f2f2'];
+
+function lorry(k: Kit, x: number, z: number, col: string, cab = '#e8e6e0') {
+  // cab faces +z (out towards the road)
+  k.box(x, 0.3, z - 1.4, 2.3, 0.7, 11, plain('#26282c'));
+  k.box(x, 1.0, z - 1.4, 2.5, 3.1, 11, plain(col));
+  k.box(x, 0.3, z + 5.4, 2.5, 3, 2.4, plain(cab));
+  k.box(x, 1.9, z + 6.61, 2.3, 0.9, 0.02, plain('#2b3640'));
+}
+
+function industry(k: Kit, l: Lot, r: () => number) {
+  const W = l.w, D = l.d, zf = D / 2, extras: string[] = [];
+  k.foot = { w: W, d: D };
+  const arch = pick(r, ['shed', 'shed', 'factory', 'depot'] as const);
+  let name: string, L: Look;
+  if (arch === 'shed') {
+    L = look(r, 'metal', 'none', '#2d3338');
+    const H = Math.round(l.h);
+    k.block(0, 0, W, D, 0, 1, H, 0, blank(L));
+    k.box(0, H - 1.3, 0, W + 0.1, 1.3, D + 0.1, plain(pick(r, ['#3f4449', '#2f5d9e', '#b23a3a', '#e8e6e0', '#2e7d5b'])));
+    k.gable(0, 0, W, D, H, 1.8, 0.3, plain('#9aa0a4'), blank(L));
+    const ow = Math.min(10, W * 0.3);
+    const n = Math.max(2, Math.floor((W - ow) / 5));
+    for (let i = 0; i < n; i++) {
+      const x = -W / 2 + ow + ((W - ow) / n) * (i + 0.5);
+      k.box(x, 0, zf + 0.05, 3.4, 4.3, 0.12, plain('#5d6166'));
+      k.box(x, 0, zf + 0.6, 3.6, 1.2, 1.2, plain('#2e3034')); // dock leveller
+    }
+    k.box(ow / 2, 5, zf + 1.2, W - ow, 0.3, 2.4, plain('#8a8f94'));
+    const ofm = facade('ribbon', 'render', '#f0efea', '#2d3338');
+    k.block(-W / 2 + ow / 2, zf + 0.5, ow, 5, 0, 2, 3.2, 3, ofm, ofm, ofm, plain(GRAVEL));
+    extras.push(plural(n, 'loading door'), 'two-storey office');
+    name = 'Distribution warehouse';
+  } else if (arch === 'factory') {
+    L = look(r, 'brick', 'warehouse', pick(r, ['#2e5a45', '#2d3338']), pick(r, [BRICK[0], BRICK[2], BRICK[4]]));
+    const H = 8;
+    k.block(0, 0, W, D, 0, 2, 4, 3.6, fm(L), fm(L), fm(L));
+    // north-light sawtooth roof
+    const n = Math.max(2, Math.round(D / 6)), td = D / n, roof = roofM(pick(r, SLATE)[0]);
+    const glass = facade('curtain', 'glass', GLASS[2][0], '#2d3338');
+    for (let i = 0; i < n; i++) {
+      const z0 = -D / 2 + i * td, z1 = z0 + td;
+      k.g(roof).quad(k.T(W / 2, H, z0), k.T(-W / 2, H, z0), k.T(-W / 2, H + 3, z1), k.T(W / 2, H + 3, z1), 0, 0, W / 2, td / 2);
+      k.g(glass).quad(k.T(-W / 2, H, z1), k.T(W / 2, H, z1), k.T(W / 2, H + 3, z1), k.T(-W / 2, H + 3, z1), 0, 0, W / 6, 0.5);
+      const e = k.g(blank(L));
+      e.tri(k.T(-W / 2, H, z0), k.T(-W / 2, H, z1), k.T(-W / 2, H + 3, z1), [0, 0], [td / 6, 0], [td / 6, 0.5]);
+      e.tri(k.T(W / 2, H, z0), k.T(W / 2, H + 3, z1), k.T(W / 2, H, z1), [0, 0], [td / 6, 0.5], [td / 6, 0]);
+    }
+    const ch = 24 + r() * 12;
+    k.prismN(W / 2 - 3, -D / 2 + 3, 1.3, 10, 0, ch, blank(L));
+    k.prismN(W / 2 - 3, -D / 2 + 3, 1.45, 10, ch - 3, 0.8, plain(TRIM));
+    extras.push('sawtooth roof', 'chimney stack');
+    if (r() < 0.5) { k.prismN(-W / 2 + 3.5, -D / 2 + 3.5, 3, 12, H, 8, plain('#b8bcbf'), 1.6); extras.push('silo'); }
+    name = pick(r, ['Brick works', 'Engineering works', 'Bakery', 'Print works']);
+  } else {
+    L = look(r, 'metal', 'none', '#2d3338');
+    // open canopy over the front half, workshop behind
+    k.block(0, -D / 4, W, D / 2, 0, 1, 7, 0, blank(L), blank(L), blank(L), plain('#9aa0a4'));
+    k.box(0, 7, D / 4, W, 0.5, D / 2, plain('#c9cdd0'));
+    for (let x = -W / 2 + 0.3; x <= W / 2; x += Math.max(6, W / 5)) k.box(x, 0, zf - 0.3, 0.4, 7, 0.4, plain('#3a3a3a'));
+    for (let i = 0; i < Math.floor(W / 8); i++) if (r() < 0.7) lorry(k, -W / 2 + 4 + i * 8, D / 4 - 3, pick(r, CONTAINERS));
+    extras.push('lorry canopy');
+    name = 'Haulage depot';
+  }
+  return { name, detail: [L.wall[1], ...extras].join(' · ') };
+}
+
+// ---------------- plots: gardens, drives, car parks, plazas, yards ----------------
+const LEAVES = ['#4f8a36', '#5b9440', '#3e7a35', '#6c9a3a', '#4a8a4a', '#b0782f'];
+const gmat = (key: string, draw: (x: CanvasRenderingContext2D, r: () => number) => void) => M(`g|${key}`, () => new THREE.MeshLambertMaterial({ map: tex(`g|${key}`, 64, 64, draw) }));
+const lawnM = (f: number) => gmat(`lawn${f}`, (x, r) => {
+  for (let i = 0; i < 4; i++) { x.fillStyle = shade('#6aa046', f * (i % 2 ? 1.07 : 0.95)); x.fillRect(0, i * 16, 64, 16); }
+  for (let i = 0; i < 300; i++) { x.fillStyle = `rgba(${r() < 0.5 ? '40,70,20' : '200,230,150'},0.18)`; x.fillRect(r() * 64, r() * 64, 1, 1.5); }
+});
+const slabsM = () => gmat('slabs', (x, r) => {
+  x.fillStyle = '#b3aea4'; x.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { x.fillStyle = shade('#cfcac0', 0.95 + r() * 0.1); x.fillRect(i * 16 + 0.6, j * 16 + 0.6, 14.8, 14.8); }
+});
+const blockM = () => gmat('block', (x, r) => {
+  x.fillStyle = '#6e4a3c'; x.fillRect(0, 0, 64, 64);
+  for (let j = 0; j < 16; j++) for (let i = 0; i < 8; i++) { x.fillStyle = shade('#a8664f', 0.85 + r() * 0.3); x.fillRect(i * 8 + (j % 2) * 4 + 0.4, j * 4 + 0.4, 7.2, 3.2); }
+});
+const tarmacM = () => gmat('tarmac', (x, r) => { x.fillStyle = '#4c4f54'; x.fillRect(0, 0, 64, 64); for (let i = 0; i < 400; i++) { x.fillStyle = `rgba(255,255,255,${r() * 0.07})`; x.fillRect(r() * 64, r() * 64, 1, 1); } });
+const gravelM = () => gmat('gravel', (x, r) => { x.fillStyle = '#c9bc9c'; x.fillRect(0, 0, 64, 64); for (let i = 0; i < 700; i++) { x.fillStyle = shade('#c9bc9c', 0.75 + r() * 0.45); x.fillRect(r() * 64, r() * 64, 1.4, 1.4); } });
+const tilesM = () => gmat('tiles', (x) => { for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { x.fillStyle = (i + j) % 2 ? '#e9e4d8' : '#7a3b30'; x.fillRect(i * 8, j * 8, 8, 8); } });
+const concreteM = () => gmat('concrete', (x, r) => {
+  x.fillStyle = '#b4b1a9'; x.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 200; i++) { x.fillStyle = `rgba(0,0,0,${r() * 0.06})`; x.fillRect(r() * 64, r() * 64, 2 + r() * 4, 1 + r() * 3); }
+  x.fillStyle = '#8f8c85'; x.fillRect(0, 0, 64, 0.8); x.fillRect(0, 0, 0.8, 64);
+});
+const plazaM = () => gmat('plaza', (x, r) => {
+  x.fillStyle = '#b9b1a2'; x.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { x.fillStyle = shade('#ddd5c6', 0.96 + r() * 0.08); x.fillRect(i * 32 + 0.6, j * 32 + 0.6, 30.8, 30.8); }
+  x.fillStyle = '#a79d8c'; x.fillRect(0, 30, 64, 4);
+});
+const bedM = () => gmat('bed', (x, r) => {
+  x.fillStyle = '#5e4632'; x.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 140; i++) { x.fillStyle = pick(r, ['#d94f6a', '#f2d04a', '#f4f0ea', '#9b59c9', '#e5873a', '#4f8a36', '#4f8a36']); x.fillRect(r() * 64, r() * 64, 2.5, 2.5); }
+});
+const hedgeM = () => plain('#3f6e34');
+
+const rectXZ = (x0: number, z0: number, x1: number, z1: number): XZ[] => {
+  const a = Math.min(x0, x1), b = Math.max(x0, x1), c = Math.min(z0, z1), d = Math.max(z0, z1);
+  return [[a, d], [b, d], [b, c], [a, c]];
+};
+function flat(k: Kit, x0: number, z0: number, x1: number, z1: number, y: number, m: THREE.Material) {
+  if (Math.abs(x1 - x0) < 0.05 || Math.abs(z1 - z0) < 0.05) return;
+  k.cap(rectXZ(x0, z0, x1, z1), y, m);
+}
+// a run along x from x0 to x1, leaving gaps (gates, paths, drives)
+function run(x0: number, x1: number, gaps: [number, number][], draw: (a: number, b: number) => void) {
+  let a = x0;
+  for (const [g0, g1] of [...gaps].sort((p, q) => p[0] - q[0])) {
+    if (g0 > a + 0.2) draw(a, Math.min(g0, x1));
+    a = Math.max(a, g1);
+  }
+  if (x1 > a + 0.2) draw(a, x1);
+}
+function sphere(k: Kit, x: number, y: number, z: number, rad: number, m: THREE.Material, seg = 7, rings = 4, squash = 1) {
+  const g = k.g(m);
+  const P = (i: number, j: number) => {
+    const th = (i / seg) * Math.PI * 2, ph = (j / rings) * Math.PI;
+    return k.T(x + Math.sin(ph) * Math.cos(th) * rad, y + Math.cos(ph) * rad * squash, z + Math.sin(ph) * Math.sin(th) * rad);
+  };
+  for (let i = 0; i < seg; i++) for (let j = 0; j < rings; j++) g.quad(P(i, j), P(i + 1, j), P(i + 1, j + 1), P(i, j + 1));
+}
+function tree(k: Kit, x: number, z: number, s: number, r: () => number) {
+  k.prismN(x, z, 0.16 * s, 5, 0, 2.6 * s, plain('#6b4a2f'));
+  const leaf = plain(pick(r, LEAVES));
+  sphere(k, x, 3.8 * s, z, 1.9 * s, leaf);
+  if (r() < 0.6) sphere(k, x + 0.7 * s, 4.5 * s, z - 0.4 * s, 1.25 * s, leaf, 6, 3);
+}
+function car(k: Kit, x: number, z: number, alongZ: boolean, col: string) {
+  const [w, d] = alongZ ? [1.8, 4.3] : [4.3, 1.8], [cw, cd] = alongZ ? [1.6, 2.2] : [2.2, 1.6];
+  k.box(x, 0.1, z, w * 0.9, 0.32, d * 0.9, plain('#1c1d20'));
+  k.box(x, 0.38, z, w, 0.72, d, plain(col));
+  k.box(x, 1.1, z, cw, 0.6, cd, plain('#2b3640'));
+}
+function bench(k: Kit, x: number, z: number, alongX: boolean) {
+  const [w, d] = alongX ? [1.8, 0.55] : [0.55, 1.8];
+  k.box(x, 0, z, alongX ? w * 0.8 : 0.3, 0.42, alongX ? 0.3 : d * 0.8, plain('#3a3a3a'));
+  k.box(x, 0.42, z, w, 0.08, d, plain('#8a6446'));
+}
+function parasol(k: Kit, x: number, z: number, col: string) {
+  k.prismN(x, z, 0.45, 8, 0, 0.75, plain('#e8e6e0'));
+  k.prismN(x, z, 0.05, 4, 0.75, 1.5, plain('#3a3a3a'));
+  k.prismN(x, z, 1.4, 8, 2.2, 0.05, plain(col), 0.5, plain(col));
+  for (const s of [-1, 1]) k.box(x + s * 0.8, 0, z, 0.4, 0.45, 0.4, plain('#3a3a3a'));
+}
+function shed(k: Kit, x: number, z: number, r: () => number) {
+  k.box(x, 0, z, 2.4, 2.1, 2, plain(pick(r, ['#7a5a3e', '#5f7f5a', '#8a6446', '#6f8fae'])));
+  k.box(x, 2.1, z, 2.7, 0.12, 2.3, plain('#2e3034'));
+}
+function fountain(k: Kit, x: number, z: number) {
+  k.prismN(x, z, 3.3, 16, 0, 0.5, plain('#c9c2b4'));
+  k.prismN(x, z, 3.0, 16, 0.5, 0.02, plain('#4f93c4'));
+  k.prismN(x, z, 0.35, 8, 0.5, 1.3, plain('#c9c2b4'));
+  sphere(k, x, 2.3, z, 0.55, plain('#dcecf5'), 6, 3, 1.3);
+}
+function parkingRow(k: Kit, x0: number, x1: number, zBack: number, r: () => number, fill = 0.7) {
+  const n = Math.floor((x1 - x0) / 2.6);
+  for (let i = 0; i <= n; i++) flat(k, x0 + i * 2.6 - 0.06, zBack, x0 + i * 2.6 + 0.06, zBack + 5, 0.1, plain(PAINT));
+  for (let i = 0; i < n; i++) if (r() < fill) car(k, x0 + i * 2.6 + 1.3, zBack + 2.6, true, pick(r, CAR_COLS));
+  return n;
+}
+
+// Landscapes the plot around the building. Returns notes for the building card.
+function yard(k: Kit, l: Lot, r: () => number, rr: () => number): string[] {
+  const { w: W, d: D } = k.foot;
+  const F = l.d / 2 + l.front, Bk = -l.d / 2 - l.back, X0 = l.px - l.pw / 2, X1 = l.px + l.pw / 2;
+  const bf = D / 2, bb = -D / 2, door = k.doorX ?? 0;
+  const out: string[] = [];
+  const freeR = X1 - W / 2, freeL = -W / 2 - X0;
+  if (l.kind === 'house') {
+    flat(k, X0, Bk, X1, F, 0.04, lawnM(pick(rr, [0.94, 1, 1.06])));
+    const driveMat = pick(rr, [tarmacM(), gravelM(), blockM()]);
+    let drive: [number, number] | null = null;
+    if (Math.max(freeR, freeL) >= 2.8) {
+      const right = freeR >= freeL;
+      drive = right ? [W / 2 + 0.3, X1 - 0.3] : [X0 + 0.3, -W / 2 - 0.3];
+      flat(k, drive[0], bb + 1, drive[1], F, 0.07, driveMat);
+      if (r() < 0.75) car(k, (drive[0] + drive[1]) / 2, F - 3.3, true, pick(r, CAR_COLS));
+      out.push('driveway');
+    } else if (l.front > 5) {
+      const px = door > 0 ? -W / 4 : W / 4;
+      drive = [px - 1.7, px + 1.7];
+      flat(k, drive[0], bf + 0.3, drive[1], F, 0.07, driveMat);
+      if (r() < 0.75) car(k, px, (bf + F) / 2, true, pick(r, CAR_COLS));
+      out.push('parking pad');
+    }
+    flat(k, door - 0.6, bf, door + 0.6, F, 0.075, slabsM());
+    const edge = pick(rr, ['hedge', 'wall', 'picket', 'open', 'hedge'] as const);
+    const gaps: [number, number][] = [[door - 0.9, door + 0.9]];
+    if (drive) gaps.push(drive);
+    const zE = F - 0.35;
+    const wallM = plain(pick(rr, ['#9a4b35', '#b8a08c', '#e8e2d4']));
+    if (edge !== 'open') run(X0, X1, gaps, (a, b) => {
+      if (edge === 'hedge') k.box((a + b) / 2, 0, zE, b - a, 0.9, 0.7, hedgeM());
+      else if (edge === 'wall') k.box((a + b) / 2, 0, zE, b - a, 0.7, 0.3, wallM);
+      else { for (const y of [0.35, 0.75]) k.box((a + b) / 2, y, zE, b - a, 0.07, 0.05, plain('#f4f4f0')); for (let x = a + 0.1; x < b; x += 0.7) k.box(x, 0, zE, 0.08, 0.95, 0.06, plain('#f4f4f0')); }
+    });
+    out.push({ hedge: 'front hedge', wall: 'garden wall', picket: 'picket fence', open: 'open-plan front' }[edge]);
+    if (r() < 0.5) { run(X0 + 0.4, X1 - 0.4, gaps, (a, b) => flat(k, a, zE - 1.5, b, zE - 0.5, 0.075, bedM())); out.push('flower beds'); }
+    if (l.front > 6.5 && r() < 0.4) tree(k, door > 0 ? -W / 3 : W / 3, (bf + F) / 2, 0.7, r);
+    if (l.back > 2) {
+      const fence = plain(pick(rr, ['#8a6446', '#6e5238', '#a07a52']));
+      k.box((X0 + X1) / 2, 0, Bk + 0.05, X1 - X0, 1.8, 0.1, fence);
+      for (const x of [X0 + 0.05, X1 - 0.05]) k.box(x, 0, (bb + Bk) / 2, 0.1, 1.8, bb - Bk, fence);
+      if (l.back > 4) flat(k, -W / 2, bb - 3, W / 2, bb, 0.075, r() < 0.5 ? slabsM() : blockM());
+      if (l.back > 7 && r() < 0.6) { shed(k, X0 + 1.6, Bk + 1.5, r); out.push('shed'); }
+      if (l.back > 6 && r() < 0.75) tree(k, X1 - 2.5, Bk + 3, 0.8 + r() * 0.4, r);
+      if (l.back > 9 && r() < 0.15) { k.prismN((X0 + X1) / 2, Bk + 5, 1.7, 12, 0.7, 0.08, plain('#1e2226')); out.push('trampoline'); }
+      out.push(`${Math.round(l.back)} m back garden`);
+    }
+  } else if (l.kind === 'terrace') {
+    flat(k, X0, bf, X1, F, 0.05, pick(rr, [slabsM(), gravelM(), tilesM()]));
+    const wallM = plain(pick(rr, ['#9a4b35', '#b8a08c', '#e8e2d4'])), rails = rr() < 0.5;
+    run(X0, X1, [[door - 0.6, door + 0.6]], (a, b) => {
+      k.box((a + b) / 2, 0, F - 0.2, b - a, 0.6, 0.3, wallM);
+      if (rails) k.box((a + b) / 2, 0.6, F - 0.2, b - a, 0.5, 0.04, plain('#1f2226'));
+    });
+    if (r() < 0.6) { const bx = door > 0 ? X0 + 0.7 : X1 - 1.5; for (const i of [0, 1]) k.box(bx + i * 0.8, 0, F - 1, 0.6, 1.05, 0.7, plain(pick(r, ['#2f5d3a', '#222222', '#2f5d9e', '#6b4b2a']))); out.push('wheelie bins'); }
+    out.push(rails ? 'front wall and railings' : 'front wall');
+    if (l.back > 1.5) {
+      flat(k, X0, Bk, X1, bb, 0.05, r() < 0.6 ? lawnM(1) : slabsM());
+      const yw = plain('#8a4a36');
+      for (const x of [X0 + 0.1, X1 - 0.1]) k.box(x, 0, (bb + Bk) / 2, 0.2, 1.8, bb - Bk, yw);
+      k.box((X0 + X1) / 2, 0, Bk + 0.1, X1 - X0, 1.8, 0.2, yw);
+      if (l.back > 5 && r() < 0.35) tree(k, (X0 + X1) / 2, Bk + 2, 0.6, r);
+      out.push('back yard');
+    }
+  } else if (l.kind === 'shop') {
+    flat(k, X0, bf, X1, F, 0.05, slabsM());
+    if (l.front >= 3 && r() < 0.55) {
+      const n = Math.max(1, Math.floor(W / 4.5)), col = pick(r, FASCIA);
+      for (let i = 0; i < n; i++) parasol(k, -W / 2 + (W / n) * (i + 0.5), bf + 2, col);
+      out.push('café tables');
+    }
+    if (l.back > 2) {
+      flat(k, X0, Bk, X1, bb, 0.05, tarmacM());
+      for (const i of [0, 1]) k.box(X0 + 1.5 + i * 2, 0, Bk + 1.2, 1.6, 1.3, 1.1, plain('#3d5a3a'));
+      if (l.back > 6 && r() < 0.4) k.box(X1 - 3, 0.3, (bb + Bk) / 2, 2, 2.2, 5, plain('#f2f2f2'));
+      out.push('service yard');
+    }
+  } else if (l.kind === 'flats' || l.kind === 'office') {
+    const office = l.kind === 'office';
+    flat(k, X0, Bk, X1, F, 0.04, lawnM(1));
+    if (office) flat(k, X0, bf, X1, F, 0.05, plazaM());
+    else flat(k, -1.2, bf, 1.2, F, 0.075, slabsM());
+    // side drive to parking behind
+    const gaps: [number, number][] = [[-1.6, 1.6]];
+    let spaces = 0;
+    if (l.back >= 10) {
+      flat(k, X0 + 0.4, Bk + 0.4, X1 - 0.4, bb - 0.8, 0.06, tarmacM());
+      spaces = parkingRow(k, X0 + 0.6, X1 - 0.6, Bk + 0.5, r, office ? 0.85 : 0.65);
+      if (Math.max(freeR, freeL) >= 3.2) {
+        const d: [number, number] = freeR >= freeL ? [W / 2 + 0.2, X1 - 0.2] : [X0 + 0.2, -W / 2 - 0.2];
+        flat(k, d[0], bb - 0.8, d[1], F, 0.06, tarmacM());
+        gaps.push(d);
+      }
+      out.push(`car park (${spaces} spaces)`);
+    }
+    if (office) {
+      const n = Math.max(1, Math.floor((X1 - X0) / 7));
+      for (let i = 0; i < n; i++) {
+        const x = X0 + ((X1 - X0) * (i + 0.5)) / n;
+        if (Math.abs(x) < 2.5 || gaps.some(([a, b]) => x > a - 1 && x < b + 1)) continue;
+        k.box(x, 0, F - 2.2, 1.8, 0.6, 1.8, plain('#b9b3a8'));
+        tree(k, x, F - 2.2, 0.8, r);
+        bench(k, x + 2, F - 2.2, true);
+      }
+      if (r() < 0.35) { for (let i = 0; i < 3; i++) { k.prismN(X0 + 1.5 + i * 1.6, F - 1, 0.06, 5, 0, 9, plain('#d9dde0')); k.box(X0 + 2.2 + i * 1.6, 7.6, F - 1, 1.4, 0.9, 0.03, plain(pick(r, FASCIA))); } out.push('flagpoles'); }
+      out.push('plaza with planters');
+    } else {
+      run(X0, X1, gaps, (a, b) => k.box((a + b) / 2, 0, F - 0.4, b - a, 0.8, 0.7, hedgeM()));
+      if (l.front >= 5) for (const s of [-1, 1]) { tree(k, s * W / 3, (bf + F) / 2 + 0.5, 0.9, r); bench(k, s * 2.4, (bf + F) / 2, false); }
+      if (!spaces) k.box(X0 + 2, 0, bb - 2, 3, 1.6, 1.5, plain('#7a5a3e'));
+      out.push('communal garden');
+    }
+  } else if (l.kind === 'tower') {
+    flat(k, X0, Bk, X1, F, 0.05, plazaM());
+    if (l.front >= 7) { fountain(k, 0, (bf + F) / 2 + 0.3); out.push('fountain'); }
+    for (const x of [X0 + 1.6, X1 - 1.6]) if (Math.abs(x) > W / 2 + 1.5) for (let z = bb + 2; z < F - 1.5; z += 6) tree(k, x, z, 0.8, r);
+    if (l.back > 3) { flat(k, X1 - 4.5, Bk + 0.5, X1 - 0.8, bb - 0.5, 0.07, plain('#2a2c30')); out.push('car park ramp'); }
+    out.push('plaza');
+  } else if (l.kind === 'industry') {
+    flat(k, X0, Bk, X1, F, 0.05, concreteM());
+    // lorry bays in front of the loading doors
+    if (l.front >= 12) {
+      const n = Math.floor(W / 4.5);
+      for (let i = 0; i <= n; i++) flat(k, -W / 2 + i * 4.5 - 0.07, bf + 0.8, -W / 2 + i * 4.5 + 0.07, Math.min(F - 1.5, bf + 14), 0.1, plain('#e0c14a'));
+      for (let i = 0; i < n; i++) if (r() < 0.45) lorry(k, -W / 2 + 2.25 + i * 4.5, bf + 7.2, pick(r, CONTAINERS));
+      out.push('lorry yard');
+    }
+    if (l.back > 5) {
+      const m = Math.floor((X1 - X0 - 2) / 6.6);
+      for (let i = 0; i < m; i++) { const lv = r() < 0.5 ? 2 : 1; for (let j = 0; j < lv; j++) k.box(X0 + 4.2 + i * 6.6, j * 2.6, Bk + 1.8, 6.1, 2.55, 2.44, plain(pick(r, CONTAINERS))); }
+      if (m) out.push('container stacks');
+    }
+    if (freeR > 4) parkingRow(k, W / 2 + 0.5, X1 - 0.5, bb, r, 0.6);
+    // security fence round the plot, gate onto the road
+    const post = plain('#6b7176'), mesh = M('fence', () => new THREE.MeshLambertMaterial({ color: '#9aa3a8', transparent: true, opacity: 0.4, depthWrite: false }));
+    const side = (x0: number, z0: number, x1: number, z1: number) => { k.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.abs(x1 - x0) || 0.04, 2.2, Math.abs(z1 - z0) || 0.04, mesh); k.box((x0 + x1) / 2, 2.2, (z0 + z1) / 2, Math.abs(x1 - x0) || 0.08, 0.08, Math.abs(z1 - z0) || 0.08, post); };
+    run(X0, X1, [[-6, 6]], (a, b) => side(a, F - 0.3, b, F - 0.3));
+    side(X0 + 0.1, F - 0.3, X0 + 0.1, Bk + 0.1); side(X1 - 0.1, F - 0.3, X1 - 0.1, Bk + 0.1); side(X0 + 0.1, Bk + 0.1, X1 - 0.1, Bk + 0.1);
+    out.push('security fence');
+  }
+  return out;
+}
+
 export const USE: Record<Lot['kind'], { label: string; pop: number; unit: string }> = {
   house: { label: 'Housing · low density', pop: 4, unit: 'residents' },
   terrace: { label: 'Housing · terraced', pop: 5, unit: 'residents' },
@@ -737,17 +1075,20 @@ export const USE: Record<Lot['kind'], { label: string; pop: number; unit: string
   flats: { label: 'Housing · medium density', pop: 45, unit: 'residents' },
   office: { label: 'Offices', pop: 120, unit: 'jobs' },
   tower: { label: 'High density', pop: 160, unit: 'people' },
+  industry: { label: 'Industry', pop: 60, unit: 'jobs' },
 };
 
 export function makeBuilding(l: Lot): BuiltShape {
   const k = new Kit();
   const r = rng(Math.floor(l.seed * 4294967295));
   const rr = rng(hash(`row${l.row}`));
-  const d = l.kind === 'house' ? house(k, l, r, rr) : l.kind === 'terrace' ? terrace(k, l, r, rr) : l.kind === 'shop' ? shop(k, l, r) : l.kind === 'flats' ? flats(k, l, r) : l.kind === 'office' ? office(k, l, r) : tower(k, l, r);
+  const d = l.kind === 'house' ? house(k, l, r, rr) : l.kind === 'terrace' ? terrace(k, l, r, rr) : l.kind === 'shop' ? shop(k, l, r) : l.kind === 'flats' ? flats(k, l, r) : l.kind === 'office' ? office(k, l, r) : l.kind === 'industry' ? industry(k, l, r) : tower(k, l, r);
+  const height = k.top;
+  const y = yard(k, l, r, rr);
   const group = k.build();
   group.position.set(l.x, 0, l.z);
   // local +x runs along the road; local +z faces the road
   group.rotation.y = -l.rot;
   group.userData.lot = l;
-  return { group, height: k.top, ...d };
+  return { group, height, name: d.name, detail: [d.detail, ...y].filter(Boolean).join(' · ') };
 }
