@@ -1,5 +1,5 @@
 // Offline support: network-first for pages, cache-first for hashed assets.
-const CACHE = 'haulage-v1';
+const CACHE = 'tracks-v2';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {

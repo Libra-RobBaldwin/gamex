@@ -1,23 +1,33 @@
-// Procedural world generation: terrain + pre-placed resources, industries and towns.
-import type { BuildingKind, CargoId } from './data';
+// Seeded world generation: island terrain, towns with street grids, industries.
+import type { CargoId, IndustryKind } from './defs';
+import { EdgeGrid } from './geo';
 
 export const T_GRASS = 0;
 export const T_WATER = 1;
 export const T_SAND = 2;
-export const T_MOUNTAIN = 3;
-export const T_FOREST = 4; // decorative grass variant, buildable
+export const T_FOREST = 3;
 
-export interface Building {
+export interface Town {
   id: number;
-  kind: BuildingKind;
+  name: string;
+  cx: number;
+  cy: number;
+  growth: number; // points towards the next building
+  served: number; // passengers + goods handled, lifetime
+  parent?: number; // suburbs belong to a parent town
+}
+
+export interface Industry {
+  id: number;
+  kind: IndustryKind;
   x: number;
   y: number;
-  w: number;
-  h: number;
   name: string;
   stock: Partial<Record<CargoId, number>>;
   input: Partial<Record<CargoId, number>>;
-  progress: number[];
+  rate: number; // production multiplier
+  produced: number; // this period
+  moved: number; // this period
 }
 
 export function rng(seed: number): () => number {
@@ -31,7 +41,7 @@ export function rng(seed: number): () => number {
   };
 }
 
-function valueNoise(w: number, h: number, cell: number, rand: () => number): Float32Array {
+export function valueNoise(w: number, h: number, cell: number, rand: () => number): Float32Array {
   const gw = Math.ceil(w / cell) + 2;
   const gh = Math.ceil(h / cell) + 2;
   const grid = new Float32Array(gw * gh).map(() => rand());
@@ -49,178 +59,139 @@ function valueNoise(w: number, h: number, cell: number, rand: () => number): Flo
   return out;
 }
 
-const TOWN_NAMES = ['Lumbrook', 'Varrowmere', 'Fally Cross', 'Draymoor', 'Rimwick', 'Catherby Vale', 'Ardenholt', 'Seers Hollow'];
+export const TOWN_NAMES = [
+  'Kingsbridge', 'Ashford Vale', 'Marlow Heath', 'Redcliffe', 'Brampton', 'Easthaven',
+  'Thornbury', 'Wexcombe', 'Hollins Cross', 'Saltmere', 'Darrowby', 'Fenwick',
+];
 
-export interface GeneratedWorld {
+export interface World {
+  seed: number;
   w: number;
   h: number;
   terrain: Uint8Array;
-  buildings: Building[];
+  bld: Uint8Array; // building level per tile (0 = none)
+  bldTown: Int16Array; // owning town id, -1 none
+  road: EdgeGrid;
+  towns: Town[];
+  industries: Industry[];
   start: { x: number; y: number };
 }
 
-export function generateWorld(seed: number, w = 64, h = 64): GeneratedWorld {
+export function generateWorld(seed: number, w = 56, h = 56): World {
   const rand = rng(seed);
-  const n1 = valueNoise(w, h, 16, rand);
+  const n1 = valueNoise(w, h, 18, rand);
   const n2 = valueNoise(w, h, 7, rand);
-  const n3 = valueNoise(w, h, 3, rand);
-  const moist = valueNoise(w, h, 10, rand);
+  const moist = valueNoise(w, h, 8, rand);
   const terrain = new Uint8Array(w * h);
   const cx = w / 2, cy = h / 2;
-  const elev = new Float32Array(w * h);
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      // Keep the centre as land, drop towards the edges into sea.
       const dx = (x - cx) / cx, dy = (y - cy) / cy;
-      const edge = Math.max(0, Math.sqrt(dx * dx + dy * dy) - 0.55) * 1.4;
-      const e = n1[i] * 0.55 + n2[i] * 0.3 + n3[i] * 0.15 - edge;
-      elev[i] = e;
-      let t = T_GRASS;
-      if (e < 0.3) t = T_WATER;
-      else if (e < 0.34) t = T_SAND;
-      else if (e > 0.72) t = T_MOUNTAIN;
-      else if (moist[i] > 0.62) t = T_FOREST;
-      terrain[i] = t;
+      const edge = Math.max(0, Math.hypot(dx, dy) - 0.62) * 1.8;
+      const e = n1[i] * 0.65 + n2[i] * 0.35 - edge;
+      terrain[i] = e < 0.28 ? T_WATER : e < 0.31 ? T_SAND : moist[i] > 0.63 ? T_FOREST : T_GRASS;
     }
 
-  const buildings: Building[] = [];
-  const used = new Uint8Array(w * h);
-  let nextId = 1;
+  const bld = new Uint8Array(w * h);
+  const bldTown = new Int16Array(w * h).fill(-1);
+  const road = new EdgeGrid(w, h);
+  const blocked = new Uint8Array(w * h); // towns + industries footprint
   const idx = (x: number, y: number) => y * w + x;
   const inB = (x: number, y: number) => x >= 1 && y >= 1 && x < w - 1 && y < h - 1;
-  const land = (x: number, y: number) => {
-    const t = terrain[idx(x, y)];
-    return t === T_GRASS || t === T_FOREST;
-  };
-  const free = (x: number, y: number, bw = 1, bh = 1, pad = 1) => {
-    for (let yy = y - pad; yy < y + bh + pad; yy++)
-      for (let xx = x - pad; xx < x + bw + pad; xx++) {
-        if (!inB(xx, yy)) return false;
-        if (used[idx(xx, yy)]) return false;
-      }
-    for (let yy = y; yy < y + bh; yy++) for (let xx = x; xx < x + bw; xx++) if (!land(xx, yy)) return false;
-    return true;
-  };
-  const add = (kind: BuildingKind, x: number, y: number, bw = 1, bh = 1, name?: string) => {
-    for (let yy = y; yy < y + bh; yy++) for (let xx = x; xx < x + bw; xx++) used[idx(xx, yy)] = 1;
-    const b: Building = { id: nextId++, kind, x, y, w: bw, h: bh, name: name ?? '', stock: {}, input: {}, progress: [] };
-    buildings.push(b);
-    return b;
-  };
-  const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
+  const land = (x: number, y: number) => inB(x, y) && terrain[idx(x, y)] !== T_WATER;
 
-  // Find a spot near (x,y) at distance [dmin,dmax] satisfying predicate.
-  const near = (
-    x: number, y: number, dmin: number, dmax: number,
-    ok: (x: number, y: number) => boolean, tries = 400,
-  ): { x: number; y: number } | null => {
-    for (let i = 0; i < tries; i++) {
-      const a = rand() * Math.PI * 2;
-      const d = dmin + rand() * (dmax - dmin);
-      const px = Math.round(x + Math.cos(a) * d), py = Math.round(y + Math.sin(a) * d);
-      if (inB(px, py) && ok(px, py)) return { x: px, y: py };
-    }
-    return null;
-  };
-  const cluster = (kind: BuildingKind, x: number, y: number, count: number, spread = 3) => {
-    let placed = 0;
-    for (let i = 0; i < count * 8 && placed < count; i++) {
-      const p = near(x, y, 0, spread, (px, py) => free(px, py, 1, 1, 0), 30);
-      if (p) { add(kind, p.x, p.y); placed++; }
-    }
-  };
-  const nearTerrain = (x: number, y: number, t: number, r: number) => {
-    for (let yy = y - r; yy <= y + r; yy++)
-      for (let xx = x - r; xx <= x + r; xx++)
-        if (xx >= 0 && yy >= 0 && xx < w && yy < h && terrain[idx(xx, yy)] === t) return true;
-    return false;
+  const landArea = (x: number, y: number, r: number) => {
+    let n = 0, t = 0;
+    for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) { t++; if (land(xx, yy)) n++; }
+    return n / t;
   };
 
-  // Towns: start town near the middle, others spread out.
-  const towns: { x: number; y: number }[] = [];
-  const startTown = near(cx, cy, 0, 10, (x, y) => free(x, y, 2, 2, 2), 2000) ?? { x: Math.floor(cx), y: Math.floor(cy) };
-  towns.push(startTown);
-  for (let i = 0; i < 2000 && towns.length < 5; i++) {
-    const x = 4 + Math.floor(rand() * (w - 8)), y = 4 + Math.floor(rand() * (h - 8));
-    if (!free(x, y, 2, 2, 2)) continue;
-    if (towns.some((t) => dist(t.x, t.y, x, y) < 17)) continue;
-    towns.push({ x, y });
+  // --- towns ---
+  const towns: Town[] = [];
+  const wanted = 6;
+  for (let tries = 0; tries < 4000 && towns.length < wanted; tries++) {
+    const x = 5 + Math.floor(rand() * (w - 10)), y = 5 + Math.floor(rand() * (h - 10));
+    if (landArea(x, y, 4) < 0.92) continue;
+    if (towns.some((t) => Math.hypot(t.cx - x, t.cy - y) < 15)) continue;
+    towns.push({ id: towns.length, name: TOWN_NAMES[towns.length], cx: x, cy: y, growth: 0, served: 0 });
   }
-  towns.forEach((t, i) => add('town', t.x, t.y, 2, 2, TOWN_NAMES[i % TOWN_NAMES.length]));
+  // Biggest town nearest the middle.
+  towns.sort((a, b) => Math.hypot(a.cx - cx, a.cy - cy) - Math.hypot(b.cx - cx, b.cy - cy));
+  towns.forEach((t, i) => { t.id = i; t.name = TOWN_NAMES[i]; });
 
-  // Starter chain: trees -> sawmill -> start town.
-  const sx = startTown.x, sy = startTown.y;
-  const saw = near(sx, sy, 7, 10, (x, y) => free(x, y, 1, 1, 2), 2000);
-  if (saw) {
-    add('sawmill', saw.x, saw.y, 1, 1, 'Sawmill');
-    const grove = near(saw.x, saw.y, 6, 9, (x, y) => free(x, y, 1, 1, 1) && dist(x, y, sx, sy) > 6, 2000);
-    if (grove) cluster('tree', grove.x, grove.y, 5, 2.5);
-  }
-
-  // Fishing near a shore + cooking range.
-  const shoreOk = (x: number, y: number) =>
-    terrain[idx(x, y)] === T_WATER && !used[idx(x, y)] &&
-    [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inB(x + dx, y + dy) && terrain[idx(x + dx, y + dy)] !== T_WATER);
-  const fish = near(sx, sy, 6, 24, shoreOk, 4000);
-  if (fish) {
-    add('fishing_spot', fish.x, fish.y);
-    const f2 = near(fish.x, fish.y, 1, 4, shoreOk, 200);
-    if (f2) add('fishing_spot', f2.x, f2.y);
-    const rng2 = near(fish.x, fish.y, 5, 9, (x, y) => free(x, y, 1, 1, 1), 1000);
-    if (rng2) add('range', rng2.x, rng2.y, 1, 1, 'Cooking range');
-  }
-
-  // Mine: copper + tin near mountains, with a furnace.
-  const mineOk = (x: number, y: number) => free(x, y, 1, 1, 1) && nearTerrain(x, y, T_MOUNTAIN, 2);
-  const mine = near(sx, sy, 10, 22, mineOk, 4000) ?? near(sx, sy, 10, 22, (x, y) => free(x, y, 1, 1, 1), 2000);
-  if (mine) {
-    cluster('copper_rock', mine.x, mine.y, 3, 2);
-    const tin = near(mine.x, mine.y, 3, 5, (x, y) => free(x, y, 1, 1, 0), 400);
-    if (tin) cluster('tin_rock', tin.x, tin.y, 3, 2);
-    const fur = near(mine.x, mine.y, 7, 11, (x, y) => free(x, y, 1, 1, 2), 2000);
-    if (fur) add('furnace', fur.x, fur.y, 1, 1, 'Furnace');
-  }
-
-  // Higher tier resources further out.
-  const farFrom = (x: number, y: number, dmin: number) => dist(x, y, sx, sy) >= dmin;
-  const pick = (ok: (x: number, y: number) => boolean) => {
-    for (let i = 0; i < 4000; i++) {
-      const x = 2 + Math.floor(rand() * (w - 4)), y = 2 + Math.floor(rand() * (h - 4));
-      if (ok(x, y)) return { x, y };
-    }
-    return null;
-  };
-  for (let k = 0; k < 2; k++) {
-    const o = pick((x, y) => free(x, y, 1, 1, 1) && farFrom(x, y, 12) && terrain[idx(x, y)] === T_FOREST);
-    if (o) cluster('oak', o.x, o.y, 4, 2.5);
-  }
-  for (let k = 0; k < 2; k++) {
-    const o = pick((x, y) => free(x, y, 1, 1, 1) && farFrom(x, y, 16) && nearTerrain(x, y, T_WATER, 2));
-    if (o) cluster('willow', o.x, o.y, 3, 2);
-  }
-  for (let k = 0; k < 2; k++) {
-    const o = pick((x, y) => free(x, y, 1, 1, 1) && farFrom(x, y, 16) && nearTerrain(x, y, T_MOUNTAIN, 2));
-    if (o) cluster('iron_rock', o.x, o.y, 3, 2);
-  }
-  for (let k = 0; k < 2; k++) {
-    const o = pick((x, y) => free(x, y, 1, 1, 1) && farFrom(x, y, 20) && nearTerrain(x, y, T_MOUNTAIN, 3));
-    if (o) cluster('coal_rock', o.x, o.y, 3, 2);
-  }
-  for (let k = 0; k < 2; k++) {
-    const o = pick((x, y) => shoreOk(x, y) && farFrom(x, y, 18));
-    if (o) add('trout_spot', o.x, o.y);
-  }
-  // A few extra plain trees everywhere and extra industries near other towns.
-  for (let k = 0; k < 4; k++) {
-    const o = pick((x, y) => free(x, y, 1, 1, 1) && farFrom(x, y, 10));
-    if (o) cluster('tree', o.x, o.y, 3, 2);
-  }
-  towns.slice(1).forEach((t, i) => {
-    const kind: BuildingKind = i % 2 === 0 ? 'furnace' : 'sawmill';
-    const p = near(t.x, t.y, 6, 10, (x, y) => free(x, y, 1, 1, 2), 1000);
-    if (p) add(kind, p.x, p.y, 1, 1, kind === 'furnace' ? 'Furnace' : 'Sawmill');
+  towns.forEach((t, i) => {
+    const R = i === 0 ? 5 : i < 3 ? 4 : 3;
+    layTown(t, R, i === 0 ? 2.4 : 1.3);
   });
 
-  return { w, h, terrain, buildings, start: { x: sx + 1, y: sy + 1 } };
+  function layTown(t: Town, R: number, density: number) {
+    const street = (x: number, y: number) =>
+      Math.abs(x - t.cx) <= R && Math.abs(y - t.cy) <= R && land(x, y) &&
+      ((y - t.cy) % 3 === 0 || (x - t.cx) % 3 === 0);
+    for (let y = t.cy - R; y <= t.cy + R; y++)
+      for (let x = t.cx - R; x <= t.cx + R; x++) {
+        if (!street(x, y)) continue;
+        if (street(x + 1, y) && (y - t.cy) % 3 === 0) road.set(idx(x, y), 0, 1);
+        if (street(x, y + 1) && (x - t.cx) % 3 === 0) road.set(idx(x, y), 2, 1);
+      }
+    for (let y = t.cy - R - 1; y <= t.cy + R + 1; y++)
+      for (let x = t.cx - R - 1; x <= t.cx + R + 1; x++) {
+        if (!land(x, y)) continue;
+        const i = idx(x, y);
+        if (road.any(i)) { blocked[i] = 1; continue; }
+        const d = Math.hypot(x - t.cx, y - t.cy);
+        const p = Math.max(0, 1 - d / (R + 1.5)) * density;
+        if (rand() > p) continue;
+        let level = 1;
+        if (d < R * 0.35 && rand() < density * 0.35) level = 3;
+        else if (d < R * 0.7 && rand() < density * 0.4) level = 2;
+        bld[i] = level;
+        bldTown[i] = t.id;
+        blocked[i] = 1;
+        if (terrain[i] === T_FOREST) terrain[i] = T_GRASS;
+      }
+  }
+
+  // --- industries (2x2 footprints) ---
+  const industries: Industry[] = [];
+  const freeRect = (x: number, y: number, pad: number) => {
+    for (let yy = y - pad; yy < y + 2 + pad; yy++)
+      for (let xx = x - pad; xx < x + 2 + pad; xx++) {
+        if (!inB(xx, yy)) return false;
+        if (blocked[idx(xx, yy)]) return false;
+      }
+    for (let yy = y; yy < y + 2; yy++) for (let xx = x; xx < x + 2; xx++) if (!land(xx, yy)) return false;
+    return true;
+  };
+  const nearestTown = (x: number, y: number) =>
+    towns.reduce((best, t) => (Math.hypot(t.cx - x, t.cy - y) < Math.hypot(best.cx - x, best.cy - y) ? t : best), towns[0]);
+  const placeIndustry = (kind: IndustryKind): Industry | null => {
+    for (let tries = 0; tries < 3000; tries++) {
+      const x = 2 + Math.floor(rand() * (w - 5)), y = 2 + Math.floor(rand() * (h - 5));
+      if (!freeRect(x, y, 2)) continue;
+      if (towns.some((t) => Math.hypot(t.cx - x, t.cy - y) < 8)) continue;
+      if (industries.some((o) => Math.hypot(o.x - x, o.y - y) < 7)) continue;
+      const ind = makeIndustry(industries.length, kind, x, y, nearestTown(x, y).name);
+      industries.push(ind);
+      for (let yy = y; yy < y + 2; yy++) for (let xx = x; xx < x + 2; xx++) {
+        blocked[idx(xx, yy)] = 1;
+        terrain[idx(xx, yy)] = T_GRASS;
+      }
+      return ind;
+    }
+    return null;
+  };
+  const plan: IndustryKind[] = ['coal_mine', 'power_station', 'forest', 'sawmill', 'farm', 'food_plant', 'coal_mine', 'forest', 'farm', 'power_station'];
+  for (const k of plan) placeIndustry(k);
+
+  const start = towns[0] ? { x: towns[0].cx, y: towns[0].cy } : { x: cx, y: cy };
+  return { seed, w, h, terrain, bld, bldTown, road, towns, industries, start };
+}
+
+export function makeIndustry(id: number, kind: IndustryKind, x: number, y: number, townName: string): Industry {
+  const label: Record<IndustryKind, string> = {
+    coal_mine: 'Colliery', power_station: 'Power Station', forest: 'Forest', sawmill: 'Sawmill', farm: 'Farm', food_plant: 'Food Plant',
+  };
+  return { id, kind, x, y, name: `${townName} ${label[kind]}`, stock: {}, input: {}, rate: 1, produced: 0, moved: 0 };
 }
