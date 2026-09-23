@@ -43,6 +43,8 @@ export class Renderer {
   ctx: CanvasRenderingContext2D;
   game: Game;
   cam = { x: 0, y: 0, zoom: 1.2 };
+  // 'full' 3D, 'low' cut-down buildings so stops and vehicles show, 'plan' near-flat map view
+  view: 'full' | 'low' | 'plan' = 'full';
   cssW = 0;
   cssH = 0;
   private dpr = 1;
@@ -728,6 +730,24 @@ export class Renderer {
   private drawBuilding(x: number, y: number, level: number, i: number) {
     this.isoT();
     const h1 = hash(i), h2 = hash(i + 101), h3 = hash(i + 202);
+    const hs = this.view === 'full' ? 1 : this.view === 'low' ? 0.26 : 0.05;
+    if (hs < 1) {
+      // cut-away: a short block in the building's colours, roof on top
+      const ins = level === 1 ? 0.2 : level === 2 ? 0.12 : 0.1;
+      const x0 = x + ins, y0 = y + ins, x1 = x + 1 - ins, y1 = y + 1 - ins;
+      const wall = level === 1 ? HOUSE_WALL[Math.floor(h2 * HOUSE_WALL.length)] : level === 2 ? FLAT_WALL[Math.floor(h2 * FLAT_WALL.length)] : TOWER_WALL[Math.floor(h2 * TOWER_WALL.length)];
+      const top = level === 1 ? HOUSE_ROOF[Math.floor(h3 * HOUSE_ROOF.length)] : shade(wall, 1.12);
+      const full = level === 1 ? 14 : level === 2 ? 26 + Math.floor(h1 * 3) * 8 : 70 + Math.floor(h1 * 5) * 12;
+      this.box(x0, y0, x1, y1, 0, Math.max(1.5, full * hs), wall, top);
+      if (this.view === 'plan' && level > 1) {
+        this.ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        const p = iso(x + 0.5, y + 0.5, full * hs);
+        this.ctx.font = '700 7px Inter, system-ui, sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(level === 3 ? '▲' : '■', p.x, p.y + 2);
+      }
+      return;
+    }
     if (level === 1) {
       const ins = 0.18 + h1 * 0.06;
       const x0 = x + ins, y0 = y + ins, x1 = x + 1 - ins, y1 = y + 1 - ins;
@@ -773,6 +793,7 @@ export class Renderer {
 
   private drawTree(x: number, y: number, v: number, sc: number) {
     this.isoT();
+    if (this.view !== 'full') sc *= this.view === 'low' ? 0.55 : 0.32;
     const p = iso(x, y);
     const img = this.trees[v];
     const w = 26 * sc, h = 36 * sc;

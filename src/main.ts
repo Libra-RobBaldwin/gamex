@@ -51,6 +51,9 @@ class App {
   hiddenAt: number | null = null;
   sheetAt = 0;
   incomeSamples: { t: number; earned: number }[] = [];
+  view: 'full' | 'low' | 'plan' = (() => { try { const v = localStorage.getItem('tt-view'); return v === 'low' || v === 'plan' ? v : 'full'; } catch { return 'full'; } })();
+
+  renderViewButton() { $('#b-view').textContent = this.view === 'full' ? '🏙️' : this.view === 'low' ? '🏘️' : '🗺️'; }
 
   constructor() {
     const saved = load();
@@ -87,6 +90,7 @@ class App {
         <div id="topbtns">
           <button id="b-speed" class="glass icon" title="Speed">▶</button>
           <button id="b-menu" class="glass icon" title="Menu">☰</button>
+          <button id="b-view" class="glass icon" title="View">🏙️</button>
         </div>
       </div>
       <div id="toasts"></div>
@@ -110,6 +114,13 @@ class App {
     document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) =>
       b.addEventListener('click', () => this.setTool(b.dataset.tool as Tool)));
     $('#b-menu').addEventListener('click', () => this.open({ kind: 'menu' }));
+    $('#b-view').addEventListener('click', () => {
+      this.view = this.view === 'full' ? 'low' : this.view === 'low' ? 'plan' : 'full';
+      try { localStorage.setItem('tt-view', this.view); } catch { /* ignore */ }
+      this.renderViewButton();
+      this.toast(this.view === 'full' ? 'Full 3D view' : this.view === 'low' ? 'Low buildings: see stops and traffic' : 'Plan view: everything flat');
+    });
+    this.renderViewButton();
     $('#b-speed').addEventListener('click', () => {
       this.speed = this.speed === 1 ? 2 : this.speed === 2 ? 4 : 1;
       $('#b-speed').textContent = this.speed === 1 ? '▶' : this.speed === 2 ? '▶▶' : '▶▶▶';
@@ -823,6 +834,9 @@ class App {
       grid: this.tool !== 'look',
       floats: this.floats,
     };
+    // building and routing tools cut buildings down automatically so you can see what you're doing
+    const busy = this.tool === 'station' || this.tool === 'line' || this.tool === 'road' || this.tool === 'rail';
+    this.r.view = this.view === 'full' && busy ? 'low' : this.view;
     this.r.draw(now, ov);
     requestAnimationFrame((t) => this.frame(t));
   }

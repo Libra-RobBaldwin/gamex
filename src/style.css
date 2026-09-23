@@ -93,7 +93,7 @@ button.icon { width: 44px; height: 40px; padding: 0; font-size: 15px; border-rad
 /* ---- toasts ---- */
 #toasts {
   position: absolute;
-  top: calc(96px + var(--safe-t));
+  top: calc(144px + var(--safe-t));
   left: 50%;
   transform: translateX(-50%);
   width: min(92vw, 460px);
