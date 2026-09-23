@@ -58,3 +58,20 @@ button.danger { background: #d8392b; color: #fff; border-color: transparent; }
 #bp .lift { font-size: 12.5px; color: var(--muted); }
 #bp .lift b { color: var(--text); }
 #bp .prof { width: 100%; height: 62px; background: rgba(0, 0, 0, 0.25); border-radius: 8px; }
+#tools { grid-template-columns: repeat(6, 1fr); }
+#rtype { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 4px; }
+#rtype.hidden { display: none; }
+#rtype button { background: transparent; border: 0; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 7px 0; font-size: 12px; color: var(--muted); border-radius: 10px; }
+#rtype button i { font-style: normal; font-size: 15px; }
+#rtype button.on { background: rgba(76, 195, 255, 0.18); color: var(--text); }
+#sheet { position: absolute; left: 8px; right: 8px; bottom: calc(8px + var(--safe-b)); max-height: 72dvh; overflow: auto; padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 8px; z-index: 5; }
+#sheet.hidden { display: none; }
+#sheet .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#sheet .plan { border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+#sheet .plan.no { opacity: 0.75; }
+#sheet ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+#sheet .bad { color: var(--bad); font-size: 12.5px; }
+#sheet .xs { width: 100%; height: 96px; }
+#sheet .xs text { fill: #cfd6de; font-size: 9px; }
+#sheet .xs text.h { fill: #8e98a4; font-size: 9.5px; }
+#sheet { background: rgba(18, 22, 30, 0.97); z-index: 10; }

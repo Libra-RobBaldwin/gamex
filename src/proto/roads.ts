@@ -1,12 +1,47 @@
 // Free-form road network in metres: nodes + segments (straight, or curved as a sampled polyline),
 // snapping, junction splitting, and building plots laid out along both sides of every road.
 
-export const ROAD_W = 8; // carriageway: two 3.5 m lanes plus a little margin
-export const PAVE = 2.2; // pavement each side
-export const HALF = ROAD_W / 2 + PAVE; // centreline to back of pavement
-export const COST_PER_M = 250;
+// Road types by cross-section. Widths are per side of the centreline: half the central
+// reservation, the lanes in one direction, a hard shoulder, then pavement or grass verge.
+export type RoadType = 'street' | 'avenue' | 'dual' | 'motorway';
+export interface RoadDef {
+  label: string; icon: string; lanes: number; lane: number; median: number; shoulder: number; pave: number; verge: number;
+  speed: number; cost: number; minR: number; maxGrade: number; frontage: boolean; trees: boolean; blurb: string;
+}
+export const ROADS: Record<RoadType, RoadDef> = {
+  street: { label: 'Street', icon: '🏘️', lanes: 1, lane: 3.25, median: 0, shoulder: 0, pave: 2.4, verge: 0, speed: 13.4, cost: 250, minR: 14, maxGrade: 0.08, frontage: true, trees: false, blurb: '1 lane each way · 2.4 m pavements · 30 mph' },
+  avenue: { label: 'Avenue', icon: '🌳', lanes: 1, lane: 3.5, median: 0, shoulder: 0, pave: 5, verge: 0, speed: 13.4, cost: 480, minR: 25, maxGrade: 0.07, frontage: true, trees: true, blurb: '1 lane each way · 5 m tree-lined pavements · 30 mph' },
+  dual: { label: 'Dual', icon: '🛣️', lanes: 2, lane: 3.5, median: 2.4, shoulder: 0, pave: 2.6, verge: 0, speed: 22, cost: 1300, minR: 60, maxGrade: 0.06, frontage: true, trees: false, blurb: '2 lanes each way · central barrier · 50 mph' },
+  motorway: { label: 'Motorway', icon: '🚀', lanes: 3, lane: 3.65, median: 3, shoulder: 3.3, pave: 0, verge: 3, speed: 31, cost: 2800, minR: 180, maxGrade: 0.05, frontage: false, trees: false, blurb: '3 lanes each way · hard shoulders · no frontage or stops · 70 mph' },
+};
+// centreline to the kerb (edge of the carriageway, including any hard shoulder)
+export const kerbOf = (d: RoadDef) => d.median / 2 + d.lanes * d.lane + d.shoulder;
+// centreline to the back of the pavement or verge
+export const halfOf = (d: RoadDef) => kerbOf(d) + d.pave + d.verge;
+export const HALF = halfOf(ROADS.street);
+export const ROAD_W = kerbOf(ROADS.street) * 2;
 export const MIN_LEN = 10;
-export const MIN_RADIUS = 14; // tightest curve a road can take
+export const MIN_RADIUS = 14; // tightest curve any road can take
+
+// Bus stops. A lay-by is 3 m deep and 35 m long: an entry taper, room for a bus, an exit taper.
+export const BAY = { entry: 12, stand: 15, exit: 8, depth: 3 };
+export const MIN_FOOTWAY = 2, MIN_LANE = 3;
+export interface Stop { id: number; s: number; side: 1 | -1; kind: 'kerb' | 'layby'; take: { pave: number; lane: number; land: number } }
+// where along its road a stop's lay-by (or kerb markings) runs, entry taper first in the bus's direction
+export function stopSpan(st: Stop): [number, number] {
+  const before = BAY.entry + BAY.stand / 2, after = BAY.stand / 2 + BAY.exit;
+  return st.side === 1 ? [st.s - before, st.s + after] : [st.s - after, st.s + before];
+}
+// how far into its full depth a lay-by is at distance t along the road (0 outside, 1 at the stand)
+export function bayWeight(st: Stop, t: number) {
+  const d = st.side === 1 ? t - st.s : st.s - t; // along the bus's direction, from the stand's middle
+  const h = BAY.stand / 2;
+  if (d < -h - BAY.entry || d > h + BAY.exit) return 0;
+  if (d < -h) return (d + h + BAY.entry) / BAY.entry;
+  if (d > h) return 1 - (d - h) / BAY.exit;
+  return 1;
+}
+export interface StopPlan { kind: 'kerb' | 'layby'; ok: boolean; title: string; notes: string[]; cost: number; take: Stop['take']; lots: Lot[]; blocked?: string }
 export const CLEAR_COST = 6000; // compulsory purchase per building
 export const RAISE_COST = 170; // extra per metre of road, per metre it's raised (embankment low, viaduct high)
 
@@ -15,8 +50,8 @@ export type { HeightMode } from './grade';
 
 export interface RNode { id: number; x: number; z: number; y: number }
 // `mid` holds the interior points of a curved road, in order from a to b (empty when straight)
-export interface RSeg { id: number; a: number; b: number; mid: P[] }
-export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower' | 'industry';
+export interface RSeg { id: number; a: number; b: number; mid: P[]; type: RoadType; stops: Stop[] }
+export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower' | 'industry' | 'civic';
 // `row` identifies the run of plots along one side of one street, so neighbours can share a style
 // The building sits at (x, z) facing the road; its plot (parcel) runs from the back of the pavement
 // (`front` metres in front of the building) to `back` metres behind it, and is `pw` wide, centred
@@ -24,9 +59,10 @@ export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower
 export interface Lot {
   id: number; x: number; z: number; rot: number; w: number; d: number; h: number; kind: LotKind; seg: number; seed: number; row: number;
   front: number; back: number; px: number; pw: number;
+  arch?: string; // chosen use for civic buildings (church, pub, school...)
 }
 export type Zone = 'town' | 'industrial';
-const BACK: Record<LotKind, number> = { house: 14, terrace: 8, shop: 7, flats: 14, office: 13, tower: 10, industry: 16 };
+const BACK: Record<LotKind, number> = { house: 14, terrace: 8, shop: 7, flats: 14, office: 13, tower: 10, industry: 16, civic: 10 };
 
 // y is height above the ground in metres (0 when missing)
 export interface P { x: number; z: number; y?: number }
@@ -183,8 +219,8 @@ export function bandOf(path: P[], half = HALF) {
 
 const hitsBand = (band: ReturnType<typeof bandOf>, poly: P[], c: P, r: number) => band.some((b) => dist(b.c, c) < b.r + r && polysOverlap(b.poly, poly));
 
-export interface RoadOpts { height: HeightMode; grade: number; cross: 'junction' | 'bridge'; spec: Spec }
-export const DEFAULT_OPTS: RoadOpts = { height: 'auto', grade: 0.06, cross: 'junction', spec: GRADES.road };
+export interface RoadOpts { height: HeightMode; grade: number; cross: 'junction' | 'bridge'; spec: Spec; type: RoadType }
+export const DEFAULT_OPTS: RoadOpts = { height: 'auto', grade: 0.06, cross: 'junction', spec: GRADES.road, type: 'street' };
 export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; path: P[]; profile?: Profile; bridges: number; raised: number }
 
 export class Network {
@@ -213,12 +249,17 @@ export class Network {
   // the path walked starting from node `from`
   pathFrom(s: RSeg, from: number) { const p = this.path(s); return from === s.a ? p : p.reverse(); }
   length(s: RSeg) { return pathLength(this.path(s)); }
+  def(s: RSeg) { return ROADS[s.type]; }
+  half(s: RSeg) { return halfOf(ROADS[s.type]); }
+  band(s: RSeg) { return bandOf(this.path(s), this.half(s)); }
+  // widest road meeting at a node: how big the junction is
+  nodeHalf(n: number) { return Math.max(HALF, ...this.segsAt(n).map((s) => this.half(s))); }
 
   addNode(x: number, z: number, y = 0) { const n = { id: this.nextId++, x, z, y }; this.nodes.set(n.id, n); return n.id; }
-  addSeg(a: number, b: number, mid: P[] = []) {
+  addSeg(a: number, b: number, mid: P[] = [], type: RoadType = 'street', stops: Stop[] = []) {
     if (a === b) return -1;
     if (!mid.length) for (const s of this.segs.values()) if (!s.mid.length && ((s.a === a && s.b === b) || (s.a === b && s.b === a))) return s.id;
-    const s = { id: this.nextId++, a, b, mid };
+    const s: RSeg = { id: this.nextId++, a, b, mid, type, stops };
     this.segs.set(s.id, s);
     return s.id;
   }
@@ -229,9 +270,10 @@ export class Network {
     return best;
   }
 
-  nearestSeg(p: P, max: number) {
+  nearestSeg(p: P, max: number, ok: (s: RSeg) => boolean = () => true) {
     let best: { seg: RSeg; x: number; z: number; s: number; ux: number; uz: number } | null = null, bd = max;
     for (const s of this.segs.values()) {
+      if (!ok(s)) continue;
       const c = closestOnPath(p, this.path(s));
       if (c.d < bd) { bd = c.d; best = { seg: s, x: c.x, z: c.z, s: c.s, ux: c.ux, uz: c.uz }; }
     }
@@ -246,8 +288,10 @@ export class Network {
     const n = this.addNode(c.x, c.z, c.y);
     this.segs.delete(segId);
     const L = pathLength(path);
-    this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1));
-    this.addSeg(n, s.b, subPath(path, c.s, L).slice(1, -1));
+    // stops go with whichever half they're on; one the split runs through is lost
+    const keepA = s.stops.filter((st) => stopSpan(st)[1] < c.s - 1), keepB = s.stops.filter((st) => stopSpan(st)[0] > c.s + 1).map((st) => ({ ...st, s: st.s - c.s }));
+    this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1), s.type, keepA);
+    this.addSeg(n, s.b, subPath(path, c.s, L).slice(1, -1), s.type, keepB);
     return n;
   }
 
@@ -368,13 +412,22 @@ export class Network {
   check(a: End, b: End, ctrl?: P, opts: RoadOpts = DEFAULT_OPTS): Check {
     const flat = this.makePath(a, b, ctrl);
     const length = pathLength(flat);
-    let cost = Math.round(length * COST_PER_M);
+    const def = ROADS[opts.type], half = halfOf(def);
+    let cost = Math.round(length * def.cost);
     const clears: Lot[] = [];
     let path = flat, profile: Profile | undefined, bridges = 0, raised = 0;
     const res = (reason?: string): Check => ({ ok: !reason, reason, length, cost: reason ? cost : cost + clears.length * CLEAR_COST, clears, path, profile, bridges, raised });
     if (length < MIN_LEN) return res('Too short');
-    if (minRadius(flat) < MIN_RADIUS) return res('Curve too tight');
-    const spec = opts.spec, G = Math.min(opts.grade, spec.max);
+    if (minRadius(flat) < Math.max(MIN_RADIUS, def.minR)) return res(def.minR > MIN_RADIUS ? `Curve too tight for a ${def.label.toLowerCase()} (${def.minR} m radius at least)` : 'Curve too tight');
+    // motorways only meet other roads through proper slip roads, not side-street junctions
+    const local = opts.type === 'street' || opts.type === 'avenue';
+    for (const e of [a, b]) {
+      const on = e.seg !== undefined ? this.segs.get(e.seg) : undefined;
+      const at = e.node !== undefined ? this.segsAt(e.node) : [];
+      if (local && ((on && on.type === 'motorway') || at.some((x) => x.type === 'motorway')))
+        return res('A street can’t join a motorway — build the slip road as a dual carriageway or motorway');
+    }
+    const spec = opts.spec, G = Math.min(opts.grade, spec.max, def.maxGrade);
     const limits: Limit[] = [];
     // water has to be bridged with clearance for boats
     const steps = Math.max(20, Math.ceil(length / 2));
@@ -388,10 +441,14 @@ export class Network {
     }
     // every road crossed: join it, go over it, or pass under it if it's already up high enough
     for (const c of this.crossings(flat)) {
-      const half = Math.min(40, (HALF + 1.5) / Math.max(0.25, c.sin));
-      if (c.e >= spec.clear - 0.01) limits.push({ s0: c.s - half, s1: c.s + half, hi: c.e - spec.clear, why: 'the flyover' });
-      else if (opts.cross === 'junction') limits.push({ s0: c.s, s1: c.s, lo: c.e, hi: c.e, why: 'the junction' });
-      else limits.push({ s0: c.s - half, s1: c.s + half, lo: c.e + spec.clear, why: c.e > 0.5 ? 'the raised road' : 'the road below' });
+      const other = c.seg !== undefined ? this.segs.get(c.seg) : undefined;
+      const oh = other ? this.half(other) : c.node !== undefined ? this.nodeHalf(c.node) : HALF;
+      const span = Math.min(60, (oh + 1.5) / Math.max(0.25, c.sin));
+      // anything crossing a motorway, or a motorway crossing anything, is grade separated
+      const separate = opts.cross === 'bridge' || opts.type === 'motorway' || other?.type === 'motorway' || (c.node !== undefined && this.segsAt(c.node).some((x) => x.type === 'motorway'));
+      if (c.e >= spec.clear - 0.01) limits.push({ s0: c.s - span, s1: c.s + span, hi: c.e - spec.clear, why: 'the flyover' });
+      else if (!separate) limits.push({ s0: c.s, s1: c.s, lo: c.e, hi: c.e, why: 'the junction' });
+      else limits.push({ s0: c.s - span, s1: c.s + span, lo: c.e + spec.clear, why: other?.type === 'motorway' ? 'the motorway' : c.e > 0.5 ? 'the raised road' : 'the road below' });
     }
     profile = solveProfile(length, this.endHeight(a) ?? 0, this.endHeight(b), G, limits, opts.height);
     if (!profile.ok) return res(profile.reason);
@@ -408,18 +465,18 @@ export class Network {
     });
     cost = Math.round(cost);
     // buildings in the way are compulsorily purchased and demolished
-    const band = bandOf(path);
+    const band = bandOf(path, half);
     for (const l of this.lots) if (hitsBand(band, rectCorners(l.x, l.z, l.rot, l.w, l.d), l, Math.hypot(l.w, l.d) / 2)) clears.push(l);
     // don't allow a new road to run almost on top of an existing one at the same level
     for (const s of this.segs.values()) {
       const shared = [a.node, b.node].some((id) => id === s.a || id === s.b) || a.seg === s.id || b.seg === s.id;
       if (shared) continue;
-      const sp = this.path(s);
+      const sp = this.path(s), near = (half + this.half(s)) * 0.7;
       for (let i = 1; i < path.length; i++) {
         const m = { x: (path[i - 1].x + path[i].x) / 2, z: (path[i - 1].z + path[i].z) / 2 };
-        if (path.length > 2 && (dist(m, a) < ROAD_W * 1.5 || dist(m, b) < ROAD_W * 1.5)) continue;
+        if (path.length > 2 && (dist(m, a) < near * 1.5 || dist(m, b) < near * 1.5)) continue;
         const c = closestOnPath(m, sp);
-        if (c.d >= ROAD_W || Math.abs(c.y - ((path[i - 1].y ?? 0) + (path[i].y ?? 0)) / 2) > 3) continue;
+        if (c.d >= near || Math.abs(c.y - ((path[i - 1].y ?? 0) + (path[i].y ?? 0)) / 2) > 3) continue;
         const ang = Math.abs(Math.sin(Math.atan2(path[i].z - path[i - 1].z, path[i].x - path[i - 1].x) - Math.atan2(c.uz, c.ux)));
         if (ang < 0.25) return res('Too close to another road');
       }
@@ -450,9 +507,9 @@ export class Network {
     cuts.sort((x, y) => x.s - y.s);
     const chain = [{ s: 0, node: na }, ...cuts, { s: L, node: nb }];
     const made: number[] = [];
-    for (let i = 0; i + 1 < chain.length; i++) made.push(this.addSeg(chain[i].node, chain[i + 1].node, subPath(path, chain[i].s, chain[i + 1].s).slice(1, -1)));
+    for (let i = 0; i + 1 < chain.length; i++) made.push(this.addSeg(chain[i].node, chain[i + 1].node, subPath(path, chain[i].s, chain[i + 1].s).slice(1, -1), opts.type));
     // lots overlapping the new road (e.g. queued ones) are dropped
-    const band = bandOf(path);
+    const band = bandOf(path, halfOf(ROADS[opts.type]));
     this.lots = this.lots.filter((l) => !hitsBand(band, rectCorners(l.x, l.z, l.rot, l.w, l.d), l, Math.hypot(l.w, l.d) / 2));
     this.touched = this.lots.filter((l) => hitsBand(band, this.parcelRect(l, -0.3), this.parcelCentre(l), this.parcelR(l)));
     for (const l of this.touched) this.fitParcel(l);
@@ -466,6 +523,8 @@ export class Network {
     const path = this.path(s);
     const L = pathLength(path);
     const out: Lot[] = [];
+    if (!this.def(s).frontage) return out;
+    const HALF = this.half(s);
     for (const side of [1, -1]) {
       const row = (segId * 7919 + (side > 0 ? 1 : 0) * 104729) % 1000003;
       let t = HALF + 2;
@@ -526,7 +585,7 @@ export class Network {
       // the plot's own front edge meets its road; anything else it touches is a clash
       const back0 = { ...l, front: 0 };
       const rear = this.parcelRect(back0, -0.3);
-      if ([...this.segs.values()].some((s) => hitsBand(bandOf(this.path(s)), rear, this.parcelCentre(back0), r))) continue;
+      if ([...this.segs.values()].some((s) => hitsBand(this.band(s), rear, this.parcelCentre(back0), r))) continue;
       return true;
     }
     return false;
@@ -537,10 +596,10 @@ export class Network {
     const r = Math.hypot(l.w + 1, l.d + 1) / 2;
     if (poly.some((p) => this.isWater(p) || Math.abs(p.x) > this.bound || Math.abs(p.z) > this.bound)) return false;
     for (const s of this.segs.values()) {
-      const path = this.path(s);
-      if (hitsBand(bandOf(path), poly, l, r)) return false;
+      const path = this.path(s), h = this.half(s);
+      if (hitsBand(bandOf(path, h), poly, l, r)) return false;
       // keep plots out of junction discs
-      for (const n of [path[0], path[path.length - 1]]) if (poly.some((p) => dist(p, n) < HALF + 1) || dist(l, n) < HALF + l.d / 2) return false;
+      for (const n of [path[0], path[path.length - 1]]) if (poly.some((p) => dist(p, n) < h + 1) || dist(l, n) < h + l.d / 2) return false;
     }
     // a building can't go on somebody else's plot (neighbouring plots may touch)
     const foot = rectCorners(l.x, l.z, l.rot, l.w - 0.4, l.d - 0.4);
@@ -549,5 +608,76 @@ export class Network {
       if (polysOverlap(foot, this.parcelRect(o))) return false;
     }
     return true;
+  }
+
+  // ---------- bus stops ----------
+  // Which side of a road a point is on: 1 = left of travel from a to b (we drive on the left).
+  sideOf(s: RSeg, p: P): 1 | -1 {
+    const c = closestOnPath(p, this.path(s));
+    return (p.x - c.x) * c.uz - (p.z - c.z) * c.ux > 0 ? 1 : -1;
+  }
+
+  // Plots on one side of a stretch of road, whose front edge is on the pavement.
+  frontLots(s: RSeg, side: 1 | -1, s0: number, s1: number) {
+    const path = this.path(s), half = this.half(s);
+    return this.lots.filter((l) => {
+      const c = this.parcelCentre(l), q = closestOnPath(c, path);
+      if (this.sideOf(s, c) !== side || q.s < s0 - l.pw / 2 || q.s > s1 + l.pw / 2) return false;
+      return Math.abs(q.d - (l.d + l.front + l.back) / 2 - half) < 2.5;
+    });
+  }
+
+  // Work out how a stop could fit here, the way a highways engineer would: the bus can simply stop
+  // in the lane, or a lay-by can be cut into the kerb. The 3 m it needs comes first from the
+  // pavement (down to a 2 m footway), then from narrowing the lanes (down to 3 m), and only then
+  // from buying a strip of the front gardens behind.
+  planStop(segId: number, t: number, side: 1 | -1): { plans: StopPlan[]; reason?: string } {
+    const s = this.segs.get(segId);
+    if (!s) return { plans: [], reason: 'No road here' };
+    const def = this.def(s), path = this.path(s), L = pathLength(path);
+    if (s.type === 'motorway') return { plans: [], reason: 'No bus stops on a motorway — put one on a slip road or a road nearby' };
+    if (pointAt(path, t).y > 0.5) return { plans: [], reason: 'Stops can’t go on a bridge or a ramp' };
+    const probe: Stop = { id: 0, s: t, side, kind: 'layby', take: { pave: 0, lane: 0, land: 0 } };
+    const [s0, s1] = stopSpan(probe);
+    if (s0 < this.nodeHalf(s.a) + 6 || s1 > L - this.nodeHalf(s.b) - 6) return { plans: [], reason: 'Too close to a junction or the end of the road — stops need about 35 m clear' };
+    if (s.stops.some((o) => o.side === side && stopSpan(o)[0] < s1 && stopSpan(o)[1] > s0)) return { plans: [], reason: 'There’s already a stop here' };
+    const plans: StopPlan[] = [];
+    const multi = def.lanes > 1;
+    plans.push({
+      kind: 'kerb', ok: true, title: 'Kerbside stop', cost: 6000, lots: [], take: { pave: 0, lane: 0, land: 0 },
+      notes: ['A shelter and a flag on the pavement, “BUS STOP” painted in the lane', multi ? 'The bus stops in the inside lane: traffic moves out to pass' : 'The bus stops in the lane: traffic behind waits while people board'],
+    });
+    // find the 3 m for a lay-by
+    let need = BAY.depth;
+    const pave = Math.min(need, Math.max(0, def.pave - MIN_FOOTWAY));
+    need -= pave;
+    const lanesNarrowed = multi ? def.lanes : 2;
+    const lane = Math.min(need, Math.max(0, (def.lane - MIN_LANE) * lanesNarrowed));
+    need -= lane;
+    const land = need > 0.01 ? need : 0;
+    const notes: string[] = [];
+    if (pave > 0) notes.push(`Pavement narrowed from ${def.pave.toFixed(1)} m to ${(def.pave - pave).toFixed(1)} m along the stop`);
+    if (lane > 0) notes.push(`Lanes narrowed from ${def.lane.toFixed(2)} m to ${(def.lane - lane / lanesNarrowed).toFixed(2)} m${multi ? '' : ', centre line moved over'} for ${Math.round(s1 - s0 + 20)} m`);
+    let lots: Lot[] = [], blocked: string | undefined, cost = 45000 + (lane > 0 ? 8000 : 0);
+    if (land > 0) {
+      lots = this.frontLots(s, side, s0, s1);
+      const tight = lots.filter((l) => l.front < land + 1);
+      if (tight.length) blocked = `Needs ${land.toFixed(1)} m of land, but ${tight.length === 1 ? 'a building stands' : `${tight.length} buildings stand`} right at the pavement`;
+      cost += lots.length * 12000 + Math.round(land * (s1 - s0) * 300);
+      notes.push(`Buys a ${land.toFixed(1)} m strip off ${lots.length || 'no'} front garden${lots.length === 1 ? '' : 's'}; the pavement moves back into them`);
+    }
+    notes.push('The bus pulls in out of the traffic, which keeps moving');
+    plans.push({ kind: 'layby', ok: !blocked, blocked, title: 'Bus lay-by', cost, lots, take: { pave, lane, land }, notes });
+    return { plans };
+  }
+
+  addStop(segId: number, t: number, side: 1 | -1, plan: StopPlan) {
+    const s = this.segs.get(segId)!;
+    const st: Stop = { id: this.nextId++, s: t, side, kind: plan.kind, take: { ...plan.take } };
+    s.stops.push(st);
+    // the gardens that gave up land get shallower
+    this.touched = plan.lots;
+    for (const l of plan.lots) l.front = Math.max(0.5, l.front - plan.take.land);
+    return st;
   }
 }

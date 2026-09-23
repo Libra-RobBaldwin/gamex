@@ -292,8 +292,9 @@ class Kit {
     if (capM && tw > 0.05 && td > 0.05) this.cap(U, y0 + h, capM);
   }
   // Gable roof with its ridge running along x; the triangular ends are walls.
-  gable(cx: number, cz: number, w: number, d: number, y0: number, rise: number, over: number, roof: THREE.Material, end: THREE.Material) {
-    const g = this.g(roof), x0 = cx - w / 2 - over, x1 = cx + w / 2 + over, zf = cz + d / 2 + over, zb = cz - d / 2 - over, top = y0 + rise;
+  // overX is the overhang past the gable ends: 0 where roofs of a terrace meet, or they'd overlap
+  gable(cx: number, cz: number, w: number, d: number, y0: number, rise: number, over: number, roof: THREE.Material, end: THREE.Material, overX = over) {
+    const g = this.g(roof), x0 = cx - w / 2 - overX, x1 = cx + w / 2 + overX, zf = cz + d / 2 + over, zb = cz - d / 2 - over, top = y0 + rise;
     const eave = over * (rise / (d / 2)); // eaves dip a little below the wall top
     const slant = Math.hypot(rise, d / 2 + over) / 2, W = (x1 - x0) / 2;
     g.quad(this.T(x0, y0 - eave, zf), this.T(x1, y0 - eave, zf), this.T(x1, top, cz), this.T(x0, top, cz), 0, 0, W, slant);
@@ -513,7 +514,7 @@ function terrace(k: Kit, l: Lot, r: () => number, rr: () => number) {
     const roof = pick(rr, SLATE); roofName = roof[1];
     const fh = 3;
     k.block(0, 0, W, D, 0, 2, fh, 3, fm(L), blank(L), fm(L));
-    k.gable(0, 0, W, D, 6, 3.2, 0.3, roofM(roof[0]), blank(L));
+    k.gable(0, 0, W, D, 6, 3.2, 0.3, roofM(roof[0]), blank(L), 0);
     const bays = rr() < 0.6 ? 2 : 1;
     bay(k, -doorLeft * W / 5, zf, 2.6, 0, bays, fh, fm(L), plain('#5b6168'));
     extras.push(bays === 2 ? 'two-storey bay' : 'bay window');
@@ -537,7 +538,7 @@ function terrace(k: Kit, l: Lot, r: () => number, rr: () => number) {
     L = look(r, 'render', rr() < 0.5 ? 'casement' : 'sash', '#f4f4f0', pick(r, PASTEL));
     const roof = pick(rr, [...SLATE, ...TILE]); roofName = roof[1];
     k.block(0, 0, W, D, 0, 2, 2.8, 3, fm(L), blank(L), fm(L));
-    k.gable(0, 0, W, D, 5.6, 3, 0.3, roofM(roof[0]), blank(L));
+    k.gable(0, 0, W, D, 5.6, 3, 0.3, roofM(roof[0]), blank(L), 0);
     chimney(k, W / 2, -0.8, 8.6, blank(L));
     door(k, doorLeft * (W / 2 - 1.2), zf, doorCol);
     name = 'Painted cottage row';
@@ -1068,6 +1069,218 @@ function yard(k: Kit, l: Lot, r: () => number, rr: () => number): string[] {
   return out;
 }
 
+// ---------------- community buildings (fill awkward corners and odd plots) ----------------
+export const CIVIC: Record<string, { w: number; d: number; front: number; back: number; label: string; pop: number; unit: string }> = {
+  church: { w: 22, d: 12, front: 8, back: 12, label: 'Church', pop: 4, unit: 'jobs' },
+  pub: { w: 14, d: 11, front: 5, back: 12, label: 'Pub', pop: 12, unit: 'jobs' },
+  petrol: { w: 12, d: 8, front: 18, back: 4, label: 'Filling station', pop: 8, unit: 'jobs' },
+  school: { w: 34, d: 14, front: 10, back: 24, label: 'Primary school', pop: 40, unit: 'jobs' },
+  surgery: { w: 16, d: 11, front: 8, back: 8, label: 'Doctors’ surgery', pop: 15, unit: 'jobs' },
+  hall: { w: 15, d: 10, front: 6, back: 6, label: 'Community hall', pop: 3, unit: 'jobs' },
+  cornershop: { w: 9, d: 9, front: 3, back: 5, label: 'Corner shop', pop: 4, unit: 'jobs' },
+  substation: { w: 6, d: 5, front: 2.5, back: 2.5, label: 'Electricity substation', pop: 0, unit: 'jobs' },
+};
+const SAINTS = ['St Mary’s', 'St John’s', 'All Saints', 'St Peter’s', 'Holy Trinity', 'St Michael’s', 'St Andrew’s'];
+const PUBS = ['The Red Lion', 'The Crown', 'The Railway', 'The Royal Oak', 'The Plough', 'The White Hart', 'The Bell', 'The Swan'];
+
+function civic(k: Kit, l: Lot, r: () => number) {
+  const spec = CIVIC[l.arch ?? 'hall'];
+  const W = spec.w, D = spec.d, zf = D / 2, F = D / 2 + l.front, Bk = -D / 2 - l.back, X0 = -l.pw / 2, X1 = l.pw / 2;
+  k.foot = { w: W, d: D };
+  const out: string[] = [];
+  let name = spec.label;
+  switch (l.arch) {
+    case 'church': {
+      const S = look(r, 'stone', 'arched', '#2d3338', pick(r, STONE));
+      flat(k, X0, Bk, X1, F, 0.04, lawnM(0.96));
+      k.block(0, 0, W - 6, D - 2, 0, 1, 7, 3.4, fm(S), fm(S), fm(S));
+      k.gable(0, 0, W - 6, D - 2, 7, 5.5, 0.3, roofM(pick(r, SLATE)[0]), fm(S, 'none'));
+      // tower and spire at the west end
+      k.block(W / 2 - 3, 0, 6, 6, 0, 3, 5, 6, fm(S, 'none'), fm(S, 'none'), fm(S, 'none'), plain(GRAVEL));
+      if (r() < 0.6) { k.prismN(W / 2 - 3, 0, 3.1, 8, 15, 0.1, plain('#bdb6a6'), 13, roofM(SLATE[0][0])); out.push('spire'); }
+      else { parapet(k, W / 2 - 3, 0, 6.4, 6.4, 15, 1.2, fm(S, 'none')); out.push('square tower'); }
+      flat(k, W / 2 - 3.8, zf, W / 2 - 2.2, F, 0.075, gravelM());
+      // churchyard
+      for (let x = X0 + 2; x < X1 - 1; x += 2.2) for (const z of [Bk + 2, Bk + 4.5, Bk + 7]) if (r() < 0.75) k.box(x, 0, z, 0.7, 0.8 + r() * 0.4, 0.18, plain(pick(r, ['#8f8a80', '#a8a296', '#6f6b64'])));
+      for (const x of [X0 + 2, X1 - 2]) tree(k, x, F - 3, 1.1, () => 0.2);
+      k.box((X0 + X1) / 2, 0, F - 0.3, X1 - X0, 0.9, 0.5, fm(S, 'none'));
+      name = `${pick(r, SAINTS)} church`;
+      out.push('churchyard');
+      break;
+    }
+    case 'pub': {
+      const L = look(r, r() < 0.5 ? 'brick' : 'render', 'sash', '#2d3338', r() < 0.5 ? undefined : pick(r, [...RENDER, PASTEL[3]]));
+      flat(k, X0, zf, X1, F, 0.05, slabsM());
+      k.block(0, 0, W, D, 0, 1, 3.6, 3, facade('shop', L.skin, L.wall[0], '#2d3338', pick(r, ['#2e5a45', '#7a2d2d', '#1f3f6a', '#3a3a3a'])), blank(L), fm(L));
+      k.block(0, 0, W, D, 3.6, 1, 3, 3, fm(L), blank(L), fm(L));
+      k.gable(0, 0, W, D, 6.6, 3.4, 0.3, roofM(pick(r, [...SLATE, ...TILE])[0]), blank(L));
+      chimney(k, -W / 2 + 0.6, 0, 9.8, blank(L));
+      // hanging sign
+      k.box(W / 2 - 1, 3.6, zf + 0.6, 0.1, 0.1, 1.2, plain('#2b2b2b'));
+      k.box(W / 2 - 1, 2.4, zf + 1.1, 0.08, 1.1, 0.8, plain(pick(r, FASCIA)));
+      // beer garden
+      flat(k, X0, Bk, X1, -zf, 0.04, lawnM(1));
+      for (let i = 0; i < 4; i++) { const x = X0 + 2 + ((X1 - X0 - 4) * i) / 3, z = Bk + 3 + (i % 2) * 4; k.box(x, 0.7, z, 1.8, 0.08, 0.8, plain('#8a6446')); for (const s of [-0.7, 0.7]) k.box(x, 0.42, z + s, 1.8, 0.06, 0.3, plain('#8a6446')); if (i % 2) parasol(k, x, z, pick(r, FASCIA)); }
+      k.box((X0 + X1) / 2, 0, Bk + 0.1, X1 - X0, 1.6, 0.12, plain('#6e5238'));
+      name = pick(r, PUBS);
+      out.push(L.wall[1], 'beer garden');
+      break;
+    }
+    case 'petrol': {
+      flat(k, X0, Bk, X1, F, 0.05, concreteM());
+      const brand = pick(r, ['#1f7a3a', '#c9302c', '#1f4f9e', '#e0a526']);
+      const kz = zf + l.front / 2;
+      // canopy over the pumps
+      for (const [x, z] of [[-5, kz - 3], [5, kz - 3], [-5, kz + 3], [5, kz + 3]]) k.box(x, 0, z, 0.4, 5, 0.4, plain('#e8e6e0'));
+      k.box(0, 5, kz, 14, 0.9, 9, plain('#f2f2ee'));
+      k.box(0, 5.3, kz, 14.1, 0.35, 9.1, plain(brand));
+      for (const x of [-3.5, 3.5]) { k.box(x, 0, kz, 1.2, 0.2, 5, plain('#b9b3a8')); for (const z of [kz - 1.4, kz + 1.4]) k.box(x, 0.2, z, 0.8, 1.6, 0.5, plain('#dcdcd8')); }
+      const g = facade('lobby', 'render', '#f0efea', '#2d3338');
+      k.block(0, 0, W, D, 0, 1, 3.6, 4, g, blank(look(r, 'render', 'none', '#2d3338', ['#f0efea', 'white'])), blank(look(r, 'render', 'none', '#2d3338', ['#f0efea', 'white'])), plain(GRAVEL));
+      k.box(0, 3.2, zf + 0.05, W, 0.4, 0.12, plain(brand));
+      k.box(X1 - 1.5, 0, F - 1.5, 0.3, 5, 1.6, plain(brand));
+      out.push('forecourt with 4 pumps', 'shop');
+      break;
+    }
+    case 'school': {
+      const L = look(r, 'brick', 'ribbon', '#2d3338', pick(r, [BRICK[3], BRICK[5], BRICK[0]]));
+      flat(k, X0, zf, X1, F, 0.05, tarmacM());
+      k.block(0, 0, W, D, 0, 2, 3.4, 3, fm(L), fm(L), fm(L));
+      flatRoof(k, 0, 0, W, D, 6.8, blank(L), r, false);
+      k.box(-W / 4, 0, zf + 0.4, 5, 3.2, 0.8, facade('lobby', 'render', '#f0efea', '#2d3338'));
+      // playground markings and a playing field behind
+      flat(k, X0, -zf - 8, X1, -zf, 0.05, tarmacM());
+      for (let i = 0; i < 6; i++) flat(k, X0 + 3 + i * 2.5, -zf - 5, X0 + 4.5 + i * 2.5, -zf - 3.5, 0.08, plain(pick(r, ['#e0c14a', '#d94f6a', '#4f93c4', '#f2f2ee'])));
+      flat(k, X0, Bk, X1, -zf - 8, 0.04, lawnM(1.06));
+      const fz = (Bk - zf - 8) / 2;
+      for (const s of [-1, 1]) { k.box(s * (X1 - 4), 0, fz, 0.1, 2.2, 5, plain('#f4f4f0')); }
+      k.box(0, 0, fz, 0.1, 0.02, (-zf - 8 - Bk) - 2, plain('#f4f4f0'));
+      run(X0, X1, [[-4, 4]], (a, b) => k.box((a + b) / 2, 0, F - 0.3, b - a, 1.8, 0.05, plain('#2e5a45')));
+      out.push('playground', 'playing field');
+      break;
+    }
+    case 'substation': {
+      flat(k, X0, Bk, X1, F, 0.05, gravelM());
+      for (const x of [-1.5, 1.5]) { k.box(x, 0, 0, 2.2, 2.4, 2, plain('#7c8a6a')); for (const z of [-0.6, 0.6]) k.prismN(x, z, 0.15, 6, 2.4, 1.2, plain('#c9c2b4')); }
+      const mesh = M('fence', () => new THREE.MeshLambertMaterial({ color: '#9aa3a8', transparent: true, opacity: 0.4, depthWrite: false }));
+      for (const [x0, z0, x1, z1] of [[X0, F - 0.2, X1, F - 0.2], [X0, Bk, X1, Bk], [X0, Bk, X0, F], [X1, Bk, X1, F]]) k.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.abs(x1 - x0) || 0.04, 2.2, Math.abs(z1 - z0) || 0.04, mesh);
+      out.push('transformers behind a fence');
+      break;
+    }
+    default: {
+      // surgery, community hall, corner shop
+      const L = l.arch === 'cornershop' ? look(r, 'brick', 'sash', '#f4f4f0') : look(r, r() < 0.5 ? 'brick' : 'render', 'picture', '#2d3338');
+      flat(k, X0, Bk, X1, F, 0.04, lawnM(1));
+      flat(k, X0, zf, X1, F, 0.05, l.arch === 'cornershop' ? slabsM() : tarmacM());
+      if (l.arch === 'cornershop') {
+        k.block(0, 0, W, D, 0, 1, 4, 4.5, facade('shop', L.skin, L.wall[0], L.frame, pick(r, FASCIA)), blank(L), blank(L));
+        k.block(0, 0, W, D, 4, 1, 3, 3, fm(L), blank(L), fm(L));
+        k.gable(0, 0, W, D, 7, 3, 0.3, roofM(pick(r, SLATE)[0]), blank(L));
+        k.box(-W / 2 + 1, 0, zf + 1.2, 1.6, 1.1, 0.6, plain('#e0c14a')); // newspaper stand
+        out.push('newspaper stand');
+      } else {
+        k.block(0, 0, W, D, 0, 1, 4, 4, fm(L), fm(L), fm(L));
+        if (l.arch === 'hall') k.gable(0, 0, W, D, 4, 3.2, 0.4, roofM(pick(r, TILE)[0]), blank(L));
+        else flatRoof(k, 0, 0, W, D, 4, blank(L), r, false);
+        if (l.front >= 6) parkingRow(k, X0 + 0.5, X1 - 0.5, zf + 0.5, r, 0.6);
+        out.push(L.wall[1], 'car park');
+      }
+    }
+  }
+  return { name, detail: out.join(' · ') };
+}
+
+// ---------------- leftover land: parks, playgrounds, allotments, car parks, scrub ----------------
+export type RegionKind = 'verge' | 'pocket' | 'playground' | 'allotments' | 'park' | 'carpark' | 'scrub' | 'grounds';
+export interface RegionShape { cells: P3[]; size: number; kind: RegionKind; seed: number; roadEdges: [number, number, number, number][] }
+type P3 = { x: number; z: number };
+const REGION_NAMES: Record<RegionKind, string> = {
+  verge: 'Planted verge', pocket: 'Pocket park', playground: 'Playground', allotments: 'Allotments', park: 'Park', carpark: 'Car park', scrub: 'Rough ground', grounds: 'Gardens',
+};
+const meadowM = () => gmat('meadow', (x, r) => {
+  x.fillStyle = '#7aa653'; x.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 500; i++) { x.fillStyle = pick(r, ['#5f8f3e', '#8fb862', '#6a9a47', '#6a9a47', '#e8e2c0', '#d9c04a', '#b06ab0']); x.fillRect(r() * 64, r() * 64, 1.2, 2); }
+});
+const vegM = () => gmat('veg', (x, r) => {
+  x.fillStyle = '#6a4d35'; x.fillRect(0, 0, 64, 64);
+  for (let row = 4; row < 64; row += 8) for (let i = 0; i < 16; i++) { x.fillStyle = pick(r, ['#4f8a36', '#6c9a3a', '#3e7a35', '#8aa04a']); x.fillRect(i * 4 + r(), row + r(), 3, 3); }
+});
+const rubberM = () => gmat('rubber', (x, r) => { x.fillStyle = '#b5493f'; x.fillRect(0, 0, 64, 64); for (let i = 0; i < 300; i++) { x.fillStyle = `rgba(0,0,0,${r() * 0.12})`; x.fillRect(r() * 64, r() * 64, 1.5, 1.5); } });
+const scrubM = () => gmat('scrub', (x, r) => { x.fillStyle = '#9f9676'; x.fillRect(0, 0, 64, 64); for (let i = 0; i < 400; i++) { x.fillStyle = pick(r, ['#7a8a4a', '#8a8060', '#6a7a3a', '#b0a888']); x.fillRect(r() * 64, r() * 64, 2, 2); } });
+
+export function makeRegion(reg: RegionShape): BuiltShape {
+  const k = new Kit(), r = rng(Math.floor(reg.seed * 4294967295)), S = reg.size, h = S / 2;
+  const key = (c: P3) => `${Math.round(c.x / S * 2)},${Math.round(c.z / S * 2)}`;
+  const has = new Set(reg.cells.map(key));
+  const inR = (x: number, z: number) => has.has(key({ x, z }));
+  const cells = reg.cells;
+  const ground = { verge: meadowM(), pocket: lawnM(1), playground: lawnM(1), allotments: lawnM(0.94), park: lawnM(1.03), carpark: tarmacM(), scrub: scrubM(), grounds: lawnM(1) }[reg.kind];
+  for (const c of cells) flat(k, c.x - h, c.z - h, c.x + h, c.z + h, 0.04, ground);
+  // the middle of the region and the longest way across it
+  const cx = cells.reduce((t, c) => t + c.x, 0) / cells.length, cz = cells.reduce((t, c) => t + c.z, 0) / cells.length;
+  const centre = cells.reduce((b, c) => (Math.hypot(c.x - cx, c.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? c : b), cells[0]);
+  const block = (n: number) => cells.find((c) => { for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (!inR(c.x + i * S, c.z + j * S)) return false; return true; });
+  const notes: string[] = [`${Math.round(cells.length * S * S)} m²`];
+  const railings = () => { for (const [x0, z0, x1, z1] of reg.roadEdges) k.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.max(0.05, Math.abs(x1 - x0)), 1.1, Math.max(0.05, Math.abs(z1 - z0)), plain('#23262a')); };
+  const trees = (p: number, s = 0.9) => { let n = 0; for (const c of cells) if (r() < p) { tree(k, c.x + (r() - 0.5) * S * 0.6, c.z + (r() - 0.5) * S * 0.6, s + r() * 0.4, r); n++; } return n; };
+  if (reg.kind === 'verge' || reg.kind === 'grounds') {
+    for (const c of cells) if (r() < 0.6) sphere(k, c.x + (r() - 0.5) * 2, 0.6, c.z + (r() - 0.5) * 2, 0.8 + r() * 0.5, plain(pick(r, LEAVES)), 6, 3, 0.8);
+    trees(0.3, 0.8);
+    notes.push('shrubs and trees');
+  } else if (reg.kind === 'pocket' || reg.kind === 'park') {
+    // a path across the longer way, benches along it
+    const xs = cells.map((c) => c.x), zs = cells.map((c) => c.z);
+    const alongX = Math.max(...xs) - Math.min(...xs) >= Math.max(...zs) - Math.min(...zs);
+    const path = cells.filter((c) => (alongX ? Math.abs(c.z - centre.z) < 0.1 : Math.abs(c.x - centre.x) < 0.1));
+    for (const c of path) alongX ? flat(k, c.x - h, c.z - 1.2, c.x + h, c.z + 1.2, 0.075, gravelM()) : flat(k, c.x - 1.2, c.z - h, c.x + 1.2, c.z + h, 0.075, gravelM());
+    path.forEach((c, i) => { if (i % 2 === 1) bench(k, alongX ? c.x : c.x + 2, alongX ? c.z + 2 : c.z, alongX); });
+    const pond = reg.kind === 'park' ? block(4) : undefined;
+    if (pond) { k.prismN(pond.x + 1.5 * S, pond.z + 1.5 * S, S * 1.6, 18, 0, 0.1, plain('#cfc7a8')); k.prismN(pond.x + 1.5 * S, pond.z + 1.5 * S, S * 1.4, 18, 0, 0.14, plain('#4f93c4')); notes.push('pond'); }
+    const tn = trees(reg.kind === 'park' ? 0.3 : 0.4);
+    for (const c of cells) if (r() < 0.12) flat(k, c.x - 1.5, c.z - 1, c.x + 1.5, c.z + 1, 0.07, bedM());
+    if (reg.kind === 'park' && cells.length > 80) { k.prismN(centre.x, centre.z + S, 3.2, 8, 0, 0.6, plain('#c9c2b4')); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; k.box(centre.x + Math.cos(a) * 2.8, 0.6, centre.z + S + Math.sin(a) * 2.8, 0.15, 2.6, 0.15, plain('#2e5a45')); } k.prismN(centre.x, centre.z + S, 3.6, 8, 3.2, 0.2, plain('#2e5a45'), 1.4, plain('#2e5a45')); notes.push('bandstand'); }
+    railings();
+    notes.push(`${tn} trees`, 'benches', 'railings');
+  } else if (reg.kind === 'playground') {
+    const b = block(2) ?? centre;
+    const x0 = b.x - h, z0 = b.z - h, x1 = x0 + 2 * S, z1 = z0 + 2 * S;
+    flat(k, x0, z0, x1, z1, 0.06, rubberM());
+    // swings, slide, climbing frame
+    k.box(x0 + 2.5, 2.3, z0 + 2.5, 3.4, 0.12, 0.12, plain('#2f5d9e'));
+    for (const s of [-1.6, 1.6]) k.box(x0 + 2.5 + s, 0, z0 + 2.5, 0.12, 2.4, 0.12, plain('#2f5d9e'));
+    for (const s of [-0.7, 0.7]) k.box(x0 + 2.5 + s, 0.5, z0 + 2.5, 0.5, 0.06, 0.25, plain('#1c1d20'));
+    k.box(x1 - 2.5, 0, z0 + 2.5, 1.4, 1.8, 1.4, plain('#e0a526'));
+    k.g(plain('#c9302c')).quad(k.T(x1 - 1.8, 1.8, z0 + 1.9), k.T(x1 - 1.8, 1.8, z0 + 3.1), k.T(x1 + 0.6, 0.1, z0 + 3.1), k.T(x1 + 0.6, 0.1, z0 + 1.9));
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) k.box(x0 + 3.5 + i * 1.2, 0, z1 - 4.5 + j * 1.2, 0.08, 2, 0.08, plain('#2e7d5b'));
+    k.box(x0 + 4.7, 2, z1 - 3.3, 2.5, 0.08, 2.5, plain('#2e7d5b'));
+    for (const [a, c, d, e] of [[x0, z0, x1, z0], [x0, z1, x1, z1], [x0, z0, x0, z1], [x1, z0, x1, z1]]) k.box((a + d) / 2, 0, (c + e) / 2, Math.max(0.05, d - a), 1, Math.max(0.05, e - c), plain('#2e7d5b'));
+    bench(k, x0 - 1.5, z0 + S, false);
+    trees(0.25);
+    railings();
+    notes.push('swings, slide and climbing frame');
+  } else if (reg.kind === 'allotments') {
+    let sheds = 0;
+    for (const c of cells) {
+      flat(k, c.x - h + 0.5, c.z - h + 0.5, c.x + h - 0.5, c.z + h - 0.5, 0.07, vegM());
+      if (r() < 0.16) { shed(k, c.x + h - 1.8, c.z + h - 1.6, r); sheds++; }
+      else if (r() < 0.15) k.prismN(c.x - h + 1, c.z - h + 1, 0.4, 8, 0, 0.9, plain('#2f5d3a'));
+      if (r() < 0.2) { for (let i = 0; i < 3; i++) k.box(c.x - 1 + i, 0, c.z, 0.05, 1.6, 0.05, plain('#8a6446')); }
+    }
+    notes.push(`${cells.length} plots`, `${sheds} sheds`);
+  } else if (reg.kind === 'carpark') {
+    let spaces = 0;
+    for (const c of cells) { for (let i = 0; i < 2; i++) { flat(k, c.x - h + i * 2.5, c.z - h + 0.2, c.x - h + i * 2.5 + 0.1, c.z + h - 0.2, 0.1, plain('#f2f2ee')); if (r() < 0.6) car(k, c.x - h + 1.3 + i * 2.5, c.z, true, pick(r, CAR_COLS)); spaces++; } }
+    k.box(centre.x, 0, centre.z, 0.15, 2.4, 0.15, plain('#3a3a3a'));
+    k.box(centre.x, 2.4, centre.z, 1.2, 0.8, 0.1, plain('#1f4f9e'));
+    notes.push(`${spaces} spaces`, 'pay and display');
+  } else {
+    for (const c of cells) if (r() < 0.3) sphere(k, c.x + (r() - 0.5) * 3, 0.4, c.z + (r() - 0.5) * 3, 0.6 + r() * 0.6, plain(pick(r, ['#6a7a3a', '#7a8a4a', '#8a8060'])), 5, 3, 0.7);
+    for (const c of cells) if (r() < 0.05) k.box(c.x, 0, c.z, 3.6, 1.2, 1.8, plain(pick(r, ['#e0a526', '#2f6f9e', '#b0463a'])));
+    notes.push('weeds', 'a skip or two');
+  }
+  return { group: k.build(), height: k.top, name: REGION_NAMES[reg.kind], detail: notes.join(' · ') };
+}
+
 export const USE: Record<Lot['kind'], { label: string; pop: number; unit: string }> = {
   house: { label: 'Housing · low density', pop: 4, unit: 'residents' },
   terrace: { label: 'Housing · terraced', pop: 5, unit: 'residents' },
@@ -1076,13 +1289,14 @@ export const USE: Record<Lot['kind'], { label: string; pop: number; unit: string
   office: { label: 'Offices', pop: 120, unit: 'jobs' },
   tower: { label: 'High density', pop: 160, unit: 'people' },
   industry: { label: 'Industry', pop: 60, unit: 'jobs' },
+  civic: { label: 'Community', pop: 10, unit: 'jobs' },
 };
 
 export function makeBuilding(l: Lot): BuiltShape {
   const k = new Kit();
   const r = rng(Math.floor(l.seed * 4294967295));
   const rr = rng(hash(`row${l.row}`));
-  const d = l.kind === 'house' ? house(k, l, r, rr) : l.kind === 'terrace' ? terrace(k, l, r, rr) : l.kind === 'shop' ? shop(k, l, r) : l.kind === 'flats' ? flats(k, l, r) : l.kind === 'office' ? office(k, l, r) : l.kind === 'industry' ? industry(k, l, r) : tower(k, l, r);
+  const d = l.kind === 'house' ? house(k, l, r, rr) : l.kind === 'terrace' ? terrace(k, l, r, rr) : l.kind === 'shop' ? shop(k, l, r) : l.kind === 'flats' ? flats(k, l, r) : l.kind === 'office' ? office(k, l, r) : l.kind === 'industry' ? industry(k, l, r) : l.kind === 'civic' ? civic(k, l, r) : tower(k, l, r);
   const height = k.top;
   const y = yard(k, l, r, rr);
   const group = k.build();
