@@ -38,3 +38,16 @@ button:disabled { opacity: 0.45; }
 #tools button { background: transparent; border: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; font-size: 11px; color: var(--muted); border-radius: 10px; }
 #tools button i { font-style: normal; font-size: 21px; }
 #tools button.on { background: rgba(76, 195, 255, 0.18); color: var(--text); }
+button.danger { background: #d8392b; color: #fff; border-color: transparent; }
+#bp .demo { background: rgba(216, 57, 43, 0.18); border: 1px solid rgba(255, 90, 77, 0.55); border-radius: 10px; padding: 7px 9px; font-size: 12.5px; line-height: 1.4; }
+#bp .demo b { color: #ff8a7f; }
+#kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 4px; }
+#kinds.hidden { display: none; }
+#kinds button { background: transparent; border: 0; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 0; font-size: 12.5px; color: var(--muted); border-radius: 10px; }
+#kinds button i { font-style: normal; font-size: 16px; }
+#kinds button.on { background: rgba(76, 195, 255, 0.18); color: var(--text); }
+#card { position: absolute; top: calc(64px + var(--safe-t)); left: 8px; right: 62px; padding: 9px 12px; font-size: 12.5px; line-height: 1.4; }
+#card.hidden { display: none; }
+#card b { font-size: 14.5px; }
+#card div { color: var(--muted); margin-top: 2px; }
+#card .use { color: var(--accent); }

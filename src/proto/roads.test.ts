@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Network, polysOverlap, rectCorners } from './roads';
+import { MIN_RADIUS, Network, minRadius, pathLength, polysOverlap, rectCorners } from './roads';
 
 describe('free-form roads', () => {
   it('snaps angles to 15° and lengths to 4 m', () => {
@@ -56,5 +56,60 @@ describe('free-form roads', () => {
     n.build({ x: l.x, z: l.z - 40 }, { x: l.x, z: l.z + 40 });
     expect(n.lots.length).toBeLessThan(before);
     expect(n.check({ x: 90, z: 20 }, { x: 160, z: 20 }).reason).toMatch(/Water/);
+  });
+
+  it('builds curved roads through a control point', () => {
+    const n = new Network();
+    const c = n.check({ x: 0, z: 0 }, { x: 100, z: 0 }, { x: 50, z: 60 });
+    expect(c.ok).toBe(true);
+    expect(c.length).toBeGreaterThan(100);
+    const [id] = n.build({ x: 0, z: 0 }, { x: 100, z: 0 }, { x: 50, z: 60 });
+    const s = n.segs.get(id)!;
+    expect(s.mid.length).toBeGreaterThan(3);
+    // the curve bulges towards the control point, half way there at its middle
+    const mid = s.mid[Math.floor(s.mid.length / 2)];
+    expect(mid.z).toBeGreaterThan(25);
+    expect(minRadius(n.path(s))).toBeGreaterThan(MIN_RADIUS);
+  });
+
+  it('refuses curves that are too tight', () => {
+    const n = new Network();
+    expect(n.check({ x: 0, z: 0 }, { x: 12, z: 0 }, { x: 6, z: 40 }).reason).toMatch(/tight/);
+  });
+
+  it('a straight road across a curve splits it into a junction (twice if it crosses twice)', () => {
+    const n = new Network();
+    n.build({ x: 0, z: 0 }, { x: 120, z: 0 }, { x: 60, z: 100 });
+    n.build({ x: -10, z: 30 }, { x: 130, z: 30 });
+    // curve cut in 3, straight cut in 3
+    expect(n.segs.size).toBe(6);
+    const junctions = [...n.nodes.values()].filter((x) => n.segsAt(x.id).length === 4);
+    expect(junctions.length).toBe(2);
+    // the pieces still add up to the whole curve
+    const curveLen = [...n.segs.values()].filter((s) => s.mid.length).reduce((t, s) => t + n.length(s), 0);
+    expect(curveLen).toBeGreaterThan(150);
+  });
+
+  it('a smooth curve leaves along the road it continues', () => {
+    const n = new Network();
+    n.build({ x: -60, z: 0 }, { x: 0, z: 0 });
+    const a = n.snapStart({ x: 0, z: 0 }, 3);
+    const ctrl = n.smoothCtrl(a, { x: 60, z: 40 })!;
+    // control point lies straight ahead of the existing road
+    expect(Math.abs(ctrl.z)).toBeLessThan(1e-9);
+    expect(ctrl.x).toBeGreaterThan(0);
+    expect(n.check(a, { x: 60, z: 40 }, ctrl).ok).toBe(true);
+  });
+
+  it('lays plots along curves without overlaps, facing the road', () => {
+    const n = new Network();
+    const [id] = n.build({ x: 0, z: 0 }, { x: 200, z: 0 }, { x: 100, z: 120 });
+    const lots = n.plotsFor(id, { x: 999, z: 999 });
+    expect(lots.length).toBeGreaterThan(8);
+    const path = n.path(n.segs.get(id)!);
+    expect(pathLength(path)).toBeGreaterThan(200);
+    for (let i = 0; i < lots.length; i++)
+      for (let j = i + 1; j < lots.length; j++)
+        expect(polysOverlap(rectCorners(lots[i].x, lots[i].z, lots[i].rot, lots[i].w, lots[i].d), rectCorners(lots[j].x, lots[j].z, lots[j].rot, lots[j].w, lots[j].d))).toBe(false);
   });
 });

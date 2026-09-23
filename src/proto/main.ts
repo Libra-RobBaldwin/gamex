@@ -1,7 +1,8 @@
 // 3D prototype: free-form roads, plots along any street, buses and cars, rotating camera.
 import * as THREE from 'three';
 import './proto.css';
-import { HALF, Network, ROAD_W, rng, closestOnSeg, type End, type Lot, type P, type RSeg } from './roads';
+import { HALF, Network, ROAD_W, rng, closestOnPath, pointAt, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg } from './roads';
+import { makeBuilding as generate, USE } from './buildgen';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -88,26 +89,6 @@ const grassTex = canvasTex(256, 256, (x) => {
 });
 grassTex.repeat.set(60, 60);
 
-// One window cell = 3 m x 3 m. White walls are tinted by each material's colour.
-const facadeTex = canvasTex(64, 64, (x) => {
-  x.fillStyle = '#ffffff';
-  x.fillRect(0, 0, 64, 64);
-  x.fillStyle = '#5f7488';
-  x.fillRect(14, 16, 36, 30);
-  x.fillStyle = '#8fa6b8';
-  x.fillRect(14, 16, 36, 6);
-  x.fillStyle = '#e9e9e9';
-  x.fillRect(12, 46, 40, 4);
-});
-const glassTex = canvasTex(64, 64, (x) => {
-  x.fillStyle = '#ffffff';
-  x.fillRect(0, 0, 64, 64);
-  x.fillStyle = '#4d6b86';
-  x.fillRect(3, 6, 58, 50);
-  x.fillStyle = '#7fa3c2';
-  x.fillRect(3, 6, 58, 12);
-});
-
 // ---------------- ground, water ----------------
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND * 2.6, BOUND * 2.6), new THREE.MeshLambertMaterial({ map: grassTex }));
 ground.rotation.x = -Math.PI / 2;
@@ -146,10 +127,7 @@ const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
 for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); }
 
 function treeBlocked(t: Tree) {
-  for (const s of net.segs.values()) {
-    const [a, b] = net.segEnds(s);
-    if (closestOnSeg(t, a, b).d < HALF + 3) return true;
-  }
+  for (const s of net.segs.values()) if (closestOnPath(t, net.path(s)).d < HALF + 3) return true;
   for (const l of net.lots) if (Math.hypot(t.x - l.x, t.z - l.z) < Math.max(l.w, l.d) * 0.75 + 2) return true;
   return false;
 }
@@ -168,6 +146,7 @@ function refreshTrees() {
   for (const x of [trunks, crowns, pines]) x.instanceMatrix.needsUpdate = true;
 }
 
+
 // ---------------- roads ----------------
 const paveMat = new THREE.MeshLambertMaterial({ color: '#bdb8ad', polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 const asphaltMat = new THREE.MeshLambertMaterial({ color: '#484c52', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
@@ -177,17 +156,36 @@ scene.add(roadGroup);
 
 class Flat {
   pos: number[] = [];
-  quad(a: P, b: P, hw: number, y: number) {
-    const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1;
-    const nx = (-dz / L) * hw, nz = (dx / L) * hw;
-    const p = [a.x + nx, a.z + nz, b.x + nx, b.z + nz, b.x - nx, b.z - nz, a.x - nx, a.z - nz];
-    this.tri(p[0], p[1], p[2], p[3], p[4], p[5], y);
-    this.tri(p[0], p[1], p[4], p[5], p[6], p[7], y);
+  // a strip of half-width hw following a path, mitred at the bends
+  ribbon(path: P[], hw: number, y: number) {
+    const n = path.length;
+    const side: P[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = path[Math.max(0, i - 1)], b = path[Math.min(n - 1, i + 1)];
+      const L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      side.push({ x: -(b.z - a.z) / L, z: (b.x - a.x) / L });
+    }
+    for (let i = 1; i < n; i++) {
+      const p = path[i - 1], q = path[i], s0 = side[i - 1], s1 = side[i];
+      const a = { x: p.x + s0.x * hw, z: p.z + s0.z * hw }, b = { x: q.x + s1.x * hw, z: q.z + s1.z * hw };
+      const c = { x: q.x - s1.x * hw, z: q.z - s1.z * hw }, d = { x: p.x - s0.x * hw, z: p.z - s0.z * hw };
+      this.tri(a.x, a.z, b.x, b.z, c.x, c.z, y);
+      this.tri(a.x, a.z, c.x, c.z, d.x, d.z, y);
+    }
   }
   disc(c: P, r: number, y: number, n = 20) {
     for (let i = 0; i < n; i++) {
       const a0 = (i / n) * Math.PI * 2, a1 = ((i + 1) / n) * Math.PI * 2;
       this.tri(c.x, c.z, c.x + Math.cos(a1) * r, c.z + Math.sin(a1) * r, c.x + Math.cos(a0) * r, c.z + Math.sin(a0) * r, y);
+    }
+  }
+  ring(c: P, r0: number, r1: number, y: number, n = 24) {
+    for (let i = 0; i < n; i++) {
+      const a0 = (i / n) * Math.PI * 2, a1 = ((i + 1) / n) * Math.PI * 2;
+      const p = (a: number, r: number) => [c.x + Math.cos(a) * r, c.z + Math.sin(a) * r] as const;
+      const [x0, z0] = p(a0, r0), [x1, z1] = p(a1, r0), [x2, z2] = p(a1, r1), [x3, z3] = p(a0, r1);
+      this.tri(x0, z0, x1, z1, x2, z2, y);
+      this.tri(x0, z0, x2, z2, x3, z3, y);
     }
   }
   tri(x0: number, z0: number, x1: number, z1: number, x2: number, z2: number, y: number) {
@@ -210,14 +208,13 @@ function rebuildRoads() {
   for (const c of [...roadGroup.children]) { roadGroup.remove(c); (c as THREE.Mesh).geometry.dispose(); }
   const pave = new Flat(), asph = new Flat(), lines = new Flat();
   for (const s of net.segs.values()) {
-    const [a, b] = net.segEnds(s);
-    pave.quad(a, b, HALF, 0.15);
-    asph.quad(a, b, ROAD_W / 2, 0.25);
+    const path = net.path(s);
+    pave.ribbon(path, HALF, 0.15);
+    asph.ribbon(path, ROAD_W / 2, 0.25);
     // dashed centre line, kept clear of junctions
-    const L = Math.hypot(b.x - a.x, b.z - a.z);
-    const ux = (b.x - a.x) / L, uz = (b.z - a.z) / L;
-    const trimA = net.segsAt(a.id).length > 2 ? HALF + 1 : 0, trimB = net.segsAt(b.id).length > 2 ? HALF + 1 : 0;
-    for (let t = trimA + 1; t + 3 < L - trimB; t += 6) lines.quad({ x: a.x + ux * t, z: a.z + uz * t }, { x: a.x + ux * (t + 3), z: a.z + uz * (t + 3) }, 0.12, 0.35);
+    const L = pathLength(path);
+    const trimA = net.segsAt(s.a).length > 2 ? HALF + 1 : 0, trimB = net.segsAt(s.b).length > 2 ? HALF + 1 : 0;
+    for (let t = trimA + 1; t + 3 < L - trimB; t += 6) lines.ribbon(subPath(path, t, t + 3), 0.12, 0.35);
   }
   for (const n of net.nodes.values()) {
     pave.disc(n, HALF, 0.15);
@@ -227,85 +224,20 @@ function rebuildRoads() {
 }
 
 // ---------------- buildings ----------------
-const WALLS: Record<Lot['kind'], string[]> = {
-  house: ['#efe4cf', '#dcc6a4', '#c7916f', '#e9e6de', '#d8b68f'],
-  terrace: ['#b86e4f', '#c98a64', '#a55d45', '#d8c1a2'],
-  shop: ['#e8dfd0', '#cfc4b3', '#b9a58c'],
-  flats: ['#cdbca7', '#b6a48f', '#d9d2c6', '#a88a74'],
-  tower: ['#9fbdd3', '#b3c2cf', '#8ca8bf'],
-};
-const ROOFS = ['#9c463b', '#6d5a50', '#7b838c', '#b0633e', '#56606b'];
-const matCache = new Map<string, THREE.Material>();
-const mat = (key: string, make: () => THREE.Material) => { let m = matCache.get(key); if (!m) { m = make(); matCache.set(key, m); } return m; };
-const wallMat = (col: string, glass = false) => mat(`w${col}${glass}`, () => new THREE.MeshLambertMaterial({ color: col, map: glass ? glassTex : facadeTex }));
-const plainMat = (col: string) => mat(`p${col}`, () => new THREE.MeshLambertMaterial({ color: col }));
-
-// Box whose side UVs repeat every 3 m so windows stay the right size.
-function facadeBox(w: number, h: number, d: number) {
-  const g = new THREE.BoxGeometry(w, h, d);
-  const uv = g.attributes.uv as THREE.BufferAttribute;
-  const scale = [[d, h], [d, h], [0, 0], [0, 0], [w, h], [w, h]]; // px nx py ny pz nz
-  for (let f = 0; f < 6; f++)
-    for (let v = 0; v < 4; v++) {
-      const i = f * 4 + v;
-      uv.setXY(i, (uv.getX(i) * scale[f][0]) / 3, (uv.getY(i) * scale[f][1]) / 3);
-    }
-  return g;
-}
-
-function gableRoof(w: number, d: number, rise: number) {
-  const x = w / 2, z = d / 2;
-  const v = [
-    -x, 0, -z, x, 0, -z, x, rise, 0, -x, 0, -z, x, rise, 0, -x, rise, 0, // back slope
-    -x, 0, z, -x, rise, 0, x, rise, 0, -x, 0, z, x, rise, 0, x, 0, z, // front slope
-    -x, 0, -z, -x, rise, 0, -x, 0, z, x, 0, -z, x, 0, z, x, rise, 0, // gables
-  ];
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
-  g.computeVertexNormals();
-  return g;
-}
-
-interface Built { lot: Lot; group: THREE.Group; born: number }
+interface Built { lot: Lot; group: THREE.Group; born: number; height: number; name: string; detail: string; dying?: number }
 const buildings: Built[] = [];
 const cityGroup = new THREE.Group();
 scene.add(cityGroup);
 
-function makeBuilding(l: Lot): THREE.Group {
-  const g = new THREE.Group();
-  const pick = <T,>(arr: T[]) => arr[Math.floor(l.seed * arr.length) % arr.length];
-  const wall = pick(WALLS[l.kind]);
-  const add = (m: THREE.Mesh, y: number) => { m.position.y = y; m.castShadow = true; m.receiveShadow = true; g.add(m); return m; };
-  const roofMat = plainMat(pick(ROOFS));
-  if (l.kind === 'house' || l.kind === 'terrace') {
-    const wallH = l.kind === 'house' ? 5.2 : l.h;
-    add(new THREE.Mesh(facadeBox(l.w, wallH, l.d), [wallMat(wall), wallMat(wall), roofMat, roofMat, wallMat(wall), wallMat(wall)]), wallH / 2);
-    add(new THREE.Mesh(gableRoof(l.w + 0.6, l.d + 0.6, l.kind === 'house' ? 3.6 : 3), roofMat), wallH);
-    if (l.kind === 'house') add(new THREE.Mesh(new THREE.BoxGeometry(0.8, 2, 0.8), plainMat('#8a6b5a')), wallH + 2.4).position.x = l.w * 0.25;
-  } else {
-    const glass = l.kind === 'tower';
-    add(new THREE.Mesh(facadeBox(l.w, l.h, l.d), [wallMat(wall, glass), wallMat(wall, glass), plainMat(glass ? '#c3ccd4' : '#8c8580'), roofMat, wallMat(wall, glass), wallMat(wall, glass)]), l.h / 2);
-    add(new THREE.Mesh(new THREE.BoxGeometry(l.w * 0.3, 2.2, l.d * 0.3), plainMat('#a7a9ab')), l.h + 1.1);
-    if (l.kind === 'shop') {
-      // a coloured awning over the shopfront, on the side facing the road
-      const aw = add(new THREE.Mesh(new THREE.BoxGeometry(l.w * 0.9, 0.4, 1.6), plainMat(pick(['#2e7d5b', '#b23a3a', '#2f5d9e', '#c98a1f']))), 3.4);
-      aw.position.z = l.d / 2 + 0.8;
-    }
-  }
-  g.position.set(l.x, 0, l.z);
-  // local +x runs along the road; local +z faces the road
-  g.rotation.y = -l.rot;
-  return g;
-}
-
 let queue: Lot[] = [];
 function spawnLot(l: Lot, animate = true) {
   net.lots.push(l);
-  const group = makeBuilding(l);
-  if (animate) group.scale.y = 0.01;
-  cityGroup.add(group);
-  buildings.push({ lot: l, group, born: performance.now() });
+  const b = generate(l);
+  if (animate) b.group.scale.y = 0.01;
+  cityGroup.add(b.group);
+  buildings.push({ lot: l, born: performance.now(), ...b });
 }
+const shortName = (b: Built) => b.name.split(' · ')[0];
 
 function queuePlots(segs: number[]) {
   for (const id of segs) {
@@ -319,6 +251,8 @@ function queuePlots(segs: number[]) {
 // ---------------- vehicles ----------------
 interface Veh { mesh: THREE.Group; seg: RSeg; from: number; s: number; speed: number; heading: number; bus: boolean }
 const vehicles: Veh[] = [];
+const vMat = new Map<string, THREE.Material>();
+const plainMat = (c: string) => { let m = vMat.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); vMat.set(c, m); } return m; };
 
 function busMesh(color: string) {
   const g = new THREE.Group();
@@ -373,7 +307,7 @@ function moveVehicles(dt: number) {
       const p = v.mesh.position;
       const n = net.nearestSeg({ x: p.x, z: p.z }, 50);
       if (!n) continue;
-      v.seg = n.seg; v.from = n.seg.a; v.s = n.t * net.length(n.seg);
+      v.seg = n.seg; v.from = n.seg.a; v.s = n.s;
     }
     let L = net.length(v.seg);
     v.s += v.speed * dt;
@@ -387,11 +321,10 @@ function moveVehicles(dt: number) {
       v.from = at;
       L = net.length(next);
     }
-    const A = net.node(v.from), B = net.node(net.other(v.seg, v.from));
-    const ux = (B.x - A.x) / L, uz = (B.z - A.z) / L;
+    const q = pointAt(net.pathFrom(v.seg, v.from), v.s);
     // drive on the left
-    const x = A.x + ux * v.s + uz * 1.9, z = A.z + uz * v.s - ux * 1.9;
-    const target = Math.atan2(uz, ux);
+    const x = q.x + q.uz * 1.9, z = q.z - q.ux * 1.9;
+    const target = Math.atan2(q.uz, q.ux);
     let dh = target - v.heading;
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
@@ -403,27 +336,16 @@ function moveVehicles(dt: number) {
 
 // ---------------- starter town ----------------
 function seedTown() {
-  const road = (a: P, b: P) => {
-    const s = net.snapStart(a, 3), e = net.snapStart(b, 3);
-    return net.build(s, e);
-  };
-  const made: number[] = [];
-  void made.length;
-  made.push(...road({ x: -230, z: 0 }, { x: 230, z: 0 }));
-  made.push(...road({ x: 0, z: -200 }, { x: 0, z: 200 }));
-  made.push(...road({ x: 0, z: 0 }, { x: 170, z: -98 })); // a 30° diagonal
-  made.push(...road({ x: -200, z: -96 }, { x: 0, z: -96 }));
-  made.push(...road({ x: -110, z: -96 }, { x: -170, z: 0 })); // a slanting link
-  // a crescent: short straight pieces around a curve
-  let prev: P = { x: 0, z: 70 };
-  for (let k = 1; k <= 7; k++) {
-    const a = (k / 7) * (Math.PI / 2);
-    const p = { x: -80 + 80 * Math.cos(a), z: 70 + 80 * Math.sin(a) };
-    made.push(...road(prev, p));
-    prev = p;
-  }
-  made.push(...road({ x: 60, z: 0 }, { x: 60, z: 110 }));
-  made.push(...road({ x: 0, z: 110 }, { x: 110, z: 110 }));
+  const road = (a: P, b: P, c?: P) => net.build(net.snapStart(a, 3), net.snapStart(b, 3), c);
+  road({ x: -230, z: 0 }, { x: 230, z: 0 });
+  road({ x: 0, z: -200 }, { x: 0, z: 200 });
+  road({ x: 0, z: 0 }, { x: 170, z: -98 }); // a 30° diagonal
+  road({ x: -200, z: -96 }, { x: 0, z: -96 });
+  road({ x: -110, z: -96 }, { x: -170, z: 0 }); // a slanting link
+  road({ x: 0, z: 70 }, { x: -80, z: 150 }, { x: 0, z: 150 }); // a crescent
+  road({ x: 60, z: 0 }, { x: 60, z: 110 });
+  road({ x: 0, z: 110 }, { x: 110, z: 110 });
+  road({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 }); // a sweeping bypass
   for (const s of net.segs.values()) queuePlots([s.id]);
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
@@ -432,9 +354,14 @@ function seedTown() {
 
 // ---------------- UI ----------------
 type Mode = 'look' | 'road';
+type RoadKind = 'straight' | 'curve' | 'smooth';
 let mode: Mode = 'look';
-let draft: { a: End; b: End } | null = null;
+let roadKind: RoadKind = 'straight';
+interface Draft { a: End; b: End; c?: P }
+let draft: Draft | null = null;
+let picks: End[] = []; // curve tool: taps placed so far (start, bend)
 let dragging = false;
+let draftCheck: Check | null = null;
 
 $('#ui').innerHTML = `
   <div id="info" class="glass"><b>Tracks &amp; Towns · 3D test</b><div id="stats"></div></div>
@@ -444,9 +371,15 @@ $('#ui').innerHTML = `
     <button id="rotR" title="Rotate right">⟳</button>
     <button id="top" title="Top-down view">🗺️</button>
   </div>
+  <div id="card" class="glass hidden"></div>
   <div id="dock">
     <div id="hint"></div>
     <div id="bp" class="glass hidden"></div>
+    <div id="kinds" class="glass hidden">
+      <button data-k="straight"><i>📏</i>Straight</button>
+      <button data-k="curve"><i>⤵️</i>Curve</button>
+      <button data-k="smooth"><i>〰️</i>Smooth</button>
+    </div>
     <div id="tools" class="glass">
       <button data-t="look"><i>👆</i>Look</button>
       <button data-t="road"><i>🛣️</i>Road</button>
@@ -456,17 +389,35 @@ $('#ui').innerHTML = `
     </div>
   </div>`;
 
+const ctrlOf = (d: Draft) => (roadKind === 'smooth' ? net.smoothCtrl(d.a, d.b) : d.c);
+function draftChanged() {
+  draftCheck = draft ? net.check(draft.a, draft.b, ctrlOf(draft)) : null;
+  drawGhost();
+  renderBar();
+}
+function clearDraft() { draft = null; picks = []; draftChanged(); hint(); }
+
 function setMode(m: Mode) {
   mode = m;
-  draft = null;
   document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.classList.toggle('on', b.dataset.t === m));
-  renderBar();
-  hint();
+  $('#kinds').classList.toggle('hidden', m !== 'road');
+  clearDraft();
+}
+function setKind(k: RoadKind) {
+  roadKind = k;
+  document.querySelectorAll<HTMLButtonElement>('#kinds button').forEach((b) => b.classList.toggle('on', b.dataset.k === k));
+  clearDraft();
 }
 function hint(text?: string) {
-  $('#hint').textContent = text ?? (mode === 'road'
-    ? 'Drag to draw a road · it snaps to 15° and to other roads · two fingers to move, pinch, twist'
-    : 'Drag to move · pinch to zoom · twist to turn · two fingers up/down to tilt · double-tap to zoom in');
+  let t = text;
+  if (t === undefined) {
+    if (mode !== 'road') t = 'Drag to move · pinch to zoom · twist to turn · two fingers up/down to tilt · tap a building';
+    else if (draft) t = 'Drag the white handles to adjust, then Build';
+    else if (roadKind === 'straight') t = 'Drag to draw a straight road · snaps to 15° and to other roads';
+    else if (roadKind === 'smooth') t = 'Drag from a road: the new road curves smoothly out of it';
+    else t = ['1/3 · Tap where the curve starts', '2/3 · Tap the bend point: the curve pulls towards it', '3/3 · Tap where the curve ends'][picks.length];
+  }
+  $('#hint').textContent = t;
 }
 document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.addEventListener('click', () => {
   const t = b.dataset.t!;
@@ -475,6 +426,7 @@ document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.a
   if (t === 'cars') { for (let i = 0; i < 5; i++) addVehicle(false); hint('Five cars added.'); }
   if (t === 'reset') location.reload();
 }));
+document.querySelectorAll<HTMLButtonElement>('#kinds button').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.k as RoadKind)));
 $('#rotL').addEventListener('click', () => { goal = { az: view.az - Math.PI / 4 }; });
 $('#rotR').addEventListener('click', () => { goal = { az: view.az + Math.PI / 4 }; });
 $('#compass').addEventListener('click', () => { goal = { az: view.az + wrap(HOME.az - view.az), el: HOME.el }; });
@@ -482,62 +434,142 @@ $('#top').addEventListener('click', () => {
   goal = { el: view.el > 1.2 ? HOME.el : EL_MAX };
 });
 
+// what a road would knock down, in words
+function demolitionSummary(lots: Lot[]) {
+  const counts = new Map<string, number>();
+  let residents = 0, jobs = 0;
+  for (const l of lots) {
+    const b = buildings.find((x) => x.lot === l);
+    const n = b ? shortName(b) : l.kind;
+    counts.set(n, (counts.get(n) ?? 0) + 1);
+    const u = USE[l.kind];
+    if (u.unit === 'jobs') jobs += u.pop; else residents += u.pop;
+  }
+  const list = [...counts].map(([n, c]) => `${c} × ${n}`).join(', ');
+  const people = [residents && `${residents} residents rehoused`, jobs && `${jobs} jobs moved`].filter(Boolean).join(' · ');
+  return { list, people };
+}
+
 function renderBar() {
   const el = $('#bp');
-  if (!draft) { el.classList.add('hidden'); return; }
-  const c = net.check(draft.a, draft.b);
-  el.innerHTML = `<div class="row"><span>📐 New road <b>${Math.round(c.length)} m</b>${c.clears.length ? ` · clears ${c.clears.length} building${c.clears.length > 1 ? 's' : ''}` : ''} · <b style="color:var(--gold)">${money(c.cost)}</b></span>
-    <span class="btns"><button id="bpc">Cancel</button><button id="bpb" class="primary" ${c.ok && !dragging ? '' : 'disabled'}>Build</button></span></div>
+  if (!draft || !draftCheck) { el.classList.add('hidden'); return; }
+  const c = draftCheck;
+  const n = c.clears.length;
+  const kind = c.path.length > 2 ? 'Curved road' : 'New road';
+  const demo = n ? demolitionSummary(c.clears) : null;
+  el.innerHTML = `<div class="row"><span>📐 ${kind} <b>${Math.round(c.length)} m</b> · <b style="color:var(--gold)">${money(c.cost)}</b></span>
+    <span class="btns"><button id="bpc">Cancel</button><button id="bpb" class="${n ? 'danger' : 'primary'}" ${c.ok && !dragging ? '' : 'disabled'}>${n ? `💥 Demolish ${n} &amp; build` : 'Build'}</button></span></div>
+    ${demo ? `<div class="demo"><b>⚠️ This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(n * 6000)} compensation included</div>` : ''}
     ${c.ok ? '' : `<div class="bad">${c.reason}</div>`}`;
   el.classList.remove('hidden');
-  $('#bpc').addEventListener('click', () => { draft = null; renderBar(); });
+  $('#bpc').addEventListener('click', clearDraft);
   $('#bpb').addEventListener('click', () => {
     if (!draft) return;
-    const made = net.build(draft.a, draft.b);
-    // remove meshes for buildings the road cleared
-    for (let i = buildings.length - 1; i >= 0; i--)
-      if (!net.lots.includes(buildings[i].lot)) { cityGroup.remove(buildings[i].group); buildings.splice(i, 1); }
+    const doomed = new Set(draftCheck?.clears ?? []);
+    const summary = doomed.size ? demolitionSummary([...doomed]) : null;
+    const made = net.build(draft.a, draft.b, ctrlOf(draft));
+    // demolished buildings sink away rather than vanishing
+    for (const b of buildings) if (!net.lots.includes(b.lot) && !b.dying) b.dying = performance.now();
     draft = null;
+    draftChanged();
     rebuildRoads();
     queuePlots(made);
     refreshTrees();
-    renderBar();
-    hint('Built. New plots will fill in along it.');
+    hint(summary ? `💥 Demolished ${doomed.size}: ${summary.list}` : 'Built. New plots will fill in along it.');
   });
 }
 
-// ghost road for the blueprint
+// ---------------- blueprint ghost ----------------
 const ghostMat = new THREE.MeshBasicMaterial({ color: '#4cc3ff', transparent: true, opacity: 0.55, depthWrite: false });
 const badMat = new THREE.MeshBasicMaterial({ color: '#ff5a4d', transparent: true, opacity: 0.55, depthWrite: false });
-let ghost: THREE.Mesh | null = null;
-function drawGhost() {
-  if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost = null; }
-  if (!draft) return;
-  const ok = net.check(draft.a, draft.b).ok;
-  const f = new Flat();
-  f.quad(draft.a, draft.b, HALF, 0.6);
-  f.disc(draft.a, HALF, 0.6);
-  f.disc(draft.b, HALF, 0.6);
-  for (const l of net.check(draft.a, draft.b).clears) {
-    const c = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => ({ x: l.x + Math.cos(l.rot) * (l.w / 2) * i - Math.sin(l.rot) * (l.d / 2) * j, z: l.z + Math.sin(l.rot) * (l.w / 2) * i + Math.cos(l.rot) * (l.d / 2) * j }));
-    f.tri(c[0].x, c[0].z, c[1].x, c[1].z, c[2].x, c[2].z, 0.7);
-    f.tri(c[0].x, c[0].z, c[2].x, c[2].z, c[3].x, c[3].z, 0.7);
+const handleMat = new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false });
+const handleRing = new THREE.MeshBasicMaterial({ color: '#1f8fd6', depthTest: false });
+const guideMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7, depthWrite: false });
+const doomMat = new THREE.MeshBasicMaterial({ color: '#ff2a1a', transparent: true, opacity: 0.45, depthWrite: false });
+const ghost = new THREE.Group();
+ghost.renderOrder = 5;
+scene.add(ghost);
+
+function handles(): { p: P; key: 'a' | 'b' | 'c' }[] {
+  if (draft) {
+    const hs: { p: P; key: 'a' | 'b' | 'c' }[] = [{ p: draft.a, key: 'a' }, { p: draft.b, key: 'b' }];
+    if (roadKind === 'curve' && draft.c) hs.push({ p: draft.c, key: 'c' });
+    return hs;
   }
-  ghost = f.mesh(ok ? ghostMat : badMat);
-  ghost.renderOrder = 5;
-  scene.add(ghost);
+  return picks.map((p, i) => ({ p, key: i === 0 ? 'a' : 'c' }));
+}
+
+function drawGhost() {
+  for (const c of [...ghost.children]) { ghost.remove(c); (c as THREE.Mesh).geometry.dispose(); }
+  const hr = Math.max(2, view.h * 0.016);
+  const hf = new Flat(), rf = new Flat(), gf = new Flat();
+  for (const h of handles()) { rf.disc(h.p, hr * 1.35, 1.2); hf.disc(h.p, hr, 1.3); }
+  // guide lines from the ends to the bend point, like Cities: Skylines
+  const guide = (a: P, b: P) => {
+    const L = Math.hypot(b.x - a.x, b.z - a.z);
+    for (let t = 0; t < L; t += 4) gf.ribbon(subPath([a, b], t, Math.min(L, t + 2.2)), 0.35, 1.0);
+  };
+  if (!draft && picks.length === 2) guide(picks[0], picks[1]);
+  if (draft && roadKind === 'curve' && draft.c) { guide(draft.a, draft.c); guide(draft.c, draft.b); }
+  if (draft && draftCheck) {
+    const f = new Flat();
+    f.ribbon(draftCheck.path, HALF, 0.6);
+    f.disc(draft.a, HALF, 0.6);
+    f.disc(draft.b, HALF, 0.6);
+    const m = f.mesh(draftCheck.ok ? ghostMat : badMat);
+    m.renderOrder = 5;
+    ghost.add(m);
+    // every building in the way gets a flashing red block over it
+    for (const l of draftCheck.clears) {
+      const b = buildings.find((x) => x.lot === l);
+      const h = (b?.height ?? l.h) + 1;
+      const box = new THREE.Mesh(new THREE.BoxGeometry(l.w + 1, h, l.d + 1), doomMat);
+      box.position.set(l.x, h / 2, l.z);
+      box.rotation.y = -l.rot;
+      box.renderOrder = 6;
+      ghost.add(box);
+    }
+  }
+  for (const [f, mat, order] of [[gf, guideMat, 9], [rf, handleRing, 10], [hf, handleMat, 11]] as const) {
+    if (!f.pos.length) continue;
+    const m = f.mesh(mat);
+    m.renderOrder = order;
+    ghost.add(m);
+  }
+}
+
+// ---------------- building card ----------------
+const ray = new THREE.Raycaster();
+const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+function ndc(sx: number, sy: number) {
+  const r = canvas.getBoundingClientRect();
+  return new THREE.Vector2(((sx - r.left) / r.width) * 2 - 1, -((sy - r.top) / r.height) * 2 + 1);
+}
+function pickBuilding(sx: number, sy: number) {
+  ray.setFromCamera(ndc(sx, sy), cam);
+  const hit = ray.intersectObjects(cityGroup.children, true)[0];
+  let o: THREE.Object3D | null = hit?.object ?? null;
+  while (o && !o.userData.lot) o = o.parent;
+  return o ? buildings.find((b) => b.group === o) ?? null : null;
+}
+function showCard(b: Built | null) {
+  const el = $('#card');
+  if (!b) { el.classList.add('hidden'); return; }
+  const u = USE[b.lot.kind];
+  el.innerHTML = `<b>${b.name}</b><div>${b.detail}</div><div class="use">${u.label} · ${u.pop} ${u.unit}</div>`;
+  el.classList.remove('hidden');
 }
 
 // ---------------- input (Google Maps style) ----------------
-const ray = new THREE.Raycaster();
-const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 function groundAt(sx: number, sy: number): P {
-  const r = canvas.getBoundingClientRect();
-  const ndc = new THREE.Vector2(((sx - r.left) / r.width) * 2 - 1, -((sy - r.top) / r.height) * 2 + 1);
-  ray.setFromCamera(ndc, cam);
+  ray.setFromCamera(ndc(sx, sy), cam);
   const hit = new THREE.Vector3();
   ray.ray.intersectPlane(plane, hit);
   return { x: hit.x, z: hit.z };
+}
+function toScreen(p: P) {
+  const v = new THREE.Vector3(p.x, 0, p.z).project(cam);
+  return { x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight };
 }
 // move the camera so world point w sits under screen point (sx, sy)
 function keepUnder(w: P, sx: number, sy: number) {
@@ -549,13 +581,14 @@ function keepUnder(w: P, sx: number, sy: number) {
 }
 
 const pts = new Map<number, { x: number; y: number; t: number }>();
-type G = 'none' | 'maybe' | 'pan' | 'draw' | 'two';
+type G = 'none' | 'maybe' | 'pan' | 'draw' | 'handle' | 'two';
 let gesture: G = 'none';
 let downAt = { x: 0, y: 0, t: 0 };
 let lastTap = { x: 0, y: 0, t: 0 };
 let fling = { vx: 0, vz: 0 };
 let panAnchor: P = { x: 0, z: 0 };
 let vel: { x: number; z: number; t: number }[] = [];
+let grabbed: 'a' | 'b' | 'c' = 'b';
 // two-finger state, measured from the moment the second finger landed
 let two = {
   d0: 0, a0: 0, m0: { x: 0, y: 0 }, anchor: { x: 0, z: 0 }, h0: 0, az0: 0, el0: 0,
@@ -577,18 +610,53 @@ function startPan(x: number, y: number) {
   panAnchor = groundAt(x, y);
   vel = [];
 }
+function handleUnder(x: number, y: number) {
+  if (mode !== 'road') return null;
+  let best: 'a' | 'b' | 'c' | null = null, bd = 34;
+  for (const h of handles()) { const s = toScreen(h.p); const d = Math.hypot(s.x - x, s.y - y); if (d < bd) { bd = d; best = h.key; } }
+  return best;
+}
+// move a blueprint handle to a new spot, re-snapping it
+function moveHandle(key: 'a' | 'b' | 'c', raw: P) {
+  if (!draft) {
+    if (key === 'a' && picks[0]) picks[0] = net.snapStart(raw, tol());
+    if (key === 'c' && picks[0] && picks[1]) picks[1] = net.snapAngle(picks[0], raw);
+    drawGhost();
+    return;
+  }
+  if (key === 'a') draft.a = net.snapStart(raw, tol());
+  if (key === 'b') draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight');
+  if (key === 'c') draft.c = { ...raw };
+  draftChanged();
+}
+function curveTap(raw: P) {
+  if (draft) return;
+  if (picks.length === 0) picks = [net.snapStart(raw, tol())];
+  else if (picks.length === 1) picks.push(net.snapAngle(picks[0], raw));
+  else {
+    const b = net.snapEnd(picks[0], raw, tol(), true);
+    draft = { a: picks[0], c: { x: picks[1].x, z: picks[1].z }, b };
+    picks = [];
+    draftChanged();
+  }
+  drawGhost();
+  hint();
+}
 
 canvas.addEventListener('pointerdown', (e) => {
-  canvas.setPointerCapture(e.pointerId);
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
   pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
   goal = null;
   fling = { vx: 0, vz: 0 };
   if (pts.size === 1) {
     downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+    const h = handleUnder(e.clientX, e.clientY);
+    if (h) { gesture = 'handle'; grabbed = h; dragging = true; return; }
     gesture = 'maybe';
     startPan(e.clientX, e.clientY);
   } else if (pts.size === 2) {
-    if (gesture === 'draw') { draft = null; drawGhost(); renderBar(); }
+    if (gesture === 'draw') { draft = null; draftChanged(); }
+    if (gesture === 'handle') { dragging = false; renderBar(); }
     dragging = false;
     gesture = 'two';
     startTwo();
@@ -620,8 +688,10 @@ canvas.addEventListener('pointermove', (e) => {
     keepUnder(two.anchor, m.x, m.y);
     return;
   }
+  if (gesture === 'handle') { moveHandle(grabbed, groundAt(e.clientX, e.clientY)); return; }
   if (gesture === 'maybe' && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 8) {
-    gesture = mode === 'road' ? 'draw' : 'pan';
+    // straight and smooth roads are drawn by dragging; the curve tool uses taps, so dragging pans
+    gesture = mode === 'road' && roadKind !== 'curve' && !draft ? 'draw' : 'pan';
     if (gesture === 'draw') {
       const a = net.snapStart(groundAt(downAt.x, downAt.y), tol());
       draft = { a, b: { ...a } };
@@ -633,9 +703,8 @@ canvas.addEventListener('pointermove', (e) => {
     vel.push({ x: view.x, z: view.z, t: performance.now() });
     if (vel.length > 6) vel.shift();
   } else if (gesture === 'draw' && draft) {
-    draft.b = net.snapEnd(draft.a, groundAt(e.clientX, e.clientY), tol());
-    drawGhost();
-    renderBar();
+    draft.b = net.snapEnd(draft.a, groundAt(e.clientX, e.clientY), tol(), roadKind === 'smooth');
+    draftChanged();
   }
 });
 
@@ -656,18 +725,22 @@ const end = (e: PointerEvent) => {
     return;
   }
   if (pts.size) return;
-  if (gesture === 'draw') { dragging = false; renderBar(); drawGhost(); }
+  if (gesture === 'draw' || gesture === 'handle') { dragging = false; renderBar(); hint(); }
   if (gesture === 'pan' && vel.length >= 2) {
     const a = vel[0], b = vel[vel.length - 1];
     const dt = (b.t - a.t) / 1000;
     if (dt > 0 && now - b.t < 80) fling = { vx: (b.x - a.x) / dt, vz: (b.z - a.z) / dt };
   }
-  if (gesture === 'maybe' && now - downAt.t < 300) {
-    // double-tap zooms in on the spot
-    if (now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
-      animateZoom(0.5, e.clientX, e.clientY);
-      lastTap.t = 0;
-    } else lastTap = { x: e.clientX, y: e.clientY, t: now };
+  if (gesture === 'maybe' && now - downAt.t < 400) {
+    if (mode === 'road' && roadKind === 'curve') curveTap(groundAt(e.clientX, e.clientY));
+    else if (mode === 'look') {
+      showCard(pickBuilding(e.clientX, e.clientY));
+      // double-tap zooms in on the spot
+      if (now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
+        animateZoom(0.5, e.clientX, e.clientY);
+        lastTap.t = 0;
+      } else lastTap = { x: e.clientX, y: e.clientY, t: now };
+    }
   }
   gesture = 'none';
 };
@@ -724,16 +797,20 @@ refreshTrees();
 for (let i = 0; i < 4; i++) addVehicle(true);
 for (let i = 0; i < 14; i++) addVehicle(false);
 setMode('look');
+setKind('straight');
 resize();
 
-const POP: Record<Lot['kind'], number> = { house: 4, terrace: 5, shop: 6, flats: 45, tower: 160 };
 let last = performance.now();
 let growAt = 0;
+let lastH = view.h;
 function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   stepCamera(dt);
   placeCamera();
+  // keep blueprint handles a finger's width wide at any zoom
+  if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
+  doomMat.opacity = 0.3 + 0.25 * Math.sin(now / 160);
   // the town grows: one new building every few tenths of a second
   growAt -= dt;
   if (growAt <= 0 && queue.length) {
@@ -741,13 +818,20 @@ function frame(now: number) {
     const l = queue.shift()!;
     if (net.lotFree(l)) { spawnLot(l); refreshTrees(); }
   }
-  for (const b of buildings) if (b.group.scale.y < 1) b.group.scale.y = Math.min(1, (now - b.born) / 700);
+  for (let i = buildings.length - 1; i >= 0; i--) {
+    const b = buildings[i];
+    if (b.dying) {
+      const k = (now - b.dying) / 700;
+      b.group.scale.y = Math.max(0.01, 1 - k);
+      if (k >= 1) { cityGroup.remove(b.group); for (const m of b.group.children) (m as THREE.Mesh).geometry.dispose(); buildings.splice(i, 1); }
+    } else if (b.group.scale.y < 1) b.group.scale.y = Math.min(1, (now - b.born) / 700);
+  }
   moveVehicles(dt);
-  const pop = buildings.reduce((s, b) => s + POP[b.lot.kind], 0);
+  const pop = buildings.reduce((s, b) => s + (USE[b.lot.kind].unit === 'jobs' ? 0 : USE[b.lot.kind].pop), 0);
   $('#stats').textContent = `Population ${pop.toLocaleString('en-GB')} · ${buildings.length} buildings · ${vehicles.length} vehicles`;
   renderer.render(scene, cam);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { net, view, vehicles, buildings, setMode, groundAt, cam, THREE };
+(window as unknown as { proto: unknown }).proto = { net, view, vehicles, buildings, setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding };
