@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BAY, ROADS, bayWeight, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
 import { legsAt, type Junction } from './junction';
+import { STD } from './standards';
 
 export const paveMat = new THREE.MeshLambertMaterial({ color: '#bdb8ad', polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 export const asphaltMat = new THREE.MeshLambertMaterial({ color: '#484c52', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
@@ -48,6 +49,14 @@ export class Flat {
   // dashes along a line at a (varying) sideways offset
   dashes(path: P[], off: (t: number) => number, t0: number, t1: number, len: number, gap: number, w: number, y: number) {
     for (let t = t0; t + len <= t1; t += len + gap) { const sp = subPath(path, t, t + len); this.strip(sp, (i) => { const o = off(t + (len * i) / (sp.length - 1 || 1)); return [o - w, o + w]; }, y); }
+  }
+  // a filled polygon (convex or not)
+  poly(pts: P[], y: number) {
+    const clean: THREE.Vector2[] = [];
+    for (const p of pts) { const l = clean[clean.length - 1]; if (!l || Math.hypot(l.x - p.x, l.y - p.z) > 0.05) clean.push(new THREE.Vector2(p.x, p.z)); }
+    if (clean.length > 2 && clean[0].distanceTo(clean[clean.length - 1]) < 0.05) clean.pop();
+    if (clean.length < 3) return;
+    for (const [i, j, k] of THREE.ShapeUtils.triangulateShape(clean, [])) this.tri(clean[i].x, clean[i].y, clean[j].x, clean[j].y, clean[k].x, clean[k].y, y);
   }
   disc(c: P, r: number, y: number, n = 20) {
     y += c.y ?? 0;
@@ -257,15 +266,28 @@ export function laneCentre(net: Network, s: RSeg, i: number) {
   const d = net.def(s);
   return d.lanes > 1 ? d.median / 2 + (d.lanes - 1 - i + 0.5) * d.lane : d.median / 2 + d.lane / 2;
 }
-// how far from a junction's centre its markings (and the ends of lane lines) sit, per leg
-export function trimFor(net: Network, junctions: Map<number, Junction>, node: number, s: RSeg) {
-  const j = junctions.get(node);
-  if (!j) return net.segsAt(node).length > 2 ? net.nodeHalf(node) + 1 : 0;
-  if (j.form === 'roundabout') return j.R + (net.def(s).lanes === 1 ? 13 : 2);
-  if (j.form === 'mini') return j.R + 1;
-  if (j.form === 'priority') return j.major.includes(s.id) ? 0 : (j.reach[s.id] ?? 0) + 0.5;
-  if (j.form === 'join' || j.form === 'merge') return 0;
-  return (j.reach[s.id] ?? net.nodeHalf(node)) + 0.5;
+// Where a road's own drawing stops at each end, taken from the junction's shape: its carriageway
+// (`strip`), its markings (`line`), its reservation (`median`), and its footway on each side
+// (`L`/`R`, left and right of the road's direction from a to b).
+export interface Ends { strip: [number, number]; line: [number, number]; median: [number, number]; L: [number, number]; R: [number, number] }
+export function endsOf(junctions: Map<number, Junction>, s: RSeg): Ends {
+  const at = (node: number, atA: boolean) => {
+    const j = junctions.get(node), sh = j?.shape;
+    if (!j || !sh) return { strip: 0, line: 0, median: 0, L: 0, R: 0 };
+    const [plus, minus] = sh.paveTrim[s.id] ?? [0, 0];
+    const major = j.form === 'priority' && j.major.includes(s.id);
+    const ring = j.form === 'roundabout' || j.form === 'mini';
+    return {
+      strip: sh.mouth[s.id] ?? 0,
+      line: major ? 0 : ring ? sh.mouth[s.id] ?? 0 : sh.line[s.id] ?? 0,
+      median: sh.medianTrim[s.id] ?? 0,
+      // arriving traffic keeps left: at the a end it arrives on the road's right, at the b end on its left
+      L: atA ? minus : plus,
+      R: atA ? plus : minus,
+    };
+  };
+  const A = at(s.a, true), B = at(s.b, false);
+  return { strip: [A.strip, B.strip], line: [A.line, B.line], median: [A.median, B.median], L: [A.L, B.L], R: [A.R, B.R] };
 }
 
 export interface Lamp { mesh: THREE.Mesh; node: number; seg: number; col: 'red' | 'amber' | 'green' }
@@ -285,10 +307,16 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
 
   for (const s of net.segs.values()) {
     const d = net.def(s), path = finePath(net, s), A = arcs(path), L = A[A.length - 1];
-    const sec = A.map((t) => section(net, s, t));
+
     const half = net.half(s);
     structures(path, body, rails, half);
-    const trimA = trimFor(net, junctions, s.a, s), trimB = trimFor(net, junctions, s.b, s);
+    const ends = endsOf(junctions, s);
+    // markings stop at the junction's lines; the carriageway, reservation and footways where its shape takes over
+    const [trimA, trimB] = ends.line, [stripA, stripB] = ends.strip;
+    const part = (t0: number, t1: number) => {
+      const p = subPath(path, Math.max(0, t0), Math.min(L, t1)), ar = arcs(p);
+      return { p, sec: ar.map((t) => section(net, s, t + Math.max(0, t0))) };
+    };
     // ---- cuttings and tunnels: open to the sky while shallow, covered once deep ----
     const Y = (i: number) => path[i].y ?? 0;
     const DEEP = -9;
@@ -346,37 +374,52 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     }
     // ---- road: pavements or verges, then the carriageway ----
     const surface = d.pave > 0 ? pave : verge;
-    surface.strip(path, (i) => [sec[i].L.kerb, sec[i].L.back], 0.15);
-    surface.strip(path, (i) => [-sec[i].R.back, -sec[i].R.kerb], 0.15);
+    if (L - ends.L[0] - ends.L[1] > 0.2) { const q = part(ends.L[0], L - ends.L[1]); surface.strip(q.p, (i) => [q.sec[i].L.kerb, q.sec[i].L.back], 0.15); }
+    if (L - ends.R[0] - ends.R[1] > 0.2) { const q = part(ends.R[0], L - ends.R[1]); surface.strip(q.p, (i) => [-q.sec[i].R.back, -q.sec[i].R.kerb], 0.15); }
+    const cw = part(stripA, L - stripB);
     if (d.median > 0) {
-      asph.strip(path, (i) => [d.median / 2, sec[i].L.kerb], 0.25);
-      asph.strip(path, (i) => [-sec[i].R.kerb, -d.median / 2], 0.25);
+      asph.strip(cw.p, (i) => [d.median / 2, cw.sec[i].L.kerb], 0.25);
+      asph.strip(cw.p, (i) => [-cw.sec[i].R.kerb, -d.median / 2], 0.25);
       const mk = d.medianKind;
-      // the reservation stops where the junction starts
-      if (L - trimA - trimB > 2) (mk === 'grass' || mk === 'trees' ? verge : mk === 'hatch' ? asph : median).strip(subPath(path, trimA, L - trimB), () => [-d.median / 2, d.median / 2], 0.27);
+      // the reservation stops at its nose, where the junction starts
+      const [mA, mB] = ends.median;
+      if (L - mA - mB > 2) {
+        const mp = subPath(path, mA, L - mB);
+        (mk === 'grass' || mk === 'trees' ? verge : mk === 'hatch' ? asph : median).strip(mp, () => [-d.median / 2, d.median / 2], 0.27);
+        // a rounded kerbed nose at each end
+        if (mk !== 'hatch') for (const [t, dir] of [[mA, 1], [L - mB, -1]] as const) {
+          const q = pointAt(path, t), r = d.median / 2;
+          for (let k = 0; k < 8; k++) {
+            const a0 = (k / 8) * Math.PI, a1 = ((k + 1) / 8) * Math.PI;
+            const pt = (a: number) => [q.x + q.uz * Math.cos(a) * r - q.ux * Math.sin(a) * r * dir, q.z - q.ux * Math.cos(a) * r - q.uz * Math.sin(a) * r * dir];
+            const [x0, z0] = pt(a0), [x1, z1] = pt(a1);
+            (mk === 'grass' || mk === 'trees' ? verge : median).tri(q.x, q.z, x0, z0, x1, z1, q.y + 0.27);
+          }
+        }
+      }
       if (mk === 'hatch') {
         for (const k of [1, -1]) lines.strip(path, () => [k * d.median / 2 - 0.07, k * d.median / 2 + 0.07], 0.35);
         lines.dashes(path, () => 0, trimA + 2, L - trimB - 2, 0.5, 2.5, d.median / 2 - 0.1, 0.35); // chevron-ish hatching
       }
-      if (mk === 'trees') for (let t = trimA + 10; t < L - trimB - 6; t += 16) { const q = pointAt(path, t); tree(q.x, q.y, q.z, 0.9); }
-    } else asph.strip(path, (i) => [-sec[i].R.kerb, sec[i].L.kerb], 0.25);
+      if (mk === 'trees') for (let t = ends.median[0] + 10; t < L - ends.median[1] - 6; t += 16) { const q = pointAt(path, t); tree(q.x, q.y, q.z, 0.9); }
+    } else asph.strip(cw.p, (i) => [-cw.sec[i].R.kerb, cw.sec[i].L.kerb], 0.25);
     const secAt = (t: number) => section(net, s, t);
     // kerbside lanes: bus lanes (red), cycle lanes (green), parking bays with parked cars
     for (const k of [1, -1] as const) {
-      const S = (i: number) => (k === 1 ? sec[i].L : sec[i].R);
       const gen = d.median / 2 + d.lanes * d.lane;
       const span = (a: number, b: number) => (k === 1 ? [a, b] : [-b, -a]) as [number, number];
-      if (d.bus) { bus.strip(path, (i) => span(S(i).lane, S(i).lane + d.bus), 0.26); lines.dashes(path, (t) => k * (k === 1 ? secAt(t).L.lane : secAt(t).R.lane), trimA + 1, L - trimB, Math.max(1, L - trimA - trimB - 2), 1, 0.12, 0.35); }
+      const S2 = (i: number) => (k === 1 ? cw.sec[i].L : cw.sec[i].R);
+      if (d.bus) { bus.strip(cw.p, (i) => span(S2(i).lane, S2(i).lane + d.bus), 0.26); lines.dashes(path, (t) => k * (k === 1 ? secAt(t).L.lane : secAt(t).R.lane), trimA + 1, L - trimB, Math.max(1, L - trimA - trimB - 2), 1, 0.12, 0.35); }
       if (d.cycle) {
         const c0 = gen + d.bus;
-        cyc.strip(path, () => span(c0, c0 + d.cycle), 0.26);
+        cyc.strip(cw.p, () => span(c0, c0 + d.cycle), 0.26);
         lines.dashes(path, () => k * (c0 + 0.1), trimA + 1, L - trimB, Math.max(1, L - trimA - trimB - 2), 1, 0.08, 0.35);
       }
       if (d.parking) {
         const p0 = gen + d.bus + d.cycle;
-        bays.strip(path, (i) => span(p0 + d.parking - Math.max(0, S(i).park), p0 + d.parking), 0.26);
+        bays.strip(cw.p, (i) => span(p0 + d.parking - Math.max(0, S2(i).park), p0 + d.parking), 0.26);
         let n = 0;
-        for (let t = trimA + 4; t < L - trimB - 5; t += 6) {
+        for (let t = stripA + 4; t < L - stripB - 5; t += 6) {
           const x = secAt(t + 3), side = k === 1 ? x.L : x.R;
           if (side.park < d.parking - 0.1) continue; // painted out by a stop
           lines.dashes(path, () => k * (p0 + d.parking / 2), t, t + 0.12, 0.12, 1, d.parking / 2, 0.35);
@@ -421,52 +464,73 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       shelter(furn, path, st.s, kerb(st.s) + k * 0.2);
     }
     // street trees along wide pavements, clear of junctions and stops
-    if (d.pave >= 5) for (const k of [1, -1]) for (let t = trimA + 8; t < L - trimB - 4; t += 14) {
+    if (d.pave >= 5) for (const k of [1, -1]) for (let t = (k === 1 ? ends.L : ends.R)[0] + 8; t < L - (k === 1 ? ends.L : ends.R)[1] - 4; t += 14) {
       if (s.stops.some((st) => { const [a, b] = stopSpan(st); return st.side === k && t > a - 6 && t < b + 6; })) continue;
       const x = secAt(t), side = k === 1 ? x.L : x.R;
       if (side.back - side.kerb < 3) continue;
       const q = pointAt(path, t), o = k * (side.kerb + 1.4);
-      tree(q.x + q.uz * o, q.y, q.z - q.ux * o);
+      const at = { x: q.x + q.uz * o, z: q.z - q.ux * o };
+      // not on a junction's land (a slip road, an island)
+      if (net.land.at(at)?.owner === 'junction') continue;
+      tree(at.x, q.y, at.z);
     }
   }
 
   // ---- junctions ----
+  // Each junction is drawn from its shape (jshape.ts): the carriageway with its kerb radii or
+  // roundabout, the footway round it, islands, then the markings a UK road would have.
+  const kerbed = (pts: P[], y: number, top = 0.42) => {
+    island.poly(pts, y + top);
+    for (let k = 0; k < pts.length; k++) { const p = pts[k], q = pts[(k + 1) % pts.length]; kerbs.quad([p.x, y + 0.25, p.z], [q.x, y + 0.25, q.z], [q.x, y + top, q.z], [p.x, y + top, p.z]); }
+  };
   for (const n of net.nodes.values()) {
     const segs = net.segsAt(n.id);
     if (!segs.length) continue;
     if (net.def(segs[0]).cls === 'rail') { ballast.disc(n, Math.max(...segs.map((s) => kerbOf(net.def(s)))), 0.2); continue; }
-    const j = junctions.get(n.id);
-    const kerb = Math.max(ROADS.street.lane, ...segs.map((s) => kerbOf(net.def(s)))), back = net.nodeHalf(n.id);
-    const ring = j && (j.form === 'roundabout' || j.form === 'mini');
-    (segs.every((s) => net.def(s).pave === 0) ? verge : pave).disc(n, ring && j ? Math.max(back, j.R + 3) : back, 0.15, 32);
-    asph.disc(n, ring && j ? Math.max(kerb, j.R) : kerb, 0.25, 32);
-    if (!j || j.form === 'join' || j.form === 'merge') continue;
-    const legs = legsAt(net, n.id);
+    const j = junctions.get(n.id), sh = j?.shape;
     const y = n.y;
-    // a frame on each leg: `a` metres out along it, `b` across (positive on the side traffic arrives)
+    const noPave = segs.every((s) => net.def(s).pave === 0);
+    if (!j || !sh) {
+      // a bend or where one road runs on as another: fill the joint
+      const kerb = Math.max(ROADS.street.lane, ...segs.map((s) => kerbOf(net.def(s))));
+      (noPave ? verge : pave).disc(n, net.nodeHalf(n.id), 0.15, 32);
+      asph.disc(n, kerb, 0.25, 32);
+      continue;
+    }
+    (noPave ? verge : pave).poly(sh.pave, y + 0.15);
+    asph.poly(sh.apron, y + 0.25);
+    for (const isl of sh.islands) {
+      kerbed(isl, y);
+      // a keep-left bollard at the end facing oncoming traffic
+      if (isl.length === 3) { const b0 = { x: (isl[0].x + isl[1].x) / 2 * 0.8 + isl[2].x * 0.2, z: (isl[0].z + isl[1].z) / 2 * 0.8 + isl[2].z * 0.2 }; kerbs.box(b0.x, b0.z, 1, 0, 0.18, 0.18, y + 0.4, y + 1.3); }
+    }
+    const legs = legsAt(net, n.id);
+    const ring = j.form === 'roundabout' || j.form === 'mini';
     for (const leg of legs) {
       const W = (a: number, b: number) => [n.x + leg.dir.x * a - leg.dir.z * b, n.z + leg.dir.z * a + leg.dir.x * b] as const;
       const rect = (f: Flat, a0: number, a1: number, b0: number, b1: number, yy: number) => { const p = [W(a0, b0), W(a1, b0), W(a1, b1), W(a0, b1)]; f.tri(p[0][0], p[0][1], p[1][0], p[1][1], p[2][0], p[2][1], y + yy); f.tri(p[0][0], p[0][1], p[2][0], p[2][1], p[3][0], p[3][1], y + yy); };
       const triW = (f: Flat, pts: [number, number][], yy: number) => { const q = pts.map(([a, b]) => W(a, b)); f.tri(q[0][0], q[0][1], q[1][0], q[1][1], q[2][0], q[2][1], y + yy); };
-      const d = net.def(leg.seg), kIn = kerbOf(d), reach = j.reach[leg.seg.id] ?? 0;
-      const lineAt = j.form === 'roundabout' || j.form === 'mini' ? j.R + 0.3 : reach;
+      const d = net.def(leg.seg), kIn = kerbOf(d);
+      // at a roundabout the give-way line follows the edge of the ring
+      const lineAtB = (b: number) => (ring ? Math.sqrt(Math.max(0, sh.R * sh.R - b * b)) + 0.3 : sh.line[leg.seg.id] ?? 0);
+      const lineAt = lineAtB((d.median / 2 + kIn) / 2);
       const approaches = !(j.form === 'priority' && j.major.includes(leg.seg.id));
       // give-way lines (double broken) or a solid stop line across the incoming half
       if (j.form === 'signals') rect(lines, lineAt, lineAt + 0.3, d.median / 2 + 0.2, kIn - 0.1, 0.36);
-      else if (approaches) for (const off of [0, 0.6]) for (let b = d.median / 2 + 0.3; b < kIn - 0.2; b += 0.9) rect(lines, lineAt + off, lineAt + off + 0.3, b, Math.min(kIn - 0.2, b + 0.6), 0.36);
+      else if (approaches) for (const off of [0, 0.6]) for (let b = d.median / 2 + 0.3; b < kIn - 0.2; b += 0.9) { const la = lineAtB(b + 0.3); rect(lines, la + off, la + off + 0.3, b, Math.min(kIn - 0.2, b + 0.6), 0.36); }
       // the give-way triangle, pointing at the line
       if (approaches && j.form !== 'signals') for (let i = 0; i < d.lanes; i++) {
-        const c = laneCentre(net, leg.seg, i);
-        triW(lines, [[lineAt + 5, c - 0.7], [lineAt + 5, c + 0.7], [lineAt + 3, c]], 0.36);
-        triW(asph, [[lineAt + 4.85, c - 0.45], [lineAt + 4.85, c + 0.45], [lineAt + 3.45, c]], 0.37);
+        const c = laneCentre(net, leg.seg, i), la = lineAtB(c);
+        triW(lines, [[la + 5, c - 0.7], [la + 5, c + 0.7], [la + 3, c]], 0.36);
+        triW(asph, [[la + 4.85, c - 0.45], [la + 4.85, c + 0.45], [la + 3.45, c]], 0.37);
       }
       // lane arrows, a pair per approach lane
       const lanes = j.lanes[leg.seg.id] ?? [];
       // arrows only where lanes actually divide the traffic (not on a plain single-lane approach)
       const arrows = lanes.length > 1 || j.form === 'signals' || n.id === editing;
       if (arrows) lanes.forEach((mv, i) => {
-        const c = laneCentre(net, leg.seg, i);
-        for (const at of [lineAt + 9, lineAt + 26]) {
+        const c = laneCentre(net, leg.seg, i), la = Math.max(lineAtB(c), sh.mouth[leg.seg.id] ?? 0);
+        for (const at of [la + 9, la + 26]) {
           if (at > leg.len - 8) continue;
           // shaft towards the junction (smaller `a`), then a head for each movement
           rect(lines, at - 3.2, at, c - 0.12, c + 0.12, 0.36);
@@ -483,18 +547,9 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
           }
         }
       });
-      if (j.form === 'roundabout' && d.lanes === 1) {
-        // a splitter island between the ways in and out, with a keep-left bollard
-        const tri = [W(j.R + 0.8, -1.1), W(j.R + 0.8, 1.1), W(j.R + 12, 0)];
-        island.tri(tri[0][0], tri[0][1], tri[1][0], tri[1][1], tri[2][0], tri[2][1], y + 0.42);
-        for (let k = 0; k < 3; k++) { const p = tri[k], q = tri[(k + 1) % 3]; kerbs.quad([p[0], y + 0.25, p[1]], [q[0], y + 0.25, q[1]], [q[0], y + 0.42, q[1]], [p[0], y + 0.42, p[1]]); }
-        const b0 = W(j.R + 1.6, 0);
-        kerbs.box(b0[0], b0[1], leg.dir.x, leg.dir.z, 0.18, 0.18, y + 0.4, y + 1.3);
-      }
       if (j.form === 'roundabout') {
         // chevron boards on the island, facing traffic coming in
-        const Ri = j.R - (legs.some((l) => l.lanes > 1) ? 9 : 6.5);
-        const p = W(Ri + 0.2, 1.6), q = W(Ri + 0.2, -1.6);
+        const p = W(sh.island + 0.2, 1.6), q = W(sh.island + 0.2, -1.6);
         boards.quad([p[0], y + 0.6, p[1]], [q[0], y + 0.6, q[1]], [q[0], y + 1.3, q[1]], [p[0], y + 1.3, p[1]]);
       }
       if (j.form === 'signals') {
@@ -510,32 +565,27 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
           group.add(m);
           lamps.push({ mesh: m, node: n.id, seg: leg.seg.id, col });
         });
-      }
-      // dotted guide lines through the junction for turning traffic
-      if (j.form === 'signals' || j.form === 'priority') lanes.forEach((mv, i) => {
-        for (const m of mv) {
-          if (m === 'S' && j.form === 'priority') continue;
-          if (j.form === 'priority' && j.major.includes(leg.seg.id) && m !== 'R') continue;
-          const to = legs.find((o) => o !== leg && (m === 'L' ? turnSign(leg, o) < -0.55 : m === 'R' ? turnSign(leg, o) > 0.55 : Math.abs(turnSign(leg, o)) <= 0.55));
-          if (!to) continue;
-          if (j.slip && j.slip.from === leg.seg.id && j.slip.to === to.seg.id) continue;
+        // dotted guides for right turns only (the ones that cross the junction), as UK junctions have
+        lanes.forEach((mv, i) => {
+          if (!mv.includes('R')) return;
+          const to = legs.find((o) => o !== leg && turnSign(leg, o) > 0.55);
+          if (!to) return;
           const c = laneCentre(net, leg.seg, i);
-          const ex = m === 'L' ? 0 : m === 'R' ? net.def(to.seg).lanes - 1 : Math.min(i, net.def(to.seg).lanes - 1);
-          const co = laneCentre(net, to.seg, ex);
-          const r0 = Math.max(lineAt, 1), r1 = Math.max(j.reach[to.seg.id] ?? 0, kIn + 1);
-          const A0 = W(r0, c);
+          const co = laneCentre(net, to.seg, net.def(to.seg).lanes - 1);
+          const A0 = W(lineAt, c);
+          const r1 = sh.mouth[to.seg.id] ?? 0;
           const B0 = [n.x + to.dir.x * r1 + to.dir.z * co, n.z + to.dir.z * r1 - to.dir.x * co];
           const k = Math.hypot(B0[0] - A0[0], B0[1] - A0[1]) * 0.45;
           const c1 = [A0[0] - leg.dir.x * k, A0[1] - leg.dir.z * k], c2 = [B0[0] - to.dir.x * k, B0[1] - to.dir.z * k];
           const pts: P[] = [];
-          for (let t = 0; t <= 1.0001; t += 1 / 12) { const u = 1 - t; pts.push({ x: u * u * u * A0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * B0[0], z: u * u * u * A0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * B0[1], y }); }
+          for (let t = 0; t <= 1.0001; t += 1 / 16) { const u = 1 - t; pts.push({ x: u * u * u * A0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * B0[0], z: u * u * u * A0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * B0[1], y }); }
           lines.dashes(pts, () => 0, 0.5, pathLength(pts) - 0.5, 0.8, 1, 0.07, 0.36);
-        }
-      });
+        });
+      }
     }
     if (j.form === 'roundabout') {
       // central island: kerbed, grassed, a little planting
-      const Ri = j.R - (legs.some((l) => l.lanes > 1) ? 9 : 6.5);
+      const Ri = sh.island;
       island.disc(n, Ri, 0.45, 28);
       for (let k = 0; k < 28; k++) {
         const a0 = (k / 28) * Math.PI * 2, a1 = ((k + 1) / 28) * Math.PI * 2;
@@ -545,8 +595,8 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       if (Ri > 5) for (let k = 0; k < 3; k++) { const a = k * 2.1; tree(n.x + Math.cos(a) * Ri * 0.4, y + 0.45, n.z + Math.sin(a) * Ri * 0.4, 0.8); }
       if (legs.some((l) => l.lanes > 1)) {
         const ringPts: P[] = [];
-        const rr = (Ri + j.R) / 2;
-        for (let k = 0; k <= 48; k++) { const a = (k / 48) * Math.PI * 2; ringPts.push({ x: n.x + Math.cos(a) * rr, z: n.z + Math.sin(a) * rr, y }); }
+        const rr = (Ri + sh.R) / 2;
+        for (let k = 0; k <= 64; k++) { const a = (k / 64) * Math.PI * 2; ringPts.push({ x: n.x + Math.cos(a) * rr, z: n.z + Math.sin(a) * rr, y }); }
         lines.dashes(ringPts, () => 0, 0, pathLength(ringPts), 2, 2, 0.07, 0.35);
       }
     }
@@ -556,16 +606,17 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       asph.disc(n, 1.6, 0.35, 20);
       lines.disc(n, 1.2, 0.36, 20);
     }
-    if (j.slip) {
-      // the slip road, its island, and the give-way at the end
-      const sp = j.slip.path.map((p) => ({ ...p, y }));
-      asph.strip(sp, () => [-2.4, 2.4], 0.26);
-      for (const o of [-2.2, 2.2]) lines.strip(sp, () => [o - 0.07, o + 0.07], 0.37);
-      const isl = j.slip.island;
-      island.tri(isl[0].x, isl[0].z, isl[1].x, isl[1].z, isl[2].x, isl[2].z, y + 0.42);
-      for (let k = 0; k < 3; k++) { const p = isl[k], q = isl[(k + 1) % 3]; kerbs.quad([p.x, y + 0.25, p.z], [q.x, y + 0.25, q.z], [q.x, y + 0.42, q.z], [p.x, y + 0.42, p.z]); }
-      const e = pointAt(sp, pathLength(sp) - 2);
-      for (const off of [0, 0.6]) for (let b = -2; b < 2; b += 0.9) {
+    const sl = sh.slip;
+    if (sl) {
+      // the slip road, its outside footway, edge lines, and the give-way where it rejoins
+      const sp = sl.path.map((p) => ({ ...p, y }));
+      const w = STD.slipWidth / 2, mid = sp[Math.floor(sp.length / 2)], nx = sp[Math.floor(sp.length / 2) + 1];
+      const outside = (sl.centre.x - mid.x) * (nx.z - mid.z) - (sl.centre.z - mid.z) * (nx.x - mid.x) > 0 ? 1 : -1;
+      asph.strip(sp, () => [-w, w], 0.26);
+      (noPave ? verge : pave).strip(sp, () => (outside > 0 ? [w, w + STD.slipFootway] : [-w - STD.slipFootway, -w]), 0.16);
+      for (const o of [-w + 0.2, w - 0.2]) lines.strip(sp, () => [o - 0.07, o + 0.07], 0.37);
+      const L2 = pathLength(sp), e = pointAt(sp, L2 - 7);
+      for (const off of [0, 0.6]) for (let b = -w + 0.3; b < w - 0.3; b += 0.9) {
         const p0 = [e.x - e.ux * off + e.uz * b, e.z - e.uz * off - e.ux * b], p1 = [e.x - e.ux * (off + 0.3) + e.uz * b, e.z - e.uz * (off + 0.3) - e.ux * b];
         const p2 = [p1[0] + e.uz * 0.6, p1[1] - e.ux * 0.6], p3 = [p0[0] + e.uz * 0.6, p0[1] - e.ux * 0.6];
         lines.tri(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], y + 0.37);

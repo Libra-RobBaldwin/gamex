@@ -1325,7 +1325,7 @@ export function makeRegion(reg: RegionShape): BuiltShape {
   const centre = cells.reduce((b, c) => (Math.hypot(c.x - cx, c.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? c : b), cells[0]);
   const block = (n: number) => cells.find((c) => { for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (!inR(c.x + i * S, c.z + j * S)) return false; return true; });
   const notes: string[] = [`${Math.round(cells.length * S * S)} m²`];
-  const railings = () => { for (const [x0, z0, x1, z1] of reg.roadEdges) k.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.max(0.05, Math.abs(x1 - x0)), 1.1, Math.max(0.05, Math.abs(z1 - z0)), plain('#23262a')); };
+  const railings = () => { for (const [x0, z0, x1, z1] of reg.roadEdges) k.at((x0 + x1) / 2, (z0 + z1) / 2, -Math.atan2(z1 - z0, x1 - x0), () => k.box(0, 0, 0, Math.hypot(x1 - x0, z1 - z0) + 0.05, 1.1, 0.06, plain('#23262a'))); };
   const keep: { x: number; z: number; r: number }[] = [];
   const clear = (x: number, z: number) => keep.every((o) => Math.hypot(x - o.x, z - o.z) > o.r);
   const trees = (p: number, s = 0.9) => { let n = 0; for (const c of cells) if (r() < p && clear(c.x, c.z)) { tree(k, c.x + (r() - 0.5) * S * 0.6, c.z + (r() - 0.5) * S * 0.6, s + r() * 0.4, r); n++; } return n; };

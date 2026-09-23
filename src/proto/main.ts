@@ -1,8 +1,8 @@
 // 3D prototype: free-form roads, plots along any street, buses and cars, rotating camera.
 import * as THREE from 'three';
 import './proto.css';
-import { DEFAULT_OPTS, Network, ROADS, kerbOf, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
-import { FORM_NAME, design, laneOptions, legsAt, moveOf, rescore, slipClear, type Form, type Junction, type Slip } from './junction';
+import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
+import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
 import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, type RoadFilter } from './catalog';
 import { GRADES } from './grade';
 import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
@@ -183,7 +183,7 @@ scene.add(roadGroup);
 // junction the player has customised keeps their choices as long as its roads stay the same.
 const junctions = new Map<number, Junction>();
 let seenAt: (node: number) => Map<string, number> | undefined = () => undefined;
-const geoFor = (node: number) => ({ slipFits: (sl: Slip) => slipClear(net, sl, node) });
+const geoFor = (node: number) => ({ fits: (polys: P[][]) => landFits(net, node, polys) });
 function redesignJunctions() {
   for (const id of [...junctions.keys()]) if (!net.nodes.has(id) || legsAt(net, id).length < 3) junctions.delete(id);
   for (const n of net.nodes.values()) {
@@ -196,12 +196,24 @@ function redesignJunctions() {
     if (j) junctions.set(n.id, j);
   }
 }
-let lamps: Lamp[] = [];
-function rebuildRoads() {
+// Every junction registers the land its shape takes (see land.ts), so nothing else is built on it.
+function claimJunctions() {
+  net.land.releaseWhere((k) => k.startsWith('junction:') && !junctions.has(Number(k.slice(9))));
+  for (const j of junctions.values()) net.land.claim(`junction:${j.node}`, 'junction', j.shape?.claims ?? []);
+}
+// The one place the town changes shape. Roads first, then the junctions they form (which claim
+// their land), then anything standing on land that's now taken moves out, then plots fill in.
+// Every step reads the land registry, so the order can't let one thing be built over another.
+function commitRoads(made: number[] = []) {
   redesignJunctions();
+  claimJunctions();
+  evictFromWorks();
   lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
+  if (made.length) queuePlots(made);
   onRoadsChanged();
 }
+let lamps: Lamp[] = [];
+const rebuildRoads = () => commitRoads();
 
 // ---------------- buildings ----------------
 // Each building is generated once, then baked into world space. Settled buildings are merged into
@@ -290,6 +302,19 @@ function demolish(b: Built) {
   placesDirty = true;
 }
 const shortName = (b: Built) => b.name.split(' · ')[0];
+// A junction grew (a crossroads became a roundabout, a slip road was added): buildings standing on
+// its land are compulsorily purchased, gardens running into it are cut back, queued plots dropped.
+function evictFromWorks() {
+  const works = (c: { owner: string }) => c.owner === 'road';
+  for (const b of buildings) {
+    if (b.dying || b.lot.id < 0) continue;
+    const l = b.lot;
+    if (!net.land.free(rectCorners(l.x, l.z, l.rot, l.w, l.d))) { net.lots = net.lots.filter((x) => x !== l); demolish(b); continue; }
+    if (!net.land.free(net.parcelRect(l, -0.3), works)) { const was = l.back; net.fitParcel(l); if (l.back !== was) regenerate(b); }
+  }
+  queue = queue.filter((l) => net.lotFree(l));
+}
+
 
 // ---------------- leftover land ----------------
 let infill: Built[] = [];
@@ -321,6 +346,14 @@ function queuePlots(segs: number[]) {
     // denser, taller near the centre; a few gaps elsewhere
     for (const p of plots) if (Math.hypot(p.x, p.z) < 200 || rand() < 0.75) queue.push(p);
   }
+  // and around any roundabout these roads meet at
+  const nodes = new Set(segs.flatMap((id) => { const s = net.segs.get(id); return s ? [s.a, s.b] : []; }));
+  for (const id of nodes) {
+    const j = junctions.get(id);
+    if (!j || j.form !== 'roundabout' || !j.shape) continue;
+    const legs = legsAt(net, id).map((l) => ({ seg: l.seg.id, ang: l.ang, half: net.half(l.seg) }));
+    queue.push(...net.plotsAround(id, j.R + 3, legs, CENTRE));
+  }
   queue.sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
 }
 
@@ -333,7 +366,7 @@ function seedTown() {
   road({ x: 0, z: 0 }, { x: 170, z: -98 }); // a 30° diagonal
   road({ x: -200, z: -96 }, { x: 0, z: -96 });
   road({ x: -110, z: -96 }, { x: -170, z: 0 }); // a slanting link
-  road({ x: 0, z: 70 }, { x: -80, z: 150 }, { x: 0, z: 150 }); // a crescent
+  road({ x: 0, z: 70 }, { x: -80, z: 150 }, { x: -80, z: 70 }); // a crescent
   road({ x: 60, z: 0 }, { x: 60, z: 110 });
   road({ x: 0, z: 110 }, { x: 110, z: 110 });
   road({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 }, as('dual')); // a sweeping dual-carriageway bypass
@@ -345,12 +378,15 @@ function seedTown() {
   road({ x: -190, z: -290 }, { x: 150, z: -290 });
   road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 });
   // a motorway along the south edge, reached from the estate by a dual carriageway
-  road({ x: -510, z: -470 }, { x: 510, z: -470 }, undefined, as('motorway'));
+  // the motorway ends at a roundabout, where it carries on east as a fast dual carriageway
+  road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway'));
+  road({ x: 0, z: -470 }, { x: 510, z: -470 }, undefined, as('dual-2-70-0'));
   road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
   // a main line railway along the north, lifted over the high road, and a road tunnel under the lake
   net.build({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
   road({ x: 250, z: -450 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 });
-  for (const s of net.segs.values()) queuePlots([s.id]);
+  // junctions are designed (and take their land) before any plot is laid out
+  commitRoads([...net.segs.keys()]);
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
   for (const l of queue.splice(0, now)) if (net.lotFree(l)) spawnLot(l, false);
@@ -742,18 +778,22 @@ function renderBar() {
     if (!draft) return;
     const doomed = new Set(draftCheck?.clears ?? []);
     const summary = doomed.size ? demolitionSummary([...doomed]) : null;
-    const made = net.build(draft.a, draft.b, ctrlOf(draft), opts);
-    // demolished buildings sink away rather than vanishing
-    for (const b of buildings) if (!net.lots.includes(b.lot) && !b.dying) demolish(b);
-    for (const l of net.touched) { const b = buildings.find((x) => x.lot === l); if (b && !b.dying) regenerate(b); }
+    buildRoad(draft.a, draft.b, ctrlOf(draft), opts);
     draft = null;
     draftChanged();
-    rebuildRoads();
-    queuePlots(made);
-    refreshTrees();
-    infillDue = true;
     hint(summary ? `💥 Demolished ${doomed.size}: ${summary.list}` : 'Built. New plots will fill in along it.');
   });
+}
+
+function buildRoad(a: End, b: End, ctrl: P | undefined, o: RoadOpts) {
+  const made = net.build(a, b, ctrl, o);
+  // demolished buildings sink away rather than vanishing
+  for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
+  for (const l of net.touched) { const x = buildings.find((y) => y.lot === l); if (x && !x.dying) regenerate(x); }
+  commitRoads(made);
+  refreshTrees();
+  infillDue = true;
+  return made;
 }
 
 // Long section of the blueprint: ground, the road's height, and what it has to clear.
@@ -1286,4 +1326,4 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, growAll: () => { for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, growAll: () => { for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };

@@ -4,12 +4,15 @@
 // park, a planted verge. This finds the gaps on a 5 m grid and decides what each becomes.
 import { CIVIC } from './buildgen';
 import type { RegionKind } from './buildgen';
-import { closestOnSeg, rng, type Lot, type Network, type P } from './roads';
+import { closestOnSeg, pathLength, pointAt, rng, type Lot, type Network, type P } from './roads';
 
 export const CELL = 5;
 export interface Region { id: string; cells: P[]; kind: RegionKind; seed: number; roadEdges: [number, number, number, number][]; centre: P }
 
 const FREE = 0, LOT = 1, ROAD = 2, WATER = 3;
+
+// a cell is taken if any part of it (not just its centre) is on claimed land
+const landNear = (net: Network, p: P) => { const h = CELL * 0.45; return !net.land.free([{ x: p.x - h, z: p.z - h }, { x: p.x + h, z: p.z - h }, { x: p.x + h, z: p.z + h }, { x: p.x - h, z: p.z + h }]); };
 
 export function findRegions(net: Network, pending: Lot[]) {
   const all = [...net.lots, ...pending];
@@ -50,7 +53,12 @@ export function findRegions(net: Network, pending: Lot[]) {
       }
     }
   }
-  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) if (net.isWater({ x: cx(i), z: cz(j) })) occ[i + j * nx] = WATER;
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    const p = { x: cx(i), z: cz(j) };
+    if (net.isWater(p)) occ[i + j * nx] = WATER;
+    // anything the land registry says is taken (junctions, slip roads, islands, road corridors)
+    else if (occ[i + j * nx] === FREE && landNear(net, p)) occ[i + j * nx] = ROAD;
+  }
 
   // gaps: connected free cells that are near both a road and buildings
   const seen = new Uint8Array(nx * nz);
@@ -69,13 +77,29 @@ export function findRegions(net: Network, pending: Lot[]) {
       }
     }
     let cells = comp;
+    // railings along the back of the road's footway where it borders this gap, following the road
+    // itself (not the 5 m grid), and stopping where a junction's corner takes over
     const roadEdges = (list: [number, number][]) => {
       const out: [number, number, number, number][] = [];
-      for (const [a, b] of list) for (const [da, db] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const u = a + da, v = b + db;
-        if (u < 0 || v < 0 || u >= nx || v >= nz || occ[u + v * nx] !== ROAD) continue;
-        const ex = cx(a) + (da * CELL) / 2, ez = cz(b) + (db * CELL) / 2;
-        out.push(da ? [ex, ez - CELL / 2, ex, ez + CELL / 2] : [ex - CELL / 2, ez, ex + CELL / 2, ez]);
+      const set = new Set(list.map(([a, b]) => a + b * nx));
+      const inside = (x: number, z: number) => { const a = Math.floor((x - x0) / CELL), b = Math.floor((z - z0) / CELL); return a >= 0 && b >= 0 && a < nx && b < nz && set.has(a + b * nx); };
+      const bx = list.map(([a]) => cx(a)), bz = list.map(([, b]) => cz(b));
+      const lo = { x: Math.min(...bx) - 30, z: Math.min(...bz) - 30 }, hi = { x: Math.max(...bx) + 30, z: Math.max(...bz) + 30 };
+      for (const s of net.segs.values()) {
+        const p = net.path(s);
+        if (p.every((q) => q.x < lo.x) || p.every((q) => q.x > hi.x) || p.every((q) => q.z < lo.z) || p.every((q) => q.z > hi.z)) continue;
+        if (net.def(s).cls !== 'road') continue;
+        const L = pathLength(p), back = net.half(s) + 0.3;
+        for (const side of [1, -1]) {
+          let prev: P | null = null;
+          for (let t = 0; t <= L; t += 1.5) {
+            const q = pointAt(p, t), nxv = q.uz * side, nzv = -q.ux * side;
+            const at = { x: q.x + nxv * back, z: q.z + nzv * back };
+            const ok = Math.abs(q.y) < 1 && inside(q.x + nxv * (back + 2.5), q.z + nzv * (back + 2.5)) && !net.land.at({ x: q.x + nxv * (back + 0.3), z: q.z + nzv * (back + 0.3) });
+            if (ok && prev) out.push([prev.x, prev.z, at.x, at.z]);
+            prev = ok ? at : null;
+          }
+        }
       }
       return out;
     };

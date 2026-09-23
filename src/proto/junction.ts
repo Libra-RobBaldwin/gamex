@@ -3,7 +3,10 @@
 // slip, a mini or full roundabout, signals, a merge onto a fast road), assigns every approach
 // lane to the movements that balance the load best, and keeps the form that leaves the most
 // spare capacity. The player can override any of it; the score says what that costs.
-import { kerbOf, type Lot, type Network, type P, type RSeg } from './roads';
+import { kerbOf, rectCorners, type Lot, type Network, type P, type RSeg } from './roads';
+import { STD } from './standards';
+import { polysTouch } from './land';
+import { shapeJunction, ringFootprint, type Shape, type ShapeLeg, type SlipShape } from './jshape';
 
 export type Form = 'join' | 'merge' | 'priority' | 'signals' | 'mini' | 'roundabout';
 export type Move = 'L' | 'S' | 'R';
@@ -12,7 +15,7 @@ export const FORM_NAME: Record<Form, string> = {
 };
 
 export interface Leg { seg: RSeg; dir: P; ang: number; lanes: number; w: number; len: number }
-export interface Slip { from: number; to: number; path: P[]; island: P[] }
+export type Slip = SlipShape;
 export interface Score { dos: number; demand: number; capacity: number; busiest: string }
 export interface Junction {
   node: number; form: Form; auto: boolean; custom: boolean; complex: boolean;
@@ -24,6 +27,7 @@ export interface Junction {
   reach: Record<number, number>; // per leg: how far from the centre its stop / give-way line is
   score: Score;
   flows: Record<string, number>; // "from>to" (seg ids): design flow, vehicles per hour
+  shape: Shape | null; // its kerbs, islands, markings positions and land (see jshape.ts)
 }
 
 const dist = (a: P, b: P) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -125,7 +129,9 @@ export function assignLanes(n: number, moves: Move[], demand: Record<Move, numbe
   return best ?? { lanes: Array.from({ length: n }, () => order.slice()), dos: 9 };
 }
 
-export interface Geometry { slipFits: (s: Slip) => boolean }
+// What the junction may take: `fits` says whether a footprint is free of other people's land
+export interface Geometry { fits: (polys: P[][]) => boolean }
+export const shapeLegs = (net: Network, legs: Leg[]): ShapeLeg[] => legs.map((l) => ({ id: l.seg.id, dir: l.dir, ang: l.ang, def: net.def(l.seg), len: l.len }));
 
 // Score a form: how full the busiest lane would be at design traffic (degree of saturation).
 export function evaluate(net: Network, _node: number, legs: Leg[], form: Form, flows: Record<string, number>, major: number[], slip: Slip | null, fixed?: Record<number, Move[][]>) {
@@ -176,31 +182,9 @@ export function evaluate(net: Network, _node: number, legs: Leg[], form: Form, f
   return { lanes, score: { dos: worst, demand: total, capacity: worst > 0 ? total / worst : total, busiest } as Score };
 }
 
-// A left-turn slip: a short curved road cutting the corner, with an island between it and the junction.
-export function slipGeometry(net: Network, node: number, a: Leg, b: Leg, reach: number): Slip | null {
-  const n = net.node(node), d = reach + 14;
-  if (a.len < d + 8 || b.len < d + 8) return null;
-  const ka = kerbOf(net.def(a.seg)), kb = kerbOf(net.def(b.seg));
-  const la = a.lanes > 0 ? net.def(a.seg).lane : 3.25;
-  // arriving along leg a (nearside is to the left of travel), leaving along leg b
-  const inLeft = (() => { const u = { x: -a.dir.x, z: -a.dir.z }; return { x: u.z, z: -u.x }; })();
-  const outLeft = { x: b.dir.z, z: -b.dir.x };
-  const off = (k: number, lw: number) => k - lw / 2 + 2.2;
-  const p0 = { x: n.x + a.dir.x * d + inLeft.x * off(ka, la), z: n.z + a.dir.z * d + inLeft.z * off(ka, la) };
-  const p2 = { x: n.x + b.dir.x * d + outLeft.x * off(kb, la), z: n.z + b.dir.z * d + outLeft.z * off(kb, la) };
-  // bend point: out beyond the corner
-  const corner = { x: n.x + (inLeft.x + outLeft.x) * (ka + kb) * 0.5 + (a.dir.x + b.dir.x) * reach, z: n.z + (inLeft.z + outLeft.z) * (ka + kb) * 0.5 + (a.dir.z + b.dir.z) * reach };
-  const path: P[] = [];
-  for (let i = 0; i <= 16; i++) { const t = i / 16, u = 1 - t; path.push({ x: u * u * p0.x + 2 * u * t * corner.x + t * t * p2.x, z: u * u * p0.z + 2 * u * t * corner.z + t * t * p2.z }); }
-  // island: between the slip and the two kerb lines
-  const ca = { x: n.x + a.dir.x * (reach + 2) + inLeft.x * (ka + 0.5), z: n.z + a.dir.z * (reach + 2) + inLeft.z * (ka + 0.5) };
-  const cb = { x: n.x + b.dir.x * (reach + 2) + outLeft.x * (kb + 0.5), z: n.z + b.dir.z * (reach + 2) + outLeft.z * (kb + 0.5) };
-  const mid = path[8];
-  const island = [ca, { x: (ca.x + mid.x) / 2 + (mid.x - n.x) * 0.02, z: (ca.z + mid.z) / 2 + (mid.z - n.z) * 0.02 }, cb];
-  return { from: a.seg.id, to: b.seg.id, path, island };
-}
-
 function fitsRoundabout(legs: Leg[], R: number) { return legs.every((l) => l.len > R + 14); }
+// room for the ring without knocking anything down
+const ringFree = (net: Network, node: number, R: number, geo: Geometry) => geo.fits([ringFootprint(net.node(node), R)]);
 
 // Design a junction from scratch: pick the form and lane use with the most spare capacity.
 export function design(net: Network, node: number, geo: Geometry, seen?: Map<string, number>, prefer?: { form?: Form; slip?: boolean }): Junction | null {
@@ -221,45 +205,52 @@ export function design(net: Network, node: number, geo: Geometry, seen?: Map<str
   }
   const multi = legs.some((l) => l.lanes > 1);
   const small = legs.every((l) => l.lanes === 1 && net.def(l.seg).mph <= 30);
-  const R = small && legs.length <= 4 ? 6 : multi ? 24 : 16;
+  const R = STD.roundabout(multi ? 2 : 1, legs.some((l) => net.def(l.seg).mph >= 50)).R;
   const raised = Math.abs(n.y) > 0.5;
   const make = (form: Form, slipOn: boolean): Junction => {
-    const reach: Record<number, number> = {};
-    const Rf = form === 'mini' ? Math.max(maxK + 2, 7) : R;
-    for (const l of legs) {
-      const k = kerbOf(net.def(l.seg));
-      reach[l.seg.id] = form === 'roundabout' ? Rf + 1.5 : form === 'mini' ? Rf + 1 : form === 'priority' ? (major.includes(l.seg.id) ? 0 : Math.max(...legs.filter((x) => major.includes(x.seg.id)).map((x) => kerbOf(net.def(x.seg)))) + 1.5) : form === 'signals' ? net.nodeHalf(node) + 2 : 0;
-      void k;
-    }
+    const sl = shapeLegs(net, legs);
+    const shapeOf = (pair: [number, number] | null) => (form === 'join' || form === 'merge' ? null : shapeJunction(n, sl, form, major, pair, form === 'roundabout' ? R : 0));
+    let shape = shapeOf(null);
     let slip: Slip | null = null;
     if (slipOn && (form === 'priority' || form === 'signals')) {
       // the busiest left turn gets a slip, if there's room for one
       let best = 0;
-      for (const a of legs) for (const b of legs) {
-        if (a === b || moveOf(a, b, form, legs) !== 'L') continue;
-        const t = turnOf(a, b);
-        if (t > -0.9 || t < -2.1) continue;
+      for (let i = 0; i < legs.length; i++) {
+        const a = legs[i], b = legs[(i + 1) % legs.length];
+        if (moveOf(a, b, form, legs) !== 'L') continue;
         const q = flows[`${a.seg.id}>${b.seg.id}`] ?? 0;
-        if (q <= best) continue;
-        const s = slipGeometry(net, node, a, b, Math.max(reach[a.seg.id], maxK));
-        if (s && geo.slipFits(s)) { best = q; slip = s; }
+        // slips are for busy turns and bigger roads; a back-street T doesn't get one
+        const big = [a, b].some((l) => l.lanes > 1 || net.def(l.seg).mph >= 40);
+        if (q <= best || (!big && q < 300 && !prefer?.slip)) continue;
+        const sh = shapeOf([a.seg.id, b.seg.id]);
+        if (sh?.slip && geo.fits(sh.claims)) { best = q; slip = sh.slip; shape = sh; }
       }
     }
+    const reach: Record<number, number> = {};
+    for (const l of legs) reach[l.seg.id] = shape ? shape.line[l.seg.id] ?? 0 : 0;
     const ev = evaluate(net, node, legs, form, flows, major, slip);
-    return { node, form, auto: true, custom: false, complex: legs.length > 4, legs: ids, major, lanes: ev.lanes, slip, R: form === 'mini' ? Math.max(maxK + 2, 7) : R, reach, score: ev.score, flows };
+    return { node, form, auto: true, custom: false, complex: legs.length > 4, legs: ids, major, lanes: ev.lanes, slip, R: shape?.R || (form === 'mini' ? Math.max(maxK + 2, 7) : R), reach, score: ev.score, flows, shape };
   };
   if (legs.length === 2) return make('join', false);
-  if (fast.length) return make('merge', false);
   const options: Junction[] = [];
   if (prefer?.form) return make(prefer.form, prefer.slip ?? true);
-  if (legs.length === 3) {
+  // fast roads (and the end of a motorway) meet others at a roundabout, never a side-road T
+  const quick = fast.length > 0 || legs.some((l) => net.def(l.seg).mph >= 50);
+  const ringOk = (r: number) => !raised && fitsRoundabout(legs, r) && ringFree(net, node, r, geo);
+  if (quick && ringOk(R)) {
+    const rb = make('roundabout', false);
+    if (fast.length || rb.score.dos < 0.95) return rb;
+    options.push(rb);
+  }
+  if (fast.length) options.push(make('signals', false));
+  else if (legs.length === 3) {
     // a T: give way with a slip for the busiest left turn, unless signals would clearly cope better
     options.push(make('priority', true), make('priority', false));
     if (multi) options.push(make('signals', true));
   } else {
     // crossroads and bigger: a roundabout if there's room, else signals
     // mini-roundabouts suit four quiet streets at most; five or more roads want a full one
-    if (!raised && fitsRoundabout(legs, small && legs.length > 4 ? 16 : R)) options.push(make(small && legs.length <= 4 ? 'mini' : 'roundabout', false));
+    if (ringOk(small && legs.length > 4 ? 16 : small ? 7 : R)) options.push(make(small && legs.length <= 4 ? 'mini' : 'roundabout', false));
     options.push(make('signals', legs.length === 4));
     if (small && legs.length === 4) options.push(make('priority', false));
   }
@@ -292,17 +283,19 @@ export function laneOptions(moves: Move[]): Move[][] {
   return out;
 }
 
-// Does a slip's corridor stay clear of buildings and roads it shouldn't touch?
-export function slipClear(net: Network, s: Slip, node: number) {
-  for (const p of s.path) {
+// Is this land free for the junction at `node` to take? Its own roads don't count; other roads,
+// other junctions and buildings do (gardens can be trimmed, buildings would have to go).
+export function landFits(net: Network, node: number, polys: P[][]) {
+  const mine = new Set(net.segsAt(node).map((s) => `road:${s.id}`));
+  mine.add(`junction:${node}`);
+  for (const poly of polys) {
+    if (!net.land.free(poly, (c) => mine.has(c.key))) return false;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const p of poly) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
     for (const l of net.lots) {
-      const c = net.parcelCentre(l), co = Math.cos(l.rot), si = Math.sin(l.rot), dx = p.x - c.x, dz = p.z - c.z;
-      if (Math.abs(dx * co + dz * si) < l.pw / 2 + 3 && Math.abs(-dx * si + dz * co) < (l.d + l.front + l.back) / 2 + 3) return false;
-    }
-    for (const seg of net.segs.values()) {
-      if (seg.a === node || seg.b === node) continue;
-      const q = net.nearestSeg(p, net.half(seg) + 3, (x) => x.id === seg.id);
-      if (q) return false;
+      const r = Math.hypot(l.w, l.d) / 2 + 1;
+      if (l.x + r < x0 || l.x - r > x1 || l.z + r < z0 || l.z - r > z1) continue;
+      if (polysTouch(rectCorners(l.x, l.z, l.rot, l.w + 1, l.d + 1), poly)) return false;
     }
   }
   return true;

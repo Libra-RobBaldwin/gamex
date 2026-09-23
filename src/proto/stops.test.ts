@@ -32,7 +32,7 @@ describe('road types and bus stops', () => {
     expect(n.planStop(a, 5, 1).reason).toMatch(/junction|end/);
   });
 
-  it('motorways cross other roads on bridges, and streets cannot join them', () => {
+  it('motorways cross other roads on bridges, and nothing joins them part-way', () => {
     const n = new Network();
     n.build({ x: -300, z: 0 }, { x: 300, z: 0 }, undefined, as('motorway'));
     const c = n.check({ x: 0, z: -200 }, { x: 0, z: 200 });
@@ -40,8 +40,11 @@ describe('road types and bus stops', () => {
     expect(c.bridges).toBe(1);
     n.build({ x: 0, z: -200 }, { x: 0, z: 200 });
     expect(n.segs.size).toBe(2); // no junction on the motorway
+    // nothing joins a motorway part-way along, not even a dual carriageway
     expect(n.check(n.snapStart({ x: 100, z: 1 }, 5), { x: 100, z: 150 }).reason).toMatch(/motorway/);
-    expect(n.check(n.snapStart({ x: 100, z: 1 }, 5), { x: 100, z: 150 }, undefined, as('dual')).reason ?? '').not.toMatch(/motorway/);
+    expect(n.check(n.snapStart({ x: 100, z: 1 }, 5), { x: 100, z: 150 }, undefined, as('dual')).reason).toMatch(/motorway/);
+    // but a road can carry on from where it ends
+    expect(n.check(n.snapStart({ x: 300, z: 0 }, 5), { x: 450, z: 0 }, undefined, as('dual')).ok).toBe(true);
   });
 
   it('stops stay on their half when a road is split by a new junction', () => {

@@ -3,6 +3,7 @@
 
 import { ROADS, halfOf, kerbOf, type Cls } from './catalog';
 export { ROADS, halfOf, kerbOf, type RoadDef } from './catalog';
+import { Land, bandPolys, type Claim } from './land';
 export type RoadType = string;
 export const HALF = halfOf(ROADS.street);
 export const ROAD_W = kerbOf(ROADS.street) * 2;
@@ -221,6 +222,8 @@ export class Network {
   zoneAt: (p: P) => Zone = () => 'town';
   // lots whose plots the last build() cut into (their gardens get trimmed)
   touched: Lot[] = [];
+  // who owns the ground (see land.ts): roads claim theirs here, junctions theirs when designed
+  land = new Land();
 
   constructor(isWater: (p: P) => boolean = () => false, bound = 560, seed = 7) {
     this.isWater = isWater;
@@ -242,12 +245,28 @@ export class Network {
   // widest road meeting at a node: how big the junction is
   nodeHalf(n: number) { return Math.max(HALF, ...this.segsAt(n).map((s) => this.half(s))); }
 
+  // The land a road takes: its full width, wider where it runs in a cutting; none where it's deep
+  // underground (the surface above a bored tunnel is free).
+  claimSeg(s: RSeg) {
+    const path = this.path(s), half = this.half(s), polys: P[][] = [];
+    for (let i = 1; i < path.length; i++) {
+      const y = Math.min(path[i - 1].y ?? 0, path[i].y ?? 0);
+      if (y < -9) continue;
+      const w = half + (y < 0 ? 0.7 * -y : 0);
+      polys.push(...bandPolys([path[i - 1], path[i]], w, w));
+    }
+    this.land.claim(`road:${s.id}`, 'road', polys);
+  }
+  // Is this polygon clear of every road, junction and island (bar the ones `skip` excuses)?
+  clearOfWorks(poly: P[], skip?: (c: Claim) => boolean) { return this.land.free(poly, skip); }
+
   addNode(x: number, z: number, y = 0) { const n = { id: this.nextId++, x, z, y }; this.nodes.set(n.id, n); return n.id; }
   addSeg(a: number, b: number, mid: P[] = [], type: RoadType = 'street', stops: Stop[] = []) {
     if (a === b) return -1;
     if (!mid.length) for (const s of this.segs.values()) if (!s.mid.length && ((s.a === a && s.b === b) || (s.a === b && s.b === a))) return s.id;
     const s: RSeg = { id: this.nextId++, a, b, mid, type, stops };
     this.segs.set(s.id, s);
+    this.claimSeg(s);
     return s.id;
   }
 
@@ -280,6 +299,7 @@ export class Network {
     const c = closestOnPath(p, path);
     const n = this.addNode(c.x, c.z, c.y);
     this.segs.delete(segId);
+    this.land.release(`road:${segId}`);
     const L = pathLength(path);
     // stops go with whichever half they're on; one the split runs through is lost
     const keepA = s.stops.filter((st) => stopSpan(st)[1] < c.s - 1), keepB = s.stops.filter((st) => stopSpan(st)[0] > c.s + 1).map((st) => ({ ...st, s: st.s - c.s }));
@@ -412,15 +432,15 @@ export class Network {
     const res = (reason?: string): Check => ({ ok: !reason, reason, length, cost: reason ? cost : cost + clears.length * CLEAR_COST, clears, path, profile, bridges, raised, tunnels, sunk });
     if (length < MIN_LEN) return res('Too short');
     if (minRadius(flat) < Math.max(MIN_RADIUS, def.minR)) return res(def.minR > MIN_RADIUS ? `Curve too tight for a ${def.label.toLowerCase()} (${def.minR} m radius at least)` : 'Curve too tight');
-    // motorways only meet other roads through proper slip roads, not side-street junctions
-    const local = def.cls === 'road' && def.family !== 'Dual' && def.family !== 'Motorway';
+    // motorways only meet other roads where they end (at a roundabout, or running on as another
+    // road); along their length they're crossed on a bridge or in a tunnel, never joined
     const isMotorway = (x: RSeg) => this.def(x).family === 'Motorway';
     for (const e of [a, b]) {
       const on = e.seg !== undefined ? this.segs.get(e.seg) : undefined;
       const at = e.node !== undefined ? this.segsAt(e.node) : [];
       if ([on, ...at].some((x) => x && this.def(x).cls !== def.cls)) return res('Roads and railways can’t join each other');
-      if (local && ((on && isMotorway(on)) || at.some(isMotorway)))
-        return res('A local road can’t join a motorway — build the slip road as a dual carriageway or motorway');
+      if (def.family !== 'Motorway' && ((on && isMotorway(on)) || at.filter(isMotorway).length > 1))
+        return res('Roads can’t join a motorway part-way along — cross it with Over or Under, or join it where it ends');
     }
     // railways need gentler gradients and more headroom (for the wires) than roads
     const spec = def.cls === 'rail' ? GRADES.rail : opts.spec, G = Math.min(opts.grade, def.maxGrade);
@@ -530,6 +550,21 @@ export class Network {
     return made.filter((id) => id >= 0);
   }
 
+  // What gets built at a spot: the kind of building (by zone and how central it is) and its size.
+  private lotSpec(m: P, centre: P) {
+    const dc = Math.hypot(m.x - centre.x, m.z - centre.z);
+    const r = this.rand();
+    const kind: LotKind = this.zoneAt(m) === 'industrial' ? 'industry'
+      : dc < 60 ? (r < 0.3 ? 'tower' : r < 0.55 ? 'office' : 'flats') : dc < 110 ? (r < 0.45 ? 'shop' : r < 0.75 ? 'flats' : 'office') : dc < 170 ? 'terrace' : 'house';
+    const w = kind === 'industry' ? 26 + this.rand() * 16 : kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 6 + this.rand() * 1.5 : 12 + this.rand() * 6;
+    const d = kind === 'industry' ? 20 + this.rand() * 12 : kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 9 : 12 + this.rand() * 8;
+    // the side gap belongs to the plot: a driveway for houses, a service lane for the rest
+    const gap = kind === 'terrace' ? 0.2 : kind === 'house' ? 3.4 + this.rand() * 1.4 : kind === 'industry' ? 6 : 3 + this.rand() * 3;
+    const front = { house: 5.5, terrace: 2.2, shop: 4, flats: 6.5, office: 8, tower: 10, industry: 14, civic: 6 }[kind] + (kind === 'house' ? this.rand() * 2 : 0);
+    const h = kind === 'house' ? 6 : kind === 'terrace' ? 7 + this.rand() * 2 : kind === 'shop' ? 8 + this.rand() * 6 : kind === 'flats' ? 12 + this.rand() * 12 : kind === 'office' ? 16 + this.rand() * 14 : kind === 'industry' ? 8 + this.rand() * 4 : 30 + this.rand() * 45;
+    return { kind, w, d, gap, front, h };
+  }
+
   // Free plots along both sides of a segment, straight or curved. `centre` makes buildings denser/taller.
   plotsFor(segId: number, centre: P = { x: 0, z: 0 }): Lot[] {
     const s = this.segs.get(segId);
@@ -543,17 +578,8 @@ export class Network {
       const row = (segId * 7919 + (side > 0 ? 1 : 0) * 104729) % 1000003;
       let t = HALF + 2;
       while (t < L - HALF - 2) {
-        const m = pointAt(path, t);
-        const dc = Math.hypot(m.x - centre.x, m.z - centre.z);
-        const r = this.rand();
-        const kind: LotKind = this.zoneAt(m) === 'industrial' ? 'industry'
-          : dc < 60 ? (r < 0.3 ? 'tower' : r < 0.55 ? 'office' : 'flats') : dc < 110 ? (r < 0.45 ? 'shop' : r < 0.75 ? 'flats' : 'office') : dc < 170 ? 'terrace' : 'house';
-        const w = kind === 'industry' ? 26 + this.rand() * 16 : kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 6 + this.rand() * 1.5 : 12 + this.rand() * 6;
-        const d = kind === 'industry' ? 20 + this.rand() * 12 : kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 9 : 12 + this.rand() * 8;
-        // the side gap belongs to the plot: a driveway for houses, a service lane for the rest
-        const gap = kind === 'terrace' ? 0.2 : kind === 'house' ? 3.4 + this.rand() * 1.4 : kind === 'industry' ? 6 : 3 + this.rand() * 3;
+        const { kind, w, d, gap, front, h } = this.lotSpec(pointAt(path, t), centre);
         if (t + w > L - HALF - 2) break;
-        const front = { house: 5.5, terrace: 2.2, shop: 4, flats: 6.5, office: 8, tower: 10, industry: 14 }[kind] + (kind === 'house' ? this.rand() * 2 : 0);
         const off = HALF + front + d / 2;
         // the building's front faces the road, square to it at the middle of the plot
         const c = pointAt(path, t + w / 2);
@@ -561,13 +587,40 @@ export class Network {
         if (Math.abs(c.y) > 1 || Math.abs(pointAt(path, t).y) > 1 || Math.abs(pointAt(path, t + w).y) > 1) { t += w; continue; }
         const cx = c.x - c.uz * off * side, cz = c.z + c.ux * off * side;
         const rot = Math.atan2(c.uz, c.ux);
-        const h = kind === 'house' ? 6 : kind === 'terrace' ? 7 + this.rand() * 2 : kind === 'shop' ? 8 + this.rand() * 6 : kind === 'flats' ? 12 + this.rand() * 12 : kind === 'office' ? 16 + this.rand() * 14 : kind === 'industry' ? 8 + this.rand() * 4 : 30 + this.rand() * 45;
         // local +x runs along the road in the direction of travel for side -1, against it for side 1
         const lot: Lot = { id: this.nextId++, x: cx, z: cz, rot: side === 1 ? rot + Math.PI : rot, w, d, h, kind, seg: segId, seed: this.rand(), row, front, back: BACK[kind], px: (side === -1 ? gap : -gap) / 2, pw: w + gap };
-        if (this.lotFree(lot, out)) { this.fitParcel(lot, out); out.push(lot); }
-        t += w + gap;
+        // (a plot that doesn't fit here is skipped a little way, so the next one can start sooner)
+        if (this.lotFree(lot, out) && this.fitParcel(lot, out)) { out.push(lot); t += w + gap; } else t += 3;
       }
     }
+    return out;
+  }
+
+  // Plots facing a roundabout, between the roads that leave it: buildings follow the ring rather
+  // than leaving its corners empty. `ring` is the radius of the back of its footway.
+  plotsAround(node: number, ring: number, legs: { seg: number; ang: number; half: number }[], centre: P = { x: 0, z: 0 }): Lot[] {
+    const n = this.node(node), out: Lot[] = [];
+    if (legs.length < 2 || legs.some((l) => !ROADS[this.segs.get(l.seg)?.type ?? '']?.frontage)) return out;
+    const sorted = [...legs].sort((a, b) => a.ang - b.ang);
+    sorted.forEach((l, i) => {
+      const nx = sorted[(i + 1) % sorted.length];
+      let a1 = nx.ang;
+      while (a1 <= l.ang) a1 += Math.PI * 2;
+      const row = (node * 7919 + i * 104729) % 1000003;
+      let a = l.ang;
+      // clear of each road leaving the ring
+      const margin = (x: typeof l, rf: number) => Math.asin(Math.min(0.95, (x.half + 3) / rf));
+      for (let tries = 0; tries < 40; tries++) {
+        const spec = this.lotSpec({ x: n.x + Math.cos(a) * ring, z: n.z + Math.sin(a) * ring }, centre);
+        const rf = ring + spec.front;
+        const start = Math.max(a, l.ang + margin(l, rf));
+        const span = (spec.w + spec.gap) / rf;
+        if (start + span > a1 - margin(nx, rf)) break;
+        const th = start + span / 2, rb = rf + spec.d / 2;
+        const lot: Lot = { id: this.nextId++, x: n.x + Math.cos(th) * rb, z: n.z + Math.sin(th) * rb, rot: th + Math.PI / 2, w: spec.w, d: spec.d, h: spec.h, kind: spec.kind, seg: l.seg, seed: this.rand(), row, front: spec.front, back: BACK[spec.kind], px: 0, pw: spec.w + spec.gap * 0.5 };
+        if (this.lotFree(lot, out) && this.fitParcel(lot, out)) { out.push(lot); a = start + span; } else a = start + 3 / rf;
+      }
+    });
     return out;
   }
 
@@ -597,9 +650,10 @@ export class Network {
       if (poly.some((p) => this.isWater(p))) continue;
       if (others.some((o) => dist(this.parcelCentre(o), c) < r + this.parcelR(o) && polysOverlap(poly, this.parcelRect(o)))) continue;
       // the plot's own front edge meets its road; anything else it touches is a clash
+      // (roads are checked behind the building, so a front garden on a bend may touch its own pavement)
       const back0 = { ...l, front: 0 };
-      const rear = this.parcelRect(back0, -0.3);
-      if ([...this.segs.values()].some((s) => hitsBand(this.band(s), rear, this.parcelCentre(back0), r))) continue;
+      if (!this.land.free(this.parcelRect(back0, -0.3))) continue;
+      if (!this.land.free(poly, (c) => c.owner === 'road')) continue;
       return true;
     }
     return false;
@@ -609,12 +663,7 @@ export class Network {
     const poly = rectCorners(l.x, l.z, l.rot, l.w + 1, l.d + 1);
     const r = Math.hypot(l.w + 1, l.d + 1) / 2;
     if (poly.some((p) => this.isWater(p) || Math.abs(p.x) > this.bound || Math.abs(p.z) > this.bound)) return false;
-    for (const s of this.segs.values()) {
-      const path = this.path(s), h = this.half(s);
-      if (hitsBand(bandOf(path, h), poly, l, r)) return false;
-      // keep plots out of junction discs
-      for (const n of [path[0], path[path.length - 1]]) if (poly.some((p) => dist(p, n) < h + 1) || dist(l, n) < h + l.d / 2) return false;
-    }
+    if (!this.land.free(poly)) return false;
     // a building can't go on somebody else's plot (neighbouring plots may touch)
     const foot = rectCorners(l.x, l.z, l.rot, l.w - 0.4, l.d - 0.4);
     for (const o of [...this.lots, ...extra]) {
