@@ -32,7 +32,12 @@ sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
-const view = { x: 0, z: 20, az: Math.PI / 4, el: 0.6, elTarget: 0.6, h: 300 };
+const view = { x: 0, z: 20, az: Math.PI / 4, el: 0.6, h: 300 };
+const HOME = { az: Math.PI / 4, el: 0.6 };
+const EL_MIN = 0.35, EL_MAX = 1.52, H_MIN = 35, H_MAX = 900;
+// animated camera moves (buttons, double-tap); any touch cancels them
+let goal: Partial<typeof view> | null = null;
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 function placeCamera() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -43,6 +48,7 @@ function placeCamera() {
   const d = 1200;
   cam.position.set(view.x + Math.sin(view.az) * Math.cos(view.el) * d, Math.sin(view.el) * d, view.z + Math.cos(view.az) * Math.cos(view.el) * d);
   cam.lookAt(view.x, 0, view.z);
+  cam.updateMatrixWorld();
   // the sun follows the view so shadows stay sharp where you're looking
   sun.position.set(view.x - 160, 260, view.z + 110);
   sun.target.position.set(view.x, 0, view.z);
@@ -433,6 +439,7 @@ let dragging = false;
 $('#ui').innerHTML = `
   <div id="info" class="glass"><b>Tracks &amp; Towns · 3D test</b><div id="stats"></div></div>
   <div id="side">
+    <button id="compass" title="Reset north and tilt"><span id="needle">➤</span></button>
     <button id="rotL" title="Rotate left">⟲</button>
     <button id="rotR" title="Rotate right">⟳</button>
     <button id="top" title="Top-down view">🗺️</button>
@@ -459,7 +466,7 @@ function setMode(m: Mode) {
 function hint(text?: string) {
   $('#hint').textContent = text ?? (mode === 'road'
     ? 'Drag to draw a road · it snaps to 15° and to other roads · two fingers to move, pinch, twist'
-    : 'Drag to move · pinch to zoom · twist with two fingers to rotate');
+    : 'Drag to move · pinch to zoom · twist to turn · two fingers up/down to tilt · double-tap to zoom in');
 }
 document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.addEventListener('click', () => {
   const t = b.dataset.t!;
@@ -468,11 +475,11 @@ document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.a
   if (t === 'cars') { for (let i = 0; i < 5; i++) addVehicle(false); hint('Five cars added.'); }
   if (t === 'reset') location.reload();
 }));
-$('#rotL').addEventListener('click', () => { view.az += Math.PI / 4; });
-$('#rotR').addEventListener('click', () => { view.az -= Math.PI / 4; });
+$('#rotL').addEventListener('click', () => { goal = { az: view.az + Math.PI / 4 }; });
+$('#rotR').addEventListener('click', () => { goal = { az: view.az - Math.PI / 4 }; });
+$('#compass').addEventListener('click', () => { goal = { az: view.az + wrap(HOME.az - view.az), el: HOME.el }; });
 $('#top').addEventListener('click', () => {
-  view.elTarget = view.elTarget > 1 ? 0.6 : 1.5;
-  $('#top').classList.toggle('on', view.elTarget > 1);
+  goal = { el: view.el > 1.2 ? HOME.el : EL_MAX };
 });
 
 function renderBar() {
@@ -521,7 +528,7 @@ function drawGhost() {
   scene.add(ghost);
 }
 
-// ---------------- input ----------------
+// ---------------- input (Google Maps style) ----------------
 const ray = new THREE.Raycaster();
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 function groundAt(sx: number, sy: number): P {
@@ -532,58 +539,99 @@ function groundAt(sx: number, sy: number): P {
   ray.ray.intersectPlane(plane, hit);
   return { x: hit.x, z: hit.z };
 }
+// move the camera so world point w sits under screen point (sx, sy)
+function keepUnder(w: P, sx: number, sy: number) {
+  placeCamera();
+  const g = groundAt(sx, sy);
+  view.x += w.x - g.x;
+  view.z += w.z - g.z;
+  placeCamera();
+}
 
-const pts = new Map<number, { x: number; y: number }>();
-let gesture: 'none' | 'maybe' | 'pan' | 'draw' | 'multi' = 'none';
-let start = { x: 0, y: 0 };
-let multi = { d: 0, a: 0, cx: 0, cy: 0 };
+const pts = new Map<number, { x: number; y: number; t: number }>();
+type G = 'none' | 'maybe' | 'pan' | 'draw' | 'two';
+let gesture: G = 'none';
+let downAt = { x: 0, y: 0, t: 0 };
+let lastTap = { x: 0, y: 0, t: 0 };
+let fling = { vx: 0, vz: 0 };
+let panAnchor: P = { x: 0, z: 0 };
+let vel: { x: number; z: number; t: number }[] = [];
+// two-finger state, measured from the moment the second finger landed
+let two = {
+  d0: 0, a0: 0, m0: { x: 0, y: 0 }, anchor: { x: 0, z: 0 }, h0: 0, az0: 0, el0: 0,
+  rotating: false, rotOff: 0, tilting: false, moved: false, t: 0,
+};
 const tol = () => view.h * 0.035;
+const ROT_START = (12 * Math.PI) / 180;
+
+function startTwo() {
+  const [a, b] = [...pts.values()];
+  const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  two = {
+    d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, a0: Math.atan2(b.y - a.y, b.x - a.x), m0: m,
+    anchor: groundAt(m.x, m.y), h0: view.h, az0: view.az, el0: view.el,
+    rotating: false, rotOff: 0, tilting: false, moved: false, t: performance.now(),
+  };
+}
+function startPan(x: number, y: number) {
+  panAnchor = groundAt(x, y);
+  vel = [];
+}
 
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
+  goal = null;
+  fling = { vx: 0, vz: 0 };
   if (pts.size === 1) {
-    start = { x: e.clientX, y: e.clientY };
+    downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
     gesture = 'maybe';
+    startPan(e.clientX, e.clientY);
   } else if (pts.size === 2) {
     if (gesture === 'draw') { draft = null; drawGhost(); renderBar(); }
     dragging = false;
-    gesture = 'multi';
-    const [a, b] = [...pts.values()];
-    multi = { d: Math.hypot(a.x - b.x, a.y - b.y), a: Math.atan2(b.y - a.y, b.x - a.x), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+    gesture = 'two';
+    startTwo();
   }
 });
 
 canvas.addEventListener('pointermove', (e) => {
   if (!pts.has(e.pointerId)) return;
-  const prev = pts.get(e.pointerId)!;
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (gesture === 'multi' && pts.size >= 2) {
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
+  if (gesture === 'two' && pts.size >= 2) {
     const [a, b] = [...pts.values()];
-    const d = Math.hypot(a.x - b.x, a.y - b.y), ang = Math.atan2(b.y - a.y, b.x - a.x);
-    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
-    const g0 = groundAt(multi.cx, multi.cy);
-    view.h = Math.max(40, Math.min(900, view.h * (multi.d / (d || multi.d))));
-    view.az -= ang - multi.a;
-    placeCamera();
-    const g1 = groundAt(cx, cy);
-    view.x += g0.x - g1.x;
-    view.z += g0.z - g1.z;
-    multi = { d, a: ang, cx, cy };
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const rot = wrap(Math.atan2(b.y - a.y, b.x - a.x) - two.a0);
+    const scale = d / two.d0;
+    const dy = m.y - two.m0.y;
+    if (Math.abs(scale - 1) > 0.04 || Math.abs(rot) > 0.05 || Math.hypot(m.x - two.m0.x, dy) > 8) two.moved = true;
+    // two fingers sliding up/down together (not pinching or turning) tilts, like Google Maps
+    if (!two.rotating && !two.tilting && Math.abs(dy) > 14 && Math.abs(scale - 1) < 0.08 && Math.abs(rot) < 0.1 && Math.abs(m.x - two.m0.x) < Math.abs(dy) * 0.6) two.tilting = true;
+    if (two.tilting) {
+      view.el = Math.max(EL_MIN, Math.min(EL_MAX, two.el0 - dy * 0.006));
+      placeCamera();
+      return;
+    }
+    // rotation only kicks in after a deliberate twist, so pinching doesn't wobble
+    if (!two.rotating && Math.abs(rot) > ROT_START) { two.rotating = true; two.rotOff = Math.sign(rot) * ROT_START; }
+    view.h = Math.max(H_MIN, Math.min(H_MAX, two.h0 / scale));
+    view.az = two.az0 - (two.rotating ? rot - two.rotOff : 0);
+    keepUnder(two.anchor, m.x, m.y);
     return;
   }
-  if (gesture === 'maybe' && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) {
+  if (gesture === 'maybe' && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 8) {
     gesture = mode === 'road' ? 'draw' : 'pan';
     if (gesture === 'draw') {
-      const a = net.snapStart(groundAt(start.x, start.y), tol());
+      const a = net.snapStart(groundAt(downAt.x, downAt.y), tol());
       draft = { a, b: { ...a } };
       dragging = true;
     }
   }
   if (gesture === 'pan') {
-    const g0 = groundAt(prev.x, prev.y), g1 = groundAt(e.clientX, e.clientY);
-    view.x += g0.x - g1.x;
-    view.z += g0.z - g1.z;
+    keepUnder(panAnchor, e.clientX, e.clientY);
+    vel.push({ x: view.x, z: view.z, t: performance.now() });
+    if (vel.length > 6) vel.shift();
   } else if (gesture === 'draw' && draft) {
     draft.b = net.snapEnd(draft.a, groundAt(e.clientX, e.clientY), tol());
     drawGhost();
@@ -593,17 +641,81 @@ canvas.addEventListener('pointermove', (e) => {
 
 const end = (e: PointerEvent) => {
   if (!pts.has(e.pointerId)) return;
+  const now = performance.now();
   pts.delete(e.pointerId);
+  if (gesture === 'two') {
+    if (pts.size === 1) {
+      // a quick two-finger tap zooms out
+      if (!two.moved && now - two.t < 300) animateZoom(2, two.m0.x, two.m0.y);
+      // carry on panning with the finger that's left, without a jump
+      const [p] = [...pts.values()];
+      startPan(p.x, p.y);
+      gesture = 'pan';
+      two.moved = true; // only the first finger lift counts for the tap
+    }
+    return;
+  }
   if (pts.size) return;
   if (gesture === 'draw') { dragging = false; renderBar(); drawGhost(); }
+  if (gesture === 'pan' && vel.length >= 2) {
+    const a = vel[0], b = vel[vel.length - 1];
+    const dt = (b.t - a.t) / 1000;
+    if (dt > 0 && now - b.t < 80) fling = { vx: (b.x - a.x) / dt, vz: (b.z - a.z) / dt };
+  }
+  if (gesture === 'maybe' && now - downAt.t < 300) {
+    // double-tap zooms in on the spot
+    if (now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
+      animateZoom(0.5, e.clientX, e.clientY);
+      lastTap.t = 0;
+    } else lastTap = { x: e.clientX, y: e.clientY, t: now };
+  }
   gesture = 'none';
 };
 canvas.addEventListener('pointerup', end);
 canvas.addEventListener('pointercancel', end);
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  view.h = Math.max(40, Math.min(900, view.h * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
+  const w = groundAt(e.clientX, e.clientY);
+  view.h = Math.max(H_MIN, Math.min(H_MAX, view.h * (e.deltaY > 0 ? 1.12 : 1 / 1.12)));
+  keepUnder(w, e.clientX, e.clientY);
 }, { passive: false });
+
+// Zoom by a factor, keeping the tapped spot in place.
+function animateZoom(f: number, sx: number, sy: number) {
+  const w = groundAt(sx, sy);
+  const h = Math.max(H_MIN, Math.min(H_MAX, view.h * f));
+  // where the camera centre should end up so w stays under the finger
+  const c = groundAt(canvas.clientWidth / 2, canvas.clientHeight / 2);
+  const k = h / view.h;
+  goal = { h, x: view.x + (w.x - c.x) * (1 - k), z: view.z + (w.z - c.z) * (1 - k) };
+}
+
+function stepCamera(dt: number) {
+  if (goal) {
+    const t = Math.min(1, dt * 7);
+    let done = true;
+    for (const k of Object.keys(goal) as (keyof typeof view)[]) {
+      const g = goal[k]!;
+      view[k] += (g - view[k]) * t;
+      if (Math.abs(g - view[k]) > (k === 'h' || k === 'x' || k === 'z' ? 0.05 : 0.002)) done = false;
+    }
+    if (done) { Object.assign(view, goal); goal = null; }
+  }
+  if (gesture !== 'pan' && gesture !== 'two' && (fling.vx || fling.vz)) {
+    view.x += fling.vx * dt;
+    view.z += fling.vz * dt;
+    const decay = Math.exp(-dt * 4);
+    fling.vx *= decay; fling.vz *= decay;
+    if (Math.hypot(fling.vx, fling.vz) < 2) fling = { vx: 0, vz: 0 };
+  }
+  view.x = Math.max(-BOUND, Math.min(BOUND, view.x));
+  view.z = Math.max(-BOUND, Math.min(BOUND, view.z));
+  // point the compass needle at north (-z) as it appears on screen
+  const a = new THREE.Vector3(view.x, 0, view.z).project(cam), b = new THREE.Vector3(view.x, 0, view.z - 50).project(cam);
+  const ang = Math.atan2(-(b.y - a.y) * canvas.clientHeight, (b.x - a.x) * canvas.clientWidth);
+  $('#needle').style.transform = `rotate(${(ang * 180) / Math.PI}deg)`;
+  $('#top').classList.toggle('on', view.el > 1.2);
+}
 
 // ---------------- loop ----------------
 seedTown();
@@ -620,7 +732,7 @@ let growAt = 0;
 function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  view.el += (view.elTarget - view.el) * Math.min(1, dt * 5);
+  stepCamera(dt);
   placeCamera();
   // the town grows: one new building every few tenths of a second
   growAt -= dt;
@@ -638,4 +750,4 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { net, view, vehicles, buildings, setMode, groundAt };
+(window as unknown as { proto: unknown }).proto = { net, view, vehicles, buildings, setMode, groundAt, cam, THREE };
