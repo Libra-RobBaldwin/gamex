@@ -115,8 +115,8 @@ export class RailGame {
     const { shell } = this.c;
     this.end();
     this.active = 'station';
-    this.tool = shell.startTool({ name: 'Railway station', spec: 'Platforms on a straight, level run of track', icon: 'train', tone: 'rail', onDone: () => this.end(), onCancel: () => this.end() });
-    this.c.hint('Tap a straight, level stretch of railway, on the side for the station building', 'train');
+    this.tool = shell.startTool({ name: 'Railway station', spec: 'Platforms on level track: on the ground, a viaduct or deep underground', icon: 'train', tone: 'rail', onDone: () => this.end(), onCancel: () => this.end() });
+    this.c.hint('Tap a level stretch of railway (straight, or a gentle curve), on the side for the station building · for one underground, use the underground view', 'train');
   }
   private stationTap(g: P) {
     const { net } = this.c;
@@ -140,7 +140,7 @@ export class RailGame {
     }
     const cfg = this.cfg;
     const res = presets.reason ? presets : railway.plan(at.seg, at.s, at.side, this.len, cfg);
-    const p = res.plans[0];
+    const p = res.plans[0], structure = p?.station.structure ?? presets.plans[0]?.station.structure ?? 'surface';
     this.preview(p ?? null);
     const row = (label: string, key: string, opts: [string | number | boolean, string, boolean?][], on: unknown) => `<div class="grp"><span class="tab">${label}</span><div class="row3" role="group" aria-label="${label}">${opts.map(([v, t, off]) => `<button data-opt="${key}" data-v="${v}" class="${v === on ? 'on' : ''}" aria-pressed="${v === on}" ${off ? 'disabled' : ''}>${esc(t)}</button>`).join('')}</div></div>`;
     const len = this.len ?? p?.station.len ?? presets.plans[0]?.station.len;
@@ -149,8 +149,9 @@ export class RailGame {
       row('Tracks', 'tracks', [1, 2, 3, 4].map((n) => [n, n === 1 ? '1 track' : `${n} tracks`, n < lineTracks]), cfg.tracks),
       row('Platforms', 'layout', [['side', 'At the sides'], ['island', 'Island', cfg.tracks === 1], ['both', 'Both sides']], cfg.layout),
       row('Style', 'style', [['victorian', 'Brick hall'], ['modern', 'Glass hall'], ['halt', 'Halt']], cfg.style),
-      row('Crossing the tracks', 'access', [['footbridge', 'Footbridge'], ['subway', 'Subway']], cfg.access),
-      row('Canopies', 'canopy', [[true, 'Canopies'], [false, 'None']], cfg.canopy),
+      structure === 'surface' ? row('Crossing the tracks', 'access', [['footbridge', 'Footbridge'], ['subway', 'Subway']], cfg.access)
+        : `<div class="grp"><span class="tab">Getting to the platforms</span><small>${structure === 'viaduct' ? 'Stairs and a lift down from each platform to the booking hall under the viaduct' : 'Stairs, escalators and lifts from each platform up to the entrance'}</small></div>`,
+      structure === 'underground' ? '' : row('Canopies', 'canopy', [[true, 'Canopies'], [false, 'None']], cfg.canopy),
       `<div class="grp"><span class="tab">Platform length</span><div class="row3" role="group" aria-label="Platform length">${LENGTHS.map((l) => `<button data-len="${l.len}" class="${len === l.len ? 'on' : ''}">${l.label} · ${l.len} m</button>`).join('')}</div></div>`,
     ].join('');
     const plan = p ? `<div class="plan${p.ok ? '' : ' no'}"><div class="row"><span class="tab">${esc(p.title)}</span><span class="cost">${money(this.price(p.cost))}</span></div>
@@ -158,7 +159,8 @@ export class RailGame {
           <button class="act primary tone-rail" data-build="1" ${p.ok && this.can(this.price(p.cost)) ? '' : 'disabled'} ${this.can(this.price(p.cost)) ? '' : `title="${esc(this.short(this.price(p.cost)))}"`}>${icon('check')}<span>Build this station</span></button></div>`
       : `<div class="bad">${icon('alert')}<span>${esc(res.reason ?? 'That doesn’t fit here')}</span></div>`;
     const body = presets.reason ? `<div class="bad">${icon('alert')}<span>${esc(presets.reason)}</span></div>${choices}` : `${plan}${choices}`;
-    const el = shell.openSheet({ key: 'rail-station', title: presets.reason ? 'Can’t build a station here' : 'Railway station', icon: 'train', tone: 'rail', body, onClose: () => { this.preview(null); this.cfg = null; } });
+    const kind = structure === 'viaduct' ? 'Viaduct station' : structure === 'underground' ? 'Underground station' : 'Railway station';
+    const el = shell.openSheet({ key: 'rail-station', title: presets.reason ? 'Can’t build a station here' : kind, icon: 'train', tone: 'rail', body, onClose: () => { this.preview(null); this.cfg = null; } });
     el.querySelectorAll<HTMLButtonElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { this.len = +b.dataset.len!; this.planSheet(); }));
     el.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((b) => b.addEventListener('click', () => { Object.assign(cfg, presets.plans[+b.dataset.preset!].config); this.planSheet(); }));
     el.querySelectorAll<HTMLButtonElement>('[data-opt]').forEach((b) => b.addEventListener('click', () => {
@@ -279,9 +281,9 @@ export class RailGame {
     const lines = railway.lines.filter((l) => l.stops.includes(st.id));
     const sh = railway.shapes.get(st.id);
     const use = (sh?.platforms ?? []).map((_, i) => this.c.people.platformUse(`plat:${st.id}:${i}`)).reduce((a, u) => ({ waiting: a.waiting + u.waiting, boarded: a.boarded + u.boarded, alighted: a.alighted + u.alighted }), { waiting: 0, boarded: 0, alighted: 0 });
-    const n = st.tracks ?? (st.loop ? 2 : 1), lay = `${n} track${n === 1 ? '' : 's'}${st.loop ? ' (a passing loop)' : ''} · ${st.layout === 'side' ? 'side platforms' : st.layout === 'island' ? 'island' : 'platforms both sides'} · ${st.style === 'modern' ? 'glass hall' : st.style === 'halt' ? 'halt' : 'brick hall'}${(sh?.platforms.length ?? 0) > 1 || n > 1 ? ` · ${st.access === 'subway' ? 'subway' : 'footbridge'}` : ''}`;
+    const n = st.tracks ?? (st.loop ? 2 : 1), lay = `${n} track${n === 1 ? '' : 's'}${st.loop ? ' (a passing loop)' : ''} · ${st.layout === 'side' ? 'side platforms' : st.layout === 'island' ? 'island' : 'platforms both sides'} · ${st.style === 'modern' ? 'glass hall' : st.style === 'halt' ? 'halt' : 'brick hall'}${st.structure === 'viaduct' ? ' · stairs and lifts to the street' : st.structure === 'underground' ? ` · ${Math.round(-(sh?.mid.y ?? 0))} m down, lifts and escalators` : (sh?.platforms.length ?? 0) > 1 || n > 1 ? ` · ${st.access === 'subway' ? 'subway' : 'footbridge'}` : ''}`;
     shell.openInfo({
-      key: `station:${st.id}`, title: st.name, sub: 'Railway station', icon: 'train', tone: 'rail',
+      key: `station:${st.id}`, title: st.name, sub: st.structure === 'viaduct' ? 'Railway station, on a viaduct' : st.structure === 'underground' ? 'Railway station, underground' : 'Railway station', icon: 'train', tone: 'rail',
       facts: [['Layout', lay], ['Platforms', `${sh?.platforms.length ?? 0} × ${st.len} m`], ['Lines', lines.map((l) => `${l.num}`).join(', ') || 'None yet'], ['Waiting', `${use.waiting}`], ['Boarded today', `${use.boarded}`], ['Got off today', `${use.alighted}`]],
       note: sh ? undefined : 'The track here has changed: the station is closed until it’s straight and clear again',
       actions: [

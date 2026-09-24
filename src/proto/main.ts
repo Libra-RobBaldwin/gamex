@@ -4,7 +4,7 @@ import './proto.css';
 import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
 import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
 import { PRESETS, RAIL_PRESETS, filterRoads, isSlip, type RoadFilter } from './catalog';
-import { GRADES } from './grade';
+import { DEEP, GRADES } from './grade';
 import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, GRASS_MATS, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
 import { GRADE_STEPS } from './grade';
 import { Traffic, rushLabel, type Places } from './traffic';
@@ -33,6 +33,7 @@ import { starterStops } from './game/crowdsites';
 import { IX_BLURB, IX_FORMS, IX_NAME, IX_SIZES, IX_SIZE_BLURB, IX_SIZE_NAME, buildPair, motorwayCloverleaf, motorwayWithJunction, pairCrossed, pairToNode, pairUpMotorways, scratch, type Interchange, type IxForm, type IxSize, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
 import { buildSlip, planCloverleaf, planJunction, planSlip, roadCrossed, type IxPlan, type SlipPlan } from './interchange/plan';
 import { Railway } from './rail/railway'; // stations, signalling and rail lines (docs/rail.md)
+import { UnderView } from './game/underview';
 import { RailDraw } from './rail/draw';
 import { RailGame } from './rail/game';
 import { layRegionRail, planRegionRail } from './rail/region';
@@ -145,9 +146,13 @@ function refreshEdge() { scene.remove(mapEdge); mapEdge.geometry.dispose(); mapE
 // ground's own patch), and the water and reeds on top: two draw calls
 gameWater.patch(gameGround.ground.material);
 scene.add(gameWater.group);
+// the underground view (game/underview.ts): the surface fades so tunnels and underground stations
+// show (the lake's bed and the map's cut edge, under the ground but not built, stay out of it)
+const underView = new UnderView(renderer, () => [gameWater.group, mapEdge, ...waterBeds]);
+const waterBeds: THREE.Object3D[] = [];
 gameWater.light(scene, sun); // (evening light: the sun, sky and water change together)
 // rivers' beds, in a ground material of their own (the flat ground leaves out what they cover)
-for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshLambertMaterial(), gameGround.ground.uniforms)))) scene.add(m);
+for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshLambertMaterial(), gameGround.ground.uniforms)))) { scene.add(m); waterBeds.push(m); }
 
 // ---------------- trees (instanced) ----------------
 interface Tree { x: number; z: number; s: number; kind: number }
@@ -500,7 +505,7 @@ let draftCheck: Check | null = null;
 let trace: P[] = []; // curve tool: where the finger has been during a drag
 const opts: RoadOpts = { ...DEFAULT_OPTS };
 const lastType = { road: 'street', rail: 'rail-main' };
-const HEIGHTS = [['auto', 'Auto', 'heightAuto'], ['level', 'Level', 'minus'], ['up', 'Climb', 'trendUp']] as const;
+const HEIGHTS = [['auto', 'Auto', 'heightAuto'], ['level', 'Level', 'minus'], ['up', 'Climb', 'trendUp'], ['deep', 'Deep', 'trendDown']] as const;
 const CROSS = [['junction', 'Join', 'arrowsCross'], ['bridge', 'Over', 'bridge'], ['tunnel', 'Under', 'tunnel']] as const;
 const KINDS = [['straight', 'Straight', 'line'], ['curve', 'Curve', 'curve'], ['smooth', 'Smooth', 'smooth']] as const;
 const cls = () => (mode === 'rail' ? 'rail' : 'road') as 'road' | 'rail';
@@ -514,6 +519,7 @@ const shell = new Shell($('#ui'), {
   onRate: () => cycleRate(),
   onPerf: () => togglePerf(),
   onTown: () => showTown(),
+  onUnderground: () => toggleUnderground(),
 });
 // the tool in use (a road or rail type, or bus stops), if any
 let tool: ToolHandle | null = null;
@@ -761,7 +767,7 @@ function bindRoadOptions(el: HTMLElement) {
   el.querySelector('#g-h')!.addEventListener('click', () => {
     opts.height = HEIGHTS[(HEIGHTS.findIndex((h) => h[0] === opts.height) + 1) % HEIGHTS.length][0];
     refreshOptions(); draftChanged();
-    hint({ auto: 'Auto: stays near the ground, climbing or diving only to clear what it crosses', level: 'Level: holds the starting height all the way', up: 'Climb: rises at the chosen gradient the whole way' }[opts.height]);
+    hint({ auto: 'Auto: stays near the ground, climbing or diving only to clear what it crosses', level: 'Level: holds the starting height all the way', up: 'Climb: rises at the chosen gradient the whole way', deep: `Deep: dives into a bored tunnel ${DEEP} m down and stays there · deep enough for an underground station` }[opts.height]);
   });
   el.querySelector('#g-g')!.addEventListener('click', () => {
     const steps = gradeSteps();
@@ -1654,12 +1660,13 @@ function tapMap(sx: number, sy: number): Mode {
   }
   if (mode === 'stop') { stopTap(g); return mode; }
   if (mode === 'line') { lineTap(sx, sy); return mode; }
-  if (railGame.tap(sx, sy, g)) return 'stop'; // (a railway tool: rail/game.ts)
+  if (railGame.tap(sx, sy, underView.on ? deepAt(sx, sy) : g)) return 'stop'; // (a railway tool: rail/game.ts)
   if (mode === 'station') { stationTap(g); return mode; } // (the interim stations, game/rail.ts: not offered while rail/ is)
   const bus = traffic.busNear(g);
   if (bus !== null) { showBusInfo(bus); return 'look'; }
   const ixAt = interchangeAt(g); // (a motorway junction is one junction, whichever part of it is tapped)
   if (ixAt) { showInterchangeInfo(ixAt); return 'look'; }
+  if (underView.on && railGame.inspect(deepAt(sx, sy))) return 'look'; // (deep down, in the underground view)
   if (railGame.inspect(g)) return 'look'; // a train or a station
   const train = traffic.trainNear(g);
   if (train !== null) { showTrainInfo(train); return 'look'; }
@@ -1682,6 +1689,18 @@ function tapMap(sx: number, sy: number): Mode {
 // ---------------- input ----------------
 // The shared camera (kit/camera.ts) pans, pinches, turns and tilts the map (Google Maps style);
 // the game takes the finger when a tool needs it, and hears about taps.
+// In the underground view a tap on a tunnel or an underground station means what's drawn there, deep
+// down, not the ground in front of it.
+function toggleUnderground(on = !underView.on) {
+  underView.set(on);
+  shell.setUnderground(on);
+  hint(on ? 'Underground view: the ground fades so tunnels, underground stations and their trains show · tap again for the surface' : 'Back to the surface', 'tunnel');
+}
+function deepAt(sx: number, sy: number): P {
+  if (!underView.on) return groundAt(sx, sy);
+  const g = nav.levelUnder(sx, sy, -DEEP + 1.4);
+  return { x: g.x, z: g.z };
+}
 function groundAt(sx: number, sy: number): P {
   const g = nav.groundUnder(sx, sy);
   return { x: g.x, z: g.z };
@@ -1902,7 +1921,8 @@ const railDraw = new RailDraw(railway, traffic.fleet);
 railway.useRoads(traffic);
 traffic.onDraw = (dt) => railDraw.drawTrains(dt);
 const railGame = new RailGame({
-  net, shell, railway, draw: railDraw, people, scene, toScreen, focusOn, rebuildRoads, hint, purse,
+  net, shell, railway, draw: railDraw, people, scene, toScreen, focusOn, hint, purse,
+  rebuildRoads: () => { rebuildRoads(); refreshTrees(); }, // (a station's platforms and building take their land: trees there go)
   clear: (lots) => { for (const l of lots) { const b = buildings.find((x) => x.lot === l); if (b && !b.dying) demolish(b); } placesDirty = true; },
 });
 if (!MAP.generated) railGame.starter(); // (a generated region lays its own: seedTown)
@@ -2034,7 +2054,7 @@ function frame(now: number) {
   const t1 = performance.now();
   const q = TIERS[tier];
   if (q.every && ++frameNo % q.every === 0) renderer.shadowMap.needsUpdate = true;
-  renderer.render(scene, cam);
+  underView.render(scene, cam, now);
   if (!loaded) { loaded = true; loading.done(); } // (the first frame is drawn: the loading screen goes)
   const t2 = performance.now();
   perf.simMs += t1 - t0; perf.drawMs += t2 - t1; perf.worstSim = Math.max(perf.worstSim, t1 - t0);
@@ -2058,6 +2078,7 @@ let loaded = false;
 requestAnimationFrame(frame);
 
 (window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+Object.assign((window as unknown as { proto: object }).proto, { underView, toggleUnderground }); // (the underground view: game/underview.ts)
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
 Object.assign((window as unknown as { proto: object }).proto, { interchanges, blueprint: (a: P, b: P) => { draft = { a: net.snapStart(a, 4), b: net.snapEnd(net.snapStart(a, 4), b, 4, true) }; draftChanged(); } });

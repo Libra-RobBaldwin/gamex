@@ -37,7 +37,7 @@ export const RAISE_COST = 170; // extra per metre of road, per metre it's raised
 import { blocksBridges, clipBridges, crossingOf, earthworks, priceBridges, storeBridges, type SegBridge } from './game/bridges';
 import type { BridgeChoice } from './bridges/choose';
 import { CROSSING_CLEAR, levelCrossingOk } from './rail/rules';
-import { FLOOR, GRADES, heightAt, solveProfile, type CrossMode, type HeightMode, type Limit, type Profile, type Spec } from './grade';
+import { DEEP, FLOOR, GRADES, heightAt, solveProfile, type CrossMode, type HeightMode, type Limit, type Profile, type Spec } from './grade';
 export const TUNNEL_COST = 450; // per metre, per metre below ground (cut and cover shallow, bored deep)
 export type { HeightMode } from './grade';
 
@@ -525,8 +525,15 @@ export class Network {
     }
     // railways need gentler gradients and more headroom (for the wires) than roads
     const spec = def.cls === 'rail' ? GRADES.rail : opts.spec, G = Math.min(opts.grade, def.maxGrade);
-    const floor = opts.cross === 'tunnel' ? FLOOR : 0;
+    const floor = opts.cross === 'tunnel' || opts.height === 'deep' ? FLOOR : 0;
     const limits: Limit[] = [...(opts.limits ?? [])];
+    // Deep: down into a bored tunnel from each end that joins something, as steeply as allowed
+    if (opts.height === 'deep') {
+      const ya = this.endHeight(a) ?? 0, yb = this.endHeight(b), down = (y: number) => Math.max(0, y + DEEP) / G + 4;
+      const s0 = down(ya), s1 = length - (yb === undefined ? 0 : down(yb));
+      if (s1 - s0 < 20) return res(`Too short to get down into a deep tunnel · it needs about ${Math.round(s0 + (yb === undefined ? 20 : down(yb) + 20))} m at this gradient`);
+      limits.push({ s0, s1, hi: -DEEP, why: 'the deep tunnel' });
+    }
     // water has to be bridged with clearance for boats
     const steps = Math.max(20, Math.ceil(length / 2));
     let w0 = -1;

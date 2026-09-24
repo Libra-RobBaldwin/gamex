@@ -1,0 +1,123 @@
+// The underground view (docs/rail.md): the ground, the buildings and everything else on the
+// surface fade back, so tunnels, underground stations and the trains in them show through.
+//
+// It's drawn in two passes split by one level plane just under the ground, so every triangle is
+// drawn exactly once and nothing is sorted against anything else (fading the surface's many
+// materials one by one would sort per object, and flicker as the camera moved):
+//   1. everything below the plane, straight to the screen, over a dark background;
+//   2. everything above it into an off-screen target, which is then laid over the first at the
+//      surface's opacity.
+// With the surface at full opacity that's the ordinary picture, so the fade in and out runs
+// smoothly from it, and once the view is off the passes stop and the game draws as it always has.
+// The sun's shadows are drawn with the surface pass (the clipping leaves what's under the ground
+// out of them, which only matters under the ground), and drawn whole again once the view is off.
+import * as THREE from 'three';
+
+export const FADED = 0.25; // how much of the surface shows in the underground view
+const CUT = -0.3; // the plane: just under the ground, above anything built below it
+const FADE_S = 0.35; // seconds to fade in or out
+const DARK = new THREE.Color('#0f3322'); // (the brand's darker forest green, under everything)
+
+export class UnderView {
+  on = false;
+  private k = 1; // how much of the surface shows now
+  private rt: THREE.WebGLRenderTarget | null = null;
+  private below = [new THREE.Plane(new THREE.Vector3(0, -1, 0), CUT)]; // keeps y < CUT
+  private above = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -CUT)]; // keeps y > CUT
+  private quad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  private qScene = new THREE.Scene();
+  private qCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  // (the second pass looks through a copy of the camera: three.js only re-applies the clipping
+  // planes when the camera changes between draws, so the same camera would keep the first pass's)
+  private cam2: THREE.Camera | null = null;
+  private sky = new THREE.Color();
+  private bg = new THREE.Color();
+  private size = new THREE.Vector2();
+  private clearWas = new THREE.Color();
+  private shadowsOwed = false;
+  private last = 0;
+
+  // `hideBelow`: things under the ground that aren't built (the lake bed, the map's cut edge),
+  // left out of the first pass
+  constructor(private renderer: THREE.WebGLRenderer, private hideBelow: () => THREE.Object3D[] = () => []) {
+    this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+      uniforms: { map: { value: null }, depth: { value: null }, k: { value: 1 } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      // (the target holds the surface's colour. Where anything was drawn, its depth says so: that's
+      // solid, whatever alpha an opaque material happened to write, which the screen would have
+      // ignored. Elsewhere only see-through things were drawn, over nothing, so their colour is
+      // premultiplied by their alpha: un-premultiply it. Then convert it for the screen, and lay it
+      // over what's below at the surface's opacity, premultiplied.)
+      fragmentShader: `uniform sampler2D map, depth; uniform float k; varying vec2 vUv;
+        void main() {
+          vec4 c = texture2D(map, vUv);
+          float a = texture2D(depth, vUv).x < 1.0 ? 1.0 : c.a;
+          gl_FragColor = vec4(a >= 1.0 ? c.rgb : c.a > 0.0 ? c.rgb / c.a : vec3(0.0), 1.0);
+          #include <colorspace_fragment>
+          gl_FragColor = vec4(gl_FragColor.rgb * a * k, a * k);
+        }`,
+      transparent: true, depthTest: false, depthWrite: false,
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+    }));
+    this.quad.frustumCulled = false;
+    this.qScene.add(this.quad);
+  }
+  get showing() { return this.on || this.k < 1; }
+  set(on: boolean) { this.on = on; }
+
+  // Draw a frame (in place of renderer.render).
+  render(scene: THREE.Scene, cam: THREE.Camera, now = performance.now()) {
+    const r = this.renderer, dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
+    this.last = now;
+    const to = this.on ? FADED : 1;
+    this.k = to < this.k ? Math.max(to, this.k - (dt * (1 - FADED)) / FADE_S) : Math.min(to, this.k + (dt * (1 - FADED)) / FADE_S);
+    if (this.k >= 1 && !this.on) {
+      if (this.shadowsOwed) { r.shadowMap.needsUpdate = true; this.shadowsOwed = false; }
+      r.render(scene, cam);
+      return;
+    }
+    r.getDrawingBufferSize(this.size);
+    // (stored as sRGB, like the screen: linear light in 8 bits would band away the ground's fine detail)
+    if (!this.rt) {
+      this.rt = new THREE.WebGLRenderTarget(this.size.x, this.size.y, { samples: 4, depthTexture: new THREE.DepthTexture(this.size.x, this.size.y) });
+      this.rt.texture.colorSpace = THREE.SRGBColorSpace;
+    }
+    else if (this.rt.width !== this.size.x || this.rt.height !== this.size.y) this.rt.setSize(this.size.x, this.size.y);
+    const t = Math.min(1, (1 - this.k) / (1 - FADED)), was = scene.background, clear = r.getClearColor(this.clearWas), clearA = r.getClearAlpha();
+    if (was instanceof THREE.Color) this.sky.copy(was); else this.sky.set('#000000');
+    // 1: the surface, off the screen, on nothing. The shadows are drawn with it, as they are every
+    // frame: only what's on the surface casts them onto the surface. (They're then left out of
+    // the ones below ground, which is why they're drawn again once the view is off.)
+    scene.background = null;
+    r.clippingPlanes = this.above;
+    r.setRenderTarget(this.rt);
+    r.setClearColor(0x000000, 0);
+    r.render(scene, cam);
+    this.shadowsOwed = true;
+    scene.background = was;
+    r.setClearColor(clear, clearA);
+    // 2: below the ground, on the screen, over the dark (with the same shadows: not drawn again)
+    const hidden = this.hideBelow().filter((o) => o.visible), owed = r.shadowMap.needsUpdate;
+    for (const o of hidden) o.visible = false;
+    scene.background = this.bg.copy(this.sky).lerp(DARK, t);
+    r.shadowMap.needsUpdate = false;
+    r.clippingPlanes = this.below;
+    r.setRenderTarget(null);
+    if (!this.cam2 || this.cam2.type !== cam.type) this.cam2 = cam.clone();
+    this.cam2.copy(cam);
+    r.render(scene, this.cam2);
+    r.shadowMap.needsUpdate = owed;
+    for (const o of hidden) o.visible = true;
+    scene.background = was;
+    r.clippingPlanes = [];
+    // 3: the surface laid over what's below
+    this.quad.material.uniforms.map.value = this.rt.texture;
+    this.quad.material.uniforms.depth.value = this.rt.depthTexture;
+    this.quad.material.uniforms.k.value = this.k;
+    const auto = r.autoClear;
+    r.autoClear = false;
+    r.render(this.qScene, this.qCam);
+    r.autoClear = auto;
+  }
+  dispose() { this.rt?.dispose(); this.quad.geometry.dispose(); this.quad.material.dispose(); }
+}

@@ -211,6 +211,12 @@ interface Built {
 interface SegState { sig: string; bridges: Built[] }
 
 const overlap = (a0: number, a1: number, b0: number, b1: number) => Math.min(a1, b1) - Math.max(a0, b0);
+// Stretches of a segment (by distance along it) that something else draws in place of a bridge: a
+// viaduct station's own widened deck and piers (rail/draw.ts sets this). The bridges either side
+// stop where it starts.
+let bridgeSkip: (s: RSeg) => [number, number][] = () => [];
+export function setBridgeSkip(f: (s: RSeg) => [number, number][]) { bridgeSkip = f; }
+const minus = (a: number, b: number, cut: [number, number][]) => cut.reduce<[number, number][]>((out, [c0, c1]) => out.flatMap(([p, q]) => (c1 <= p || c0 >= q ? [[p, q]] : [[p, Math.min(q, c0)], [Math.max(p, c1), q]].filter(([u, v]) => v - u > 0.5)) as [number, number][]), [[a, b]]);
 
 export class BridgeLayer {
   group = new THREE.Group();
@@ -226,23 +232,23 @@ export class BridgeLayer {
   // runs into a junction (its deck and parapets would cut across the roads leaving it).
   sync(net: Network, reserve: (s: RSeg) => [number, number] = () => [0, 0]) {
     // nothing to do if no road changed and no type was picked (the common case: a junction edit)
-    const topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}`).join();
+    const topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}:${JSON.stringify(bridgeSkip(s))}`).join();
     if (topo === this.topo && !this.dirty) return false;
     this.topo = topo;
     for (const id of [...this.segs.keys()]) if (!net.segs.has(id)) { this.drop(id); this.dirty = true; }
     for (const s of net.segs.values()) {
       const path = net.path(s);
       if (!path.some((p) => (p.y ?? 0) > 3)) { if (s.bridges || this.segs.has(s.id)) { s.bridges = undefined; this.drop(s.id); this.dirty = true; } continue; }
-      const c = crossingOf(net, path, net.def(s), (id) => id === s.id), keep = reserve(s);
-      const sig = `${keyOf(c)}|${keep.map((k) => k.toFixed(1))}|${JSON.stringify(s.bridges ?? null)}`;
+      const c = crossingOf(net, path, net.def(s), (id) => id === s.id), keep = reserve(s), skip = JSON.stringify(bridgeSkip(s));
+      const sig = `${keyOf(c)}|${keep.map((k) => k.toFixed(1))}|${JSON.stringify(s.bridges ?? null)}|${skip}`;
       if (this.segs.get(s.id)?.sig === sig) continue;
       this.drop(s.id);
       this.segs.set(s.id, { sig: '', bridges: this.layOut(s, c, keep) });
       // (the types may have been filled in or corrected: that's part of the signature)
-      this.segs.get(s.id)!.sig = `${keyOf(c)}|${keep.map((k) => k.toFixed(1))}|${JSON.stringify(s.bridges ?? null)}`;
+      this.segs.get(s.id)!.sig = `${keyOf(c)}|${keep.map((k) => k.toFixed(1))}|${JSON.stringify(s.bridges ?? null)}|${skip}`;
       this.dirty = true;
     }
-    this.topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}`).join();
+    this.topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}:${JSON.stringify(bridgeSkip(s))}`).join();
     if (this.dirty) this.redraw();
     const was = this.dirty;
     this.dirty = false;
@@ -253,7 +259,7 @@ export class BridgeLayer {
     const stored = s.bridges ?? [];
     const out: Built[] = [], keep: SegBridge[] = [];
     const L = c.path.reduce((t, p, i) => (i ? t + Math.hypot(p.x - c.path[i - 1].x, p.z - c.path[i - 1].z) : 0), 0);
-    for (const [a0, b0] of extents(c)) {
+    for (const [a0, b0] of extents(c).flatMap(([p, q]) => minus(p, q, bridgeSkip(s)))) {
       // (short of the junctions at either end)
       const a = Math.max(a0, reserve[0]), b = Math.min(b0, L - reserve[1]);
       if (b - a < 8) continue;
@@ -271,6 +277,10 @@ export class BridgeLayer {
       }
       if (!lay?.ok) continue; // nothing fits: roaddraw keeps its old deck for this stretch
       if (!layoutBridge(c, lay.def, a, b).ok) lay = { ...lay, notes: [LOW_NOTE, ...lay.notes] };
+      // where it stops at a viaduct station's deck (which runs on over it), it ends on a pier, not
+      // on an abutment and its return walls down into a bank that isn't there
+      const cut = bridgeSkip(s), meets = (q: number) => cut.some(([c0, c1]) => Math.abs(c1 - q) < 0.6 || Math.abs(c0 - q) < 0.6);
+      if (meets(a) || meets(b)) lay = { ...lay, supports: lay.supports.map((q) => (q.kind === 'abutment' && ((meets(a) && Math.abs(q.s - a) < 0.6) || (meets(b) && Math.abs(q.s - b) < 0.6)) ? { ...q, kind: 'pier' as const } : q)) };
       keep.push({ s0: a, s1: b, type: lay.def.id, override: over });
       // the deck slab sits a hair under the game's road surface, so the two never fight
       const draw = { ...c, path: c.path.map((p) => ({ ...p, y: (p.y ?? 0) - 0.04 })) };

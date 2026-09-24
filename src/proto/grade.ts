@@ -13,10 +13,12 @@ export const GRADES = {
   rail: { max: 0.035, clear: 7.8, water: 7, under: 14, label: 'railway' },
 };
 export type Spec = (typeof GRADES)['road'];
-export type HeightMode = 'auto' | 'level' | 'up';
+// deep: dives into a bored tunnel (DEEP metres down) as soon as the gradient allows, and stays there
+export type HeightMode = 'auto' | 'level' | 'up' | 'deep';
 export type CrossMode = 'junction' | 'bridge' | 'tunnel';
 export const GRADE_STEPS = [0.02, 0.04, 0.06, 0.08];
 export const FLOOR = -60; // deepest a tunnel may go
+export const DEEP = 14; // how far down a deep tunnel runs (room for an underground station's box above it)
 
 // A height window over part of the route (by distance along it). lo/hi may be equal (a junction).
 export interface Limit { s0: number; s1: number; lo?: number; hi?: number; why: string }
