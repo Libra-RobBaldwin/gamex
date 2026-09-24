@@ -30,9 +30,9 @@ function offences(src: string): string[] {
 }
 
 // Every page: the html files at the top of the repo and the script each one loads. index.html is
-// the old 2D canvas prototype (src/main.ts), which has no three.js camera and is not the game;
-// places.html is Real Town Plans (src/places), a Leaflet map and flat plans with no 3D scene.
-const LEGACY = new Set(['index.html', 'places.html']);
+// the game; proto.html only sends old links on to it; places.html is Real Town Plans (src/places),
+// a Leaflet map and flat plans with no 3D scene.
+const LEGACY = new Set(['proto.html', 'places.html']);
 const pages = Object.entries(HTML).filter(([f]) => !LEGACY.has(f.slice(1))).map(([f, text]) => {
   const src = text.match(/<script[^>]*type="module"[^>]*src="(\/?[^"]+)"/)?.[1];
   return { html: f.slice(1), script: src ? (src.startsWith('/') ? src : `/${src}`) : null };
@@ -41,7 +41,7 @@ const pages = Object.entries(HTML).filter(([f]) => !LEGACY.has(f.slice(1))).map(
 describe('one camera for the game and every demo (docs/kit.md)', () => {
   it('finds the game and the demos', () => {
     const names = pages.map((p) => p.html);
-    for (const want of ['proto.html', 'water-demo.html', 'vehicles-demo.html', 'people-demo.html', 'bridges-demo.html', 'industries-demo.html', 'ground-demo.html']) expect(names).toContain(want);
+    for (const want of ['index.html', 'water-demo.html', 'vehicles-demo.html', 'people-demo.html', 'bridges-demo.html', 'industries-demo.html', 'ground-demo.html']) expect(names).toContain(want);
   });
 
   for (const p of pages) {

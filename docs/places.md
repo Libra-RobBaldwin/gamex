@@ -96,7 +96,7 @@ takes three steps:
 
 1. **The page** already keeps each area's trimmed data in IndexedDB. Flip
    `GAME_READS_PLACES` in `src/places/main.ts` to `true`. The button then opens
-   `proto.html?place=<area id>`.
+   `/?place=<area id>` (the game's front page).
 2. **The game** reads the parameter at start-up, before it builds the world:
 
    ```ts
