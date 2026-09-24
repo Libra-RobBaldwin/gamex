@@ -20,8 +20,8 @@ It fails if any of them:
 - uses a three.js controls add-on.
 
 It also fails if a page doesn't import `kit/camera` and make a `NavRig`. A new demo page is
-checked as soon as its `.html` file exists. The one exception is `index.html`, the old 2D canvas
-prototype (`src/main.ts`). It has no three.js camera and isn't the game.
+checked as soon as its `.html` file exists. The game is `index.html` (the site's front page), which opens on the start menu (`src/app`); the test follows the menu's dynamic import to the game module, `src/proto/main.ts`;
+`proto.html` only redirects old links there.
 
 ## Registry
 

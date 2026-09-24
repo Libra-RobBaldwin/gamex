@@ -22,7 +22,7 @@ import { PlanViewer } from './viewer';
 /**
  * "Play it in 3D" opens the game on an area. The game has to be able to start from an imported
  * world first (the real-town stream: src/proto/town). Until it can, the button says so. Flip this
- * once proto.html reads `?place=<id>` and loads it with store.ts placeData(): see docs/places.md.
+ * once the game (index.html) reads `?place=<id>` and loads it with store.ts placeData(): see docs/places.md.
  */
 const GAME_READS_PLACES = false;
 
@@ -458,7 +458,7 @@ $('#p-download').addEventListener('click', () => {
 });
 $('#p-play').addEventListener('click', () => {
   if (!current || !GAME_READS_PLACES) return;
-  location.href = `proto.html?place=${encodeURIComponent(current.meta.id)}`;
+  location.href = `./?place=${encodeURIComponent(current.meta.id)}`;
 });
 $('#p-new').addEventListener('click', () => {
   if (areaMap && current) { areaMap.moveTo(bboxCentre(current.meta.bbox)); setSize(current.meta.sizeKm); nameInput.value = current.meta.name; go('area'); areaMap.fit(); }

@@ -11,6 +11,7 @@ import type { Network } from '../roads';
 // bands by depth below the surface (m); the edges between them wander a little, as real strata do
 const BANDS: [string, number, number][] = [[EARTH_COLOURS.turf, 0, 0.35], [EARTH_COLOURS.topsoil, 0.35, 1.4], [EARTH_COLOURS.subsoil, 1.4, 5], [EARTH_COLOURS.bedrock, 5, Infinity]];
 export const EDGE_BASE = -26; // how far down the slice goes
+const WATER = '#2f6f9e'; // (the bridges demo's water in section)
 const ROAD = { asphalt: '#3d4046', footway: '#b3a996', subbase: '#8a8378', ballast: '#8f887c' };
 const STEP = 4; // metres between the face's columns
 
@@ -44,7 +45,9 @@ export function edgeCrossings(net: Network, edge: number): EdgeCrossing[] {
   return out;
 }
 
-export function edgeMesh(edge: number, crossings: EdgeCrossing[] = []) {
+// `ground`: the ground's height at a point (the water system's, dipping into lake and river beds);
+// where it's below `level`, the slice shows the water standing in the bed.
+export function edgeMesh(edge: number, crossings: EdgeCrossing[] = [], ground: (x: number, z: number) => number = () => 0, level = 0) {
   const pos: number[] = [], col: number[] = [], nor: number[] = [];
   const c = new THREE.Color();
   // side k's frame: a point u along it (-edge..edge) and its outward normal
@@ -63,16 +66,27 @@ export function edgeMesh(edge: number, crossings: EdgeCrossing[] = []) {
     c.set(hex);
     for (let i = 0; i < 6; i++) col.push(c.r, c.g, c.b);
   };
-  // (sides are walked so each quad faces outwards; u runs the same way round for every side)
+  const gAt = (k: number, u: number) => { const p = P(k, u, 0); return ground(p[0], p[2]); };
+  // the bands hang from the surface (down to the level base); where the ground dips into water, the
+  // water shows as a column from its bed up to its level
+  const column = (k: number, u: number, u1: number) => {
+    const s0 = k * 2 * edge + u, s1 = s0 + (u1 - u), ga = gAt(k, u), gb = gAt(k, u1);
+    for (let b = 0; b < BANDS.length; b++) {
+      const [hex, d0, d1] = BANDS[b];
+      const top0 = ga - (b === 0 ? 0 : d0 + wander(s0, b - 1)), top1 = gb - (b === 0 ? 0 : d0 + wander(s1, b - 1));
+      const bot0 = d1 === Infinity ? EDGE_BASE : ga - (d1 + wander(s0, b)), bot1 = d1 === Infinity ? EDGE_BASE : gb - (d1 + wander(s1, b));
+      quad(k, u, u1, Math.max(EDGE_BASE, bot0), Math.max(EDGE_BASE, top0), Math.max(EDGE_BASE, bot1), Math.max(EDGE_BASE, top1), hex);
+    }
+    if (ga < level - 0.02 || gb < level - 0.02) quad(k, u, u1, Math.min(ga, level), level, Math.min(gb, level), level, WATER, 0.01);
+  };
+  // (sides are walked so each quad faces outwards; u runs the same way round for every side; finer
+  // where the ground isn't level, so a river's banks keep their shape)
   for (let k = 0; k < 4; k++) {
     for (let u = -edge; u < edge - 1e-6; u += STEP) {
-      const u1 = Math.min(edge, u + STEP), s0 = k * 2 * edge + u, s1 = s0 + (u1 - u);
-      for (let b = 0; b < BANDS.length; b++) {
-        const [hex, d0, d1] = BANDS[b];
-        const top0 = b === 0 ? 0 : -(d0 + wander(s0, b - 1)), top1 = b === 0 ? 0 : -(d0 + wander(s1, b - 1));
-        const bot0 = d1 === Infinity ? EDGE_BASE : -(d1 + wander(s0, b)), bot1 = d1 === Infinity ? EDGE_BASE : -(d1 + wander(s1, b));
-        quad(k, u, u1, bot0, top0, bot1, top1, hex);
-      }
+      const u1 = Math.min(edge, u + STEP);
+      const flat = [u, (u + u1) / 2, u1].every((x) => Math.abs(gAt(k, x)) < 0.01);
+      if (flat) column(k, u, u1);
+      else for (let v = u; v < u1 - 1e-6; v += 0.5) column(k, v, Math.min(u1, v + 0.5));
     }
   }
   // roads and railways running off the map, in section: laid a few centimetres proud of the face

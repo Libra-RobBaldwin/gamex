@@ -320,7 +320,6 @@ setQuality('high');
 setDusk(false);
 resize();
 requestAnimationFrame(frame);
-(window as unknown as { nav: NavRig }).nav = nav;
 // Cost per pixel: the ground filling the whole screen with nothing else drawn, old grass against
 // the new ground at each quality (ms per frame, waiting for the GPU each time). Ratios carry over
 // to a phone better than the absolute times from a software renderer do.
@@ -331,7 +330,7 @@ function pixelCost(frames = 20) {
   const uv = g.getAttribute('uv') as THREE.BufferAttribute, pos = g.getAttribute('position') as THREE.BufferAttribute;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / 22.5, pos.getZ(i) / 22.5);
   const m = new THREE.Mesh(g);
-  m.position.set(view.x, cur?.height?.(view.x, view.z) ?? 0, view.z);
+  m.position.set(view.x, view.y ?? 0, view.z); // (at the height the camera looks at)
   s2.add(m);
   const time = (mat: THREE.Material) => {
     m.material = mat;
@@ -349,4 +348,5 @@ function pixelCost(frames = 20) {
   g.dispose();
   return out;
 }
+(window as unknown as { nav: NavRig }).nav = nav;
 (window as unknown as { groundDemo: unknown }).groundDemo = { pixelCost, setScene, setQuality, setDusk, view, nav, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };

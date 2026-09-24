@@ -1,4 +1,4 @@
-// Regression checks for the game (proto.html) after its own camera and gesture code was replaced
+// Regression checks for the game (the front page, index.html) after its own camera and gesture code was replaced
 // by the shared kit (src/proto/kit/camera.ts). Each check passes on the game as it was before
 // (origin/claude/cloud-session-history-rvqkm1) and measures something a player would notice.
 //
@@ -31,7 +31,7 @@ const open = async (opts) => {
   const page = await browser.newPage(opts);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(BASE + '/proto.html');
+  await page.goto(BASE + '/?map=town'); // (a deep link: straight into the starter town, past the start menu)
   await page.waitForFunction('!!window.proto', null, { timeout: 60000 });
   await page.waitForTimeout(WAIT);
   // Software rendering takes a second or more a frame: around taps the page's frame loop is

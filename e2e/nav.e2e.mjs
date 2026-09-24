@@ -17,7 +17,7 @@ const WAIT = Number(process.env.WAIT ?? 10000);
 
 // how each page exposes its camera rig (NavRig) for measuring
 const PAGES = {
-  game: { url: '/proto.html', rig: 'window.proto.nav' },
+  game: { url: '/?map=town', rig: 'window.proto.nav' },
   water: { url: '/water-demo.html?preset=valley', rig: 'window.nav' },
   vehicles: { url: '/vehicles-demo.html', rig: 'window.nav' },
   people: { url: '/people-demo.html', rig: 'window.nav' },

@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 // every module in src/proto and every page at the top of the repo, as text
 const SOURCES = import.meta.glob(['/src/proto/**/*.ts', '!/src/proto/**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 const HTML = import.meta.glob('/*.html', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+// the start menu, which index.html loads first and which loads the game with a dynamic import
+const APP = import.meta.glob(['/src/app/**/*.ts', '!/src/app/**/*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 const KIT = '/src/proto/kit/';
 
 // comments say what used to happen; only code counts
@@ -30,18 +32,22 @@ function offences(src: string): string[] {
 }
 
 // Every page: the html files at the top of the repo and the script each one loads. index.html is
-// the old 2D canvas prototype (src/main.ts), which has no three.js camera and is not the game;
-// places.html is Real Town Plans (src/places), a Leaflet map and flat plans with no 3D scene.
-const LEGACY = new Set(['index.html', 'places.html']);
+// the game; proto.html only sends old links on to it; places.html is Real Town Plans (src/places),
+// a Leaflet map and flat plans with no 3D scene.
+const LEGACY = new Set(['proto.html', 'places.html']);
 const pages = Object.entries(HTML).filter(([f]) => !LEGACY.has(f.slice(1))).map(([f, text]) => {
   const src = text.match(/<script[^>]*type="module"[^>]*src="(\/?[^"]+)"/)?.[1];
-  return { html: f.slice(1), script: src ? (src.startsWith('/') ? src : `/${src}`) : null };
+  let script = src ? (src.startsWith('/') ? src : `/${src}`) : null;
+  // a page that opens on the start menu (src/app) is held to the game module the menu loads
+  const game = script && APP[script]?.match(/import\(\s*['"]\.\.\/proto\/([\w/]+)['"]\s*\)/)?.[1];
+  if (game) script = `/src/proto/${game}.ts`;
+  return { html: f.slice(1), script };
 });
 
 describe('one camera for the game and every demo (docs/kit.md)', () => {
   it('finds the game and the demos', () => {
     const names = pages.map((p) => p.html);
-    for (const want of ['proto.html', 'water-demo.html', 'vehicles-demo.html', 'people-demo.html', 'bridges-demo.html', 'industries-demo.html', 'ground-demo.html']) expect(names).toContain(want);
+    for (const want of ['index.html', 'water-demo.html', 'vehicles-demo.html', 'people-demo.html', 'bridges-demo.html', 'industries-demo.html', 'ground-demo.html']) expect(names).toContain(want);
   });
 
   for (const p of pages) {
@@ -56,7 +62,7 @@ describe('one camera for the game and every demo (docs/kit.md)', () => {
   }
 
   it('no other module in src/proto has its own gesture or camera code', () => {
-    const bad = Object.entries(SOURCES).filter(([f]) => !f.startsWith(KIT)).map(([f, src]) => ({ f, why: offences(src) })).filter((x) => x.why.length);
+    const bad = Object.entries({ ...SOURCES, ...APP }).filter(([f]) => !f.startsWith(KIT)).map(([f, src]) => ({ f, why: offences(src) })).filter((x) => x.why.length);
     expect(Object.keys(SOURCES).length).toBeGreaterThan(50);
     expect(bad).toEqual([]);
   });

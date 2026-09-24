@@ -27,7 +27,7 @@ bottom, on a 412×915 phone.
 
 ## Build
 
-A half-height sheet with category tabs:
+A compact strip over the bar (about a seventh of a phone screen): one row of category tabs with Close, and one row of small cards that scrolls sideways.
 
 | Tab | What's in it |
 |---|---|
@@ -92,11 +92,11 @@ scripts and tests.
 
 | Call | What it does |
 |---|---|
-| `openSheet({ key, title, sub?, icon?, tone?, tabs?, tab?, onTab?, body, actions?, back?, onClose?, fresh?, from?, fixed? })` | Opens a bottom sheet (a panel down the right in landscape). Returns the body element, so wire it with `querySelectorAll`. Re-opening the same `key` re-renders in place and keeps the scroll position. `onClose` runs once, when the sheet closes or a sheet with another key replaces it. `back` shows a back arrow. `from` lights a bar button. `fixed` holds the sheet at full height, so switching its tabs doesn't move them. `tone` is `'road' \| 'rail' \| 'stop' \| 'look'`. |
+| `openSheet({ key, title, sub?, icon?, tone?, tabs?, tab?, onTab?, body, actions?, back?, onClose?, fresh?, from?, fixed? })` | Opens a bottom sheet (a panel down the right in landscape). Returns the body element, so wire it with `querySelectorAll`. Re-opening the same `key` re-renders in place and keeps the scroll position. `onClose` runs once, when the sheet closes or a sheet with another key replaces it. `back` shows a back arrow. `from` lights a bar button. `fixed` holds the sheet at full height, so switching its tabs doesn't move them. `compact` puts the tabs and Close in one header row with no title block (the Build sheet uses it, so it's a strip over the bar rather than half the screen). `tone` is `'road' \| 'rail' \| 'stop' \| 'look'`. |
 | `closeSheet()` | Closes it (and runs its `onClose`). |
 | `openInfo({ key?, title, sub?, icon?, tone?, facts?, meter?, note?, html?, actions?, onClose? })` | The info sheet for something tapped: a title, `[label, value]` facts, an optional 0..1 meter, a note and action buttons. |
 | `addBuildCategory({ id, label, icon, disabled?, note? })` | A tab in the Build sheet. |
-| `addBuildItem(cat, { id, label, spec?, icon?, tone?, locked?, on?, onPick? })` | A card in that tab. `locked` shows it disabled with the reason. `on()` marks the current choice. `onPick` runs after the sheet closes (return `false` to keep it open, e.g. to show a picker in the sheet). |
+| `addBuildItem(cat, { id, label, spec?, name?, short?, icon?, tone?, locked?, on?, onPick? })` | A card in that tab. The cards are small (one row that scrolls sideways), so `name` and `short` give a shorter name and one line of detail in place of `label` and `spec`; the full text stays in the card's label for screen readers. `locked` shows it disabled with the reason. `on()` marks the current choice. `onPick` runs after the sheet closes (return `false` to keep it open, e.g. to show a picker in the sheet). |
 | `startTool({ name, spec?, icon?, tone?, options?, bind?, onUndo?, onDone?, onCancel? })` | Swaps the bar for the tool strip: name and spec, the options row (HTML, wired in `bind(el)`), Undo (shown if `onUndo` is given), Cancel and Done. Returns a handle: `set({ name, spec, icon, tone, options })`, `setUndo(on)`, `setPrimary(action \| null)` (e.g. Build while a blueprint waits), `setPanel(html \| null, bind?)` (the card above the strip), `avoid(points)` (screen points the card must not cover) and `end()`. |
 | `guardTap()` | Call from a map tap that opens a sheet: it swallows that tap's click, so it can't also press a button the new sheet puts under the finger. `tapMap()` does this already. |
 | `endTool()` | Leaves the tool quietly. `toolActive` says whether one is in use. |
