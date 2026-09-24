@@ -52,7 +52,7 @@ export const deleteArea = (id: string) => run<void>(['areas', 'files'], 'readwri
 
 /**
  * The hand-over to the game: an area's trimmed OSM data (the fixture format, with its bbox and
- * ODbL credit), for `importOsm`. The game opens `proto.html?place=<id>` and calls this.
+ * ODbL credit), for `importOsm`. The game opens `/?place=<id>` and calls this.
  */
 export async function placeData(id: string): Promise<OverpassRaw | undefined> {
   const f = await getFiles(id);
