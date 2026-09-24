@@ -567,9 +567,15 @@ describe('terminals left idle', () => {
   });
 
   it("never closes the docks' own quay", () => {
-    let st = startingTerminals('port');
-    for (let d = 30; d <= 900; d += 30) st = tick(specFor('port'), st, 30, {}, d).st;
-    expect(terminalFor(st, 'water')).toMatchObject({ tier: 'quay', status: 'mothballed', builtIn: true });
+    // Fixer's note: this once expected the quay to be mothballed after 90 idle days. The second
+    // review showed that means billing the player, and sending them idle news, for every docks on
+    // the map whether they've used it or not; the quay is the docks' own, so it now neither costs
+    // the player nor ages. Never closing it is still what's tested, and more strictly.
+    let st = startingTerminals('port'), upkeep = 0, events = 0;
+    for (let d = 30; d <= 900; d += 30) { const r = tick(specFor('port'), st, 30, {}, d); st = r.st; upkeep += r.upkeep; events += r.events.length; }
+    expect(terminalFor(st, 'water')).toMatchObject({ tier: 'quay', status: 'open', builtIn: true });
+    expect(upkeep).toBe(0);
+    expect(events).toBe(0);
   });
 });
 
@@ -613,7 +619,12 @@ describe('layout', () => {
         for (const p of P) {
           if (p.side === 'plot') { expect(inside(p.pad, B), `${id} ${p.tier} in plot`).toBe(true); expect(p.land).toBeNull(); }
           else { expect(overlaps(p.pad, B), `${id} ${p.tier} clear of plot`).toBe(false); expect(p.land!.length).toBe(4); }
-          if (p.mode === 'water') { expect(p.pad.z1).toBeLessThanOrEqual(waterline(m) + 1e-9); expect(p.spine.z).toBeCloseTo(p.pad.z0, 9); }
+          // Fixer's note: the docks' bulk or container terminal now runs from the docks' own quay line
+          // out to sea, beside the basin's mouth (the second review found it cut off from the docks
+          // and closing their basin when built out from the back fence); everything else still starts
+          // at the waterline. Either way the quay edge (the spine) faces the open water.
+          const shore = m.type === 'port' && p.tier === 'port_terminal' ? m.anchors.quay[0].z : waterline(m);
+          if (p.mode === 'water') { expect(p.pad.z1).toBeLessThanOrEqual(shore + 1e-9); expect(p.pad.z0).toBeLessThan(waterline(m)); expect(p.spine.z).toBeCloseTo(p.pad.z0, 9); }
         }
         for (let i = 0; i < annexes.length; i++) for (let j = i + 1; j < annexes.length; j++) expect(overlaps(annexes[i].pad, annexes[j].pad), `${id} ${annexes[i].tier}/${annexes[j].tier}`).toBe(false);
       }

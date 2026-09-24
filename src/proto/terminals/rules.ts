@@ -154,7 +154,9 @@ export const handlingRate = (h: Handling, c: CargoId, dir: Dir = 'load') => {
 // round, hoses, which better tiers and kit shorten) plus the time its berth takes to fill or empty it.
 export function dwellHours(h: Handling, cargo: CargoId, load: number, dir: Dir = 'load') {
   const T = TIERS[h.tier];
-  return STOP_HOURS[T.mode] * T.manoeuvre * FITS[h.fit].dwell + load / handlingRate(h, cargo, dir);
+  // kit shortens the stop only for the cargo it's built for: a gantry doesn't speed up a coal train
+  const kit = FITS[h.fit].suits[CARGO_CLASS[cargo]] !== undefined ? FITS[h.fit].dwell : 1;
+  return STOP_HOURS[T.mode] * T.manoeuvre * kit + load / handlingRate(h, cargo, dir);
 }
 // What one berth moves an hour, stops and all, turning round the mode's typical vehicle. Capacity
 // and growth use this, so a berth's rating and the time vehicles stand in it are the same number.
@@ -627,7 +629,11 @@ export function apply(spec: SiteSpec, st: SiteTerminals, ctx: SiteContext, p: Pu
     if (!fo.ok) return { ok: false, reason: `${FITS[p.fit].name}: ${fo.reason}` };
     if (cur.status !== 'open' && !cur.pending) return { ok: false, reason: cur.status === 'building' ? 'Wait for it to open' : 'Reopen it first' };
     if (cur.pending) {
-      const extra = Math.round(T(tier).cost * (FITS[p.fit].extra - FITS[cur.pending.fit].extra));
+      // switching an unfinished refit back to the kit already fitted is cancelling it
+      if (cur.pending.tier === cur.tier && p.fit === cur.fit) return apply(spec, st, ctx, { kind: 'cancel', mode: p.mode });
+      // dearer kit is paid for in full; cheaper kit gives back only what cancelling would
+      const diff = T(tier).cost * (FITS[p.fit].extra - FITS[cur.pending.fit].extra);
+      const extra = Math.round(diff >= 0 ? diff : CANCEL_REFUND * diff);
       return { ok: true, st: { ...st, terminals: [...others, { ...cur, pending: { ...cur.pending, fit: p.fit, paid: (cur.pending.paid ?? 0) + extra } }] }, cost: extra, events: [] };
     }
     if (cur.fit === p.fit) return { ok: false, reason: 'Already fitted' };
@@ -664,23 +670,40 @@ export function tick(spec: SiteSpec, st: SiteTerminals, days: number, served: Pa
   const events: TerminalEvent[] = [];
   let upkeep = 0;
   const keep: Terminal[] = [];
+  // a day's upkeep: none for what the site came with, a fifth while mothballed
+  const cost = (t: Terminal) => (t.builtIn ? 0 : TIERS[t.tier].upkeep * (t.status === 'mothballed' ? MOTHBALL_UPKEEP : 1));
   for (const t0 of st.terminals) {
     let t = { ...t0 };
     const name = () => TIERS[t.tier].name;
-    if (t.status === 'building' && day >= t.ready) { t.status = 'open'; t.idle = 0; delete t.paid; events.push({ kind: 'opened', mode: t.mode, tier: t.tier, text: `${name()} open at the ${lc(spec.name)}` }); }
+    // days of this tick after `ready`: only those are charged and aged at what opened then
+    const since = (ready: number) => Math.max(0, Math.min(days, day - ready));
+    let live = days; // days this tick the terminal was open (or mothballed) as it now stands
+    if (t.status === 'building') {
+      if (day < t.ready) { keep.push(t); continue; } // a building site: no upkeep, doesn't age
+      live = since(t.ready);
+      t.status = 'open'; t.idle = 0; delete t.paid;
+      events.push({ kind: 'opened', mode: t.mode, tier: t.tier, text: `${name()} open at the ${lc(spec.name)}` });
+    }
     if (t.pending && day >= t.pending.ready) {
-      const up = t.pending.tier !== t.tier;
-      // an upgrade the player paid for is theirs, even on top of a terminal the site came with
-      t = { ...t, tier: t.pending.tier, fit: t.pending.fit, status: 'open', idle: 0, warned: false, pending: undefined, builtIn: !up && t.builtIn ? true : undefined };
+      const up = t.pending.tier !== t.tier, after = since(t.pending.ready);
+      // the old terminal worked, and cost its upkeep, until the new one took over
+      upkeep += cost(t) * (live - after);
+      live = after;
+      // an upgrade the player paid for is theirs, even on top of a terminal the site came with; new
+      // kit on the same terminal changes nothing about how long it has stood unused
+      t = up
+        ? { ...t, tier: t.pending.tier, fit: t.pending.fit, status: 'open', idle: 0, warned: false, pending: undefined, builtIn: undefined }
+        : { ...t, fit: t.pending.fit, pending: undefined };
       events.push({ kind: up ? 'upgraded' : 'refitted', mode: t.mode, tier: t.tier, text: up ? `${name()} open at the ${lc(spec.name)}` : `${FITS[t.fit].name} working at the ${lc(name())}` });
     }
     const T = TIERS[t.tier];
-    if (t.status === 'open') upkeep += T.upkeep * days;
-    else if (t.status === 'mothballed') upkeep += T.upkeep * MOTHBALL_UPKEEP * days;
-    // being built, or with an upgrade under way: a building site, which doesn't age
-    if (t.status === 'building' || t.pending) { keep.push(t); continue; }
+    upkeep += cost(t) * live;
+    // an upgrade under way: the old terminal keeps its place and its idle clock until it opens
+    if (t.pending && t.pending.tier !== t.tier) { keep.push(t); continue; }
+    // the docks' own quay is the docks' to run: it neither costs the player nor ages
+    if (t.builtIn) { keep.push(t); continue; }
     if (t.status === 'open' && served[t.mode]) { t.idle = 0; t.warned = false; keep.push(t); continue; }
-    t.idle += days;
+    t.idle += live;
     const v = MODE_NAME[t.mode].vehicles;
     if (t.status === 'open' && t.idle >= IDLE_WARN_DAYS && !t.warned) {
       t.warned = true;
