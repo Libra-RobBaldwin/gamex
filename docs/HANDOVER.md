@@ -8,6 +8,37 @@ carry on.
 Read this first, then `docs/ROADMAP.md` (direction), `docs/ENGINE.md` (architecture) and the
 per-library docs in `docs/`.
 
+## Second session (from 24 Sep, ~10:20 UTC): status
+
+A session on the user's other account picked this up:
+https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
+
+- **Integration branch:** `claude/cloud-session-history-rvqkm1`, with PR #9 into the main branch.
+- **Merged into it so far:**
+  - the handover (b8de12e);
+  - the vitest fix (known bug 3);
+  - all eight finished libraries (PRs #1–#8).
+- **Checks at cccd45c:** tsc is clean and 429 tests pass. Under heavy CPU load, `terrain/bench.test.ts` and one water test can time out; both pass on a re-run.
+- **Running:** three workflows finish the stopped streams. Each stream is finished, then reviewed by an adversary who writes failing tests, then fixed.
+
+  | Workflow | Streams |
+  |---|---|
+  | wf_3a219236-759 | traffic, economy, terminals (terminals has chains merged in) |
+  | wf_1f90242b-267 | ui, kit-nav, bridges-track |
+  | wf_8ff5d1b7-f4b | ground, vehicles-moving (on the latest vehicles-lib) |
+
+  Their branches are local (`work/<stream>`, `-review`, `-2`) and land here once they pass. If this session stops before then, re-run the `claude/wip-*` streams from the briefs, as before.
+- **New preview links (this account):**
+
+  | What | Link |
+  |---|---|
+  | Game | https://claude.ai/artifact/Baau34269e5GgVfKquSesJ |
+  | Water | https://claude.ai/artifact/CuTMcGE9xTebEACgv2Hkyf |
+  | Vehicles | https://claude.ai/artifact/Vy1PUbSTHLMuScoL66fcLv |
+  | People | https://claude.ai/artifact/9FaghH7bkVoAN7bfWR9MqJ |
+  | Bridges | https://claude.ai/artifact/L72vN7hP41VjDp29fJnBLd |
+  | Industries | https://claude.ai/artifact/6JyuqJ7Tdb5m2p4hYyhJzR |
+
 ## The game and previews (published artifacts, owned by the org account)
 
 These links belong to the org account. A session on another account can't update them, so
