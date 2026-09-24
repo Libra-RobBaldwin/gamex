@@ -4,7 +4,7 @@ import { bandPolys, circlePoly, pointInPoly } from '../land';
 import { DIRS, packCover, SAMPLES, unpackCover, type GroundQuality } from './covers';
 import { Ground, type GroundInput, type XZ } from './index';
 import { Layout } from './layout';
-import { groundFragment, patchGround, groundUniforms, setOrigin } from './material';
+import { DETAIL_REPEAT, groundFragment, patchGround, groundUniforms, setOrigin } from './material';
 import { makeDetail, makeMacro, seamStats, MACRO_PERIOD } from './textures';
 import { rng } from './noise';
 
@@ -68,7 +68,8 @@ describe('generated textures', () => {
   it('fit the memory budget with a game-sized cover map (4 MB with mipmaps)', () => {
     const detail = 512 * 512 * 4 * (4 / 3), macro = 256 * 256 * 4 * (4 / 3), cover = Math.ceil(1200 / 2.5) ** 2 * 4;
     expect(detail + macro + cover).toBeLessThanOrEqual(4 * 1024 * 1024);
-    expect(MACRO_PERIOD % 8).toBe(0); // (detail repeats fit the period, so rebasing the origin never jumps)
+    // (detail repeats fit the period, so rebasing the origin never jumps)
+    expect(Number.isInteger(MACRO_PERIOD / DETAIL_REPEAT)).toBe(true);
   });
 });
 
@@ -231,7 +232,7 @@ describe('budgets', () => {
 });
 
 describe('the material', () => {
-  it('reads at most 6 textures at high quality and 3 at low (in fact 4 and 2)', () => {
+  it('reads at most 6 textures at high quality and 3 at low (in fact 4 and 3)', () => {
     const count = (q: GroundQuality) => (groundFragment(q).match(/texture2D\s*\(/g) ?? []).length;
     expect(count('high')).toBeLessThanOrEqual(6);
     expect(count('low')).toBeLessThanOrEqual(3);

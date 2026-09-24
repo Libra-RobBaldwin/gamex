@@ -53,7 +53,7 @@ export class GameGround {
     const industrial: XZ[] = [];
     for (let x = -600; x <= 600; x += 40) for (let z = -600; z <= 600; z += 40) if (this.w.industrial({ x, z })) industrial.push({ x, z });
     const L = this.w.lake;
-    return { blocked, lanes, parks, industrial, water: [circlePoly(L, L.r + 6, 48)] };
+    return { blocked, lanes, parks, industrial, water: [circlePoly(L, L.r + 9, 48)] /* (the beach reaches r + 7) */ };
   }
   // The roads or the landscaping changed: repaint everything (next time `sync` runs).
   invalidate() { this.full = true; this.fixed = null; }

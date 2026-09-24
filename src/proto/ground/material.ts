@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { CROPS, CROP_NAMES, DIRS, PALETTE, type GroundQuality } from './covers';
 import { MACRO_PERIOD, makeDetail, makeMacro } from './textures';
 
-export const DETAIL_REPEAT = 8; // metres per repeat of the detail texture (its second layer: 1024/48)
+export const DETAIL_REPEAT = MACRO_PERIOD / 160; // 12.8 m per repeat of the detail texture: a whole number of repeats in the period
 const DETAIL2 = MACRO_PERIOD / 96; // 21.33 m, a whole number of repeats in the period, so rebasing never jumps
 
 // The detail and macro textures are generated once and shared by every ground.
@@ -79,7 +79,7 @@ export function groundUniforms(cover: THREE.Texture): GroundUniforms {
     uPal: { value: PAL_KEYS.map((k) => new THREE.Color(PALETTE[k])) },
     uCropA: { value: CROP_NAMES.map((c) => new THREE.Color(CROPS[c].a)) },
     uCropB: { value: CROP_NAMES.map((c) => new THREE.Color(CROPS[c].b)) },
-    uCropRow: { value: CROP_NAMES.map((c) => new THREE.Vector4(CROPS[c].rows, CROPS[c].row, CROPS[c].tram ? 1 : 0, 0)) },
+    uCropRow: { value: CROP_NAMES.map((c) => new THREE.Vector4(CROPS[c].rows, CROPS[c].row, CROPS[c].tram ? 1 : 0, CROPS[c].tex)) },
     uDirs: { value: Array.from({ length: DIRS }, (_, k) => new THREE.Vector2(-Math.sin((k * Math.PI) / DIRS), Math.cos((k * Math.PI) / DIRS))) },
   };
 }
@@ -130,15 +130,9 @@ const FRAG_BODY = `
 #else
   vec4 d2 = d1.gbga;
 #endif
-#if GROUND_Q >= 1
+  // (every level reads the macro texture: the patches must be the same at every quality, or the
+  // whole view would change colour when the game changes quality tier)
   vec4 mac = texture2D( uMacro, dp * ${(1 / MACRO_PERIOD).toFixed(8)} );
-#else
-  // no macro texture: soft bumps from parabolic waves (a few multiplies, no sines), at skewed
-  // angles and whole numbers of cycles per period, so rebasing the origin never jumps
-  vec4 w = fract( vec4( dot( dp, vec2( 5.0, 2.0 ) ), dot( dp, vec2( -3.0, 5.0 ) ), dot( dp, vec2( 13.0, 9.0 ) ), dot( dp, vec2( -11.0, 17.0 ) ) ) * ${(1 / MACRO_PERIOD).toFixed(8)} );
-  w = w * ( 1.0 - w ) * 4.0;
-  vec4 mac = vec4( w.x * w.y, w.z * w.w, w.x * w.w, w.y * w.z ) * 0.5 + 0.25;
-#endif
 
   // the cover map (pasture past its edge), its borders wobbled by the clump noise so they look
   // grown, not drawn
@@ -149,7 +143,7 @@ const FRAG_BODY = `
   vec3 sg = cov.rba * 2.0 - 1.0;
   float nz = d2.g - 0.5;
   float lawn = max( -sg.x, 0.0 ), fld = gRamp( 0.15, 0.85, sg.x + nz * 0.35 );
-  float wood = gRamp( 0.1, 0.9, sg.y + nz * 0.5 ), bare = gRamp( 0.1, 0.9, nz * 0.6 - sg.y );
+  float wood = gRamp( 0.1, 0.9, sg.y + nz * 0.5 ), bare = gRamp( 0.15, 0.75, nz * 0.3 - sg.y );
   float rough = max( sg.z, 0.0 ), wet = max( -sg.z, 0.0 );
   float sum = lawn + fld + wood + bare, k = 1.0 / max( sum, 1.0 );
   lawn *= k; fld *= k; wood *= k; bare *= k;
@@ -160,22 +154,26 @@ const FRAG_BODY = `
   // painted rough
   vec3 grass = mix( uPal[${P('pasture')}], uPal[${P('pastureDry')}], gRamp( 0.3, 0.75, mac.r * 0.65 + mac.b * 0.35 ) );
   grass = mix( grass, uPal[${P('pastureCool')}], gRamp( 0.45, 0.8, mac.a ) * 0.8 );
-  grass = mix( grass, uPal[${P('wet')}], wet ) * ( 1.0 + ( mac.b - 0.5 ) * 0.3 + nz * 0.16 );
+  grass = mix( grass, uPal[${P('wet')}], wet ) * ( 1.0 + ( mac.b - 0.5 ) * 0.42 + ( mac.g - 0.5 ) * 0.22 + nz * 0.45 );
   float rgh = min( max( rough, gRamp( 0.6, 0.8, mac.g * 0.55 + mac.b * 0.2 + d2.g * 0.35 ) * 0.55 * ( 1.0 - wet ) ), 1.0 );
-  vec3 col = mix( grass, mix( uPal[${P('rough')}], uPal[${P('pastureDry')}], d2.b ), rgh ) * ( 1.0 + tuft * ( 0.4 + rgh * 0.3 ) + clump * 0.42 ) * past;
+  vec3 col = mix( grass, mix( uPal[${P('rough')}], uPal[${P('pastureDry')}], d2.b ), rgh ) * ( 1.0 + tuft * ( 0.9 + rgh * 0.3 ) + clump * 0.85 + grain * 0.3 ) * past; // (strong in linear light: the screen's sRGB halves it)
 
   // fields and lawns: the crop (or mown stripes) and its rows, along the direction in the map
   float code = floor( cov.g * 255.0 + 0.5 ), cropF = floor( code * ${(1 / DIRS).toFixed(6)} );
   int ci = int( cropF );
   vec4 row = uCropRow[ ci ];
   float ac = dot( dp, uDirs[ int( code - cropF * ${DIRS}.0 ) ] ); // metres across the rows
+#if GROUND_Q >= 1
   // rows: a triangle wave (soft, few harmonics) fading to its mean before it gets fine enough to alias
   float rows = ( abs( fract( ac / max( row.x, 0.01 ) ) - 0.5 ) * 4.0 - 1.0 ) * row.y * ( 1.0 - gRamp( 0.12, 0.3, mpp / max( row.x, 0.01 ) ) );
   // tramlines: two wheel tracks 2 m apart every 24 m, anti-aliased, gone when under a pixel
   float s24 = fract( ac * ${(1 / 24).toFixed(6)} ) * 24.0, dl = min( min( s24, 24.0 - s24 ), abs( s24 - 2.0 ) );
   float tram = row.z * ( 1.0 - gRamp( 0.22, 0.22 + mpp, dl ) ) * ( 1.0 - gRamp( 0.25, 0.6, mpp ) );
+#else
+  float rows = 0.0, tram = 0.0; // (Low: no rows or tramlines, just the crop; they average out to nearly nothing anyway)
+#endif
   vec3 fieldC = mix( uCropA[ ci ], uCropB[ ci ], gRamp( 0.3, 0.7, mac.g * 0.7 + mac.b * 0.3 ) );
-  col += fieldC * ( 1.0 + rows + tuft * 0.45 + clump * 0.28 + grain * ( ci == 4 ? 0.5 : 0.08 ) - tram * 0.2 ) * fld;
+  col += fieldC * ( 1.0 + rows + ( tuft * 0.9 + clump * 0.8 ) * row.w + grain * ( ci == 4 ? 0.7 : 0.15 ) - tram * 0.2 ) * fld;
   col += mix( uPal[${P('lawn')}], grass, 0.3 ) * ( 1.0 + tuft * 0.2 + clump * 0.12 + ( ci == 7 ? rows : 0.0 ) ) * lawn;
 
   col += mix( uPal[${P('wood')}], uPal[${P('litter')}], gRamp( 0.45, 0.75, d1.g * 0.5 + d2.g * 0.5 ) ) * ( 1.0 + tuft * 0.3 + ( d2.b - 0.5 ) * 0.3 ) * wood;
@@ -190,9 +188,9 @@ const FRAG_BODY = `
 #ifdef GROUND_TERRAIN
   // slopes and heights: rock and scree where it's steep, heather and moor grass high up
   float rockW = gRamp( uSlope.x, uSlope.y, 1.0 - vGN.y + grain * 0.06 + ( mac.b - 0.5 ) * 0.08 );
-  float heath = gRamp( uSlope.z, uSlope.w, vGW.y + ( mac.g - 0.5 ) * 40.0 ) * ( 1.0 - fld ) * ( 1.0 - lawn );
-  col = mix( col, mix( uPal[${P('moor')}], uPal[${P('heather')}], gRamp( 0.35, 0.65, d2.g * 0.6 + mac.b * 0.4 ) ) * ( 1.0 + clump * 0.35 + tuft * 0.3 ), heath );
-  col = mix( col, mix( uPal[${P('rock')}], uPal[${P('scree')}], gRamp( 0.35, 0.65, d2.b * 0.5 + mac.b * 0.5 ) ) * ( 1.0 + grain * 0.5 + tuft * 0.2 ), rockW );
+  float heath = gRamp( uSlope.z, uSlope.w, vGW.y + ( mac.g - 0.5 ) * 70.0 + ( mac.b - 0.5 ) * 30.0 ) * ( 1.0 - fld ) * ( 1.0 - lawn );
+  col = mix( col, mix( uPal[${P('moor')}], uPal[${P('heather')}], gRamp( 0.25, 0.75, d2.g * 0.3 + mac.b * 0.7 ) ) * ( 1.0 + clump * 0.2 + tuft * 0.3 ), heath );
+  col = mix( col, mix( uPal[${P('rock')}], uPal[${P('scree')}], gRamp( 0.3, 0.7, d1.b * 0.6 + mac.b * 0.4 ) ) * ( 1.0 + grain * 0.8 + clump * 0.3 + tuft * 0.3 ), rockW );
 #endif
 
   diffuseColor.rgb *= max( col, 0.0 );

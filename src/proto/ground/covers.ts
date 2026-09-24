@@ -35,16 +35,16 @@ export const CROP_NAMES = Object.keys(CROP) as CropName[];
 // How each crop looks: two colours the macro noise moves between (a field is never one flat
 // colour), and its rows: spacing in metres (0 for none), strength, and whether a sprayer's
 // tramlines run through it every 24 m.
-export interface CropLook { a: string; b: string; rows: number; row: number; tram: boolean }
+export interface CropLook { a: string; b: string; rows: number; row: number; tram: boolean; tex: number } // tex: how strongly the grass/soil detail shows
 export const CROPS: Record<CropName, CropLook> = {
-  grass: { a: '#6b8a47', b: '#7a914e', rows: 0, row: 0, tram: false }, // a grass field grazed or cut for hay
-  ley: { a: '#628d45', b: '#6f9a4c', rows: 1.2, row: 0.05, tram: false }, // sown grass, lusher, faint drill rows
-  wheat: { a: '#b69d5d', b: '#c4aa68', rows: 0.6, row: 0.05, tram: true },
-  barley: { a: '#bfb17f', b: '#c9bb8b', rows: 0.6, row: 0.045, tram: true },
-  plough: { a: '#7a6650', b: '#86715a', rows: 1.1, row: 0.14, tram: false }, // furrows
-  rape: { a: '#c3b54e', b: '#b1a94e', rows: 0, row: 0, tram: true }, // oilseed rape in flower, toned down
-  stubble: { a: '#b0a077', b: '#a49871', rows: 0.6, row: 0.06, tram: true },
-  stripes: { a: '#6e9449', b: '#76994e', rows: 7, row: 0.045, tram: false }, // mown lawn: stripes, not a crop
+  grass: { a: '#6b8a47', b: '#7a914e', rows: 0, row: 0, tram: false, tex: 1.0 }, // a grass field grazed or cut for hay
+  ley: { a: '#628d45', b: '#6f9a4c', rows: 1.2, row: 0.05, tram: false, tex: 0.85 }, // sown grass, lusher, faint drill rows
+  wheat: { a: '#b69d5d', b: '#c4aa68', rows: 0.6, row: 0.05, tram: true, tex: 0.6 },
+  barley: { a: '#bfb17f', b: '#c9bb8b', rows: 0.6, row: 0.045, tram: true, tex: 0.55 },
+  plough: { a: '#7a6650', b: '#86715a', rows: 1.1, row: 0.14, tram: false, tex: 0.45 }, // furrows
+  rape: { a: '#c3b54e', b: '#b1a94e', rows: 0, row: 0, tram: true, tex: 0.6 }, // oilseed rape in flower, toned down
+  stubble: { a: '#b0a077', b: '#a49871', rows: 0.6, row: 0.06, tram: true, tex: 0.6 },
+  stripes: { a: '#6e9449', b: '#76994e', rows: 7, row: 0.045, tram: false, tex: 0.5 }, // mown lawn: stripes, not a crop
 };
 
 // The rest of the palette.
@@ -59,8 +59,8 @@ export const PALETTE = {
   bare: '#86705a',
   bareDark: '#6d5a45',
   wet: '#547c45',
-  rock: '#83827a',
-  scree: '#9b978b',
+  rock: '#77766f',
+  scree: '#8b877d',
   heather: '#695a5c',
   moor: '#747449', // bleached moor grass between the heather
   daisy: '#e9e6d6',
@@ -71,4 +71,4 @@ export const PALETTE = {
 // (fewer texture reads, no second detail layer, cheaper macro variation).
 export type GroundQuality = 'high' | 'medium' | 'low';
 // Texture reads per ground fragment at each level (checked against the compiled shader in tests).
-export const SAMPLES: Record<GroundQuality, number> = { high: 4, medium: 3, low: 2 };
+export const SAMPLES: Record<GroundQuality, number> = { high: 4, medium: 3, low: 3 };
