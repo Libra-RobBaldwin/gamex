@@ -38,6 +38,7 @@ export interface ZState extends ZoneGeo {
   cleared: PerUse;
   buildings: BState[]; indJobs: number;
   cov: number; // share of the zone (by capacity) near a served bus or rail stop
+  covHome: number; // the same of its homes alone: who can set out from home by your lines
   centre: number; // 0..1, how central in its town
   cap: PerUse; occCap: PerUse; // this review's tallies
   pHome: number; labour: number; customers: number;
@@ -450,7 +451,7 @@ function facts(t: TState, c: TownCtx, abandoned: number, built: number, lost: nu
   const cs = t.carShare;
   for (const z of t.zones) {
     const i = z.idx, res = z.occCap.home;
-    R += res; homes += z.cap.home; near += z.cap.home * z.cov; plots += Math.max(0, z.plots - z.reserved);
+    R += res; homes += z.cap.home; near += z.cap.home * z.covHome; plots += Math.max(0, z.plots - z.reserved);
     for (const u of GROWN) plots += z.cleared[u];
     jobs += z.cap.shop + z.cap.office + z.cap.works + z.cap.civic + z.indJobs;
     wc += res * Math.min(1, c.work.car[i]); wn += res * Math.min(1, c.work.nc[i]); wp += res * Math.min(1, c.work.pt[i]);

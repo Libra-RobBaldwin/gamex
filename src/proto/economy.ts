@@ -196,7 +196,7 @@ export class Economy {
     }
     const zs: ZState = {
       id: z.id, idx: -1, town, x: z.x, z: z.z, r: z.r ?? 120, plots: z.plots, reserved: 0, blocked: 0, allow, cleared: perUse(),
-      buildings: [], indJobs: 0, cov: 0, centre: 0.5, size: 0, group: -1, acc: [], cap: perUse(), occCap: perUse(), pHome: 1, labour: 1, customers: 1,
+      buildings: [], indJobs: 0, cov: 0, covHome: 0, centre: 0.5, size: 0, group: -1, acc: [], cap: perUse(), occCap: perUse(), pHome: 1, labour: 1, customers: 1,
     };
     this.zoneMap.set(z.id, zs);
     town.zones.push(zs);
@@ -581,7 +581,7 @@ export class Economy {
     // each zone's capacity near each served stop (by skim index), and the distance it walks
     const S = this.skim.S, accCap = new Float64Array(S), accD = new Float64Array(S), seen = new Uint8Array(S), touched: number[] = [], cand: SState[] = [];
     for (const z of this.zoneList) {
-      let total = 0, covered = 0;
+      let total = 0, covered = 0, homes = 0, coveredHomes = 0;
       const R = radius.get(z.town)!;
       z.centre = 1 - Math.min(1, Math.hypot(z.x - z.town.x, z.z - z.town.z) / R);
       // the stops that might reach any of its buildings, gathered once for the zone
@@ -600,6 +600,7 @@ export class Economy {
       for (const b of z.buildings) {
         if (b.abandoned) continue;
         total += b.cap;
+        if (b.use === 'home') homes += b.cap;
         let best = Infinity;
         for (const s of cand) {
           const dx = s.x - b.x, dz = s.z - b.z, d = Math.sqrt(dx * dx + dz * dz);
@@ -615,7 +616,7 @@ export class Economy {
             if (b.use === 'works') bump(works, s, z.town, b.cap);
           }
         }
-        if (best < Infinity) covered += b.cap;
+        if (best < Infinity) { covered += b.cap; if (b.use === 'home') coveredHomes += b.cap; }
         const bx = b.x - z.town.x, bz = b.z - z.town.z, centre = 1 - Math.min(1, Math.sqrt(bx * bx + bz * bz) / R);
         const stop = S ? (best < Infinity ? 1 - best / 800 : 0) : 0.3;
         b.site = 0.35 * centre + 0.65 * Math.max(0, stop);
@@ -625,6 +626,7 @@ export class Economy {
       for (const s of touched) accCap[s] = accD[s] = seen[s] = 0;
       touched.length = 0;
       z.cov = total > 0 ? covered / total : 0;
+      z.covHome = homes > 0 ? coveredHomes / homes : 0;
       z.size = total;
       // blocked with the rest of its town if it has a stop, so service to one town isn't lent to the next
       z.group = z.acc.length ? z.town.id : -1;
@@ -777,7 +779,7 @@ export class Economy {
     const Z = this.zoneList.length, T = this.tune;
     const a = {
       residents: new Float64Array(Z), workers: new Float64Array(Z), work: new Float64Array(Z), shop: new Float64Array(Z),
-      leisure: new Float64Array(Z), car: new Float64Array(Z), attraction: new Float64Array(Z), visit: new Float64Array(Z), cover: new Float64Array(Z),
+      leisure: new Float64Array(Z), car: new Float64Array(Z), attraction: new Float64Array(Z), visit: new Float64Array(Z), cover: new Float64Array(Z), homeCover: new Float64Array(Z),
     };
     for (const z of this.zoneList) {
       const i = z.idx, h = z.town.health;
@@ -796,7 +798,8 @@ export class Economy {
       a.car[i] = z.town.carShare;
       a.visit[i] = jobs + 2 * shop + 2 * civic; // what draws people who don't live there
       a.attraction[i] = a.visit[i] + 0.1 * res;
-      a.cover[i] = z.cov;
+      a.cover[i] = z.cov; // what draws people there, near a stop
+      a.homeCover[i] = z.covHome; // who lives there, near a stop
     }
     return a;
   }
@@ -804,7 +807,7 @@ export class Economy {
   private trips() {
     if (!this.pairs) return;
     const a = this.zoneArrays();
-    const t = assignTrips(this.pairs, this.skim, a.residents, a.attraction, a.visit, a.car, a.cover, this.tune);
+    const t = assignTrips(this.pairs, this.skim, a.residents, a.attraction, a.visit, a.car, a.cover, a.homeCover, this.tune);
     installTrips(this.lineList, t);
     this.reviewWork += t.work;
   }

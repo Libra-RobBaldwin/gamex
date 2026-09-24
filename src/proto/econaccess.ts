@@ -544,7 +544,7 @@ export interface TripTables {
   arrivals: Map<LineState, Float64Array>; visits: Map<LineState, Float64Array>; perDay: number; work: number;
 }
 
-export function assignTrips(p: Pairs, skim: Skim, residents: Float64Array, attraction: Float64Array, visit: Float64Array, carShare: Float64Array, cover: Float64Array, tune: Tune = TUNE): TripTables {
+export function assignTrips(p: Pairs, skim: Skim, residents: Float64Array, attraction: Float64Array, visit: Float64Array, carShare: Float64Array, cover: Float64Array, homeCover: Float64Array, tune: Tune = TUNE): TripTables {
   const Z = p.Z, tau = tune.gravityMin, beta = tune.modeBeta;
   const tables: TripTables = { gen: new Map(), onward: new Map(), arrivals: new Map(), visits: new Map(), perDay: 0, work: 0 };
   // what each place draws, the share of that from workplaces, and how much of it is near a stop
@@ -607,7 +607,8 @@ export function assignTrips(p: Pairs, skim: Skim, residents: Float64Array, attra
     for (let n = s0; n < s1; n++) {
       const j = p.j[n], a = A[j], pg = p.gen[n];
       if (a <= 0 || !Number.isFinite(pg)) continue;
-      const cov = cover[i] * (AC[j] / a);
+      // trips set out from homes near a stop to places near one
+      const cov = homeCover[i] * (AC[j] / a);
       if (cov <= 0) continue;
       // with a car: car, your lines or on foot; without: your lines or on foot
       const uw = -beta * p.walk[n], up = -beta * (pg + tune.ptBiasMin), ud = -beta * (p.drive[n] + tune.carBiasMin);

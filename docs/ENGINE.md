@@ -239,7 +239,9 @@ How well supplied a town is follows its memory of deliveries, as its growth does
 panel says is arriving (goods and materials an hour, passengers a day) is what your lines
 brought last month alone: a town nothing is delivered to says so ("shops only 67% supplied with
 goods, no goods delivered"; "no passengers arriving by your lines"), even while it still lives
-on what it started with. Growing means something went up (and the game put it up) or
+on what it started with. "Homes near a stop" counts homes alone, not the offices and shops
+sharing their zone, and only those homes set out on trips by your lines; trips by your lines
+end at whatever in a zone is near a stop. Growing means something went up (and the game put it up) or
 people moved in; demand that nothing comes of isn't growth, and demand that has fallen and
 settled isn't stalling.
 
