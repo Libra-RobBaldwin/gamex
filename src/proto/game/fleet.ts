@@ -7,7 +7,7 @@
 // level of detail on screen, so the fleet on the road is kept to a few dozen models a year.
 import * as THREE from 'three';
 import {
-  DoorStates, FLAGS, MODEL, MODELS, OPERATOR, VehicleRenderer, doorPositions, consistOffsets, liveryColours, liveryFor, lodFor, lookFor, operatorsFor, pickVehicle, purchaseList,
+  DoorStates, FLAGS, MODEL, doorSeconds, MODELS, OPERATOR, VehicleRenderer, doorPositions, consistOffsets, liveryColours, liveryFor, lodFor, lookFor, operatorsFor, pickVehicle, purchaseList,
   type Area, type DoorPlace, type Livery, type Look, type Model, type Offer, type Operator,
 } from '../vehicles';
 import { hash, rng, weighted, type Rand } from '../vehicles/util';
@@ -355,8 +355,9 @@ export class Fleet {
       d.lastV = c.v;
     }
     const lead = d.chain[0], r0 = parts[0];
-    // a bus's doors open on the kerb side (the driver's left) while it stands at a stop
-    if (c.bus && dt > 0) this.doors.setDoors(c.id, c.dwell !== undefined && c.gone === undefined ? 1 : 0, 'left', { model: lead });
+    // a bus's doors open on the kerb side (the driver's left) while it stands at a stop, and are
+    // shut again (they take doorSeconds) by the time it pulls away
+    if (c.bus && dt > 0) this.doors.setDoors(c.id, c.dwell !== undefined && c.dwell > doorSeconds(lead) + 0.2 && c.gone === undefined ? 1 : 0, 'left', { model: lead });
     // (off screen: nothing more to work out)
     if (!r0 || !this.seen(r0.x, y, r0.z, d.length)) return;
     let f = (d.brake > 0 ? FLAGS.brake : 0) | this.indicators(c);
