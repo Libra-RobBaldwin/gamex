@@ -103,7 +103,7 @@ export interface NavOptions extends NavHooks {
   animMs?: number;
 }
 
-interface Ptr { id: number; x: number; y: number; px: number; py: number; t: number; x0: number; y0: number; t0: number; v0: View; type: string; button: number }
+interface Ptr { id: number; x: number; y: number; px: number; py: number; t: number; pt: number; stopper?: boolean; x0: number; y0: number; t0: number; v0: View; type: string; button: number }
 export interface PointerIn { id: number; x: number; y: number; t: number; type?: string; button?: number; orbit?: boolean }
 
 type Anim =
@@ -144,7 +144,7 @@ export class NavCore {
   private two: {
     a: number; b: number; d0: number; a0: number; m0: { x: number; y: number }; anchor: V3; h0: number; az0: number;
     rotating: boolean; rotOff: number; tilting: boolean; tiltDy: number; tiltEl: number; tiltAt: { x: number; y: number };
-    moved: boolean; t: number;
+    moved: boolean; t: number; t0: number;
   } | null = null;
   private anim: Anim | null = null;
   private keys = new Set<string>();
@@ -250,11 +250,15 @@ export class NavCore {
   animateTo(to: Partial<View>, ms = this.o.animMs): Promise<boolean> {
     this.stop();
     const target = this.fill(to);
+    // turn the short way round, however many turns the view has made
+    if (to.az !== undefined) target.az = nearestAz(this.view.az, target.az);
     return new Promise((done) => { this.anim = { kind: 'to', from: { ...this.view }, to: target, ms: Math.max(1, ms), t: 0, done }; });
   }
   /** zoom by a factor keeping the ground under (sx, sy) where it is, all the way */
   zoomAt(sx: number, sy: number, factor: number, ms = 400): Promise<boolean> {
-    return this.about({ h: this.view.h * factor }, sx, sy, ms);
+    // presses in quick succession add up exactly
+    const a = this.anim, from = a && a.kind === 'about' && a.sx === sx && a.sy === sy ? a.to.h : this.view.h;
+    return this.about({ h: from * factor }, sx, sy, ms);
   }
   /** zoom about the middle of the screen */
   zoomBy(factor: number, ms = 300) { const L = this.lens(); return this.zoomAt(L.width / 2, L.height / 2, factor, ms); }
@@ -295,8 +299,11 @@ export class NavCore {
 
   down(e: PointerIn, event?: Event) {
     if (!this.enabled) return;
+    // a touch that stops a glide only stops it: its lift is not a tap
+    const gliding = !!(this.flingV.x || this.flingV.z);
     this.interact();
-    const p: Ptr = { id: e.id, x: e.x, y: e.y, px: e.x, py: e.y, t: e.t, x0: e.x, y0: e.y, t0: e.t, v0: { ...this.view }, type: e.type ?? 'touch', button: e.button ?? 0 };
+    const p: Ptr = { id: e.id, x: e.x, y: e.y, px: e.x, py: e.y, t: e.t, pt: e.t, x0: e.x, y0: e.y, t0: e.t, v0: { ...this.view }, type: e.type ?? 'touch', button: e.button ?? 0 };
+    if (gliding) p.stopper = true;
     this.ptrs.delete(e.id);
     this.ptrs.set(e.id, p);
     const n = this.ptrs.size;
@@ -340,7 +347,7 @@ export class NavCore {
     this.two = {
       a, b, d0: Math.hypot(A.x - B.x, A.y - B.y) || 1, a0: Math.atan2(B.y - A.y, B.x - A.x), m0: m,
       anchor: this.groundUnder(m.x, m.y), h0: this.view.h, az0: this.view.az,
-      rotating: false, rotOff: 0, tilting: false, tiltDy: 0, tiltEl: this.view.el, tiltAt: m, moved: false, t,
+      rotating: false, rotOff: 0, tilting: false, tiltDy: 0, tiltEl: this.view.el, tiltAt: m, moved: false, t, t0: Math.min(A.t0, B.t0),
     };
   }
 
@@ -348,8 +355,10 @@ export class NavCore {
     const p = this.ptrs.get(e.id);
     if (!p) return;
     p.px = p.x; p.py = p.y;
-    p.x = e.x; p.y = e.y; p.t = e.t;
+    p.x = e.x; p.y = e.y; p.pt = p.t; p.t = e.t;
     const L = this.lens();
+    // fingers moving the map take over from any animation (a two-finger-tap zoom, a preset)
+    if (this.anim && (this.mode === 'pan' || this.mode === 'two' || this.mode === 'orbit')) this.stop();
     if (this.mode === 'claim') {
       if (e.id === this.primary) this.hooks.onClaimMove?.(this.touch(p, event));
       return;
@@ -376,9 +385,15 @@ export class NavCore {
       // start catches up with the finger
       if (this.o.oneFinger === 'orbit') { this.startOrbit(p); return; }
       this.mode = 'pan'; // and the pan starts with this move
+      // where the view was before it, so even a flick of a single move can glide
+      this.vel = [{ x: this.view.x, z: this.view.z, t: p.pt }];
     }
     if (this.mode === 'pan') {
-      this.put(keepUnder(this.view, L, this.anchor, p.x, p.y));
+      const want = keepUnder(this.view, L, this.anchor, p.x, p.y);
+      this.put(want);
+      // held at the edge of the map: grab the ground that's under the finger now, so dragging
+      // back moves the map straight away
+      if (this.view.x !== want.x || this.view.z !== want.z) this.anchor = this.groundUnder(p.x, p.y);
       this.vel.push({ x: this.view.x, z: this.view.z, t: p.t });
       if (this.vel.length > 6) this.vel.shift();
     }
@@ -394,12 +409,20 @@ export class NavCore {
     if (g.tilting) {
       const el = g.tiltEl - (dy - g.tiltDy) * this.o.tiltPerPx;
       this.put(keepUnder(clampView({ ...this.view, el }, this.limits), L, g.anchor, g.tiltAt.x, g.tiltAt.y));
+      // at the tilt limit: count from here, so sliding back tilts back straight away
+      if (this.view.el !== el) { g.tiltDy = dy; g.tiltEl = this.view.el; }
       return;
     }
     // rotation only starts after a deliberate twist, then carries on from there
     if (this.o.rotate && !g.rotating && Math.abs(rot) > this.o.rotateThreshold) { g.rotating = true; g.rotOff = Math.sign(rot) * this.o.rotateThreshold; }
-    const v = clampView({ ...this.view, h: g.h0 / scale, az: g.az0 + (g.rotating ? rot - g.rotOff : 0) }, this.limits);
-    this.put(keepUnder(v, L, g.anchor, m.x, m.y));
+    const h = g.h0 / scale;
+    const v = clampView({ ...this.view, h, az: g.az0 + (g.rotating ? rot - g.rotOff : 0) }, this.limits);
+    const want = keepUnder(v, L, g.anchor, m.x, m.y);
+    this.put(want);
+    // at the zoom limit: count from here, so the fingers work straight away when they turn back
+    if (v.h !== h) g.h0 = this.view.h * scale;
+    // at the edge of the map: grab the ground now under the fingers
+    if (this.view.x !== want.x || this.view.z !== want.z) g.anchor = this.groundUnder(m.x, m.y);
     // Two fingers sliding up or down together (not pinching or turning) tilts. It takes over
     // from the view this very move gave, with the fingers where they are now, so nothing jumps
     // (deciding before this move's pinch was applied left a half-moved pair's zoom behind).
@@ -411,6 +434,8 @@ export class NavCore {
   up(e: PointerIn, why: 'up' | 'cancel' = 'up', event?: Event) {
     const p = this.ptrs.get(e.id);
     if (!p) return;
+    // a quick flick can lift well past its last move: the lift is where the finger got to
+    if (why === 'up' && (e.x !== p.x || e.y !== p.y)) this.move(e, event);
     p.px = p.x; p.py = p.y;
     p.x = e.x; p.y = e.y; p.t = e.t;
     this.ptrs.delete(e.id);
@@ -420,7 +445,8 @@ export class NavCore {
       if (this.ptrs.size >= 2) { const [a, b] = [...this.ptrs.keys()]; this.startTwo(a, b, e.t); this.two!.moved = true; return; }
       if (this.ptrs.size === 1) {
         // a quick two-finger tap zooms out
-        if (why === 'up' && !g.moved && e.t - g.t < 300 && this.o.twoFingerTapZoom) this.zoomAt(g.m0.x, g.m0.y, this.o.twoFingerTapZoom);
+        // (both fingers quick: not a finger resting on the map while another brushes the screen)
+        if (why === 'up' && !g.moved && e.t - g.t0 < 300 && this.o.twoFingerTapZoom) this.zoomAt(g.m0.x, g.m0.y, this.o.twoFingerTapZoom);
         // carry on with the finger that's left, without a jump
         const [q] = [...this.ptrs.values()];
         if (this.o.oneFinger === 'orbit') this.startOrbit(q);
@@ -452,7 +478,7 @@ export class NavCore {
         this.flingV = { x: vx, z: vz };
       }
     }
-    if (mode === 'maybe' && why === 'up' && !this.longFired && e.t - p.t0 < this.o.tapMs) this.tap(p, event);
+    if (mode === 'maybe' && why === 'up' && !this.longFired && !p.stopper && e.t - p.t0 < this.o.tapMs) this.tap(p, event);
   }
 
   private tap(p: Ptr, event?: Event) {
@@ -468,7 +494,7 @@ export class NavCore {
   hover(e: PointerIn, event?: Event) {
     if (!this.hooks.onHover || this.ptrs.size) return;
     const v0 = { ...this.view };
-    this.hooks.onHover(this.touch({ id: e.id, x: e.x, y: e.y, px: e.x, py: e.y, t: e.t, x0: e.x, y0: e.y, t0: e.t, v0, type: e.type ?? 'mouse', button: -1 }, event));
+    this.hooks.onHover(this.touch({ id: e.id, x: e.x, y: e.y, px: e.x, py: e.y, t: e.t, pt: e.t, x0: e.x, y0: e.y, t0: e.t, v0, type: e.type ?? 'mouse', button: -1 }, event));
   }
 
   /** fire a long press if a still finger has been down long enough (update() calls this) */
@@ -532,7 +558,10 @@ export class NavCore {
     // on terrain, once everything has come to rest, sit the target on the ground (the picture
     // doesn't move); not mid-gesture, where it would upset a pinch or a glide
     if (this.follow && this.ground?.heightAt && !this.busy && !(this.seated && same(this.seated, this.view))) {
-      Object.assign(this.view, clampView(reseat(this.view, L, this.ground), this.limits));
+      const r = reseat(this.view, L, this.ground), c = clampView(r, this.limits);
+      // the ground on the centre line lies outside the bounds: leave the view as it is rather
+      // than let the clamp move the picture
+      if (c.x === r.x && c.z === r.z && c.h === r.h) Object.assign(this.view, c);
       this.seated = { ...this.view };
     }
     this.apply();
