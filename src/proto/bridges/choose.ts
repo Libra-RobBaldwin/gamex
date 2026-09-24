@@ -42,7 +42,7 @@ function reaching(c: Crossing, span: number, except: BridgeDef) {
   const ok = BRIDGE_IDS.map((id) => BRIDGES[id]).filter((d) => d !== except && availableIn(d, c.year) && d.span.max >= span).sort((a, b) => a.span.max - b.span.max);
   if (!ok.length) return '';
   const names = ok.slice(0, 2).map(low);
-  return ` — needs a ${names.join(' or ')}${ok.length > 2 ? ' or longer' : ''}`;
+  return ok.length > 2 ? ` — needs a ${names.join(', ')} or longer` : ` — needs a ${names.join(' or ')}`;
 }
 
 // Try every type on the stretch s0..s1 (by default the first stretch that needs a bridge).

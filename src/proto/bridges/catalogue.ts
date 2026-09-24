@@ -36,8 +36,9 @@ export interface BridgeDef {
   opening?: { lift: number; pass: number; warn: number };
 }
 
-// Real pounds to game money. Chosen so an ordinary three-span concrete bridge over a road costs
-// about what the flat RAISE_COST in roads.ts charges today, so integrating doesn't upset balance.
+// Real pounds to game money. Chosen so a 60 m three-span concrete bridge carrying a street over a
+// road costs about what the flat RAISE_COST in roads.ts charges today (£90k against £77k), so
+// integrating doesn't upset the balance. Unlike RAISE_COST it grows with the deck's width.
 export const COST_SCALE = 0.03;
 // What a year of upkeep is worth when comparing whole-life cost (30 years, undiscounted: simple
 // enough for a player to follow).

@@ -80,33 +80,36 @@ function zonesOf(c: Crossing, a: number, b: number, half: number): Zone[] {
   return z.filter((q) => q.s1 > a && q.s0 < b).sort((p, q) => p.s0 - q.s0);
 }
 
-// Does a span clear everything underneath it? Returns the worst shortfall and what caused it.
+// Does a span clear everything underneath it? Returns the worst shortfall, what caused it, and
+// the clearance it needs and has (measured from the water, road or ground beneath).
 function clearance(c: Crossing, sp: Pick<Span, 's0' | 's1' | 'def' | 'role'>, movable: boolean) {
   let short = 0, why = '', need = 0, have = 0;
-  const test = (s: number, want: number, what: string) => {
-    const u = underside(c, sp, s), gap = want - u;
-    if (gap > short + 1e-6) { short = gap; why = what; need = want; have = u; }
+  const test = (s: number, base: number, want: number, what: string) => {
+    const u = underside(c, sp, s), gap = base + want - u;
+    if (gap > short + 1e-6) { short = gap; why = what; need = want; have = u - base; }
   };
   for (const o of c.obstacles) {
     const s0 = Math.max(o.s0, sp.s0), s1 = Math.min(o.s1, sp.s1);
     if (s1 < s0) continue;
     for (let k = 0; k <= 6; k++) {
       const s = s0 + ((s1 - s0) * k) / 6;
-      if (o.kind === 'road' || o.kind === 'rail') test(s, o.surface + headroomOf(o), nameOf(o)!);
+      if (o.kind === 'road' || o.kind === 'rail') test(s, o.surface, headroomOf(o), nameOf(o)!);
       else if (o.kind === 'water') {
         const ch = o.channel;
-        if (ch && s >= ch.s0 && s <= ch.s1 && !movable) test(s, o.level + ch.clear, o.name ? `boats on ${o.name}` : 'boats');
-        else test(s, o.level + 0.6, 'the water');
+        if (ch && s >= ch.s0 && s <= ch.s1 && !movable) test(s, o.level, ch.clear, o.name ? `boats on ${o.name}` : 'boats');
+        else test(s, o.level, 0.6, 'the water');
       }
     }
     // the channel's own edges, which may lie inside the stretch sampled above
-    if (o.kind === 'water' && o.channel && !movable) for (const s of [o.channel.s0, o.channel.s1]) if (s >= sp.s0 && s <= sp.s1) test(s, o.level + o.channel.clear, o.name ? `boats on ${o.name}` : 'boats');
+    if (o.kind === 'water' && o.channel && !movable) for (const s of [o.channel.s0, o.channel.s1]) if (s >= sp.s0 && s <= sp.s1) test(s, o.level, o.channel.clear, o.name ? `boats on ${o.name}` : 'boats');
   }
   // and the ground itself, away from the supports (arches spring from their piers)
   const len = sp.s1 - sp.s0;
-  for (let k = 1; k < 8; k++) { const s = sp.s0 + (len * k) / 8; test(s, groundAt(c, s) + 0.3, 'the ground'); }
+  for (let k = 1; k < 8; k++) { const s = sp.s0 + (len * k) / 8; test(s, groundAt(c, s), 0.3, 'the ground'); }
   return { short, why, need, have };
 }
+const tooLow = (d: BridgeDef, w: { short: number; why: string; need: number; have: number }) =>
+  `A ${d.label.toLowerCase()} leaves ${Math.max(0, w.have).toFixed(1)} m over ${w.why}, which needs ${w.need.toFixed(1)} m: the deck would have to be ${w.short.toFixed(1)} m higher`;
 
 // Half the length of a support along the route (a pier's thickness).
 function halfAlong(d: BridgeDef, len: number, kind: SupportKind) {
@@ -170,7 +173,7 @@ function placeMulti(c: Crossing, d: BridgeDef, a: number, b: number, width: numb
       lift = Math.max(lift, worst.short);
       return { spans: [], fixed: [], lift, fail: worst.why === 'the ground'
         ? `A ${d.label.toLowerCase()} is too deep for the height here: it would reach the ground`
-        : `Only ${worst.have.toFixed(1)} m under a ${d.label.toLowerCase()} over ${worst.why}; needs ${worst.need.toFixed(1)} m (raise the deck ${worst.short.toFixed(1)} m)` };
+        : tooLow(d, worst) };
     }
     const prev = chunks[chunks.length - 1];
     // a stub between two zones' spans is better joined into one span, if one span can do it
@@ -268,9 +271,9 @@ function placeMain(c: Crossing, d: BridgeDef, a: number, b: number, width: numbe
   }
   if (!main) {
     lift = Math.max(0, worst.short);
-    if (worst.why === 'arch') return { spans: [], fixed: [], lift, fail: `Not deep enough for an arch: it needs ${m(worst.need)} below the deck, there's ${m(Math.max(0, worst.have))}` };
+    if (worst.why === 'arch') return { spans: [], fixed: [], lift, fail: `Not deep enough for an arch: it needs ${worst.need.toFixed(1)} m below the deck, there's ${Math.max(0, worst.have).toFixed(1)} m` };
     if (!worst.why) return { spans: [], fixed: [], lift, fail: `No room for the ${d.id === 'suspension' ? 'towers' : d.id === 'cable-stayed' ? 'pylons' : 'main piers'} clear of ${target.why}` };
-    return { spans: [], fixed: [], lift, fail: `Only ${worst.have.toFixed(1)} m under the ${d.label.toLowerCase()} over ${worst.why}; needs ${worst.need.toFixed(1)} m` };
+    return { spans: [], fixed: [], lift, fail: tooLow(d, worst) };
   }
   const endKind: SupportKind = d.id === 'suspension' ? 'tower' : d.id === 'cable-stayed' ? 'pylon' : d.id === 'bascule' ? 'leaf-pier' : d.id === 'arch-concrete' ? 'springing' : 'pier';
   const spans: Span[] = [main];
