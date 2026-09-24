@@ -52,11 +52,18 @@ export interface Facts {
 }
 export interface TState {
   id: number; name: string; x: number; z: number; carShare: number; zones: ZState[];
-  base: PerUse; bias: PerUse; calibrated: boolean; primed: boolean;
+  // What calibration found, per use: `cal`, the factor that put the town as the map made it in
+  // balance, and `at`, the demand the model explained then; `bias` is what they come to this
+  // review, as a factor on the demand the model explains.
+  base: PerUse; cal: PerUse; at: PerUse; bias: PerUse; calibrated: boolean; primed: boolean;
   assessed: boolean; // its first review has taken it as it stands (see Economy.review)
   labour: number; customers: number; // town-wide: workers per job, customers per shop place
   supply: { goods: number; materials: number; visitors: number }; // smoothed, per hour
   month: { goods: number; materials: number; visitors: number }; // delivered so far this month
+  // What was there for it last month, per hour: what your lines delivered and what the town was
+  // taken to be fed from off the map when it was made (fading as the smoothed view does)
+  got: { goods: number; materials: number; visitors: number };
+  offmap: { goods: number; materials: number; visitors: number };
   // Goods and materials the town takes, per hour: as much as its businesses can make use of,
   // however well supplied (set at each review). What's delivered goes into a store of a couple of
   // days' worth that empties at that rate; beyond it the town takes no more, and isn't paid for.
@@ -74,8 +81,8 @@ export interface TState {
 export function newTown(id: number, name: string, x: number, z: number, carShare: number): TState {
   const u = (): UState => ({ demand: 0, raw: 0, up: 0, down: 0, grew: -99, shrank: -99, stuck: false, settled: 0 });
   return {
-    id, name, x, z, carShare, zones: [], base: perUse(), bias: perUse(1), calibrated: false, primed: false, assessed: false, labour: 1, customers: 1,
-    supply: { goods: 0, materials: 0, visitors: 0 }, month: { goods: 0, materials: 0, visitors: 0 },
+    id, name, x, z, carShare, zones: [], base: perUse(), cal: perUse(1), at: perUse(), bias: perUse(1), calibrated: false, primed: false, assessed: false, labour: 1, customers: 1,
+    supply: { goods: 0, materials: 0, visitors: 0 }, month: { goods: 0, materials: 0, visitors: 0 }, got: { goods: 0, materials: 0, visitors: 0 }, offmap: { goods: 0, materials: 0, visitors: 0 },
     accept: { goods: 0, materials: 0 }, held: { goods: 0, materials: 0 },
     use: { home: u(), shop: u(), office: u(), works: u(), civic: u() }, health: perUse(1), history: [], recent: { built: [], lost: [] },
     done: { built: 0, lost: 0 }, facts: null, report: null,
@@ -137,18 +144,40 @@ export function reviewTown(t: TState, c: TownCtx) {
     t.supply.goods = (1 - T.local.goods) * t.base.shop * T.goodsPerShopJobHour;
     t.supply.materials = (1 - T.local.materials) * t.base.works * T.materialsPerWorksJobHour;
     t.supply.visitors = (1 - T.local.visitors) * t.base.office * (T.visitsPerOfficeJobDay / 24);
+    t.got = { ...t.supply };
+    t.offmap = { ...t.supply };
     t.primed = true;
   }
   supplyB.shop = T.local.goods * t.base.shop + t.supply.goods / T.goodsPerShopJobHour;
   supplyB.office = T.local.visitors * t.base.office + t.supply.visitors / (T.visitsPerOfficeJobDay / 24);
   supplyB.works = T.local.materials * t.base.works + t.supply.materials / T.materialsPerWorksJobHour;
+  // the same from last month's deliveries alone, without the town's memory of earlier months
+  const gotB = perUse(Infinity);
+  gotB.shop = T.local.goods * t.base.shop + t.got.goods / T.goodsPerShopJobHour;
+  gotB.office = T.local.visitors * t.base.office + t.got.visitors / (T.visitsPerOfficeJobDay / 24);
+  gotB.works = T.local.materials * t.base.works + t.got.materials / T.materialsPerWorksJobHour;
   // The town as the map made it is taken to be in balance, so it neither shrinks nor grows just
   // because of how it was laid out: one short of what its size needs is lifted, one with more
   // is held back, within limits (so a town far short, like an estate with no jobs in reach,
-  // still shrinks, if only towards its floor).
+  // still shrinks, if only towards its floor). One held back stays held back in proportion; one
+  // lifted is lifted in proportion only as far as it started. Past that, the lift doesn't multiply what service brings, or a town short
+  // of jobs and one short of workers joined by a railway would lift each other without end:
+  //  - homes keep it as a fixed number: people who live there for what the model doesn't see
+  //    (work off the map, family) stay, and newcomers come for what it does;
+  //  - jobs lose it as the model comes to explain them: the lift stands for workers or custom
+  //    the model doesn't see, and once service brings those it can see, firms staff up from
+  //    them rather than keep phantom ones on top.
   if (c.calibrate && !t.calibrated) {
-    for (const u of GROWN) t.bias[u] = C[u] > 0 && struct[u] > 0 ? clamp(C[u] / struct[u], T.calibrateMin, T.calibrateMax) : 1;
+    for (const u of GROWN) {
+      t.cal[u] = C[u] > 0 && struct[u] > 0 ? clamp(C[u] / struct[u], T.calibrateMin, T.calibrateMax) : 1;
+      t.at[u] = struct[u];
+    }
     t.calibrated = true;
+  }
+  for (const u of GROWN) {
+    const r = t.cal[u], s0 = t.at[u], x = struct[u];
+    const lifted = r <= 1 || x <= s0 ? r * x : u === 'home' ? x + (r - 1) * s0 : Math.max(x, r * s0);
+    t.bias[u] = x > 0 ? lifted / x : 1;
   }
   const D = perUse();
   for (const u of GROWN) {
@@ -160,7 +189,9 @@ export function reviewTown(t: TState, c: TownCtx) {
       // Firms open a little ahead of the workers they'll need, and further when what they need
       // is delivered to spare: well-supplied businesses draw workers, and homes follow the jobs.
       const staffed = t.bias[u] * struct[u], ahead = staffed * (1 + T.labourSlack);
-      const spare = ahead > 0 ? clamp(supplyB[u] / ahead - 1, 0, 1) : 0;
+      // What's to spare is judged on what actually came last month: firms don't take on staff on
+      // the memory of deliveries that have stopped (the smoothed view still caps what they keep).
+      const spare = ahead > 0 ? clamp(Math.min(supplyB[u], gotB[u]) / ahead - 1, 0, 1) : 0;
       us.raw = Math.min(ahead + staffed * T.supplySlack * spare, supplyB[u]);
       // Supply beyond twice `ahead` changes nothing above, so that (less what the town finds for
       // itself) is all it takes delivered: never less than what the businesses standing use, nor
@@ -214,13 +245,11 @@ export function reviewTown(t: TState, c: TownCtx) {
         if (Math.abs(vac - b.shown) >= 0.1 || (vac < 0.02 && b.shown >= 0.02)) { b.shown = Math.round(vac * 100) / 100; c.vacate(b, b.shown); }
       }
     }
-    t.health[u] = cu > 0 ? Math.min(1, d / cu) : 1;
-  }
-  // a town that stays bigger comes to find more for itself (only upwards: shrinking doesn't
-  // lower the floor, or an unserved town would fade away for ever)
-  for (const u of GROWN) {
-    const now = t.zones.reduce((s, z) => s + z.cap[u], 0);
-    if (now > t.base[u]) t.base[u] += T.baseDrift * (now - t.base[u]);
+    // What businesses keep going, which is what the town's people see as jobs and shops in
+    // reach: no more than they're wanted, and no more than this month's workers and last month's
+    // deliveries keep going. Jobs whose workers or supplies have gone stop counting at once, so a
+    // town whose service is cut doesn't draw people to jobs that are only fading out.
+    t.health[u] = cu > 0 ? Math.min(1, d / cu, t.use[u].raw / cu, gotB[u] / cu) : 1;
   }
   // ---- the facts for the town panel ----
   t.facts = facts(t, c, tally(t), built, lost);

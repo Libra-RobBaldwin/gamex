@@ -819,6 +819,9 @@ export class Economy {
         t.supply.goods += a * (t.month.goods / hours - t.supply.goods);
         t.supply.materials += a * (t.month.materials / hours - t.supply.materials);
         t.supply.visitors += a * (t.month.visitors / hours - t.supply.visitors);
+        const o = t.offmap;
+        o.goods *= 1 - a; o.materials *= 1 - a; o.visitors *= 1 - a;
+        t.got = { goods: t.month.goods / hours + o.goods, materials: t.month.materials / hours + o.materials, visitors: t.month.visitors / hours + o.visitors };
         t.month = { goods: 0, materials: 0, visitors: 0 };
       }
       for (const L of this.lineList) L.roll();
@@ -1000,8 +1003,8 @@ export class Economy {
       v: 1, time: this.time, month: this.month, acc: this.acc, nextDay: this.nextDay, nextReview: this.nextReview, rand: this.rand.s,
       reqNo: this.reqNo, nextId: this.nextId, runningOwed: this.runningOwed, totals: structuredClone(this.totals),
       towns: [...this.townMap.values()].map((t) => ({
-        id: t.id, base: { ...t.base }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, assessed: t.assessed, labour: t.labour, customers: t.customers,
-        supply: { ...t.supply }, month: { ...t.month }, accept: { ...t.accept }, held: { ...t.held }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
+        id: t.id, base: { ...t.base }, cal: { ...t.cal }, at: { ...t.at }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, assessed: t.assessed, labour: t.labour, customers: t.customers,
+        supply: { ...t.supply }, month: { ...t.month }, got: { ...t.got }, offmap: { ...t.offmap }, accept: { ...t.accept }, held: { ...t.held }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
         recent: structuredClone(t.recent), done: { ...t.done }, report: t.report ? structuredClone(t.report) : null,
       })),
       zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared } })),

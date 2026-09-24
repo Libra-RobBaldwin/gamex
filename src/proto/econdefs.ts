@@ -167,7 +167,6 @@ export const TUNE = {
   // smoothing and hysteresis
   supplyAlpha: 0.35, // a month's deliveries move the town's view of its supply this far
   demandAlpha: 0.5,
-  baseDrift: 0.04, // a town that stays bigger slowly comes to find more for itself
   growAt: 1.04, growAfter: 2, // months of demand above capacity before building
   stopGrowBelow: 1.0,
   declineAt: 0.86, declineAfter: 3, // months of demand well below capacity before abandoning

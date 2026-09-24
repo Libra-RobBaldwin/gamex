@@ -536,7 +536,8 @@ export function reach(p: Pairs, demand: Float64Array, supply: Float64Array, carS
 // weighted by what's there and how long it takes to get to (gravity); the mode by a logit on
 // how long each way feels. The share by your lines is loaded onto the hops of their route: the
 // first as passengers turning up at the stop, later ones as people changing. Those going out
-// to a workplace (rather than home) are counted as its visitors when they get off.
+// to a workplace (rather than home), other than workers going to their own jobs, are counted as
+// its visitors when they get off.
 export interface TripTables {
   gen: Map<LineState, Map<number, number>>;
   onward: Map<LineState, Map<string, { to: LineState; board: number; alight: number; rate: number }>[]>;
@@ -548,6 +549,8 @@ export function assignTrips(p: Pairs, skim: Skim, residents: Float64Array, attra
   const tables: TripTables = { gen: new Map(), onward: new Map(), arrivals: new Map(), visits: new Map(), perDay: 0, work: 0 };
   // what each place draws, the share of that from workplaces, and how much of it is near a stop
   const A = p.sum(attraction), V = p.sum(visit), AC = p.sum(attraction.map((a, z) => a * cover[z]));
+  // the share of trips out that aren't a worker going to work (each worker goes once a day)
+  const visiting = Math.max(0, 1 - tune.workerShare / (tune.tripsPerDay / 2));
   // many pairs share the same stops: add them up first, then trace each route once
   const byStops = new Map<number, number>(), visits = new Map<number, number>();
   const trip = (a: number, b: number, rate: number, visit: number) => {
@@ -616,8 +619,9 @@ export function assignTrips(p: Pairs, skim: Skim, residents: Float64Array, attra
       const perMin = (daily * cov) / 1440 / 2;
       if (perMin < 1e-7) continue;
       tables.perDay += daily * cov;
-      // out (visiting whatever draws them there), and home again from where they got off
-      trip(p.sa[n], p.sb[n], perMin, (perMin * V[j]) / a);
+      // out (visiting whatever draws them there), and home again from where they got off; of
+      // those going out, the workers on their way to their own jobs aren't visitors
+      trip(p.sa[n], p.sb[n], perMin, (perMin * visiting * V[j]) / a);
       trip(p.sb[n], p.rb[n], perMin, 0);
       tables.work++;
     }

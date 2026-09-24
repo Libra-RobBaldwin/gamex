@@ -184,21 +184,30 @@ longer counts as collected and doesn't grow on it.
 |---|---|---|
 | Homes | reach: workers who can get to a job within 30 min, shops within 20, leisure within 30 (by car via the car oracle, on foot, or by your lines where there's room), shared out among everyone competing for them | — |
 | Shops | customers and workers who can reach them | goods delivered |
-| Offices | workers who can reach them | passengers arriving to visit a workplace (not those going home) |
+| Offices | workers who can reach them | passengers arriving to visit a workplace (not those going home, nor workers going to their own jobs) |
 | Works | workers who can reach them | building materials delivered |
 
 Businesses open a little ahead of the workers they need, and further (up to about half again)
 when what they need is delivered to spare, so feeding a town draws jobs and the homes follow.
+What's to spare is judged on what actually came last month, and the jobs and shops a town's
+people see in reach are only those that this month's workers and last month's deliveries keep
+going. So when service is cut, the jobs it fed stop drawing people at once, and the town doesn't
+grow on jobs that are only fading out (the town's smoothed view of its supply still decides
+what its businesses keep standing).
 
-A town finds some of what it needs for itself (about half of what it started with), and half
-its homes are wanted whatever its people can reach (the retired, those working from home), so
-an unserved town shrinks towards a floor rather than vanishing. It is taken to be in balance
-when the map is made, within limits: one with more jobs than homes is held back so it doesn't
-grow on its own, and one far short (an estate with no jobs in reach) is only partly lifted, so
-it still shrinks towards its floor and a trickle of service can't make it boom. A town added
-to a running game (the map streaming in, or the player founding one) is taken as it stands at
-its first review, as those there from the start are. Demand is smoothed, then set against
-capacity:
+A town finds some of what it needs for itself (about half of what it started with, however
+big it has grown since), and half the homes it started with are wanted whatever its people can
+reach (the retired, those working from home), so an unserved town shrinks towards a floor
+rather than vanishing, and one that was fed and lost it shrinks back towards where it would
+have been. It is taken to be in balance when the map is made, within limits: one with more
+jobs than homes is held back (in proportion) so it doesn't grow on its own, and one far short
+(an estate with no jobs in reach) is only partly lifted, so it still shrinks towards its floor.
+The lift is for what the model doesn't see, so it doesn't multiply what service brings later:
+homes keep it as a fixed number of people, and jobs lose it once the model explains as much as
+they were lifted to. Otherwise a town short of jobs and one short of workers joined by one
+train would lift each other without end. A town added to a running game (the map streaming in,
+or the player founding one) is taken as it stands at its first review, as those there from the
+start are. Demand is smoothed, then set against capacity:
 
 - After two months above capacity it builds. It restores abandoned buildings first, then
   uses a free plot in the zone where demand is keenest, or densifies (house → terrace →
