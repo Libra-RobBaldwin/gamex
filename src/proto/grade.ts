@@ -68,6 +68,7 @@ export function solveProfile(L: number, y0: number, yL: number | undefined, G: n
   // stay as near the ground (or the chosen height) as the windows allow
   const target = (i: number) => (mode === 'level' ? y0 : mode === 'up' ? y0 + G * s[i] : 0);
   const y = s.map((_, i) => Math.max(low[i], Math.min(target(i), high[i])));
+  alignment(y, s, target, low, high, G);
 
   const out = (reason?: string): Profile => {
     let maxY = -Infinity, minY = Infinity, maxGrade = 0;
@@ -91,6 +92,34 @@ export function solveProfile(L: number, y0: number, yL: number | undefined, G: n
     return out(`Can't clear ${loWhy[j]} and still get under ${hiWhy[k]} ${dist} m away at ${pct(G)} (needs ${need(climb)} m)`);
   }
   return out();
+}
+
+// Hugging the ground as closely as the windows allow gives a switchback: up over one obstacle,
+// down between, up over the next. A real alignment doesn't dip for a short gap, or hump between
+// two tunnels, and it rounds every change of grade into a vertical curve. So: fill dips (and flatten
+// humps below ground) shorter than a gap that scales with how gently the route climbs, keep the
+// result within the gradient limit, then smooth it — always inside the windows.
+function alignment(y: number[], s: number[], target: (i: number) => number, low: number[], high: number[], G: number) {
+  const N = y.length;
+  if (N < 5) return;
+  // the longest dip worth filling: 100 m for a road at 8%, up to 250 m for gentle railways
+  const step = s[1] - s[0], w = Math.max(1, Math.round(Math.min(250, Math.max(60, 8 / G)) / step / 2));
+  // a point is in a dip if the profile rises higher within reach on BOTH sides; it's then lifted
+  // to the lower of the two (so the last descent to the end of a route is never mistaken for one)
+  const fill = (a: number[]) => {
+    const left = a.map((_, i) => { let v = -Infinity; for (let k = Math.max(0, i - w); k <= i; k++) v = Math.max(v, a[k]); return v; });
+    const right = a.map((_, i) => { let v = -Infinity; for (let k = i; k <= Math.min(N - 1, i + w); k++) v = Math.max(v, a[k]); return v; });
+    return a.map((v, i) => Math.max(v, Math.min(left[i], right[i])));
+  };
+  const d = y.map((v, i) => v - target(i));
+  const up = fill(d.map((v) => Math.max(0, v))), down = fill(d.map((v) => Math.max(0, -v))).map((v) => -v);
+  // (both one-sided maxima keep to the gradient, so the filled profile does too)
+  for (let i = 0; i < N; i++) y[i] = Math.min(high[i], Math.max(low[i], target(i) + up[i] + down[i]));
+  // vertical curves on the ramps: averaging keeps to the gradient and clamping keeps every
+  // clearance; stretches held at a limit (a flat deck over a channel, the ground) stay as they are
+  const free = y.map((v, i) => v > low[i] + 1e-6 && v < high[i] - 1e-6 && Math.abs(v - target(i)) > 1e-6);
+  for (let pass = 0; pass < 24; pass++) for (let i = 1; i < N - 1; i++) if (free[i]) y[i] = Math.min(high[i], Math.max(low[i], (y[i - 1] + y[i] + y[i + 1]) / 3));
+  for (let i = 0; i < N; i++) if (Math.abs(y[i] - target(i)) < 1e-9) y[i] = target(i);
 }
 
 // Height at distance t along a solved profile.

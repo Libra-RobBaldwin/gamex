@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#12161e" />
+    <title>People &amp; Animals</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #12161e; color: #e8e6e0; font: 13px/1.3 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; overflow: hidden; touch-action: none; }
+      #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      #panel { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); background: rgba(18, 22, 30, 0.86); border-radius: 12px; padding: 8px 10px; display: grid; gap: 6px; backdrop-filter: blur(6px); }
+      #panel .row { display: flex; align-items: center; gap: 8px; }
+      #panel label { white-space: nowrap; min-width: 64px; color: #b9c0cc; }
+      #panel input[type='range'] { flex: 1; min-width: 0; accent-color: #e0a526; }
+      #panel b { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+      #panel select, #panel button { background: #252c38; color: #e8e6e0; border: 1px solid #39424f; border-radius: 8px; padding: 5px 8px; font: inherit; }
+      #panel button.on { background: #e0a526; color: #12161e; border-color: #e0a526; }
+      #views { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+      #views button { flex: none; }
+      #stats { position: fixed; left: 8px; top: calc(8px + env(safe-area-inset-top)); right: 8px; background: rgba(18, 22, 30, 0.7); border-radius: 8px; padding: 5px 8px; font-size: 11.5px; color: #cfd6e0; font-variant-numeric: tabular-nums; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="stats"></div>
+    <div id="panel">
+      <div id="views"></div>
+      <div class="row"><label>🕗 Clock</label><input id="clock" type="range" min="0" max="1439" step="1" /><b id="clockv"></b><button id="play">⏸</button></div>
+      <div class="row"><label>🚏 Waiting</label><input id="wait" type="range" min="0" max="40" step="1" value="12" /><b id="waitv"></b><button id="bus">🚌 Bus</button></div>
+      <div class="row"><label>Era</label><select id="era"><option>1905</option><option>1935</option><option>1955</option><option>1975</option><option>1995</option><option selected>2025</option></select><button id="rain">☂ Rain</button><select id="stress"><option value="0">Town</option><option value="500">500</option><option value="2000">2,000</option><option value="5000">5,000</option></select></div>
+    </div>
+    <script type="module" src="/src/proto/people/demo.ts"></script>
+  </body>
+</html>
