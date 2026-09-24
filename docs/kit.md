@@ -30,7 +30,7 @@ prototype (`src/main.ts`). It has no three.js camera and isn't the game.
 | `kit/viewmath.ts` | The view maths: pure functions, no DOM, no three.js. A view is `{x, z, h, az, el, y?}`. It covers screen↔ground (flat, or terrain via a height function), keeping a ground point under a screen point, clamps and bounds, fitting a box, easing, and the texel-snapped shadow frame. Everything is worked out relative to the view target, so it is exactly as precise 100 km from the origin. | `kit/camera.ts` |
 | `kit/camera.ts` `NavCore` | The gesture state machine and view, with no DOM. Feed it pointer events and it moves `view`. Unit-tested with scripted fingers. | `NavRig` |
 | `kit/camera.ts` `NavRig` | `NavCore` bound to an element's pointer, wheel and key events, driving an orthographic or perspective three.js camera. It supports a floating origin (`origin`, `rebaseAt`, `onRebase`). | the game, every demo |
-| `kit/camera.ts` `SunFollow` | Keeps a directional light's shadow on the view. The box grows in big steps and slides in whole shadow-map texels, so shadow edges don't shimmer. | the game, people, vehicles, industries |
+| `kit/camera.ts` `SunFollow` | Keeps a directional light's shadow on the view. The box grows in big steps and slides in whole shadow-map texels, so shadow edges don't shimmer. | the game, people, vehicles, industries, ground |
 | `kit/camera.ts` `mountNavControls` | Optional on-screen buttons in the brand's colours: a compass that shows north and resets the view, rotate left and right, zoom in and out. Page CSS can't restyle them. `below: el` keeps them under a page's panel however tall it grows. | water, bridges, industries |
 
 ## What the navigation does
@@ -103,7 +103,7 @@ call `nav.animateTo({...})`. For screen↔world, use `nav.groundUnder(sx, sy)` (
 Variations:
 - **Terrain**: pass `groundAt: (x, z) => height` (or call `nav.setGround(fn, [lo, hi])` once it
   is built). Panning then grabs the hillside under the finger, and once the view comes to rest
-  it pivots on the ground in the middle of the screen. The water demo does this.
+  it pivots on the ground in the middle of the screen. The water and ground demos do this.
 - **Perspective camera**: pass a `THREE.PerspectiveCamera`. Here `h` is the visible height at
   the target, and everything else is the same.
 - **A host that draws or drags**: return true from `onPointerDown` or `onDragStart`, and handle
