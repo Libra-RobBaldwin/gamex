@@ -64,6 +64,10 @@ export class Skim {
   readonly time: Float32Array; // plain minutes
   readonly gen: Float32Array; // minutes as it feels: waits and walks weigh more, changes are disliked
   readonly room: Float32Array; // share of those setting off who find room on board all the way
+  // The stops each stop has a route to (out) and from (in), as compressed rows: most pairs have
+  // none, so walking these instead of whole rows keeps the zone pairs cheap.
+  outOff = new Int32Array(1); outTo = new Int32Array(0);
+  inOff = new Int32Array(1); inFrom = new Int32Array(0);
   private readonly pred: Int32Array; // S x S: the edge that reached it
   private eFrom: Int32Array = new Int32Array(0);
   private eHop: Int32Array = new Int32Array(0); // -1 for a walk
@@ -144,6 +148,7 @@ export class Skim {
     this.eHop = Int32Array.from(hop);
     const eTo = Int32Array.from(to), eTime = Float64Array.from(time), eGen = Float64Array.from(gen), eRoom = Float64Array.from(room);
     const dist = new Float64Array(S), tm = new Float64Array(S), rm = new Float64Array(S), rode = new Uint8Array(S), done = new Uint8Array(S);
+    const outOff = new Int32Array(S + 1), outTo: number[] = [], inCount = new Int32Array(S + 1);
     for (let o = 0; o < S; o++) {
       dist.fill(Infinity); rode.fill(0); done.fill(0);
       dist[o] = 0; tm[o] = 0; rm[o] = 1;
@@ -155,7 +160,10 @@ export class Skim {
         if (done[u]) continue;
         if (d > tune.maxTransitMin) break;
         done[u] = 1;
-        if (rode[u]) { this.time[row + u] = tm[u]; this.gen[row + u] = d; this.room[row + u] = rm[u]; }
+        if (rode[u]) {
+          this.time[row + u] = tm[u]; this.gen[row + u] = d; this.room[row + u] = rm[u];
+          outTo.push(u); inCount[u + 1]++;
+        }
         for (let n = off[u]; n < off[u + 1]; n++) {
           const e = order[n], v = eTo[e];
           if (done[v]) continue;
@@ -173,7 +181,14 @@ export class Skim {
           this.work++;
         }
       }
+      outOff[o + 1] = outTo.length;
     }
+    // and the same the other way round
+    for (let s = 0; s < S; s++) inCount[s + 1] += inCount[s];
+    const inFrom = new Int32Array(outTo.length), at = inCount.slice(0, S);
+    for (let o = 0; o < S; o++) for (let q = outOff[o]; q < outOff[o + 1]; q++) inFrom[at[outTo[q]]++] = o;
+    this.outOff = outOff; this.outTo = Int32Array.from(outTo);
+    this.inOff = inCount; this.inFrom = inFrom;
   }
 
   // the hops from stop index a to stop index b, in order
@@ -195,6 +210,12 @@ export class Skim {
 // ---------------- pairs ----------------
 export interface ZoneAccess { s: number; walk: number; cov: number } // skim stop, minutes on foot, share of the zone
 export interface ZoneGeo { id: number; x: number; z: number; r: number; acc: ZoneAccess[] }
+
+// What stays the same between rebuilds while the zones stay put, a row per zone: the places it
+// pairs with, and the car oracle's answers for them in the same order. Roads change far less
+// often than bus routes, so the economy empties `cars` when the network changes rather than
+// asking every month, and both when zones move or come and go.
+export interface PairCache { places: (Int32Array | undefined)[]; cars: (Float32Array | undefined)[] }
 
 // A block of zones, standing in for all of them as somewhere to go from further off: it's
 // reached at its middle by car, and by bus or rail at whichever of its stops is best.
@@ -224,10 +245,8 @@ export class Pairs {
   readonly scratch: [Float32Array, Float32Array]; // for reach(), kept to spare the garbage collector
   work = 0;
 
-  // `cars` keeps the car oracle's answers between rebuilds, a row per origin in the order its
-  // candidates come (the same while the zones stay put): roads change far less often than bus
-  // routes, so the economy empties it when the network changes rather than asking every month.
-  constructor(zones: ZoneGeo[], skim: Skim, oracles: Oracles, tune: Tune = TUNE, cars: (Float32Array | undefined)[] = []) {
+  // `cache` keeps what doesn't change between rebuilds while the zones stay put (see PairCache).
+  constructor(zones: ZoneGeo[], skim: Skim, oracles: Oracles, tune: Tune = TUNE, cache: PairCache = { places: [], cars: [] }) {
     const Z = (this.Z = zones.length), c0 = tune.pairCellM;
     let top = 1;
     while (c0 * 3 ** top < tune.maxPairM) top++;
@@ -291,9 +310,14 @@ export class Pairs {
       }
       return m;
     };
-    let most = 0, total = 0;
-    const scratch = new Int32Array(Z + blocks.length);
-    for (let i = 0; i < Z; i++) { const m = places(i, scratch); total += m; if (m > most) most = m; }
+    const lists: Int32Array[] = [], scratch = new Int32Array(Z + blocks.length);
+    let total = 0;
+    for (let i = 0; i < Z; i++) {
+      let list = cache.places[i];
+      if (!list) cache.places[i] = list = scratch.slice(0, places(i, scratch));
+      lists.push(list);
+      total += list.length;
+    }
     const I = new Int32Array(total), J = new Int32Array(total), SA = new Int32Array(total), SB = new Int32Array(total), RB = new Int32Array(total);
     const CAR = new Float32Array(total), NCs = new Float32Array(total), PT = new Float32Array(total), GEN = new Float32Array(total), ROOM = new Float32Array(total), W = new Float32Array(total), D = new Float32Array(total);
     this.start = new Int32Array(Z + 1);
@@ -304,8 +328,7 @@ export class Pairs {
     // from this origin, the best (as it feels) way to every stop by walking to one of ours and
     // riding, which stop it set off from, and the way home from every stop
     const S = skim.S, toGen = new Float64Array(S), toTime = new Float64Array(S), toRoom = new Float64Array(S), via = new Int32Array(S);
-    const backGen = new Float64Array(S), back = new Int32Array(S);
-    const list = new Int32Array(Math.max(1, most));
+    const backGen = new Float64Array(S), back = new Int32Array(S), cars = cache.cars;
     let n = 0;
     for (let i = 0; i < Z; i++) {
       this.start[i] = n;
@@ -313,17 +336,18 @@ export class Pairs {
       if (S) {
         toGen.fill(Infinity); backGen.fill(Infinity);
         for (const x of a.acc) {
-          const r = x.s * S;
-          for (let s = 0; s < S; s++) {
-            if (s === x.s) continue;
-            const t = WW * x.walk + skim.gen[r + s];
+          const r = x.s * S, w = WW * x.walk;
+          for (let q = skim.outOff[x.s], q1 = skim.outOff[x.s + 1]; q < q1; q++) {
+            const s = skim.outTo[q], t = w + skim.gen[r + s];
             if (t < toGen[s]) { toGen[s] = t; toTime[s] = x.walk + skim.time[r + s]; toRoom[s] = skim.room[r + s]; via[s] = x.s; }
-            const h = skim.gen[s * S + x.s] + WW * x.walk;
+          }
+          for (let q = skim.inOff[x.s], q1 = skim.inOff[x.s + 1]; q < q1; q++) {
+            const s = skim.inFrom[q], h = skim.gen[s * S + x.s] + w;
             if (h < backGen[s]) { backGen[s] = h; back[s] = x.s; }
           }
         }
       }
-      const row = cars[i], count = places(i, list);
+      const row = cars[i], list = lists[i], count = list.length;
       fresh.length = 0;
       for (let q = 0; q < count; q++) {
         const j = list[q], zone = j < Z;

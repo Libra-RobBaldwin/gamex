@@ -13,7 +13,7 @@ import {
   type Tune, type Use, type VehiclePos, type WorldIn, type ZoneIn,
 } from './econdefs';
 import { LineState, NC, type LineCtx, type StopPos } from './econlines';
-import { Pairs, Skim, assignTrips, installTrips, reach, type Reach, type ZoneAccess } from './econaccess';
+import { Pairs, Skim, assignTrips, installTrips, reach, type PairCache, type Reach, type ZoneAccess } from './econaccess';
 import { newTown, perUse, reviewTown, type BState, type TState, type TownCtx, type ZState } from './econtowns';
 
 export { LineState } from './econlines';
@@ -105,7 +105,7 @@ export class Economy {
   private actions: Action[] = [];
   private events: EconEvent[] = [];
   private skim: Skim;
-  private cars: (Float32Array | undefined)[] = []; // the car oracle's answers, kept until the network changes
+  private pairCache: PairCache = { places: [], cars: [] }; // who pairs with whom, and car times, between rebuilds
   private pairs: Pairs | null = null;
   private svc = new Map<TState, { stops: number; lines: number }>();
   private lastReach: { work: Reach; shop: Reach; leisure: Reach } | null = null;
@@ -178,7 +178,7 @@ export class Economy {
     const cur = this.zoneMap.get(z.id);
     const allow = z.allow ? new Set(z.allow) : null;
     if (cur) {
-      if (cur.x !== z.x || cur.z !== z.z) { this.cars.length = 0; this.dirty.service = true; }
+      if (cur.x !== z.x || cur.z !== z.z) { this.pairCache = { places: [], cars: [] }; this.dirty.service = true; }
       Object.assign(cur, { x: z.x, z: z.z, r: z.r ?? cur.r, plots: z.plots, allow, blocked: 0 });
       if (cur.town !== town) { cur.town.zones = cur.town.zones.filter((q) => q !== cur); cur.town = town; town.zones.push(cur); }
       return;
@@ -195,7 +195,7 @@ export class Economy {
   private reindexZones() {
     this.zoneList = [...this.zoneMap.values()].sort((a, b) => a.id - b.id);
     this.zoneList.forEach((z, i) => (z.idx = i));
-    this.cars.length = 0;
+    this.pairCache = { places: [], cars: [] };
     this.dirty.service = true;
   }
 
@@ -325,7 +325,7 @@ export class Economy {
   }
 
   // The road or rail network changed (or congestion shifted a lot): ask the oracles again.
-  networkChanged() { this.dirty.times = this.dirty.service = true; this.cars.length = 0; }
+  networkChanged() { this.dirty.times = this.dirty.service = true; this.pairCache.cars = []; }
 
   private relink() {
     for (const s of this.stopMap.values()) s.slots = [];
@@ -503,7 +503,7 @@ export class Economy {
     const t1 = performance.now();
     this.cover();
     const t2 = performance.now();
-    this.pairs = new Pairs(this.zoneList, this.skim, this.oracles, this.tune, this.cars);
+    this.pairs = new Pairs(this.zoneList, this.skim, this.oracles, this.tune, this.pairCache);
     this.reviewWork += this.pairs.work;
     const t3 = performance.now();
     if (trips) this.trips();
@@ -524,13 +524,6 @@ export class Economy {
       s.near = [];
       s.consumes = FREIGHT.map(() => null);
     }
-    const near = (x: number, z: number, fn: (s: SState, d: number) => void) => {
-      const cx = Math.floor(x / cell), cz = Math.floor(z / cell);
-      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
-        const g = grid.get(key(cx + dx, cz + dz));
-        if (g) for (const s of g) { const dx = s.x - x, dz = s.z - z, d = Math.sqrt(dx * dx + dz * dz); if (d <= s.radius) fn(s, d); }
-      }
-    };
     // towns: how far out they reach, so buildings know how central they are
     const radius = new Map<TState, number>();
     for (const t of this.townMap.values()) radius.set(t, Math.max(150, ...t.zones.map((z) => Math.hypot(z.x - t.x, z.z - t.z) + z.r)));
@@ -540,20 +533,35 @@ export class Economy {
       if (!q) m.set(s, (q = new Map()));
       q.set(t, (q.get(t) ?? 0) + v);
     };
+    // each zone's capacity near each served stop (by skim index), and the distance it walks
+    const S = this.skim.S, accCap = new Float64Array(S), accD = new Float64Array(S), seen = new Uint8Array(S), touched: number[] = [], cand: SState[] = [];
     for (const z of this.zoneList) {
-      const acc = new Map<number, { cap: number; dcap: number }>();
       let total = 0, covered = 0;
       const R = radius.get(z.town)!;
       z.centre = 1 - Math.min(1, Math.hypot(z.x - z.town.x, z.z - z.town.z) / R);
+      // the stops that might reach any of its buildings, gathered once for the zone
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const b of z.buildings) if (!b.abandoned) { x0 = Math.min(x0, b.x); x1 = Math.max(x1, b.x); z0 = Math.min(z0, b.z); z1 = Math.max(z1, b.z); }
+      cand.length = 0;
+      if (x0 <= x1)
+        for (let cx = Math.floor((x0 - cell) / cell), cx1 = Math.floor((x1 + cell) / cell); cx <= cx1; cx++)
+          for (let cz = Math.floor((z0 - cell) / cell), cz1 = Math.floor((z1 + cell) / cell); cz <= cz1; cz++) {
+            const g = grid.get(key(cx, cz));
+            if (g) for (const s of g) {
+              const dx = Math.max(x0 - s.x, 0, s.x - x1), dz = Math.max(z0 - s.z, 0, s.z - z1), r = s.radius + 1;
+              if (dx * dx + dz * dz <= r * r) cand.push(s);
+            }
+          }
       for (const b of z.buildings) {
         if (b.abandoned) continue;
         total += b.cap;
         let best = Infinity;
-        near(b.x, b.z, (s, d) => {
+        for (const s of cand) {
+          const dx = s.x - b.x, dz = s.z - b.z, d = Math.sqrt(dx * dx + dz * dz);
+          if (d > s.radius) continue;
           if (s.served) {
-            const a = acc.get(s.skim) ?? { cap: 0, dcap: 0 };
-            a.cap += b.cap; a.dcap += b.cap * d;
-            acc.set(s.skim, a);
+            if (!seen[s.skim]) { seen[s.skim] = 1; touched.push(s.skim); }
+            accCap[s.skim] += b.cap; accD[s.skim] += b.cap * d;
             if (d < best) best = d;
             if (b.use !== 'home') bump(visit, s, z.town, b.cap);
           }
@@ -561,14 +569,16 @@ export class Economy {
             if (b.use === 'shop') bump(shops, s, z.town, b.cap);
             if (b.use === 'works') bump(works, s, z.town, b.cap);
           }
-        });
+        }
         if (best < Infinity) covered += b.cap;
         const bx = b.x - z.town.x, bz = b.z - z.town.z, centre = 1 - Math.min(1, Math.sqrt(bx * bx + bz * bz) / R);
-        const stop = this.skim.S ? (best < Infinity ? 1 - best / 800 : 0) : 0.3;
+        const stop = S ? (best < Infinity ? 1 - best / 800 : 0) : 0.3;
         b.site = 0.35 * centre + 0.65 * Math.max(0, stop);
       }
-      z.acc = [...acc.entries()].sort((a, b) => a[0] - b[0])
-        .map(([s, a]): ZoneAccess => ({ s, walk: ((a.dcap / a.cap) * T.detour) / T.walkMpm, cov: total > 0 ? a.cap / total : 0 }));
+      z.acc = touched.sort((a, b) => a - b)
+        .map((s): ZoneAccess => ({ s, walk: ((accD[s] / accCap[s]) * T.detour) / T.walkMpm, cov: total > 0 ? accCap[s] / total : 0 }));
+      for (const s of touched) accCap[s] = accD[s] = seen[s] = 0;
+      touched.length = 0;
       z.cov = total > 0 ? covered / total : 0;
     }
     for (const [s, m] of visit) {
