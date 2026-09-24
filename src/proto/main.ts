@@ -30,8 +30,8 @@ import { Purse, PRICE_SHARE } from './game/money';
 import { Stations, STATION_LIST_PRICE } from './game/rail';
 import type { TrainDef } from './catalog';
 import { starterStops } from './game/crowdsites';
-import { IX_BLURB, IX_FORMS, IX_NAME, IX_SIZES, IX_SIZE_BLURB, IX_SIZE_NAME, motorwayWithJunction, pairUpMotorways, type Interchange, type IxForm, type IxSize, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
-import { planJunction, roadCrossed, type IxPlan } from './interchange/plan';
+import { IX_BLURB, IX_FORMS, IX_NAME, IX_SIZES, IX_SIZE_BLURB, IX_SIZE_NAME, buildPair, motorwayWithJunction, pairToNode, pairUpMotorways, scratch, type Interchange, type IxForm, type IxSize, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
+import { buildSlip, planJunction, planSlip, roadCrossed, type IxPlan, type SlipPlan } from './interchange/plan';
 import { Loading } from './loading';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
 
@@ -488,12 +488,16 @@ let tool: ToolHandle | null = null;
 // "Junction here": the road a motorway blueprint crosses, the junction picked for it, and its plan
 let ixRoad: RSeg | null = null, ixPick: { form: IxForm; style: SlipStyle; size: IxSize } | null = null, ixPlan: IxPlan | null = null;
 let ixStyle: SlipStyle = 'taper', ixSize: IxSize = 'tight';
+// a slip road dragged off a motorway (interchange/plan.ts planSlip), and how many lanes it has
+let slipPlan: SlipPlan | null = null, slipLanes: 1 | 2 = 1;
 
 const ctrlOf = (d: Draft) => (roadKind === 'smooth' ? net.smoothCtrl(d.a, d.b) : d.c);
 function draftChanged() {
   draftCheck = draft ? net.check(draft.a, draft.b, ctrlOf(draft), opts) : null;
+  // dragged off a motorway's carriageway, whatever road was picked, it's a slip road
+  slipPlan = draft && mode === 'road' ? planSlip(net, draft.a, draft.b, slipLanes) : null;
   // a motorway drawn across a road can have a junction there (interchange/plan.ts)
-  ixRoad = draft && ROADS[opts.type].family === 'Motorway' && !isSlip(opts.type) && !opts.oneway ? roadCrossed(net, net.makePath(draft.a, draft.b, ctrlOf(draft))) : null;
+  ixRoad = draft && !slipPlan && ROADS[opts.type].family === 'Motorway' && !isSlip(opts.type) && !opts.oneway ? roadCrossed(net, net.makePath(draft.a, draft.b, ctrlOf(draft))) : null;
   if (!ixRoad) ixPick = null;
   ixPlan = ixPick && ixRoad && draft ? planJunction(net, ixPick.form, ixPick.style, net.makePath(draft.a, draft.b, ctrlOf(draft)), opts.type, ixRoad, ixPick.size) : null;
   drawGhost();
@@ -526,6 +530,7 @@ function hint(text?: string, ic?: Icon) {
     if (mode === 'stop') t = 'Tap a road, on the side you want the stop · the bus will call there';
     else if (mode === 'station') t = 'Tap a straight, level stretch of railway · platforms go either side';
     else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : lineDraft.length === 1 ? 'Tap the next stop' : 'Tap more stops, or the first again for a circular line · then Create';
+    else if (draft && slipPlan) t = 'A slip road: drag ahead and out to leave the motorway, back and out to join it · then Build';
     else if (draft) t = 'Drag the white handles to adjust, then Build';
     else if (roadKind === 'straight') t = mode === 'rail' ? 'Drag to lay track · tap a junction to see how it works' : 'Drag to draw a road · tap a junction to redesign it';
     else if (roadKind === 'smooth') t = 'Drag from a road: the new one curves smoothly out of it';
@@ -1136,6 +1141,7 @@ function renderBar() {
   if (!draft || !draftCheck) { tool.setPanel(null); tool.setPrimary(null); return; }
   // (a sheet opened from the tool, such as the junction editor, makes way for the blueprint)
   if (shell.sheetKey) closeSheet();
+  if (slipPlan) { renderSlipBar(slipPlan); return; }
   const c = draftCheck;
   const n = c.clears.length;
   const kind = ctrlOf(draft) ? 'Curved road' : 'New road';
@@ -1185,14 +1191,65 @@ function bridgeLines(c: Check) {
     return `<div class="lift">${icon('bridge')}<span><b>${o.def.label}</b> · ${Math.round(ch.s1 - ch.s0)} m · <b class="cost">${money(price(o.cost))}</b>${o.reasons.length ? ` · ${o.reasons.slice(0, 2).join(' · ')}` : ''}</span></div>`;
   }).join('');
 }
+// How a motorway blueprint is built as a pair of carriageways, or null to build it as drawn (a
+// junction at both ends, or joined part-way along a road, where one road is all that fits)
+function motorwayPair(d: Draft) {
+  if (mode !== 'road' || ROADS[opts.type].family !== 'Motorway' || isSlip(opts.type) || opts.oneway) return null;
+  if (d.a.seg !== undefined || d.b.seg !== undefined || (d.a.node !== undefined && d.b.node !== undefined)) return null;
+  const path = net.makePath(d.a, d.b, ctrlOf(d)), o = { height: opts.height, grade: opts.grade, cross: opts.cross }, type = opts.type;
+  return (n: Network) => (d.b.node !== undefined ? pairToNode(n, path, type, d.b, 0.3, o) : d.a.node !== undefined ? pairToNode(n, [...path].reverse(), type, d.a, 0.3, o) : buildPair(n, path, type, o));
+}
+// A slip road off (or onto) a motorway: which way it goes, one lane or two, its price, why not
+function renderSlipBar(p: SlipPlan) {
+  if (!tool) return;
+  const cost = price(p.cost), afford = purse.can(cost), nd = p.clears.length, dm = nd ? demolitionSummary(p.clears) : null;
+  const what = p.kind === 'diverge' ? 'Slip road off the motorway' : 'Slip road onto the motorway';
+  tool.setPanel(`<div class="what">${icon('ruler')}<span>${what}${p.ok ? ` <b>${Math.round(p.length)} m</b> · <b class="cost">${money(cost)}</b>` : ''}</span></div>
+    <div class="ix"><div class="ixrow">${([1, 2] as const).map((n) => `<button data-sl="${n}" class="${slipLanes === n ? 'on' : ''}" aria-pressed="${slipLanes === n}">${n === 1 ? '1 lane' : '2 lanes'}</button>`).join('')}</div>
+    <small>${p.kind === 'diverge' ? 'Leaves the nearside lane along a DMRB taper, past a hatched nose' : 'Joins the nearside lane past a hatched nose, along a DMRB taper'} · drag ahead to leave, back to join</small></div>
+    ${p.ok && !afford ? `<div class="bad">${icon('alert')}<span>${short(cost)}</span></div>` : ''}
+    ${dm ? `<div class="demo">${icon('alert')}<div><b>It demolishes ${nd} building${nd > 1 ? 's' : ''}</b> (flashing red): ${dm.list}.<br>${dm.people}</div></div>` : ''}
+    ${p.ok ? '' : `<div class="bad">${icon('alert')}<span>${esc(p.reason ?? '')}</span></div>`}`, (el) => {
+    el.querySelectorAll<HTMLButtonElement>('[data-sl]').forEach((b) => b.addEventListener('click', () => { slipLanes = Number(b.dataset.sl) as 1 | 2; draftChanged(); }));
+  });
+  tool.avoid(handles().map((h) => toScreen(h.p)));
+  tool.setPrimary({ label: 'Build', title: 'Build the slip road', icon: nd ? 'bulldozer' : 'check', kind: nd ? 'danger' : 'primary', disabled: !(p.ok && !dragging && afford), onClick: buildDraft });
+}
 function buildDraft() {
+  if (draft && slipPlan) {
+    if (!slipPlan.ok) return;
+    const cost = price(slipPlan.cost);
+    if (!purse.spend(cost, 'building')) { hint(short(cost), 'alert'); return; }
+    const segs = buildSlip(net, slipPlan), kind = slipPlan.kind;
+    // (as buildRoad: what it demolishes sinks away, what it touches is redone)
+    for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
+    for (const l of net.touched) { const x = buildings.find((y) => y.lot === l); if (x && !x.dying) regenerate(x); }
+    commitRoads(segs);
+    refreshTrees();
+    infillDue = true;
+    draft = null;
+    draftChanged();
+    hint(`${kind === 'diverge' ? 'Slip road off the motorway' : 'Slip road onto the motorway'} built for ${money(cost)}`, 'check');
+    return;
+  }
   if (draft && ixPick && ixRoad && ixPlan?.ok) { buildJunctionDraft(draft, ixPick, ixRoad); return; }
   if (!draft || !draftCheck?.ok) return;
   const cost = price(draftCheck.cost);
+  // a motorway is built as a pair of one-way carriageways (so slip roads can be dragged off it),
+  // meeting a junction at either end if it's drawn to one; otherwise as it's drawn
+  const pair = motorwayPair(draft);
+  if (pair) { const t = pair(scratch(net)); if (!t.ok) { hint(t.reason, 'alert'); return; } }
   if (!purse.spend(cost, 'building')) { hint(short(cost), 'alert'); return; }
   const doomed = new Set(draftCheck.clears);
   const summary = doomed.size ? demolitionSummary([...doomed]) : null;
-  buildRoad(draft.a, draft.b, ctrlOf(draft), opts);
+  if (pair) {
+    const r = pair(net), made = r.ok ? [...r.ab, ...r.ba] : [];
+    for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
+    for (const l of net.touched) { const x = buildings.find((y) => y.lot === l); if (x && !x.dying) regenerate(x); }
+    commitRoads(made);
+    refreshTrees();
+    infillDue = true;
+  } else buildRoad(draft.a, draft.b, ctrlOf(draft), opts);
   draft = null;
   draftChanged();
   hint(summary ? `Demolished ${doomed.size}: ${summary.list} · ${money(cost)}` : `Built for ${money(cost)} · the town builds along it as it needs`, summary ? 'bulldozer' : 'check');
@@ -1277,14 +1334,16 @@ function drawGhost() {
   };
   if (!draft && picks.length === 2) guide(picks[0], picks[1]);
   if (draft && roadKind === 'curve' && draft.c) { guide(draft.a, draft.c); guide(draft.c, draft.b); }
-  if (draft && ixPlan?.ok) {
-    // the junction blueprint: every piece it builds (both carriageways, slip roads, the bridge or ring)
+  const plan = ixPlan?.ok ? ixPlan : slipPlan?.ok ? slipPlan : null;
+  if (draft && plan) {
+    // the junction blueprint: every piece it builds (both carriageways, slip roads, the bridge or ring),
+    // or a slip road's
     const f = new Flat();
-    for (const g of ixPlan.ghost) f.ribbon(g.path, g.half, 0.6);
+    for (const g of plan.ghost) f.ribbon(g.path, g.half, 0.6);
     const m = f.mesh(ghostMat);
     m.renderOrder = 5;
     ghost.add(m);
-    for (const l of ixPlan.clears) {
+    for (const l of plan.clears) {
       const box = new THREE.Mesh(new THREE.BoxGeometry(l.w + 1, l.h + 1, l.d + 1), doomMat);
       box.position.set(l.x, (l.h + 1) / 2, l.z); box.rotation.y = -l.rot; box.renderOrder = 6;
       ghost.add(box);

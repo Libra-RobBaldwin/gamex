@@ -4,7 +4,8 @@ import { design, landFits, legsAt, type Junction } from '../junction';
 import { laneBase } from '../catalog';
 import { STD } from '../standards';
 import { simulate, type Scenario } from '../trafficsim';
-import { IX_FORMS, motorwayWithJunction, type IxSize, type SlipStyle } from './build';
+import { IX_FORMS, buildPair, motorwayWithJunction, type IxSize, type SlipStyle } from './build';
+import { buildSlip, planSlip } from './plan';
 import * as THREE from 'three';
 import { SURFACES, drawRoads } from '../roaddraw';
 import { TriIndex, checkWindow, trisOf, type Defect, type Mat } from '../drawcheck';
@@ -142,5 +143,41 @@ describe('one-way roads', () => {
     expect(d.lanes).toBe(3);
     // the lanes and the hard shoulder fill the carriageway, offside strip to nearside kerb
     expect(laneBase(d) + d.lanes * d.lane + d.shoulder).toBeCloseTo(net.half(s) - d.verge, 5);
+  });
+});
+
+describe('slip roads drawn off a motorway', () => {
+  // a pair of carriageways east–west; the one running east is on the north side (z < 0: keep left)
+  const pairTown = () => { const net = new Network(() => false, 900); buildPair(net, [{ x: -800, z: 0 }, { x: 800, z: 0 }], 'motorway'); return net; };
+  const east = (net: Network) => [...net.segs.values()].find((s) => s.oneway && net.path(s)[0].x < net.path(s).at(-1)!.x)!;
+  const designAll = (net: Network) => { const js = new Map<number, Junction>(); for (const n of net.nodes.values()) if (legsAt(net, n.id).length >= 3) { const j = design(net, n.id, geo(net, n.id)); if (j) js.set(n.id, j); } return js; };
+  for (const lanes of [1, 2] as const) for (const kind of ['diverge', 'merge'] as const) it(`${kind}, ${lanes} lane${lanes > 1 ? 's' : ''}: dragged off a carriageway, it leaves (or joins) it as a ${kind}`, () => {
+    const net = pairTown(), cw = east(net), p = pointAt(net.path(cw), 800), side = { x: p.uz, z: -p.ux }; // (its nearside)
+    const from = { x: p.x, z: p.z }, to = { x: p.x + p.ux * (kind === 'diverge' ? 260 : -260) + side.x * 90, z: p.z + p.uz * (kind === 'diverge' ? 260 : -260) + side.z * 90 };
+    const plan = planSlip(net, from, to, lanes)!;
+    expect(plan.ok, plan.reason).toBe(true);
+    expect(plan.kind).toBe(kind);
+    buildSlip(net, plan);
+    const js = designAll(net);
+    const j = [...js.values()].find((x) => x.form === kind)!;
+    expect(j, 'a merge or diverge where it meets the carriageway').toBeTruthy();
+    expect(j.slip!.len).toBeGreaterThan((kind === 'merge' ? STD.merge(70) : STD.diverge(70)).taper);
+    // one way, the right way: away from the carriageway leaving it, towards it joining
+    const slip = net.segs.get(kind === 'diverge' ? j.slip!.to : j.slip!.from)!;
+    expect(slip.oneway).toBe(true);
+    expect(kind === 'diverge' ? slip.a : slip.b).toBe(j.node);
+    if (lanes === 2) expect([...net.segs.values()].some((s) => s.type === 'slip-2')).toBe(true);
+  });
+  it('refuses one off the offside, or with no room for its taper', () => {
+    const net = pairTown(), cw = east(net), p = pointAt(net.path(cw), 800), side = { x: p.uz, z: -p.ux };
+    const off = planSlip(net, { x: p.x, z: p.z }, { x: p.x + p.ux * 200 - side.x * 90, z: p.z + p.uz * 200 - side.z * 90 }, 1)!;
+    expect(off.ok).toBe(false);
+    expect(off.reason).toMatch(/left/);
+    const q = pointAt(net.path(cw), 60), s2 = { x: q.uz, z: -q.ux };
+    const early = planSlip(net, { x: q.x, z: q.z }, { x: q.x + q.ux * 200 + s2.x * 90, z: q.z + q.uz * 200 + s2.z * 90 }, 1)!;
+    expect(early.ok).toBe(false);
+    expect(early.reason).toMatch(/taper/);
+    // and a drag that doesn't start on a carriageway isn't a slip road at all
+    expect(planSlip(net, { x: 0, z: 200 }, { x: 100, z: 300 }, 1)).toBeNull();
   });
 });
