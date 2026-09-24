@@ -492,10 +492,10 @@ const pctTxt = (g: number) => { const v = g * 100; return `${Math.abs(v - Math.r
 function roadOptions() {
   const [, hl, hi] = HEIGHTS.find((h) => h[0] === opts.height)!;
   const on = (b: boolean) => `class="${b ? 'on' : ''}" aria-pressed="${b}"`;
-  return `${KINDS.map(([k, label, ic]) => `<button data-k="${k}" ${on(roadKind === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}<span class="sep"></span>
+  return `<span class="og" role="group" aria-label="Shape">${KINDS.map(([k, label, ic]) => `<button data-k="${k}" ${on(roadKind === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span><span class="sep"></span>
     <button id="g-h" aria-label="Height: ${hl}">${icon(hi)}<span>${hl}</span></button>
     <button id="g-g" aria-label="Steepest gradient ${pctTxt(opts.grade)}">${icon('angle')}<span>${pctTxt(opts.grade)}</span></button><span class="sep"></span>
-    ${CROSS.map(([k, label, ic]) => `<button data-x="${k}" ${on(opts.cross === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}`;
+    <span class="og" role="group" aria-label="Where it crosses something">${CROSS.map(([k, label, ic]) => `<button data-x="${k}" ${on(opts.cross === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span>`;
 }
 function refreshOptions() { if (mode === 'road' || mode === 'rail') tool?.set({ options: roadOptions() }); }
 function bindRoadOptions(el: HTMLElement) {
@@ -535,7 +535,7 @@ function setType(t: RoadType) {
 
 // ---- the Build sheet: a tab per category, a card per thing ----
 shell.addBuildCategory({ id: 'roads', label: 'Roads', icon: 'road' });
-for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: typeSpec(id), icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
+for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: `${ROADS[id].blurb} · ${typeSpec(id)}`, icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
 shell.addBuildItem('roads', { id: 'more', label: 'More road types', spec: 'Filter by lanes, speed, trees, bus and cycle lanes', icon: 'adjustments', tone: 'road', on: () => !PRESETS.includes(lastType.road), onPick: () => { openRoadPicker(true); return false; } });
 shell.addBuildCategory({ id: 'rail', label: 'Rail', icon: 'train' });
 for (const id of RAIL_PRESETS) shell.addBuildItem('rail', { id, label: ROADS[id].label, spec: ROADS[id].blurb, icon: roadIcon(ROADS[id]), tone: 'rail', on: () => lastType.rail === id, onPick: () => startRoadTool(id) });
@@ -562,7 +562,7 @@ shell.setViews({
   current: viewNow,
   pick: (id) => { nav.tiltTo(id === 'plan' ? EL_MAX : id === 'low' ? EL_MIN : HOME.el); },
 });
-shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it');
+shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it · pinch to zoom, twist to turn, two fingers up or down to tilt');
 
 // ---------------- sheets ----------------
 // Detail opens in a bottom sheet (a panel down the right in landscape); the camera turns so the
@@ -685,7 +685,7 @@ shell.addTransportTab({
 
 // ---- Menu: quality, the performance readout, a new town ----
 shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
-shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); shell.openMenu(); } });
+shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
 shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
 shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
 shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
@@ -815,6 +815,8 @@ function demolitionSummary(lots: Lot[]) {
 function renderBar() {
   if (!tool || (mode !== 'road' && mode !== 'rail')) return;
   if (!draft || !draftCheck) { tool.setPanel(null); tool.setPrimary(null); return; }
+  // (a sheet opened from the tool, such as the junction editor, makes way for the blueprint)
+  if (shell.sheetKey) closeSheet();
   const c = draftCheck;
   const n = c.clears.length;
   const kind = ctrlOf(draft) ? 'Curved road' : 'New road';
@@ -827,6 +829,7 @@ function renderBar() {
     ${lift}
     ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
+  tool.avoid(handles().map((h) => toScreen(h.p)));
   tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging), onClick: buildDraft });
 }
 function buildDraft() {
@@ -1068,6 +1071,7 @@ function stopTap(p: P) {
 // lands on (a stop, a junction, a building) and opens an info sheet, or closes the sheet if it
 // lands on nothing. Returns the mode it was handled in (double-tap zoom only applies to 'look').
 function tapMap(sx: number, sy: number): Mode {
+  shell.guardTap();
   shell.dismissFirstRun();
   shell.closeLayers();
   const g = groundAt(sx, sy);
