@@ -258,8 +258,10 @@ body.paused #st-rush { color: var(--gold); }
 #tool .opts.more, .stabs.more { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
 #tool .opts.more.end, .stabs.more.end { -webkit-mask-image: none; mask-image: none; }
 
+#safe { position: fixed; visibility: hidden; pointer-events: none; width: 0; height: 0; padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l); }
 /* the blueprint card above the tool strip: length, cost, what it knocks down, its long section */
 #tpanel { position: absolute; left: calc(var(--edge) + var(--safe-l)); right: calc(var(--edge) + var(--safe-r)); bottom: calc(var(--chrome-b) + 6px); max-height: min(44dvh, calc(100dvh - var(--chrome-b) - var(--safe-t) - 120px)); overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; background: var(--panel); border-top: 3px solid var(--mode); font-size: 13px; }
+#tpanel.alt { bottom: auto; top: calc(var(--edge) + var(--safe-t) + var(--tap) + 8px); right: calc(var(--edge) + var(--safe-r) + var(--tap) + 8px); }
 #tpanel .what { display: flex; align-items: center; gap: 6px; }
 #tpanel .what > .ic, #tpanel .lift > .ic { color: var(--mode); }
 #tpanel .demo { display: flex; gap: 8px; padding: 8px 10px; background: rgba(210, 63, 44, 0.24); box-shadow: inset 3px 0 0 #ff5a44; font-size: 12.5px; line-height: 1.4; }
@@ -280,9 +282,11 @@ body.paused #st-rush { color: var(--gold); }
   #firstrun { left: 0; right: auto; margin: 0; top: calc(var(--tap) + 8px); }
   #bar { left: auto; top: auto; right: calc(var(--edge) + var(--safe-r)); bottom: calc(var(--edge) + var(--safe-b)); width: var(--rail); grid-template-columns: 1fr; gap: 2px; padding: 4px; border-top: 0; border-left: 2px solid var(--gold); --cut: 10px; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
   #bar button { height: 50px; }
-  .sheet { left: auto; top: calc(var(--edge) + var(--safe-t) + var(--tap) + 8px); right: calc(var(--edge) + var(--safe-r) + var(--rail) + 8px); bottom: calc(var(--edge) + var(--safe-b)); width: min(420px, 48vw); max-height: none; height: auto; }
-  body.tooling .sheet { right: calc(var(--edge) + var(--safe-r)); bottom: calc(var(--chrome-b) + 6px); }
+  .sheet, .sheet.fixed { left: auto; top: calc(var(--edge) + var(--safe-t) + var(--tap) + 8px); right: calc(var(--edge) + var(--safe-r) + var(--rail) + 8px); bottom: calc(var(--edge) + var(--safe-b)); width: min(420px, 48vw); max-height: none; height: auto; }
+  /* (beside the compass and view buttons, which stay in the top right corner while drawing) */
+  body.tooling .sheet { right: calc(var(--edge) + var(--safe-r) + var(--tap) + 8px); bottom: calc(var(--chrome-b) + 6px); }
   #layers { right: calc(var(--edge) + var(--safe-r) + var(--rail) + 8px); bottom: calc(var(--edge) + var(--safe-b)); max-height: calc(100dvh - var(--safe-t) - var(--safe-b) - 70px); }
   #tool { grid-template-columns: minmax(150px, 0.8fr) minmax(0, 2fr) auto; grid-template-areas: 'what opts acts'; }
+  #tpanel.alt { right: auto; left: calc(var(--edge) + var(--safe-l)); }
   #tpanel { left: auto; width: min(440px, 50vw); max-height: calc(100dvh - var(--chrome-b) - var(--safe-t) - 70px); }
 }

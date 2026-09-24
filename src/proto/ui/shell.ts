@@ -77,6 +77,8 @@ export interface ToolHandle {
   setPrimary(a: Action | null): void;
   /** A card above the strip, for the blueprint and its warnings; null hides it. */
   setPanel(html: string | null, bind?: (el: HTMLElement) => void): void;
+  /** Screen points the card must not cover (the blueprint's ends); it moves across if it would. */
+  avoid(points: { x: number; y: number }[]): void;
   /** Leave the tool without calling onDone or onCancel. */
   end(): void;
 }
@@ -133,6 +135,7 @@ export class Shell {
   private viewShown = '';
   private viewBtnShown = '';
   private tabScroll = 0;
+  private guardUntil = 0;
 
   constructor(root: HTMLElement, opts: ShellOptions) {
     this.root = root;
@@ -170,7 +173,8 @@ export class Shell {
         <button data-bar="layers" aria-expanded="false">${icon('layers')}<span>Layers</span></button>
         <button data-bar="menu" aria-expanded="false">${icon('menu')}<span>Menu</span></button>
       </nav>
-      <div id="hint" role="status" aria-live="polite" hidden></div>`);
+      <div id="hint" role="status" aria-live="polite" hidden></div>
+      <div id="safe" aria-hidden="true"></div>`);
     this.$('#compass').addEventListener('click', () => opts.onCompass());
     this.$('#sp-pause').addEventListener('click', () => opts.onPause());
     this.$('#sp-rate').addEventListener('click', () => opts.onRate());
@@ -192,6 +196,9 @@ export class Shell {
       else if (k === 'layers') this.openLayers();
       else this.openMenu();
     }));
+    // A tap on the map opens a sheet on pointerup; the click from that same tap must not then
+    // press whatever the new sheet put under the finger (see guardTap).
+    root.addEventListener('click', (e) => { if (performance.now() < this.guardUntil) { e.preventDefault(); e.stopPropagation(); } }, true);
     window.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (!this.$('#layers').hidden) this.closeLayers();
@@ -231,6 +238,9 @@ export class Shell {
   /** Money, once the economy is wired; empty hides it. */
   setMoney(text: string) { this.$('#money').textContent = text; }
 
+  /** Call when a map tap is about to open or change a sheet: swallows that tap's click. */
+  guardTap(ms = 400) { this.guardUntil = performance.now() + ms; }
+
   // ---------------- hint and first run ----------------
   /** A line of help over the map. With `ms` it clears itself; without, it stays until replaced. */
   hint(content: string | null, ms = 0) {
@@ -267,6 +277,7 @@ export class Shell {
     this.closeLayers();
     const was = this.sheet;
     if (was && was.key !== spec.key) { this.sheet = null; was.onClose?.(); }
+    if (!was || was.key !== spec.key) this.toggleDrawer(false);
     const el = this.$('#sheet');
     const body = el.querySelector('.sb');
     const keep = was && was.key === spec.key && !spec.fresh && body ? body.scrollTop : 0;
@@ -502,10 +513,19 @@ export class Shell {
         if (this.tool !== t) return;
         const p = this.$('#tpanel');
         if (h === null) { if (!p.hidden) { p.hidden = true; html(p, ''); } return; }
-        p.className = `facet tone-${t.tone ?? 'look'}`;
+        p.className = `facet tone-${t.tone ?? 'look'}${p.classList.contains('alt') && !p.hidden ? ' alt' : ''}`;
         html(p, h);
         p.hidden = false;
         bind?.(p);
+      },
+      avoid: (pts) => {
+        const p = this.$('#tpanel');
+        if (this.tool !== t || p.hidden) return;
+        const hits = () => { const r = p.getBoundingClientRect(); return pts.filter((q) => q.x > r.left - 12 && q.x < r.right + 12 && q.y > r.top - 12 && q.y < r.bottom + 12).length; };
+        const here = hits();
+        if (!here) return;
+        p.classList.toggle('alt');
+        if (hits() >= here) p.classList.toggle('alt'); // no better over there: stay
       },
       end: () => { if (this.tool === t) this.stopTool(); },
     };
@@ -533,7 +553,9 @@ export class Shell {
   /** The part of the screen the chrome leaves clear, in CSS pixels (for framing the camera). */
   clearRect(): Rect {
     const W = window.innerWidth, H = window.innerHeight;
-    const r: Rect = { left: 0, top: 0, right: W, bottom: H };
+    // (#safe is padded by the safe-area insets, so its computed padding is them in pixels)
+    const sp = getComputedStyle(this.$('#safe'));
+    const r: Rect = { left: parseFloat(sp.paddingLeft) || 0, top: 0, right: W - (parseFloat(sp.paddingRight) || 0), bottom: H - (parseFloat(sp.paddingBottom) || 0) };
     const status = this.$('#status').getBoundingClientRect();
     r.top = status.bottom;
     for (const s of ['#bar', '#tool', '#tpanel', '#sheet']) {
@@ -560,5 +582,18 @@ export class Shell {
     h.style.left = `${(c.left + c.right) / 2}px`;
     h.style.bottom = `${window.innerHeight - c.bottom + 8}px`;
     h.style.maxWidth = `${Math.max(160, c.right - c.left - 16)}px`;
+    // and keeps clear of the compass and view buttons, if it reaches up beside them
+    const hr = h.getBoundingClientRect();
+    for (const s of ['#compass', '#viewbtn']) {
+      const b = this.$(s);
+      if (b.hidden) continue;
+      const br = b.getBoundingClientRect();
+      if (hr.right > br.left - 4 && hr.left < br.right && hr.bottom > br.top && hr.top < br.bottom) {
+        const right = br.left - 8;
+        h.style.left = `${(c.left + right) / 2}px`;
+        h.style.maxWidth = `${Math.max(120, right - c.left - 8)}px`;
+        break;
+      }
+    }
   }
 }

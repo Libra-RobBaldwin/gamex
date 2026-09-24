@@ -724,7 +724,7 @@ shell.addTransportTab({
 
 // ---- Menu: quality, the performance readout, a new town ----
 shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
-shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); shell.openMenu(); } });
+shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
 shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
 shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
 shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
@@ -868,6 +868,7 @@ function renderBar() {
     ${lift}
     ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
+  tool.avoid(handles().map((h) => toScreen(h.p)));
   tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging), onClick: buildDraft });
 }
 function buildDraft() {
@@ -1110,6 +1111,7 @@ function stopTap(p: P) {
 // lands on (a stop, a junction, a building) and opens an info sheet, or closes the sheet if it
 // lands on nothing. Returns the mode it was handled in (double-tap zoom only applies to 'look').
 function tapMap(sx: number, sy: number): Mode {
+  shell.guardTap();
   shell.dismissFirstRun();
   shell.closeLayers();
   const g = groundAt(sx, sy);
