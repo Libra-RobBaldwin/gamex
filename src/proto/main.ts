@@ -29,7 +29,6 @@ import { TownEconomy, TOWN_NAME } from './game/econ';
 import { Purse, PRICE_SHARE } from './game/money';
 import { Stations, STATION_LIST_PRICE } from './game/rail';
 import type { TrainDef } from './catalog';
-import { starterStops } from './game/crowdsites';
 import { IX_BLURB, IX_FORMS, IX_NAME, IX_SIZES, IX_SIZE_BLURB, IX_SIZE_NAME, buildPair, motorwayCloverleaf, motorwayWithJunction, pairCrossed, pairToNode, pairUpMotorways, scratch, type Interchange, type IxForm, type IxSize, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
 import { buildSlip, planCloverleaf, planJunction, planSlip, roadCrossed, type IxPlan, type SlipPlan } from './interchange/plan';
 import { Railway } from './rail/railway'; // stations, signalling and rail lines (docs/rail.md)
@@ -452,7 +451,8 @@ async function seedTown() {
   if (MAP.generated) {
     await loading.stage('Laying the railway', 0.03);
     const plan = planRegionRail(MAP.settlements, { bound: BOUND, isWater });
-    const made = plan ? layRegionRail(railway, plan) : null;
+    // (track only: stations and lines are the player's to build)
+    const made = plan ? layRegionRail(railway, plan, { trackOnly: true }) : null;
     if (made?.problems.length) console.info('railway:', made.problems.join(' · '));
   }
   // the map's streets (region/: the town's hand-drawn roads, or each of a generated region's settlements in turn)
@@ -1813,7 +1813,7 @@ const demo = demoJunction === 'blank' || demoJunction === 'cloverleaf' || (IX_FO
 if (demo) seedJunctionDemo(demoJunction === 'blank' ? null : (demoJunction as IxForm), new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper', new URLSearchParams(location.search).get('size') === 'tight' ? 'tight' : 'open');
 else if (!sandbox) await seedTown();
 await loading.stage('Adding bus stops and drawing the roads', 0.1);
-if (!sandbox && !demo) starterStops(net, MAP.stops); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
+// (no stops, lines, stations or trains to start with: every bit of the transport is the player's to build)
 rebuildRoads();
 refreshTrees();
 setMode('look');
@@ -1843,12 +1843,6 @@ traffic.onTrainStop = () => 30; // seconds at the platform
 const lines = new Lines(traffic, stations);
 const markers = new StopMarkers(net, traffic, stations);
 scene.add(markers.group);
-// the starter line: the high street's west end, its east end, and up the road north
-{
-  const near = (q: P) => allStops().map(({ seg, stop }) => ({ id: stop.id, d: Math.hypot(pointAt(net.path(seg), stop.s).x - q.x, pointAt(net.path(seg), stop.s).z - q.z) })).sort((a, b) => a.d - b.d)[0]?.id;
-  const ids = MAP.line.map(near).filter((x): x is number => x !== undefined);
-  if (ids.length >= 2) lines.add(ids, false, 3);
-}
 const dbSize = new THREE.Vector2();
 let clock = 7 * 60; // minutes since midnight: a day passes in six minutes
 let places: Places | null = null;
@@ -1896,8 +1890,7 @@ let lastH = view.h;
 // the town's people: on the footways, at the stops, in the parks (see game/crowds.ts)
 const people = new TownCrowds({ scene, net, junctions, traffic, regions: () => infill }, GAME_MIN_PER_S);
 (window as unknown as { people: TownCrowds }).people = people;
-// the railway: its trains drawn with the traffic, held by the level crossings' barriers, and the
-// starter town's line between two stations on the main line (rail/, docs/rail.md)
+// the railway: its trains drawn with the traffic, held by the level crossings' barriers (rail/, docs/rail.md)
 const railDraw = new RailDraw(railway, traffic.fleet);
 railway.useRoads(traffic);
 traffic.onDraw = (dt) => railDraw.drawTrains(dt);
@@ -1905,7 +1898,6 @@ const railGame = new RailGame({
   net, shell, railway, draw: railDraw, people, scene, toScreen, focusOn, rebuildRoads, hint, purse,
   clear: (lots) => { for (const l of lots) { const b = buildings.find((x) => x.lot === l); if (b && !b.dying) demolish(b); } placesDirty = true; },
 });
-if (!MAP.generated) railGame.starter(); // (a generated region lays its own: seedTown)
 rebuildRoads();
 shell.addTransportTab({ id: 'rail', label: 'Railway', icon: 'train', sub: 'Your rail lines and stations', render: (el) => railGame.renderTab(el) });
 // the economy runs the town from here on (game/econ.ts): it decides what gets built, and how
