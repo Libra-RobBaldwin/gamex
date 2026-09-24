@@ -630,21 +630,24 @@ function setType(t: RoadType) {
 
 // ---- the Build sheet: a tab per category, a card per thing ----
 shell.addBuildCategory({ id: 'roads', label: 'Roads', icon: 'road' });
-for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: `${ROADS[id].blurb} · ${typeSpec(id)}`, icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
-shell.addBuildItem('roads', { id: 'more', label: 'More road types', spec: 'Filter by lanes, speed, trees, bus and cycle lanes', icon: 'adjustments', tone: 'road', on: () => !PRESETS.includes(lastType.road), onPick: () => { openRoadPicker(true); return false; } });
+// (the small card's name and line: "Dual 2+2" over "50 mph · £950/m")
+const cardName = (t: RoadType) => ROADS[t].label.split(' · ')[0];
+const cardSpec = (t: RoadType) => `${ROADS[t].mph} mph · £${ROADS[t].cost.toLocaleString('en-GB')}/m`;
+for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: `${ROADS[id].blurb} · ${typeSpec(id)}`, name: cardName(id), short: cardSpec(id), icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
+shell.addBuildItem('roads', { id: 'more', label: 'More road types', spec: 'Filter by lanes, speed, trees, bus and cycle lanes', short: 'Lanes, speed, trees…', icon: 'adjustments', tone: 'road', on: () => !PRESETS.includes(lastType.road), onPick: () => { openRoadPicker(true); return false; } });
 shell.addBuildCategory({ id: 'rail', label: 'Rail', icon: 'train' });
-for (const id of RAIL_PRESETS) shell.addBuildItem('rail', { id, label: ROADS[id].label, spec: ROADS[id].blurb, icon: roadIcon(ROADS[id]), tone: 'rail', on: () => lastType.rail === id, onPick: () => startRoadTool(id) });
+for (const id of RAIL_PRESETS) shell.addBuildItem('rail', { id, label: ROADS[id].label, spec: ROADS[id].blurb, short: `${ROADS[id].mph} mph · ${pctTxt(ROADS[id].maxGrade)}`, icon: roadIcon(ROADS[id]), tone: 'rail', on: () => lastType.rail === id, onPick: () => startRoadTool(id) });
 shell.addBuildCategory({ id: 'stops', label: 'Stops', icon: 'busStop' });
-shell.addBuildItem('stops', { id: 'bus-stop', label: 'Bus stop', spec: 'On any road; a lay-by where there is room', icon: 'busStop', tone: 'stop', onPick: () => startStopTool() });
+shell.addBuildItem('stops', { id: 'bus-stop', label: 'Bus stop', spec: 'On any road; a lay-by where there is room', short: 'On any road', icon: 'busStop', tone: 'stop', onPick: () => startStopTool() });
 shell.addBuildItem('stops', { id: 'bus-station', label: 'Bus station', spec: 'Several bays, for busy routes', icon: 'bus', locked: 'Not in the game yet' });
 shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight run of track', icon: 'train', locked: 'Not in the game yet' });
 shell.addBuildItem('stops', { id: 'depot', label: 'Lorry depot', spec: 'Where your lorries start and are kept', icon: 'warehouse', locked: 'Not in the game yet' });
 shell.addBuildCategory({ id: 'freight', label: 'Freight', icon: 'warehouse', note: 'Terminals are bought for an industry; better ones unlock as it grows.' });
-shell.addBuildItem('freight', { id: 'terminals', label: 'Freight terminals', spec: 'Loading bays, sidings and jetties for industries', icon: 'warehouse', locked: 'Come with the terminals update' });
+shell.addBuildItem('freight', { id: 'terminals', label: 'Freight terminals', name: 'Terminals', spec: 'Loading bays, sidings and jetties for industries', icon: 'warehouse', locked: 'Come with the terminals update' });
 shell.addBuildCategory({ id: 'bulldoze', label: 'Bulldoze', icon: 'bulldozer' });
 shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Tap or drag over what you want to remove; costs shown first', icon: 'bulldozer', locked: 'Not in the game yet: roads stay once built' });
 shell.addBuildCategory({ id: 'landscape', label: 'Landscape', icon: 'mountain' });
-shell.addBuildItem('landscape', { id: 'terrain', label: 'Raise and lower land', spec: 'Hills, cuttings and embankments', icon: 'mountain', locked: 'Needs terrain, which isn’t in the game yet' });
+shell.addBuildItem('landscape', { id: 'terrain', label: 'Raise and lower land', name: 'Raise, lower', spec: 'Hills, cuttings and embankments', icon: 'mountain', locked: 'Needs terrain, which isn’t in the game yet' });
 
 // ---- the Layers pop-over: overlays (none are in the game yet) and the view ----
 shell.addLayer({ id: 'flow', label: 'Traffic flow', icon: 'lights', disabled: 'Not in the game yet' });
