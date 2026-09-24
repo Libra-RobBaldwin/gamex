@@ -87,18 +87,30 @@ const nav = new NavRig(cam, canvas, {
   shadow: new SunFollow(sun, { dir: { x: -260, y: 420, z: 180 }, back: 525, far: 1500 }),
 });
 const view = nav.view;
-mountNavControls(nav, { top: 170 });
+mountNavControls(nav, { below: $('top') });
 let focus = Math.max(0, INDUSTRY_IDS.indexOf((q.get('focus') ?? '') as IndustryId));
 let gallery = !q.has('focus');
-// Show the whole gallery, or the site in focus a little above the middle so the panel doesn't
-// hide it. zoom: the height of the view in metres (0 to fit).
+// Show the whole gallery, or the whole site in focus, in the space the title and the panel leave
+// clear. zoom: the height of the view in metres (0 to fit).
+function siteBox(list: typeof sites) {
+  const min = { x: Infinity, y: 0, z: Infinity }, max = { x: -Infinity, y: 25, z: -Infinity };
+  for (const s of list) for (const p of s.model.frame.outline) {
+    const w = toWorld(s.model.frame, p[0], p[1]);
+    min.x = Math.min(min.x, w.x); max.x = Math.max(max.x, w.x); min.z = Math.min(min.z, w.z); max.z = Math.max(max.z, w.z);
+  }
+  return { min, max };
+}
 function fitView(zoom = Number(q.get('zoom') ?? 0) || 0, ms = 0) {
-  const W = canvas.clientWidth, H = canvas.clientHeight, ui = q.get('ui') !== '0';
-  let to;
-  if (gallery) to = nav.framing({ x: 0, z: 0 }, W / 2, ui ? H * 0.43 : H / 2, { ...ISO, h: zoom || 1100 });
-  else { const m = sites[focus].model; to = nav.framing({ x: m.frame.cx, z: m.frame.cz }, W / 2, ui ? H * 0.43 : H / 2, { ...ISO, h: zoom || Math.max(m.frame.w, m.frame.d) * 1.45 }); }
+  const ui = q.get('ui') !== '0';
+  const pad = ui ? { top: $('top').getBoundingClientRect().bottom, bottom: $('panel').getBoundingClientRect().height, left: 8, right: 60 } : {};
+  let to = nav.fitting(siteBox(gallery ? sites : [sites[focus]]), pad, ISO);
+  if (zoom) to = { ...to, h: zoom };
   if (ms > 0) nav.animateTo(to, ms); else nav.setView(to);
 }
+// the catchment ring is drawn a few pixels wide: redraw it when the zoom has changed a fair bit
+let ringH = 0;
+nav.onChange((v) => { if (showRing && Math.abs(v.h - ringH) > ringH * 0.15) drawOverlay(); });
+
 // ---------------- catchment ring and icons ----------------
 let showRing = q.get('ring') === '1';
 // the ring as a flat ribbon with a faint fill, since WebGL lines are one pixel wide on phones
@@ -126,6 +138,7 @@ function drawOverlay() {
   const shape = new THREE.Shape(ov.ring.map((p) => new THREE.Vector2(p.x, -p.z)));
   const fill = new THREE.Mesh(new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2), fillMat);
   fill.position.y = 0.5;
+  ringH = view.h;
   ringLine.add(fill, new THREE.Mesh(ribbon(ov.ring, Math.max(1.5, view.h / 180)), ringMat));
   const col = ov.colour === '#2c2c2e' || ov.colour === '#1d1d1f' ? '#ffffff' : ov.colour;
   ringMat.color.set(col); fillMat.color.set(col);

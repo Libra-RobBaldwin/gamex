@@ -66,12 +66,16 @@ const nav = new NavRig(cam, canvas, {
   shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 }, radius: 60 }),
   // on the turntable a one-finger drag turns the vehicle rather than the map
   onDragStart: () => S.mode === 'turntable' && !!tt,
+  // and so does the finger left after a pinch
+  onRemaining: () => S.mode === 'turntable' && !!tt,
   onClaimMove: (p) => { if (tt) tt.a += p.dx * 0.01; },
   // a tap in the showroom opens that vehicle on the turntable
-  onTap: (p) => { if (S.mode === 'showroom') tapShowroom(p.sx, p.sy); },
-  // (a double tap zooms in as everywhere else)
+  onTap: (p) => { if (S.mode === 'showroom') { tapShowroom(p.sx, p.sy); opened = p.t; } },
+  // a double tap zooms in as everywhere else, but not the second tap of one that opened a vehicle
+  onDoubleTap: (p) => p.t - opened < 500,
 });
 const view = nav.view;
+let opened = -Infinity;
 // the view was set by hand (a new scene): stop any glide and show it
 const place = () => { nav.stop(); nav.apply(); };
 function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); place(); }
@@ -428,6 +432,8 @@ function frame(now: number) {
   last = now;
   const t = now / 1000;
   const t0 = performance.now();
+  // the camera first, so what's culled is what this frame shows
+  nav.update(dt, now);
   vr.begin(); beams.begin(); pools.begin();
   if (S.night && S.mode !== 'turntable') for (const l of streetLamps) if (onScreen(l.x, l.z, 20)) pools.add(l.x, 0.08, l.z, 0, 18, 18);
   const nightFlags = S.night ? FLAGS.lights : 0;
@@ -478,7 +484,6 @@ function frame(now: number) {
   }
   vr.end(t); beams.end(); pools.end();
   const cpu = performance.now() - t0;
-  nav.update(dt, now);
   renderer.render(scene, cam);
   frames++; fpsT += dt; cpuSum += cpu;
   if (fpsT > 0.5) {

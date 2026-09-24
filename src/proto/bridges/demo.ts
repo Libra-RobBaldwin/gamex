@@ -40,7 +40,7 @@ const nav = new NavRig(cam, canvas, {
   limits: { hMin: 4, hMax: 4000, elMin: 0.2, elMax: 1.55 },
   distance: 6000,
 });
-mountNavControls(nav, { top: 150 });
+mountNavControls(nav, { below: $('#top') });
 // what to frame: the bridge's box, and (with ?zoom=) the part worth a closer look
 let fit = { box: new THREE.Box3(), focus: null as THREE.Vector3 | null };
 let zoom = 1;

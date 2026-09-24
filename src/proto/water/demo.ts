@@ -61,7 +61,7 @@ const nav = new NavRig(cam, canvas, {
   onHover: (p) => showProbe(p.ground),
 });
 const view = nav.view;
-mountNavControls(nav, { parent: $('#phone'), top: 92 });
+mountNavControls(nav, { parent: $('#phone'), below: $('#top') });
 function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); nav.apply(); }
 window.addEventListener('resize', resize);
 
@@ -137,6 +137,8 @@ function build(key: string) {
   }
   timings.tiles = tiles.length; timings.wet = wetTiles;
   nav.setGround((x, z) => ground.heightAt(x, z), [-120, 700]);
+  // (the old place's bounds would hold the view back from the new place)
+  nav.setLimits({ bounds: null });
   nav.setView({ x: at[0], z: at[1], h: Number(Q.get('h')) || P.h, az: Q.has('az') ? Number(Q.get('az')) : P.az });
   // keep the camera over the tiles that were built
   nav.setLimits({ bounds: { minX: at[0] - 700, maxX: at[0] + 700, minZ: at[1] - 700, maxZ: at[1] + 700 } });

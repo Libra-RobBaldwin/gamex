@@ -271,7 +271,7 @@ const callBus = () => { bus.x = BUS_STOP_X - 60; bus.v = 10; bus.served = false;
 ui.bus.onclick = callBus;
 ui.era.onchange = () => { crowds.year = +ui.era.value; store.remove('turntable'); turntable(); };
 ui.rain.onclick = () => { store.rain = store.rain > 0.5 ? 0 : 1; ui.rain.classList.toggle('on', store.rain > 0.5); scene.background = new THREE.Color(store.rain > 0.5 ? '#8f9aa4' : '#a9c7dd'); };
-ui.stress.onchange = () => { stressN = +ui.stress.value; if (stressN) nav.setView({ x: 20, z: -112, h: 150, az: Math.PI / 4, el: 0.6 }); };
+ui.stress.onchange = () => { stressN = +ui.stress.value; if (stressN) { nav.spin = 0; nav.setView({ x: 20, z: -112, h: 150, az: Math.PI / 4, el: 0.6 }); } };
 const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
 
 let last = performance.now(), acc = { n: 0, ms: 0, upd: 0, flows: 0 }, fps = 0, frameMs = 0, updMs = 0, flowMs = 0;

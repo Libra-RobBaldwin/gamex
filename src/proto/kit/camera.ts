@@ -45,6 +45,9 @@ export interface NavTouch {
 export interface NavHooks {
   /** First finger down. Return true to take the pointer (the camera won't pan with it). */
   onPointerDown?(p: NavTouch): boolean | void;
+  /** Two fingers became one (a pinch ended with one finger lifted). Return true to take the
+   * finger that is left (a turntable turning its model); otherwise it pans. */
+  onRemaining?(p: NavTouch): boolean | void;
   /** The finger has moved past the tap slop. Return true to take it (e.g. to draw a road). */
   onDragStart?(p: NavTouch): boolean | void;
   /** A claimed pointer moved (also called straight after a successful onDragStart). */
@@ -128,6 +131,7 @@ export class NavCore {
   home: { az: number; el: number };
   ground: { heightAt?: HeightAt; range?: [number, number] } | undefined;
   follow: boolean;
+  private followSet: boolean;
   /** turn the view slowly about the middle of the screen, radians a second (a turntable);
    * it waits while a finger is down */
   spin = 0;
@@ -140,7 +144,7 @@ export class NavCore {
   private anchor: V3 = { x: 0, y: 0, z: 0 };
   private vel: { x: number; z: number; t: number }[] = [];
   private flingV = { x: 0, z: 0 };
-  private orb: { x0: number; y0: number; az0: number; el0: number; w: V3 | null } | null = null;
+  private orb: { x0: number; y0: number; ty0: number; az0: number; el0: number; w: V3 | null } | null = null;
   private two: {
     a: number; b: number; d0: number; a0: number; m0: { x: number; y: number }; anchor: V3; h0: number; az0: number;
     rotating: boolean; rotOff: number; tilting: boolean; tiltDy: number; tiltEl: number; tiltAt: { x: number; y: number };
@@ -160,6 +164,7 @@ export class NavCore {
     this.limits = { ...DEFAULT_LIMITS, ...o.limits };
     this.ground = o.groundAt ? { heightAt: o.groundAt, range: o.heightRange } : undefined;
     this.follow = o.follow ?? !!o.groundAt;
+    this.followSet = o.follow !== undefined;
     this.view = clampView(this.onGround({ x: 0, z: 0, h: 300, az: Math.PI / 4, el: 0.6, ...o.view }), this.limits);
     this.home = { az: o.home?.az ?? this.view.az, el: o.home?.el ?? this.view.el };
     this.hooks = o;
@@ -202,6 +207,8 @@ export class NavCore {
   }
   setGround(heightAt?: HeightAt, range?: [number, number]) {
     this.ground = heightAt ? { heightAt, range } : undefined;
+    // terrain arriving later settles the view onto it too, unless the host said otherwise
+    if (!this.followSet) this.follow = !!heightAt;
     this.seated = null;
   }
   setLimits(l: Partial<Limits>) { this.limits = { ...this.limits, ...l }; this.put({ ...this.view }); }
@@ -336,7 +343,7 @@ export class NavCore {
   private startOrbit(p: Ptr) {
     this.mode = 'orbit';
     this.primary = p.id;
-    this.orb = { x0: p.x, y0: p.y, az0: this.view.az, el0: this.view.el, w: this.o.pivot === 'target' ? null : this.groundUnder(p.x, p.y) };
+    this.orb = { x0: p.x, y0: p.y, ty0: p.y, az0: this.view.az, el0: this.view.el, w: this.o.pivot === 'target' ? null : this.groundUnder(p.x, p.y) };
   }
 
   private startTwo(a: number, b: number, t: number) {
@@ -372,9 +379,11 @@ export class NavCore {
       const o = this.orb!;
       const v = { ...this.view };
       if (this.o.rotate) v.az = o.az0 - (p.x - o.x0) * this.o.turnPerPx;
-      if (this.o.tilt) v.el = o.el0 - (p.y - o.y0) * this.o.tiltPerPx;
+      if (this.o.tilt) v.el = o.el0 - (p.y - o.ty0) * this.o.tiltPerPx;
       const c = clampView(v, this.limits);
       this.put(o.w ? keepUnder(c, L, o.w, o.x0, o.y0) : c);
+      // at the tilt limit: count from here, so dragging back tilts back at once
+      if (c.el !== v.el) { o.el0 = c.el; o.ty0 = p.y; }
       return;
     }
     if (this.mode === 'maybe') {
@@ -449,6 +458,7 @@ export class NavCore {
         if (why === 'up' && !g.moved && e.t - g.t0 < 300 && this.o.twoFingerTapZoom) this.zoomAt(g.m0.x, g.m0.y, this.o.twoFingerTapZoom);
         // carry on with the finger that's left, without a jump
         const [q] = [...this.ptrs.values()];
+        if (this.hooks.onRemaining?.(this.touch(q, event)) === true) { this.mode = 'claim'; this.primary = q.id; return; }
         if (this.o.oneFinger === 'orbit') this.startOrbit(q);
         else { this.mode = 'pan'; this.startPan(q, q.x, q.y); }
         return;
@@ -637,10 +647,11 @@ export class NavRig extends NavCore {
       if (this.hooks.onLongPress) setTimeout(() => this.checkLongPress(performance.now()), this.o.longPressMs + 5);
     });
     on(element, 'pointermove', (e: PointerEvent) => {
-      if (this.pointers) { this.move(pin(e), e); return; }
+      // (re-measured: turning the phone can move the element under a finger that's down)
+      if (this.pointers) { measure(); this.move(pin(e), e); return; }
       if (e.pointerType === 'mouse' && !e.buttons && this.hooks.onHover) { measure(); this.hover(pin(e), e); }
     });
-    on(element, 'pointerup', (e: PointerEvent) => this.up(pin(e), 'up', e));
+    on(element, 'pointerup', (e: PointerEvent) => { measure(); this.up(pin(e), 'up', e); });
     on(element, 'pointercancel', (e: PointerEvent) => this.up(pin(e), 'cancel', e));
     // the browser took the pointer away (a system gesture, the element went away): no stuck fingers
     on(element, 'lostpointercapture', (e: PointerEvent) => this.up(pin(e), 'cancel', e));
@@ -768,7 +779,11 @@ const ICON = {
  * rotate left and right, zoom in and out. In the brand's colours (forest panels, lime when
  * pressed), 44 px targets. Returns the element and a function to remove it.
  */
-export function mountNavControls(rig: NavCore, o: { parent?: HTMLElement; side?: 'left' | 'right'; top?: number; bottom?: number; zoom?: boolean; rotate?: boolean; step?: number } = {}) {
+export function mountNavControls(rig: NavCore, o: {
+  parent?: HTMLElement; side?: 'left' | 'right'; top?: number; bottom?: number; zoom?: boolean; rotate?: boolean; step?: number;
+  /** keep the buttons just below this element (a page's title panel), however tall it grows */
+  below?: HTMLElement;
+} = {}) {
   const box = document.createElement('div');
   box.className = 'kit-nav';
   const side = o.side ?? 'right';
@@ -785,7 +800,9 @@ export function mountNavControls(rig: NavCore, o: { parent?: HTMLElement; side?:
     b.setAttribute('aria-label', title);
     b.innerHTML = html;
     Object.assign(b.style, {
-      width: '44px', height: '44px', padding: '0', display: 'grid', placeItems: 'center', cursor: 'pointer',
+      // (every property the page's own button styles might set, so they can't reach these)
+      width: '44px', height: '44px', minWidth: '0', minHeight: '0', flex: '0 0 auto', margin: '0', padding: '0', borderRadius: '0',
+      font: 'inherit', lineHeight: '0', boxSizing: 'border-box', display: 'grid', placeItems: 'center', cursor: 'pointer',
       border: '1px solid rgba(255,255,255,0.12)', color: '#ffffff', background: 'rgba(15,51,34,0.9)',
       // the brand's faceted corner
       clipPath: 'polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%)', boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
@@ -806,6 +823,20 @@ export function mountNavControls(rig: NavCore, o: { parent?: HTMLElement; side?:
   const show = () => { needle.style.transform = `rotate(${rig.northAngle() + Math.PI / 2}rad)`; };
   const unsub = rig.onChange(show);
   show();
-  (o.parent ?? document.body).appendChild(box);
-  return { el: box, dispose: () => { unsub(); box.remove(); } };
+  const parent = o.parent ?? document.body;
+  parent.appendChild(box);
+  // below a panel: re-measured whenever the panel or the page changes size
+  let ro: ResizeObserver | null = null;
+  const place = () => {
+    if (!o.below) return;
+    const top = o.below.getBoundingClientRect().bottom - (o.parent ? o.parent.getBoundingClientRect().top : 0);
+    box.style.top = `${Math.round(top + 8)}px`;
+    box.style.bottom = '';
+  };
+  if (o.below) {
+    place();
+    if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(place); ro.observe(o.below); }
+    window.addEventListener('resize', place);
+  }
+  return { el: box, place, dispose: () => { unsub(); ro?.disconnect(); window.removeEventListener('resize', place); box.remove(); } };
 }
