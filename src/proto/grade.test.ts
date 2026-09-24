@@ -71,6 +71,21 @@ describe('heights and gradients', () => {
     expect(c.profile!.maxGrade).toBeLessThanOrEqual(DEFAULT_OPTS.grade + 1e-9);
   });
 
+  it("doesn't dip between two obstacles close together, or hump between two tunnels", () => {
+    // a river and then a road 40 m apart: a real deck stays up rather than diving in between
+    const p = solveProfile(500, 0, 0, 0.06, [{ s0: 150, s1: 220, lo: 6.8, why: 'the water' }, { s0: 260, s1: 280, lo: 7.3, why: 'the road below' }], 'auto');
+    expect(p.ok).toBe(true);
+    const at = (t: number) => p.y[Math.round(t / 2)];
+    for (let t = 220; t <= 260; t += 2) expect(at(t)).toBeGreaterThanOrEqual(6.8 - 1e-6);
+    expect(p.maxGrade).toBeLessThanOrEqual(0.06 + 1e-9);
+    // and far apart, it does come back down to the ground between them
+    const q = solveProfile(900, 0, 0, 0.06, [{ s0: 150, s1: 220, lo: 6.8, why: 'the water' }, { s0: 660, s1: 680, lo: 7.3, why: 'the road below' }], 'auto');
+    expect(q.y[Math.round(440 / 2)]).toBe(0);
+    // two tunnels: no hump up towards the surface between them
+    const r = solveProfile(500, 0, 0, 0.06, [{ s0: 150, s1: 200, hi: -12, why: 'the lake' }, { s0: 240, s1: 280, hi: -12, why: 'the canal' }], 'auto', -60);
+    for (let t = 200; t <= 240; t += 2) expect(r.y[Math.round(t / 2)]).toBeLessThanOrEqual(-12 + 1e-6);
+  });
+
   it('level and up modes', () => {
     const lvl = solveProfile(200, 5, undefined, 0.04, [], 'level');
     expect(Math.min(...lvl.y)).toBeCloseTo(5);
