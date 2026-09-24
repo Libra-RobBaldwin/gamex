@@ -112,10 +112,15 @@ export class MapWater {
       return { x0: Math.min(...r.path.map((p) => p.x)) - m, z0: Math.min(...r.path.map((p) => p.z)) - m, x1: Math.max(...r.path.map((p) => p.x)) + m, z1: Math.max(...r.path.map((p) => p.z)) + m };
     })];
   }
-  // the ground: flat at 0, dipping into each bed
-  ground = (x: number, z: number) => {
+  // the ground with only the lakes' bowls in it (rivers' channels are drawn as strips of their own)
+  lakesGround = (x: number, z: number) => {
     let h = 0;
     for (const L of this.spec.lakes) { const g = lakeGroundOf(L, x, z); if (g < h) h = g; }
+    return h;
+  };
+  // the ground: flat at 0, dipping into each bed
+  ground = (x: number, z: number) => {
+    let h = this.lakesGround(x, z);
     for (const r of this.rivers) {
       const d = r.index.near(x, z, r.half + RIM);
       if (d === Infinity) continue;

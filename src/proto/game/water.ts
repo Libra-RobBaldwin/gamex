@@ -109,7 +109,7 @@ export class GameWater {
 
   // The game's isWater: wet, or within ROAD_GAP of the waterline (so roads keep off the bank).
   isWater = (p: XZ) => {
-    if (!this.shapes.mayBeNear(p, 0)) return false;
+    if (!this.shapes.mayBeNear(p, ROAD_GAP)) return false;
     return this.water.distanceToShore(p.x, p.z) > -ROAD_GAP;
   };
   // Is this spot within `m` metres of water (trees keep further off than roads)?
@@ -146,7 +146,7 @@ export class GameWater {
   // are separate strips, drawn over it; see beds().)
   groundGeometry(size: number) {
     const h = size / 2, lakes = this.shapes.spec.lakes, boxes = lakes.map(lakeBox), xyz: number[] = [], tris: number[] = [];
-    const G = this.shapes.ground;
+    const G = this.shapes.lakesGround; // (rivers' channels aren't in it: see beds())
     const vert = (x: number, z: number) => { xyz.push(x, G(x, z), z); return xyz.length / 3 - 1; };
     // the grid outside the boxes (their edges are grid lines)
     const axis = (cuts: number[]) => {
@@ -164,7 +164,9 @@ export class GameWater {
       tris.push(a, c, b, b, c, d);
     }
     lakes.forEach((L, li) => this.bowl(L, boxes[li], xs, zs, xyz, tris, vert));
-    return this.finish(xyz, tris, G);
+    // (shore colours only round the lakes: a river's are on its strip, and on the flat ground's big
+    // cells they'd smear out across 100 m)
+    return this.finish(xyz, tris, G, (x, z) => boxes.some((B) => x >= B.x0 - 1e-6 && x <= B.x1 + 1e-6 && z >= B.z0 - 1e-6 && z <= B.z1 + 1e-6));
   }
   // One lake's bank ring, bed and box in the ground mesh.
   private bowl(L: LakeSpec, B: { x0: number; z0: number; x1: number; z1: number }, xs: number[], zs: number[], xyz: number[], tris: number[], vert: (x: number, z: number) => number) {
@@ -201,7 +203,7 @@ export class GameWater {
   }
   // Triangles facing up, normals from the ground, shore colours from the water's tiles, in the
   // plane's frame.
-  private finish(xyz: number[], tris: number[], G: (x: number, z: number) => number) {
+  private finish(xyz: number[], tris: number[], G: (x: number, z: number) => number, shore: (x: number, z: number) => boolean = () => true) {
     // every triangle facing up
     for (let t = 0; t < tris.length; t += 3) {
       const a = tris[t], b = tris[t + 1], c = tris[t + 2];
@@ -219,6 +221,7 @@ export class GameWater {
     const col = new Float32Array(V * 4), inTile = new Map<WaterTile, number[]>();
     for (let v = 0; v < V; v++) {
       const x = pos[v * 3], z = pos[v * 3 + 2];
+      if (!shore(x, z)) continue;
       const t = this.tiles.find((t) => x >= t.ti * t.size && x < (t.ti + 1) * t.size && z >= t.tj * t.size && z < (t.tj + 1) * t.size);
       if (!t) continue;
       let l = inTile.get(t);
