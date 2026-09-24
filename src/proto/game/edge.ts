@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { EARTH_COLOURS } from '../bridges/earthworks';
 import { kerbOf } from '../catalog';
-import { STD } from '../standards';
+import { GROUND, STD } from '../standards';
 import type { Network } from '../roads';
 
 // bands by depth below the surface (m); the edges between them wander a little, as real strata do
@@ -13,7 +13,8 @@ const BANDS: [string, number, number][] = [[EARTH_COLOURS.turf, 0, 0.35], [EARTH
 export const EDGE_BASE = -26; // how far down the slice goes
 const WATER = '#2f6f9e'; // (the bridges demo's water in section)
 const ROAD = { asphalt: '#3d4046', footway: '#b3a996', subbase: '#8a8378', ballast: '#8f887c' };
-const STEP = 4; // metres between the face's columns
+const STEP = 4; // metres between the face's columns (further apart on a big map: at most COLS a side)
+const COLS = 600;
 
 // How much a band's lower edge wanders (m) at distance s along the perimeter: a few gentle waves
 const wander = (s: number, k: number) => 0.18 * Math.sin(s * 0.031 + k * 1.7) + 0.12 * Math.sin(s * 0.093 + k * 4.1) + 0.06 * Math.sin(s * 0.27 + k);
@@ -25,6 +26,7 @@ export interface EdgeCrossing { side: number; u: number; half: number; kerb: num
 // at `edge` where they'd reach it running straight on.
 export function edgeCrossings(net: Network, edge: number): EdgeCrossing[] {
   const out: EdgeCrossing[] = [], near = net.bound - STD.mapEdge - 1;
+  if (net.bound * GROUND < edge - 1) return out; // (roads running off the map are drawn only as far as that: they don't reach this edge)
   for (const s of net.segs.values()) {
     const path = net.path(s);
     if (path.length < 2) continue;
@@ -82,8 +84,9 @@ export function edgeMesh(edge: number, crossings: EdgeCrossing[] = [], ground: (
   // (sides are walked so each quad faces outwards; u runs the same way round for every side; finer
   // where the ground isn't level, so a river's banks keep their shape)
   for (let k = 0; k < 4; k++) {
-    for (let u = -edge; u < edge - 1e-6; u += STEP) {
-      const u1 = Math.min(edge, u + STEP);
+    const step = Math.max(STEP, (2 * edge) / COLS);
+    for (let u = -edge; u < edge - 1e-6; u += step) {
+      const u1 = Math.min(edge, u + step);
       const flat = [u, (u + u1) / 2, u1].every((x) => Math.abs(gAt(k, x)) < 0.01);
       if (flat) column(k, u, u1);
       else for (let v = u; v < u1 - 1e-6; v += 0.5) column(k, v, Math.min(u1, v + 0.5));

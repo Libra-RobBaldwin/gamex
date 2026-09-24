@@ -12,6 +12,10 @@ function bezier(a: XZ, c: XZ, b: XZ): XZ[] {
   return out;
 }
 
+// You can build out to BOUND either side of the centre; the roads out of town end OUT from the
+// centre, near enough the edge to run on off the map.
+const BOUND = 820, OUT = BOUND - 10;
+
 function townStreets(): MapStreet[] {
   const road = (a: XZ, b: XZ, c?: XZ, type = 'street', o: Partial<MapStreet> = {}): MapStreet => ({ a, b, c, type, ...o });
   // the high street is a tree-lined avenue, from under the flyover to a roundabout on the bypass
@@ -31,22 +35,22 @@ function townStreets(): MapStreet[] {
     road({ x: 0, z: 110 }, { x: 110, z: 110 }),
     road({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 }, 'dual'), // a sweeping dual-carriageway bypass
     road({ x: -215, z: -150 }, { x: -215, z: 150 }, undefined, 'street', over), // a flyover across the main road
-    road({ x: 0, z: -150 }, { x: 510, z: -200 }, undefined, 'street', over), // a bridge over the lake, and on out of town to the east
+    road({ x: 0, z: -150 }, { x: OUT, z: -150 - (50 * OUT) / 510 }, undefined, 'street', over), // a bridge over the lake, and on out of town to the east
     // the industrial estate
     road({ x: 0, z: -200 }, { x: 0, z: -380 }),
     road({ x: -190, z: -290 }, { x: 150, z: -290 }),
     road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 }),
     // a motorway along the south edge, reached from the estate by a dual carriageway
     // the motorway ends at a roundabout, where it carries on east as a fast dual carriageway
-    road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, 'motorway'),
-    road({ x: 0, z: -470 }, { x: 510, z: -470 }, undefined, 'dual-2-70-0'),
+    road({ x: -OUT, z: -470 }, { x: 0, z: -470 }, undefined, 'motorway'),
+    road({ x: 0, z: -470 }, { x: OUT, z: -470 }, undefined, 'dual-2-70-0'),
     road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, 'dual'),
     // a main line railway along the north, lifted over the high road, and a road tunnel under the lake
-    road({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, 'rail-main', { cross: 'bridge', grade: 0.025, snap: false }),
+    road({ x: -OUT, z: 185 }, { x: OUT, z: 185 }, undefined, 'rail-main', { cross: 'bridge', grade: 0.025, snap: false }),
     road({ x: 250, z: -470 }, { x: 250, z: 90 }, undefined, 'street', { cross: 'tunnel', grade: 0.08 }), // from the dual carriageway
     // roads out of town: west from the end of the high street, north under the railway (both run off the map)
-    road({ x: -230, z: 0 }, { x: -510, z: 0 }, undefined, 'rural-60'),
-    road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, 'rural-60'),
+    road({ x: -230, z: 0 }, { x: -OUT, z: 0 }, undefined, 'rural-60'),
+    road({ x: 0, z: 200 }, { x: 0, z: OUT }, undefined, 'rural-60'),
   ];
 }
 
@@ -54,7 +58,7 @@ export const TOWN_MAP: MapSpec = {
   id: 'town',
   name: 'Starter town',
   seed: 99,
-  bound: 520,
+  bound: BOUND,
   water: TOWN_WATER,
   // an industrial estate south of the centre
   zones: [{ kind: 'industrial', box: { x0: -280, z0: -Infinity, x1: 280, z1: -215 } }],
@@ -70,5 +74,5 @@ export const TOWN_MAP: MapSpec = {
   // the starter line: the high street's west end, its east end, and up the road north
   line: [{ x: -85, z: 0 }, { x: 120, z: 0 }, { x: 0, z: 150 }],
   industries: true,
-  trees: { count: 1400, clear: 140 },
+  trees: { count: Math.round(1400 * (BOUND / 520) ** 2), clear: 140 }, // (woods as thick as they always were, over the bigger map)
 };

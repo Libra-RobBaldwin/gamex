@@ -57,7 +57,10 @@ function mapLine() {
 await loading.stage(MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
 const BOUND = MAP.bound;
 // the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
-const gameWater = new GameWater(BOUND * (BOUND > 520 ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
+// A big map (the region) is drawn more coarsely until it streams (docs/region.md R4); the town, even
+// widened, is drawn in full.
+const BIG = BOUND > 1000;
+const gameWater = new GameWater(BOUND * (BIG ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
 const isWater = (p: P) => gameWater.isWater(p);
 const EDGE = gameWater.half; // (where the ground ends, in a cut face: game/edge.ts)
 const net = new Network(isWater, BOUND, 11);
@@ -111,7 +114,7 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, SCALE > 1 ? 4 : undefined, SCALE === 1); // (no 3D hedgerows on a big map until it streams: docs/region.md R4)
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2), gameGround.ground.material);
@@ -264,7 +267,7 @@ interface Built { lot: Lot; born: number; height: number; name: string; detail: 
 const buildings: Built[] = [];
 const cityGroup = new THREE.Group();
 scene.add(cityGroup);
-const CH = BOUND > 520 ? 240 : 120; // (bigger on a big map: fewer draw calls when it's all in view)
+const CH = BIG ? 240 : 120; // (bigger on a big map: fewer draw calls when it's all in view)
 const chunks = new Map<string, { members: Set<Built>; group: THREE.Group; dirty: boolean }>();
 
 function bakeGroup(group: THREE.Group) {
