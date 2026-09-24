@@ -174,7 +174,7 @@ const FRAG_BODY = `
 #endif
   vec3 fieldC = mix( uCropA[ ci ], uCropB[ ci ], gRamp( 0.3, 0.7, mac.g * 0.7 + mac.b * 0.3 ) );
   col += fieldC * ( 1.0 + rows + ( tuft * 0.9 + clump * 0.8 ) * row.w + grain * ( ci == 4 ? 0.7 : 0.15 ) - tram * 0.2 ) * fld;
-  col += mix( uPal[${P('lawn')}], grass, 0.3 ) * ( 1.0 + tuft * 0.2 + clump * 0.12 + ( ci == 7 ? rows : 0.0 ) ) * lawn;
+  col += mix( uPal[${P('lawn')}], grass, 0.3 ) * ( 1.0 + tuft * 0.35 + clump * 0.4 + nz * 0.15 + ( ci == 7 ? rows : 0.0 ) ) * lawn;
 
   col += mix( uPal[${P('wood')}], uPal[${P('litter')}], gRamp( 0.45, 0.75, d1.g * 0.5 + d2.g * 0.5 ) ) * ( 1.0 + tuft * 0.3 + ( d2.b - 0.5 ) * 0.3 ) * wood;
   col += mix( uPal[${P('bare')}], uPal[${P('bareDark')}], gRamp( 0.3, 0.7, d2.b * 0.6 + mac.b * 0.4 ) ) * ( 1.0 + grain * 0.45 + tuft * 0.15 ) * bare;
