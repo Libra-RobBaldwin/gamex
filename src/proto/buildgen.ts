@@ -948,6 +948,8 @@ const lawnM = (f: number) => gmat(`lawn${f}`, (x, r) => {
   for (let i = 0; i < 4; i++) { x.fillStyle = shade('#6aa046', f * (i % 2 ? 1.07 : 0.95)); x.fillRect(0, i * 16, 64, 16); }
   for (let i = 0; i < 300; i++) { x.fillStyle = `rgba(${r() < 0.5 ? '40,70,20' : '200,230,150'},0.18)`; x.fillRect(r() * 64, r() * 64, 1, 1.5); }
 });
+// every lawn and meadow the plots and the landscaping lay (the game gives them the ground's look)
+export const grassMats = () => [meadowM(), ...[0.94, 0.96, 1, 1.03, 1.04, 1.06].map(lawnM)] as THREE.MeshLambertMaterial[];
 const slabsM = () => gmat('slabs', (x, r) => {
   x.fillStyle = '#b3aea4'; x.fillRect(0, 0, 64, 64);
   for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { x.fillStyle = shade('#cfcac0', 0.95 + r() * 0.1); x.fillRect(i * 16 + 0.6, j * 16 + 0.6, 14.8, 14.8); }

@@ -7,6 +7,7 @@ on it yet. This page is the API and the plan for wiring it in.
 
 ```
 catalogue.ts   types, cargo, chains, sizes, eras, station kinds, catchments (pure data)
+chains.ts      how they link: the chain graph, chains, value, unit rates, eras, the production rule
 state.ts       IndustryVisualState (what the economy sends) and the moving-part descriptions
 kit.ts         vertex-coloured geometry kit (one mesh per site; runs under Node)
 site.ts        plot fitting and the parts a site is made of
@@ -31,7 +32,7 @@ Each type has:
 |---|---|
 | `role` | `primary` (from the ground), `processor`, `sink` (consumes, makes nothing you carry), `hub` (stores and re-sends the same cargo) or `gateway` (docks: exports in, imports out, independently) |
 | `mix` | for processors: `all` needs every required input for a cycle; `any` runs a cycle on whichever input is there |
-| `inputs`, `outputs` | amount per production cycle. An input can be `optional`; while every optional input is supplied, output is multiplied by `boost` |
+| `inputs`, `outputs` | amount per production cycle. An input can be `optional`; while every optional input is supplied, output is multiplied by `boost`. A flow can have its own `era`, the years it runs at every site, old or new; only the docks use it |
 | `rate` | cycles per second at production level 1 (the 2D game's `rate`) |
 | `size`, `minSize` | preferred and smallest site, in metres, `w` along the road frontage |
 | `era` | years new ones appear; each variant has its own era too |
@@ -44,13 +45,14 @@ The chains:
 
 ```
 coal_mine ──coal──┬──────────────▶ power_station (sink)
-                  ├──────────────▶ steelworks ◀── iron_ore ── iron_ore_mine, port (import)
-                  └──▶ port (export)   ▲  └──steel──▶ goods_factory, port (export)
+                  ├──────────────▶ steelworks ◀── iron_ore ── iron_ore_mine, port (import from 1850)
+                  └──▶ port (export to 1984)  └──steel──▶ goods_factory, port (export)
+port (import from 1985) ──coal──▶ power_station, steelworks
 quarry ──stone──▶ towns, steelworks (optional flux, ×1.25)
 forest ──wood──▶ sawmill ──planks──▶ goods_factory, towns
 farm ──grain──▶ brewery ──beer──▶ towns, warehouse
      ├─grain/livestock──▶ food_plant ──food──▶ towns, warehouse
-oil_well, port ──oil──▶ refinery ──fuel──▶ towns, warehouse
+oil_well, port (from 1920) ──oil──▶ refinery ──fuel──▶ towns, warehouse
                                  └─chemicals──▶ goods_factory
 goods_factory ──goods──▶ towns, warehouse, port (export)
 warehouse: goods, food, beer, fuel in ──▶ the same out, to towns
@@ -62,7 +64,36 @@ planks and the food plant makes food, rather than both making goods. `CARGO_2D` 
 cargo to its nearest 2D one for anything that still only knows five.
 
 Helpers: `variantFor(type, year, seed)`, `outputRate(type, level, variant)`, `consumersOf(cargo)`,
-`producersOf(cargo)` and `TOWN_ACCEPTS`.
+`producersOf(cargo)`, `inEra`, `flowLive(flow, year)` and `TOWN_ACCEPTS`.
+
+## How industries link
+
+`chains.ts` derives everything below from the catalogue, so it can't drift from the numbers.
+
+- `chainGraph(year?)`: nodes are industry types, cargoes and `town`; `produce` edges run industry
+  to cargo and `consume` edges cargo to industry or town, with amounts per cycle, per second at
+  level 1, `optional`, `needsBoth` (one of two inputs a cycle needs at once) and the era.
+  `links(year?)` gives the same as industry-to-industry hops.
+- `chains()`: every way to get a product to someone who takes it for good (towns, the power
+  station, the docks for export). A mix `any` processor starts one chain per input; a mix `all`
+  one keeps its inputs together. There are 11: coal, stone, sawn timber, beer, food from grain,
+  food from livestock, fuel, steel, and goods from steel, sawn timber or chemicals. Each has its
+  steps, ends, relays (the distribution centre), legs (1 to 3), `needsBoth`, `boosted`, the years
+  it's open and a one-line explanation. `chainsTo(end)`, `chainsIn(year)`, `whyClosed(chain, year)`.
+- `stepValues()` and `chainPay(chain)`: each step's worth in and out at the pay rates, and a
+  chain's pay per unit of raw material over equal legs (coal 3.2, goods from steel 14.8).
+- `suppliers(id, level)` and `chainSites(chain, level)`: how many level-1 sites of each kind keep
+  a processor busy at a level (a steelworks at level 1: 0.9 collieries and 2 ironstone mines).
+- `runCycles(id, stock, level, dt, { variant, year })`: the production rule for the economy to
+  adopt. `all` is limited by the scarcest need; `any` shares cycles between inputs in stock;
+  boosts apply while every optional input covers the cycles; sinks never refuse; hubs relay; the
+  docks import at their rate and take exports in full, by year.
+- `feedable(id, year, present)`: for world generation, whether a type can run on what's on the
+  map. Refineries need the docks for oil in 1920–1949, and steelworks need them for ore after
+  1985 and for coal after 2015, so an inland map shouldn't found them then.
+- `audit()`: errors (anything made that nobody takes, or needed that nobody makes, in any year),
+  warnings (thin steps, too many suppliers) and notes for the economy. The tests keep it free of
+  errors.
 
 ## Building a site
 
@@ -88,6 +119,9 @@ const handle = fx.add(model, state);  // moving parts
   converts.
 - `model.dyn` is plain data for the moving parts: piles, rotors, emitters, movers, lamps, berths
   (where a lorry, wagon or ship would stand) and decay spots.
+- `{ bare: true }` leaves out the site's own lorry bays, rail sidings and loading canopies but
+  still records their anchors, for a site whose loading facilities are bought as terminals and
+  drawn by them (see [terminals.md](terminals.md)). Everything else is drawn as before.
 
 ## Production visuals
 
@@ -157,6 +191,8 @@ planning hints.
    is true. The station kind must be in `type.serve`. `anchors.lorry`, `anchors.rail` and
    `anchors.quay` are good default spots to suggest when the player drags a station near a site.
    Loading moves stock between the site's output store and the station, as `sim.ts` does now.
+   Terminals ([terminals.md](terminals.md)) take this further: a site's station for each mode is
+   a terminal bought for it, placed at these anchors, whose throughput caps the site's growth.
 4. **Visual state from ticks.** After each economy tick, or each game minute (it doesn't need
    more), build an `IndustryVisualState` from the site's stock against its capacity, the
    production multiplier, whether it ran this tick, whether a vehicle loaded in the last few game

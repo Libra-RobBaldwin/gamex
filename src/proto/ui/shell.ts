@@ -38,6 +38,8 @@ export interface SheetSpec {
   fresh?: boolean;
   /** Which bar button it belongs to (lit while it is open). */
   from?: BarKey;
+  /** Hold the sheet at its full height, so switching tabs doesn't move the tabs under the finger. */
+  fixed?: boolean;
 }
 export interface BuildCategory { id: string; label: string; icon: Icon; disabled?: string; note?: string }
 export interface BuildItem {
@@ -75,6 +77,8 @@ export interface ToolHandle {
   setPrimary(a: Action | null): void;
   /** A card above the strip, for the blueprint and its warnings; null hides it. */
   setPanel(html: string | null, bind?: (el: HTMLElement) => void): void;
+  /** Screen points the card must not cover (the blueprint's ends); it moves across if it would. */
+  avoid(points: { x: number; y: number }[]): void;
   /** Leave the tool without calling onDone or onCancel. */
   end(): void;
 }
@@ -106,6 +110,8 @@ export interface Rect { left: number; top: number; right: number; bottom: number
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 const html = (el: Element, s: string) => { el.innerHTML = s; };
+// fade a sideways-scrolling row's far edge while there's more of it out of sight
+const fade = (o: HTMLElement) => { o.classList.toggle('more', o.scrollWidth > o.clientWidth + 1); o.classList.toggle('end', o.scrollLeft + o.clientWidth >= o.scrollWidth - 2); };
 const said = (ic: Icon, words: string) => `${icon(ic)}<span class="vh">${words}</span>`;
 function actionHtml(a: Action, i: number, prefix: string) {
   const cls = ['act', a.kind ?? ''].join(' ').trim();
@@ -127,6 +133,9 @@ export class Shell {
   private hintTimer = 0;
   private firstRunKey = '';
   private viewShown = '';
+  private viewBtnShown = '';
+  private tabScroll = 0;
+  private guardUntil = 0;
 
   constructor(root: HTMLElement, opts: ShellOptions) {
     this.root = root;
@@ -150,10 +159,10 @@ export class Shell {
           <button id="perfbtn" aria-expanded="false" aria-controls="perf">${icon('activity')}<span>Performance</span></button>
           <div id="perf" role="status" hidden><span id="perf-t">measuring…</span></div>
         </div>
-        <button id="compass" aria-label="Face north" title="Face north"><span id="needle">${needleSvg()}</span></button>
+        <button id="compass" aria-label="Face north and reset the tilt" title="Face north"><span id="needle">${needleSvg()}</span></button>
+        <button id="viewbtn" class="round" hidden aria-label="View" title="View">${icon('map')}<span></span></button>
         <div id="firstrun" role="status" hidden></div>
       </div>
-      <div id="hint" role="status" aria-live="polite" hidden></div>
       <section id="sheet" class="sheet facet" role="dialog" hidden></section>
       <div id="layers" class="facet" role="dialog" aria-label="Map layers" hidden></div>
       <div id="tpanel" class="facet" hidden></div>
@@ -163,12 +172,22 @@ export class Shell {
         <button data-bar="transport" aria-expanded="false">${icon('transport')}<span>Transport</span></button>
         <button data-bar="layers" aria-expanded="false">${icon('layers')}<span>Layers</span></button>
         <button data-bar="menu" aria-expanded="false">${icon('menu')}<span>Menu</span></button>
-      </nav>`);
+      </nav>
+      <div id="hint" role="status" aria-live="polite" hidden></div>
+      <div id="safe" aria-hidden="true"></div>`);
     this.$('#compass').addEventListener('click', () => opts.onCompass());
     this.$('#sp-pause').addEventListener('click', () => opts.onPause());
     this.$('#sp-rate').addEventListener('click', () => opts.onRate());
     this.$('#perfbtn').addEventListener('click', () => opts.onPerf());
     this.$('#clockbtn').addEventListener('click', () => this.toggleDrawer());
+    // while a tool hides the bar (and with it Layers), this cycles 3D, Low and Plan
+    this.$('#viewbtn').addEventListener('click', () => {
+      if (!this.views) return;
+      const o = this.views.options, i = o.findIndex((x) => x.id === this.views!.current());
+      const next = o[(i + 1) % o.length];
+      this.views.pick(next.id);
+      this.labelViewBtn(next.id);
+    });
     this.root.querySelectorAll<HTMLButtonElement>('#bar button').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.bar as BarKey;
       if (b.getAttribute('aria-expanded') === 'true') return k === 'layers' ? this.closeLayers() : this.closeSheet();
@@ -177,10 +196,14 @@ export class Shell {
       else if (k === 'layers') this.openLayers();
       else this.openMenu();
     }));
+    // A tap on the map opens a sheet on pointerup; the click from that same tap must not then
+    // press whatever the new sheet put under the finger (see guardTap).
+    window.addEventListener('click', (e) => { if (performance.now() < this.guardUntil && root.contains(e.target as Node)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
     window.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (!this.$('#layers').hidden) this.closeLayers();
       else if (this.sheet) this.closeSheet();
+      else if (this.tool) { const t = this.tool; this.stopTool(); t.onCancel?.(); }
     });
     const ro = new ResizeObserver(() => this.layout());
     for (const s of ['#bar', '#tool', '#tpanel', '#sheet', '#hud-top']) ro.observe(this.$(s));
@@ -214,6 +237,9 @@ export class Shell {
   }
   /** Money, once the economy is wired; empty hides it. */
   setMoney(text: string) { this.$('#money').textContent = text; }
+
+  /** Call when a map tap is about to open or change a sheet: swallows that tap's click. */
+  guardTap(ms = 400) { this.guardUntil = performance.now() + ms; }
 
   // ---------------- hint and first run ----------------
   /** A line of help over the map. With `ms` it clears itself; without, it stays until replaced. */
@@ -251,11 +277,12 @@ export class Shell {
     this.closeLayers();
     const was = this.sheet;
     if (was && was.key !== spec.key) { this.sheet = null; was.onClose?.(); }
+    if (!was || was.key !== spec.key) this.toggleDrawer(false);
     const el = this.$('#sheet');
     const body = el.querySelector('.sb');
     const keep = was && was.key === spec.key && !spec.fresh && body ? body.scrollTop : 0;
     this.sheet = spec;
-    el.className = `sheet facet tone-${spec.tone ?? 'look'}`;
+    el.className = `sheet facet tone-${spec.tone ?? 'look'}${spec.fixed ? ' fixed' : ''}`;
     el.setAttribute('aria-label', spec.title);
     html(el, `<header>
         ${spec.back ? `<button class="back" aria-label="Back" title="Back">${icon('arrowLeft')}</button>` : ''}
@@ -270,6 +297,13 @@ export class Shell {
     el.querySelector('.close')!.addEventListener('click', () => this.closeSheet());
     el.querySelector('.back')?.addEventListener('click', () => spec.back!());
     el.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => spec.onTab?.(b.dataset.tab!)));
+    const tabs = el.querySelector<HTMLElement>('.stabs');
+    if (tabs) {
+      tabs.scrollLeft = this.tabScroll;
+      const more = () => { this.tabScroll = tabs.scrollLeft; fade(tabs); };
+      tabs.addEventListener('scroll', more, { passive: true });
+      requestAnimationFrame(more);
+    }
     el.querySelectorAll<HTMLButtonElement>('[data-act]').forEach((b) => b.addEventListener('click', () => spec.actions![+b.dataset.act!].onClick()));
     el.querySelector('.sb')!.scrollTop = keep;
     this.markBar(spec.from ?? null);
@@ -318,7 +352,7 @@ export class Shell {
     const c = this.cats.find((x) => x.id === this.buildCat);
     const list = this.items.get(this.buildCat) ?? [];
     const body = this.openSheet({
-      key: `build:${this.buildCat}`, title: 'Build', sub: 'Pick something, then draw it on the map', from: 'build',
+      key: `build:${this.buildCat}`, title: 'Build', sub: 'Pick something, then draw it on the map', from: 'build', fixed: true,
       tabs: this.cats.map((x) => ({ id: x.id, label: x.label, icon: x.icon, disabled: x.disabled })), tab: this.buildCat,
       onTab: (id) => this.openBuild(id),
       body: `<div class="grid">${list.map((it, i) => `<button class="card${it.locked ? ' locked' : ''}${it.on?.() ? ' on' : ''} tone-${it.tone ?? 'look'}" data-item="${i}" ${it.locked ? 'aria-disabled="true"' : ''}>
@@ -343,7 +377,7 @@ export class Shell {
     this.ttab = tab ?? (this.ttabs.some((t) => t.id === this.ttab) ? this.ttab : this.ttabs[0]?.id ?? '');
     const t = this.ttabs.find((x) => x.id === this.ttab);
     const body = this.openSheet({
-      key: `transport:${this.ttab}`, title: 'Transport', sub: t?.sub ?? 'Your lines and vehicles', from: 'transport',
+      key: `transport:${this.ttab}`, title: 'Transport', sub: t?.sub ?? 'Your lines and vehicles', from: 'transport', fixed: true,
       tabs: this.ttabs.map((x) => ({ id: x.id, label: x.label, icon: x.icon })), tab: this.ttab,
       onTab: (id) => this.openTransport(id), body: '',
     });
@@ -387,9 +421,18 @@ export class Shell {
   }
   /** Light the view that's showing (cheap: only touches the DOM when it changes). */
   syncView(id = this.views?.current() ?? '') {
+    if (this.tool && id !== this.viewBtnShown) this.labelViewBtn(id);
     if (id === this.viewShown || this.$('#layers').hidden) return;
     this.viewShown = id;
     this.root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === id)));
+  }
+
+  private labelViewBtn(id = this.views?.current() ?? '') {
+    const o = this.views?.options.find((x) => x.id === id);
+    const b = this.$('#viewbtn');
+    this.viewBtnShown = id;
+    b.querySelector('span')!.textContent = o?.label ?? '';
+    b.setAttribute('aria-label', `View: ${o?.label ?? ''}, tap for the next`);
   }
 
   // ---------------- menu ----------------
@@ -424,7 +467,10 @@ export class Shell {
     const el = this.$('#tool');
     const t = this.tool;
     const draw = () => {
+      const was = (el.querySelector('.opts') as HTMLElement | null)?.scrollLeft ?? 0;
       el.className = `tone-${t.tone ?? 'look'}`;
+      el.setAttribute('role', 'toolbar');
+      el.setAttribute('aria-label', t.name);
       html(el, `<div class="what">${t.icon ? `<i class="badge">${icon(t.icon)}</i>` : ''}<div class="tw"><b>${esc(t.name)}</b>${t.spec ? `<span>${esc(t.spec)}</span>` : ''}</div></div>
         <div class="opts">${t.options ?? ''}</div>
         <div class="acts">
@@ -436,9 +482,10 @@ export class Shell {
       el.querySelector('#t-cancel')!.addEventListener('click', () => { this.stopTool(); t.onCancel?.(); });
       drawPrimary();
       const o = el.querySelector('.opts') as HTMLElement;
+      o.scrollLeft = was;
       t.bind?.(o);
       // fade the edge while there are options scrolled out of sight
-      const more = () => { o.classList.toggle('more', o.scrollWidth > o.clientWidth + 1); o.classList.toggle('end', o.scrollLeft + o.clientWidth >= o.scrollWidth - 2); };
+      const more = () => fade(o);
       o.addEventListener('scroll', more, { passive: true });
       requestAnimationFrame(more);
     };
@@ -453,6 +500,8 @@ export class Shell {
     el.classList.add('enter');
     el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true });
     this.$('#bar').hidden = true;
+    this.$('#viewbtn').hidden = !this.views;
+    this.labelViewBtn();
     document.body.classList.add('tooling');
     this.layout();
     const handle: ToolHandle = {
@@ -464,10 +513,19 @@ export class Shell {
         if (this.tool !== t) return;
         const p = this.$('#tpanel');
         if (h === null) { if (!p.hidden) { p.hidden = true; html(p, ''); } return; }
-        p.className = `facet tone-${t.tone ?? 'look'}`;
+        p.className = `facet tone-${t.tone ?? 'look'}${p.classList.contains('alt') && !p.hidden ? ' alt' : ''}`;
         html(p, h);
         p.hidden = false;
         bind?.(p);
+      },
+      avoid: (pts) => {
+        const p = this.$('#tpanel');
+        if (this.tool !== t || p.hidden) return;
+        const hits = () => { const r = p.getBoundingClientRect(); return pts.filter((q) => q.x > r.left - 12 && q.x < r.right + 12 && q.y > r.top - 12 && q.y < r.bottom + 12).length; };
+        const here = hits();
+        if (!here) return;
+        p.classList.toggle('alt');
+        if (hits() >= here) p.classList.toggle('alt'); // no better over there: stay
       },
       end: () => { if (this.tool === t) this.stopTool(); },
     };
@@ -485,6 +543,7 @@ export class Shell {
     p.hidden = true;
     html(p, '');
     this.$('#bar').hidden = false;
+    this.$('#viewbtn').hidden = true;
     document.body.classList.remove('tooling');
     this.hint(null);
     this.layout();
@@ -494,7 +553,9 @@ export class Shell {
   /** The part of the screen the chrome leaves clear, in CSS pixels (for framing the camera). */
   clearRect(): Rect {
     const W = window.innerWidth, H = window.innerHeight;
-    const r: Rect = { left: 0, top: 0, right: W, bottom: H };
+    // (#safe is padded by the safe-area insets, so its computed padding is them in pixels)
+    const sp = getComputedStyle(this.$('#safe'));
+    const r: Rect = { left: parseFloat(sp.paddingLeft) || 0, top: 0, right: W - (parseFloat(sp.paddingRight) || 0), bottom: H - (parseFloat(sp.paddingBottom) || 0) };
     const status = this.$('#status').getBoundingClientRect();
     r.top = status.bottom;
     for (const s of ['#bar', '#tool', '#tpanel', '#sheet']) {
@@ -502,9 +563,12 @@ export class Shell {
       if (el.hidden) continue;
       const b = { top: el.offsetTop, left: el.offsetLeft, width: el.offsetWidth, height: el.offsetHeight };
       if (!b.width || !b.height) continue;
-      if (b.width >= W * 0.6) { if (b.top > H / 2) r.bottom = Math.min(r.bottom, b.top); }
+      // full width and sitting on the bottom (the bar, a sheet, the blueprint): the map ends above
+      // it, however tall; narrower and on the right (landscape): the map ends beside it
+      const low = b.top + b.height > H * 0.6;
+      if (b.width >= W * 0.6) { if (low) r.bottom = Math.min(r.bottom, b.top); }
       else if (b.left > W * 0.35) r.right = Math.min(r.right, b.left);
-      else if (b.top > H / 2) r.bottom = Math.min(r.bottom, b.top);
+      else if (low) r.bottom = Math.min(r.bottom, b.top);
     }
     return r;
   }
@@ -518,5 +582,18 @@ export class Shell {
     h.style.left = `${(c.left + c.right) / 2}px`;
     h.style.bottom = `${window.innerHeight - c.bottom + 8}px`;
     h.style.maxWidth = `${Math.max(160, c.right - c.left - 16)}px`;
+    // and keeps clear of the compass and view buttons, if it reaches up beside them
+    const hr = h.getBoundingClientRect();
+    for (const s of ['#compass', '#viewbtn']) {
+      const b = this.$(s);
+      if (b.hidden) continue;
+      const br = b.getBoundingClientRect();
+      if (hr.right > br.left - 4 && hr.left < br.right && hr.bottom > br.top && hr.top < br.bottom) {
+        const right = br.left - 8;
+        h.style.left = `${(c.left + right) / 2}px`;
+        h.style.maxWidth = `${Math.max(120, right - c.left - 8)}px`;
+        break;
+      }
+    }
   }
 }
