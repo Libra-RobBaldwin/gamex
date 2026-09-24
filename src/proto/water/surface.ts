@@ -46,9 +46,14 @@ export function waterSurface(t: WaterTile, stride = 1): WaterMesh | null {
   for (let b = 0; b < M; b++) for (let a = 0; a < M; a++) {
     const v = vid[b * M + a];
     if (v < 0) continue;
-    const k = at(a, b), y = t.nearLevel[k];
+    // a dry corner sits just under its ground, so the surface meets the ground between it and the
+    // wet corner and never shows over dry land (land can be lower than a river beside it)
+    // (a corner on a narrow stream's line, dry only because the stream slips between raster points,
+    // keeps the stream's level and a nominal depth, so the stream shows wherever its channel is)
+    const k = at(a, b), stream = !t.kind[k] && t.cover[k];
+    const y = t.kind[k] || stream ? t.nearLevel[k] : Math.min(t.nearLevel[k], t.ground[k] - 0.05);
     pos[v * 3] = a * step; pos[v * 3 + 1] = y; pos[v * 3 + 2] = b * step;
-    wat[v * 4] = y - t.ground[k]; wat[v * 4 + 1] = t.shore[k]; wat[v * 4 + 2] = t.flowX[k]; wat[v * 4 + 3] = t.flowZ[k];
+    wat[v * 4] = stream ? Math.max(0.35, y - t.ground[k]) : y - t.ground[k]; wat[v * 4 + 1] = t.shore[k]; wat[v * 4 + 2] = t.flowX[k]; wat[v * 4 + 3] = t.flowZ[k];
     kind[v] = t.nearKind[k];
     if (y < min) min = y;
     if (y > max) max = y;
@@ -86,7 +91,8 @@ export function shoreColours(t: WaterTile, m: MeshData): Float32Array {
     if (!kind || t.shore[k] < -25) continue;
     // smooth reads (the raster is coarser than the ground mesh), and a slow wobble in every band's
     // width so the edges of beaches and banks don't follow the raster
-    const level = rasterAt(t, t.nearLevel, x, z), above = y - level, slope = 1 - Nm[v * 3 + 1];
+    // under water only where the raster is wet (land lower than a river beside it is still land)
+    const wet = t.kind[k] > 0, level = rasterAt(t, t.nearLevel, x, z), above = wet ? y - level : Math.max(0.05, y - level), slope = 1 - Nm[v * 3 + 1];
     const wob = 1 + 0.3 * Math.sin(x * 0.071 + 1.7 * Math.sin(z * 0.043)) * Math.sin(z * 0.067 + 1.3 * Math.sin(x * 0.029));
     const dist = Math.max(0, -rasterAt(t, t.shore, x, z)) / wob;
     let c: number[], w = 0;
@@ -95,13 +101,15 @@ export function shoreColours(t: WaterTile, m: MeshData): Float32Array {
       const d = -above;
       c = kind === KIND_CODE.river || kind === KIND_CODE.canal ? mix3(C.bedGravel, C.bedSilt, sstep(0.3, 2, d)) : mix3(C.bedSand, C.bedSilt, sstep(1, 5, d));
       c = mix3(c, C.bedDeep, sstep(3, 12, d));
+      // water only inches deep over a flat, away from the shore, is a marshy margin: wet mud and weed
+      if (kind === KIND_CODE.lake) c = mix3(c, mix3(C.wetMud, C.marsh, 0.5), (1 - sstep(0.05, 0.35, d)) * sstep(2, 8, t.shore[k]));
       w = 1;
     } else if (kind === KIND_CODE.sea) {
       // beaches: sand on gentle shores, shingle where it's steep; a broad strip, fading out inland
       const width = 6 + 18 * (1 - sstep(0.02, 0.12, slope)), shingle = sstep(0.05, 0.14, slope);
       const dry = mix3(C.sand, C.shingle, shingle), wet = mix3(C.wetSand, C.wetShingle, shingle);
       c = mix3(wet, dry, sstep(0.15, 0.6, above));
-      w = 1 - sstep(width * 0.7, width, dist) * sstep(1.5, 3, above);
+      w = (1 - sstep(width * 0.7, width, dist)) * (1 - sstep(2.5, 4, above));
     } else if (kind === KIND_CODE.estuary) {
       // mudflats at the edge, salt marsh behind
       c = mix3(mix3(C.wetMud, C.mud, sstep(0.1, 0.5, above)), C.marsh, sstep(3, 9, dist));
@@ -110,7 +118,7 @@ export function shoreColours(t: WaterTile, m: MeshData): Float32Array {
       // a narrow strand: sand where flat, shingle where steeper, darker at the waterline
       const shingle = sstep(0.04, 0.15, slope), dry = mix3(C.sand, C.shingle, shingle), wet = mix3(C.wetSand, C.wetShingle, shingle);
       c = mix3(wet, dry, sstep(0.08, 0.35, above));
-      w = 1 - sstep(3, 6, dist) * sstep(0.4, 1.2, above);
+      w = (1 - sstep(3, 6, dist)) * (1 - sstep(0.8, 1.6, above));
     } else {
       // rivers and canals: muddy banks where the ground slopes into the water
       c = mix3(C.wetMud, C.mud, sstep(0.1, 0.45, above));
@@ -131,7 +139,7 @@ export function reedSpots(t: WaterTile, o: { density?: number; seed?: number } =
   for (let b = 0; b < cells; b++) for (let a = 0; a < cells; a++) {
     const k = (mg + b) * n + mg + a, kind = t.nearKind[k];
     if (!kind || kind === KIND_CODE.sea) continue;
-    const s = t.shore[k], above = t.ground[k] - t.nearLevel[k];
+    const s = t.shore[k], above = t.kind[k] ? t.ground[k] - t.nearLevel[k] : Math.max(0, t.ground[k] - t.nearLevel[k]);
     if (s > 1.5 || s < -3.5 || above > 0.9 || above < -0.5) continue;
     // not on steep ground (a river cut through a sill, a lake under a crag)
     const dx = t.ground[k + 1] - t.ground[k - 1], dz = t.ground[k + n] - t.ground[k - n];

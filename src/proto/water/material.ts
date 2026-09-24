@@ -20,12 +20,12 @@ export const WATER_LIGHT: Record<'day' | 'dusk', WaterLight> = {
   day: {
     sunDir: new THREE.Vector3(-160, 260, 110).normalize(), sun: c('#fff3dc'), skyTop: c('#5b93cc'), skyHorizon: c('#d4e6f2'), ambient: c('#b9cad4'),
     shallow: c('#3fd6c6'), deep: c('#0a3560'), foam: c('#f6fbfa'), reflect: 0.5, glint: 90,
-    hemiSky: c('#e8f3ff'), hemiGround: c('#5d7040'), hemi: 1.25, sunIntensity: 2.3, background: c('#a9cbe3'),
+    hemiSky: c('#e8f3ff'), hemiGround: c('#5d7040'), hemi: 0.95, sunIntensity: 2.9, background: c('#a9cbe3'),
   },
   dusk: {
     sunDir: new THREE.Vector3(-330, 90, 140).normalize(), sun: c('#ffae6b'), skyTop: c('#6c6aa8'), skyHorizon: c('#ffa66e'), ambient: c('#7f86bd'),
     shallow: c('#2f9c9a'), deep: c('#0b2a4a'), foam: c('#f7dcc6'), reflect: 0.34, glint: 14,
-    hemiSky: c('#b3a6d6'), hemiGround: c('#4a4234'), hemi: 1.05, sunIntensity: 1.9, background: c('#e8a883'),
+    hemiSky: c('#b3a6d6'), hemiGround: c('#4a4234'), hemi: 0.85, sunIntensity: 2.3, background: c('#e8a883'),
   },
 };
 
@@ -119,13 +119,14 @@ void main() {
 
   // foam: at the waterline, in lines washing in on the sea, and streaks where a river runs fast
   float noise = mix(fine.b, broad.b, 0.5);
-  float edge = 1.0 - smoothstep(0.02, 0.4, d);
+  // (by the shoreline, not just by depth: a lake spreading an inch deep over a flat has no surf)
+  float edge = (1.0 - smoothstep(0.3, 2.2, shore)) * (1.0 - smoothstep(0.05, 0.7, d));
   float wash = sea * pow(0.5 + 0.5 * sin(shore * 0.9 - uTime * 1.2), 3.0) * (1.0 - smoothstep(0.5, 14.0, shore));
   float rapids = smoothstep(1.3, 2.3, speed) * fine.b;
   float foam = smoothstep(0.42, 0.8, (edge * 1.1 + wash * 0.8 + rapids) * (0.45 + noise));
   col = mix(col, uFoam * (uAmbient * 0.7 + uSun * 0.45), foam * 0.9);
 
-  float alpha = mix(0.22, 0.94, column) + fres * 0.3;
+  float alpha = mix(0.3, 0.94, column) + fres * 0.3;
   alpha = max(alpha, foam * 0.9) * smoothstep(-0.04, 0.05, depth);
   gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
   #include <tonemapping_fragment>

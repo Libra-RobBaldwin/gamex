@@ -153,6 +153,21 @@ export function basinNear(R: Region, x: number, z: number): { id: number; level:
   return id < 0 ? null : { id, level: R.basinLevel[id] };
 }
 export const seaNear = (R: Region, x: number, z: number) => R.seaNear[cellOf(R, x, z)] === 1;
+// How much of the neighbourhood of a point belongs to a body: the bilinear blend of "is this cell
+// part of it" over the four cells around it (1 well inside, ½ midway to the first cell outside).
+export function share(R: Region, x: number, z: number, test: (k: number) => boolean) {
+  const g = R.g;
+  let fx = (x - g.x0) / g.step, fz = (z - g.z0) / g.step;
+  fx = Math.max(0, Math.min(g.nx - 1.001, fx)); fz = Math.max(0, Math.min(g.nz - 1.001, fz));
+  const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j, k = j * g.nx + i;
+  const v = (c: number) => (test(c) ? 1 : 0);
+  return (v(k) * (1 - tx) + v(k + 1) * tx) * (1 - tz) + (v(k + g.nx) * (1 - tx) + v(k + g.nx + 1) * tx) * tz;
+}
+// The depth water must have to count at a point this far from its body's cells: none within them,
+// rising to MARGIN_DEPTH a cell beyond, so a shoreline over a flat curves round instead of
+// stopping dead at the edge of the grid cells.
+export const MARGIN_DEPTH = 0.6;
+export const marginDepth = (sh: number) => Math.max(0, 0.5 - sh) * 2 * MARGIN_DEPTH;
 
 // ---- rivers ----
 function extractRivers(R: Region, rt: RiverTerrain | null, P: WaterParams): Reach[] {
@@ -250,13 +265,15 @@ function extractRivers(R: Region, rt: RiverTerrain | null, P: WaterParams): Reac
     for (let k = 0; k < m; k++) {
       const A = area[k], x = rs.X[k], z = rs.Z[k];
       // a slow wobble in width so banks aren't ruled lines; from world position, so it's continuous across confluences
-      hw[k] = 0.5 * Math.min(P.maxWidth, P.widthK * Math.pow(A, P.widthExp)) * (1 + 0.18 * noise.fbm(x / 110, z / 110, 2));
-      depth[k] = P.depthK * Math.pow(A, P.depthExp);
+      // (never narrower than MIN_WIDTH or shallower than MIN_DEPTH: a stream has to show on a
+      // 4 m raster and a 2–4 m ground mesh)
+      hw[k] = 0.5 * Math.max(MIN_WIDTH, Math.min(P.maxWidth, P.widthK * Math.pow(A, P.widthExp))) * (1 + 0.18 * noise.fbm(x / 110, z / 110, 2));
+      depth[k] = Math.max(MIN_DEPTH, P.depthK * Math.pow(A, P.depthExp));
     }
     return {
       id, key: `r${R.rx},${R.rz}:${id}`, n: m, x: Float64Array.from(rs.X), z: Float64Array.from(rs.Z), s: Float64Array.from(rs.S),
       area, hw, depth, surf: new Float32Array(m), speed: new Float32Array(m), cls: new Uint8Array(m), sub: new Uint8Array(m),
-      bank: P.bankSlope, reach: new Float32Array(m), up: [], down: -1, mouth: raw.mouth,
+      bank: new Float32Array(m).fill(P.bankSlope), reach: new Float32Array(m), up: [], down: -1, mouth: raw.mouth,
     };
   });
   raws.forEach((raw, i) => { if (raw.mouth === 'join') { const d = startAt.get(raw.end)!; reaches[i].down = d; if (d >= 0) reaches[d].up.push(i); } });
@@ -287,11 +304,11 @@ function profiles(R: Region, rt: RiverTerrain | null, P: WaterParams, reaches: R
     if (c >= 0) w = Math.max(w, R.srcWater[c]);
     return w;
   };
-  const inSea = (x: number, z: number) => seaNear(R, x, z);
   for (const id of order) {
     const r = reaches[id], m = r.n;
     const fb = (k: number) => 0.25 + 0.15 * r.depth[k];
     let prev = Infinity;
+    const tgt = new Float32Array(m);
     if (r.up.length) prev = Math.min(...r.up.map((u) => reaches[u].surf[reaches[u].n - 1]));
     for (let k = 0; k < m; k++) {
       const x = r.x[k], z = r.z[k], k0 = Math.max(0, k - 1), k1 = Math.min(m - 1, k + 1);
@@ -302,10 +319,21 @@ function profiles(R: Region, rt: RiverTerrain | null, P: WaterParams, reaches: R
       let target = Math.max(low - fb(k), lake);
       if (seaLevel !== null) target = Math.max(target, seaLevel);
       const y = Math.min(prev, target);
-      r.surf[k] = y; prev = y;
-      if (lake >= y - 0.01 && lake > -Infinity) r.sub[k] = 1;
-      if (seaLevel !== null && inSea(x, z) && low < seaLevel) r.sub[k] = 1;
+      r.surf[k] = y; prev = y; tgt[k] = target;
+      // (a river runs on through a lake or out into the sea: where the lake or sea is really there
+      // its level is at least the river's and wins; where the grid says lake but the ground says
+      // otherwise, the river still shows)
     }
+    // The running minimum is a staircase (level, then a sudden drop where the ground falls away):
+    // spread each drop over ±32 m, then hold the result under the ground and never uphill again.
+    // The ends keep their levels, so reaches still meet.
+    const raw = r.surf.slice();
+    for (let k = 1; k + 1 < m; k++) {
+      let a = 0, c = 0;
+      for (let q = Math.max(0, k - 4); q <= Math.min(m - 1, k + 4); q++) { a += raw[q]; c++; }
+      r.surf[k] = Math.min(a / c, tgt[k], r.surf[k - 1]);
+    }
+    if (m > 1) r.surf[m - 1] = Math.min(raw[m - 1], r.surf[m - 2]);
     // a source starts small: taper its first 40 m
     if (!r.up.length) for (let k = 0; k < m && r.s[k] < 40; k++) { const t = 0.35 + 0.65 * (r.s[k] / 40); r.hw[k] *= t; r.depth[k] *= t; }
     // tributaries meet the main river's level: lower their tails (at most 5% slope) onto it
@@ -340,16 +368,22 @@ function profiles(R: Region, rt: RiverTerrain | null, P: WaterParams, reaches: R
     const [rm, km] = path[0], wMouth = Math.min(P.estuaryMouth, 7 * 2 * rm.hw[km] + 20);
     for (let q = 0; q < dist.length && dist[q] <= len; q++) {
       const [rr, kk] = path[q], u = 1 - dist[q] / len, e = u * u;
-      rr.hw[kk] = rr.hw[kk] + (wMouth / 2 - rr.hw[kk]) * e * (1 + 0.1 * Math.sin(dist[q] / 170));
+      // it widens over the low ground only: no wider than the land within 2 m of the sea either side
+      const k0 = Math.max(0, kk - 1), k1 = Math.min(rr.n - 1, kk + 1), tx = rr.x[k1] - rr.x[k0], tz = rr.z[k1] - rr.z[k0], tl = Math.hypot(tx, tz) || 1;
+      let low = wMouth / 2;
+      for (const sd of [-1, 1]) for (let o = 8; o < wMouth / 2; o += 8) if (regionAt(R, R.ground, rr.x[kk] - (tz / tl) * o * sd, rr.z[kk] + (tx / tl) * o * sd) > seaLevel + 2) { low = Math.min(low, o); break; }
+      const want = rr.hw[kk] + (wMouth / 2 - rr.hw[kk]) * e * (1 + 0.1 * Math.sin(dist[q] / 170));
+      rr.hw[kk] = Math.max(rr.hw[kk], Math.min(want, low + 6));
       rr.depth[kk] = rr.depth[kk] + 4 * u;
       rr.surf[kk] = seaLevel;
       rr.cls[kk] = CLASS_CODE.estuary;
+      // mudflat banks, easing back to a river's banks at the head of the tide
+      rr.bank[kk] = P.bankSlope + (0.2 - P.bankSlope) * Math.min(1, u * 3);
     }
   }
   // speed (Manning, on the surface slope over ±50 m) and class
   for (const r of reaches) {
     const m = r.n;
-    if (r.cls.some((c) => c === CLASS_CODE.estuary)) r.bank = 0.2;
     for (let k = 0; k < m; k++) {
       const a = Math.max(0, k - 6), b = Math.min(m - 1, k + 6), ds = r.s[b] - r.s[a];
       const S = Math.max(2e-4, ds > 0 ? (r.surf[a] - r.surf[b]) / ds : 0);
@@ -358,18 +392,34 @@ function profiles(R: Region, rt: RiverTerrain | null, P: WaterParams, reaches: R
       r.speed[k] = Math.max(0.15, Math.min(2.5, (Math.pow(D, 2 / 3) * Math.sqrt(S)) / P.manning));
       r.cls[k] = w >= 25 && D >= NAV.navigable.draught - 0.3 ? CLASS_CODE.navigable : w >= 6 ? CLASS_CODE.river : CLASS_CODE.stream;
     }
-    // how far the banks reach: until they rise to the ground either side (from the grid, with a
-    // metre in hand for the finer ground), no further than BANK_HEIGHT
+    // how far the banks reach: walk out from the waterline until the bank has risen to the ground
+    // on both sides (read from the grid, with 1.5 m in hand for the finer ground). A bank
+    // that can't get there within MAX_RUN (a gentle mudflat bank against a steep valley side) is
+    // steepened until it does, so the cut never ends in a scarp.
     for (let k = 0; k < m; k++) {
       const k0 = Math.max(0, k - 1), k1 = Math.min(m - 1, k + 1), tx = r.x[k1] - r.x[k0], tz = r.z[k1] - r.z[k0], tl = Math.hypot(tx, tz) || 1;
-      const nx = -tz / tl, nz = tx / tl, hw = r.hw[k];
-      let need = 0;
-      for (const o of [hw + 3, hw + 8, hw + 16, hw + BANK_HEIGHT / r.bank]) for (const sd of [-1, 1]) need = Math.max(need, regionAt(R, R.ground, r.x[k] + nx * o * sd, r.z[k] + nz * o * sd) - r.surf[k]);
-      r.reach[k] = hw + SPILL + Math.min(BANK_HEIGHT, need + 1) / r.bank;
+      const nx = -tz / tl, nz = tx / tl, hw = r.hw[k], surf = r.surf[k];
+      let meet = hw;
+      for (const sd of [-1, 1]) {
+        let o = hw + 2, g = 0;
+        for (; o <= hw + MAX_RUN; o += 4) {
+          g = regionAt(R, R.ground, r.x[k] + nx * o * sd, r.z[k] + nz * o * sd) + 1.5;
+          if (surf + (o - hw) * r.bank[k] >= g) break;
+        }
+        if (o > hw + MAX_RUN) { o = hw + MAX_RUN; r.bank[k] = Math.max(r.bank[k], Math.min(BANK_HEIGHT, g - surf) / MAX_RUN); }
+        meet = Math.max(meet, o);
+      }
+      r.reach[k] = meet + SPILL + 4;
     }
+    // the widest over ±50 m, so the outline of the cut runs smoothly along the river instead of
+    // scalloping from point to point
+    const rc = r.reach.slice();
+    for (let k = 0; k < m; k++) { let v = 0; for (let q = Math.max(0, k - 6); q <= Math.min(m - 1, k + 6); q++) v = Math.max(v, rc[q] - r.hw[q] + r.hw[k]); r.reach[k] = v; }
   }
 }
 const SPILL_CHECK = 3;
+const MAX_RUN = 44; // m, the longest a bank runs out from the waterline
+const MIN_WIDTH = 5, MIN_DEPTH = 0.5;
 
 // Meanders. On a flat valley floor a river swings from side to side. The natural shape is the
 // sine-generated curve (Langbein and Leopold): the direction off the valley's line swings as

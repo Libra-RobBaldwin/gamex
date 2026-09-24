@@ -3,7 +3,7 @@
 // the ground (river channels cut into it) with its shore colours, one water mesh per tile, and
 // one instanced mesh of reeds per tile. "Measure" times frames with and without the water.
 //
-// URL options: ?preset=coast|valley|uplands &light=day|dusk &at=x,z &h=metres &az=radians
+// URL options: ?preset=coast|valley|lake|uplands &light=day|dusk &at=x,z &h=metres &az=radians
 // &t=seconds (fix the animation time) &bench=1 (measure on load).
 
 import * as THREE from 'three';
@@ -21,19 +21,24 @@ interface Place { name: string; desc: string; make: () => HeightSource; at: [num
 // interesting places move.
 const PLACES: Record<string, Place> = {
   coast: {
-    name: 'Coast with an estuary', desc: 'Rolling country falling to the sea; drowned valleys and a river mouth',
+    name: 'Coast with an estuary', desc: 'Rolling country falling to the sea: beaches, a headland, a drowned valley and a river mouth',
     make: () => new Coastal(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 11, lakes: 0 }), { dir: [1, 0.3], at: 0, width: 3000, fall: 45, deep: 60 }),
-    at: [1850, 5470], h: 520, az: Math.PI / 4,
+    at: [2050, 5550], h: 900, az: Math.PI / 4,
   },
   valley: {
-    name: 'River valley', desc: 'A meandering river on its floodplain, streams joining, a lake in a hollow',
+    name: 'River valley', desc: 'Rivers meandering on their floodplains, streams joining them',
     make: () => new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }),
-    at: [4650, 3450], h: 460, az: Math.PI / 4,
+    at: [5300, 3650], h: 700, az: Math.PI / 4,
+  },
+  lake: {
+    name: 'Lake in a hollow', desc: 'A river running into a lake that fills a hollow to its spill level',
+    make: () => new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }),
+    at: [1500, 5800], h: 650, az: Math.PI / 4,
   },
   uplands: {
-    name: 'Uplands', desc: 'Fells with streams running off them and a tarn',
+    name: 'Uplands', desc: 'A tarn in the fells, with a stream tumbling out of it',
     make: () => new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 7 }),
-    at: [6500, 3800], h: 520, az: Math.PI / 4,
+    at: [7050, 4050], h: 520, az: Math.PI / 4,
   },
 };
 

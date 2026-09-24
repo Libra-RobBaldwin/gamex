@@ -24,7 +24,7 @@ export interface Reach {
   speed: Float32Array; // m/s
   cls: Uint8Array; // CLASS_CODE
   sub: Uint8Array; // 1 where it runs under a lake or the sea (not cut, not drawn: the lake is there)
-  bank: number; // bank slope, rise over run
+  bank: Float32Array; // bank slope at each point, rise over run (gentle mudflats on an estuary)
   reach: Float32Array; // how far from the centre line the channel's banks reach before meeting the ground
   up: number[]; // reaches that end where this starts
   down: number; // the reach this flows into (−1 at the sea or the edge)
@@ -37,8 +37,10 @@ export const reachOf = (r: Reach, i: number) => r.reach[i];
 // how far past the waterline water may spill over a low bank
 export const SPILL = 2;
 
+// (the bed is flat across most of the width and rounds up to the waterline, as channels are, and
+// so that a ground mesh a little coarser than a stream still dips under its water)
 export function channelY(d: number, hw: number, depth: number, surf: number, bank: number) {
-  if (d < hw) { const q = d / hw; return surf - depth * (1 - q * q); }
+  if (d < hw) { const q = d / hw, q2 = q * q; return surf - depth * (1 - q2 * q2); }
   return surf + (d - hw) * bank;
 }
 
@@ -102,7 +104,7 @@ export function project(r: Reach, i: number, x: number, z: number): Hit {
 export const lerpAt = (a: ArrayLike<number>, h: Hit) => a[h.i] + (a[h.i + 1] - a[h.i]) * h.t;
 export function channelAt(h: Hit) {
   const r = h.r;
-  return channelY(h.d, lerpAt(r.hw, h), lerpAt(r.depth, h), lerpAt(r.surf, h), r.bank);
+  return channelY(h.d, lerpAt(r.hw, h), lerpAt(r.depth, h), lerpAt(r.surf, h), lerpAt(r.bank, h));
 }
 
 // ---------- line geometry ----------

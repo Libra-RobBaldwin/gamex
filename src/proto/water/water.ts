@@ -11,7 +11,7 @@
 
 import { BaseHeight, TILE, type GridSpec, type HeightSource } from '../terrain/height';
 import { edt } from './flood';
-import { buildRegion, cellOf, isRiverTerrain, type Region, type RiverTerrain } from './region';
+import { buildRegion, cellOf, isRiverTerrain, marginDepth, share, type Region, type RiverTerrain } from './region';
 import { CLASS_OF, ReachIndex, SPILL, capsuleRows, channelY, lerpAt, type Hit, type Reach } from './rivers';
 import { DEFAULT_WATER, KIND_CODE, KIND_OF, NAV, type Flow, type WaterKind, type WaterParams, type WaterPoint, type Watercourse } from './types';
 
@@ -37,6 +37,7 @@ export interface WaterTile {
 }
 
 const NONE = 0xffff;
+const FILM = 0.08;
 
 export class WaterSystem {
   readonly P: WaterParams;
@@ -92,15 +93,16 @@ export class WaterSystem {
   }
   // the ground with river channels cut into it
   groundAt(x: number, z: number) {
-    let h = this.base(x, z).h;
-    for (const hit of this.near(x, z)) h = Math.min(h, channelAt(hit));
+    const b = this.base(x, z).h;
+    let h = b;
+    for (const hit of this.near(x, z)) h = Math.min(h, segY(hit.r, hit.i, hit.t, hit.d, b));
     return h;
   }
   // Everything about a point in one go.
   probe(x: number, z: number): WaterPoint & { hit: Hit | null } {
     const b = this.base(x, z), hits = this.near(x, z);
     let ground = b.h;
-    for (const hit of hits) ground = Math.min(ground, channelAt(hit));
+    for (const hit of hits) ground = Math.min(ground, segY(hit.r, hit.i, hit.t, hit.d, b.h));
     let rivY = -Infinity, best: Hit | null = null;
     for (const h of hits) {
       const y = riverLevel(h.r, h.i, h.t, h.d, ground);
@@ -118,10 +120,12 @@ export class WaterSystem {
   private settle(R: Region, x: number, z: number, ground: number, srcW: number, rivY: number) {
     const o = this.st, sea = this.P.sea, c = cellOf(R, x, z);
     o.level = -Infinity; o.code = 0; o.type = 0; o.id = 0;
-    if (sea !== null && ground < sea && R.seaNear[c]) { o.level = sea; o.code = KIND_CODE.sea; o.type = BODY.sea; }
-    if (srcW === srcW && srcW > ground && (sea === null || Math.abs(srcW - sea) > 1e-4) && srcW > o.level) { o.level = srcW; o.code = KIND_CODE.lake; o.type = BODY.lake; o.id = Math.round(srcW * 100); }
+    if (sea !== null && ground < sea && R.seaNear[c] && ground < sea - marginDepth(share(R, x, z, (k) => R.sea[k] === 1))) { o.level = sea; o.code = KIND_CODE.sea; o.type = BODY.sea; }
+    // (still water must be at least FILM deep to count: a lake standing a few centimetres over a
+    // flat floodplain is a wet field, not open water)
+    if (srcW === srcW && srcW > ground + FILM && (sea === null || Math.abs(srcW - sea) > 1e-4) && srcW > o.level) { o.level = srcW; o.code = KIND_CODE.lake; o.type = BODY.lake; o.id = Math.round(srcW * 100); }
     const l = R.lakeNear[c];
-    if (l >= 0 && R.basinLevel[l] > ground && R.basinLevel[l] > o.level) { o.level = R.basinLevel[l]; o.code = KIND_CODE.lake; o.type = BODY.basin; o.id = l; }
+    if (l >= 0 && R.basinLevel[l] > ground && R.basinLevel[l] > o.level && R.basinLevel[l] - FILM - marginDepth(share(R, x, z, (k) => R.basin[k] === l)) > ground) { o.level = R.basinLevel[l]; o.code = KIND_CODE.lake; o.type = BODY.basin; o.id = l; }
     if (rivY > o.level) { o.level = rivY; o.type = BODY.river; o.code = KIND_CODE.river; }
     return o;
   }
@@ -202,7 +206,8 @@ export class WaterSystem {
       this.src.sample(g, out);
       if (water) for (let j = 0, k = 0; j < g.nz; j++) for (let i = 0; i < g.nx; i++, k++) { const w = this.src.waterLevel(g.x0 + i * g.step, g.z0 + j * g.step); water[k] = w !== null && w > out[k] ? w : NaN; }
     }
-    this.stamp(g, (k, r, i, t, d) => { const y = segY(r, i, t, d); if (y < out[k]) out[k] = y; });
+    const base = out.slice();
+    this.stamp(g, (k, r, i, t, d) => { const y = segY(r, i, t, d, base[k]); if (y < out[k]) out[k] = y; });
     return out;
   }
   // Calls f for every (grid point, segment) pair within the segment's reach, region by region
@@ -328,11 +333,17 @@ function riverLevel(r: Reach, i: number, t: number, d: number, ground: number): 
   const y = r.surf[i] + (r.surf[i + 1] - r.surf[i]) * t;
   return y > ground ? y : -Infinity;
 }
-// the channel's floor or bank at that point
-function segY(r: Reach, i: number, t: number, d: number) {
-  return channelY(d, r.hw[i] + (r.hw[i + 1] - r.hw[i]) * t, r.depth[i] + (r.depth[i + 1] - r.depth[i]) * t, r.surf[i] + (r.surf[i + 1] - r.surf[i]) * t, r.bank);
+// The ground at that point with this segment's channel cut into `base` (the uncut ground): the
+// trough and banks, easing back into the natural ground over the outer part of its reach, so a
+// bank that hasn't yet met the ground where the reach ends slopes up to it instead of stopping in
+// a cliff. Worked from the uncut ground, so it doesn't matter in which order segments are applied.
+function segY(r: Reach, i: number, t: number, d: number, base: number) {
+  const hw = r.hw[i] + (r.hw[i + 1] - r.hw[i]) * t, e = r.reach[i] + (r.reach[i + 1] - r.reach[i]) * t;
+  const y = channelY(d, hw, r.depth[i] + (r.depth[i + 1] - r.depth[i]) * t, r.surf[i] + (r.surf[i + 1] - r.surf[i]) * t, r.bank[i] + (r.bank[i + 1] - r.bank[i]) * t);
+  if (y >= base) return base;
+  const fw = Math.max(1, Math.min(18, (e - hw) * 0.5)), q = Math.max(0, Math.min(1, (d - (e - fw)) / fw));
+  return y + (base - y) * q * q * (3 - 2 * q);
 }
-const channelAt = (h: Hit) => segY(h.r, h.i, h.t, h.d);
 function segKind(r: Reach, k: number): WaterKind {
   const c = CLASS_OF[r.cls[k]];
   return c === 'estuary' ? 'estuary' : c === 'canal' ? 'canal' : 'river';

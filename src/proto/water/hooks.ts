@@ -98,7 +98,7 @@ export function canalReach(c: Canal, ground: HeightSource): Reach {
   c.path.forEach((p, i) => { x[i] = p.x; z[i] = p.z; s[i] = c.s[i]; });
   const r: Reach = {
     id: 0, key: c.id, n, x, z, s, area: f(0), hw: f(c.width / 2), depth: f(c.depth), surf: Float32Array.from(c.level), speed: f(0),
-    cls: new Uint8Array(n).fill(CLASS_CODE.canal), sub: new Uint8Array(n), bank: 1.5, reach: f(0), up: [], down: -1, mouth: 'edge',
+    cls: new Uint8Array(n).fill(CLASS_CODE.canal), sub: new Uint8Array(n), bank: f(1.5), reach: f(0), up: [], down: -1, mouth: 'edge',
   };
   for (let i = 0; i < n; i++) {
     let need = 0;
@@ -106,7 +106,7 @@ export function canalReach(c: Canal, ground: HeightSource): Reach {
       const a = c.path[Math.max(0, i - 1)], b = c.path[Math.min(n - 1, i + 1)], l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
       need = Math.max(need, ground.heightAt(x[i] - ((b.z - a.z) / l) * o * sd, z[i] + ((b.x - a.x) / l) * o * sd) - c.level[i]);
     }
-    r.reach[i] = c.width / 2 + SPILL + Math.min(BANK_HEIGHT, need + 1) / r.bank;
+    r.reach[i] = c.width / 2 + SPILL + Math.min(BANK_HEIGHT, need + 1) / r.bank[i];
   }
   return r;
 }
