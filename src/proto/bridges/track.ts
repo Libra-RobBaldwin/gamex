@@ -301,9 +301,13 @@ export class TrackBuilder {
         railAt(c + k * RAIL_CENTRE, RAIL_SECTION, SLEEPER_PROUD + SEAT);
         if (r.form === 'open') railAt(c + k * (RAIL_CENTRE - GUARD_INSET), GUARD_SECTION, SLEEPER_PROUD);
       }
-      // sleepers, square to the track, tops SLEEPER_PROUD above the ballast
+      // sleepers, square to the track, tops SLEEPER_PROUD above the ballast; they turn with the
+      // track over a few metres (the chord either side), so through a corner they fan out
+      // rather than overlapping on its inside
       for (const s of sleeperStations(r.s0, r.s1)) {
         const f = frame(r.path, s), y = r.level(s) + SLEEPER_PROUD, list = instOf(kind, chunkOf(r, s));
+        const pa = pointOn(r.path, s - 1.5), pb = pointOn(r.path, s + 1.5), dl = Math.hypot(pb.x - pa.x, pb.z - pa.z);
+        if (dl > 1e-6) { f.ux = (pb.x - pa.x) / dl; f.uz = (pb.z - pa.z) / dl; f.nx = -f.uz; f.nz = f.ux; }
         X.set(f.nx, 0, f.nz); Z.set(-f.ux, 0, -f.uz);
         for (const c of cs) { m4.makeBasis(X, Y, Z).setPosition(f.x + f.nx * c, y, f.z + f.nz * c); list.push(m4.clone()); }
       }
