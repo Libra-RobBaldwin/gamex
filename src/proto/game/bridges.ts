@@ -222,7 +222,9 @@ export class BridgeLayer {
   // Lay out every bridge whose segment (or what's under it) changed, and store the types on the
   // segments; roaddraw.ts reads RSeg.bridges to leave those stretches to the library. Returns
   // whether anything changed. Call before drawRoads().
-  sync(net: Network) {
+  // `reserve`: how far from each end of a segment (a, b) the junction there reaches: no bridge
+  // runs into a junction (its deck and parapets would cut across the roads leaving it).
+  sync(net: Network, reserve: (s: RSeg) => [number, number] = () => [0, 0]) {
     // nothing to do if no road changed and no type was picked (the common case: a junction edit)
     const topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}`).join();
     if (topo === this.topo && !this.dirty) return false;
@@ -231,13 +233,13 @@ export class BridgeLayer {
     for (const s of net.segs.values()) {
       const path = net.path(s);
       if (!path.some((p) => (p.y ?? 0) > 3)) { if (s.bridges || this.segs.has(s.id)) { s.bridges = undefined; this.drop(s.id); this.dirty = true; } continue; }
-      const c = crossingOf(net, path, net.def(s), (id) => id === s.id);
-      const sig = `${keyOf(c)}|${JSON.stringify(s.bridges ?? null)}`;
+      const c = crossingOf(net, path, net.def(s), (id) => id === s.id), keep = reserve(s);
+      const sig = `${keyOf(c)}|${keep.map((k) => k.toFixed(1))}|${JSON.stringify(s.bridges ?? null)}`;
       if (this.segs.get(s.id)?.sig === sig) continue;
       this.drop(s.id);
-      this.segs.set(s.id, { sig: '', bridges: this.layOut(s, c) });
+      this.segs.set(s.id, { sig: '', bridges: this.layOut(s, c, keep) });
       // (the types may have been filled in or corrected: that's part of the signature)
-      this.segs.get(s.id)!.sig = `${keyOf(c)}|${JSON.stringify(s.bridges ?? null)}`;
+      this.segs.get(s.id)!.sig = `${keyOf(c)}|${keep.map((k) => k.toFixed(1))}|${JSON.stringify(s.bridges ?? null)}`;
       this.dirty = true;
     }
     this.topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}`).join();
@@ -247,10 +249,14 @@ export class BridgeLayer {
     return was;
   }
 
-  private layOut(s: RSeg, c: Crossing): Built[] {
+  private layOut(s: RSeg, c: Crossing, reserve: [number, number] = [0, 0]): Built[] {
     const stored = s.bridges ?? [];
     const out: Built[] = [], keep: SegBridge[] = [];
-    for (const [a, b] of extents(c)) {
+    const L = c.path.reduce((t, p, i) => (i ? t + Math.hypot(p.x - c.path[i - 1].x, p.z - c.path[i - 1].z) : 0), 0);
+    for (const [a0, b0] of extents(c)) {
+      // (short of the junctions at either end)
+      const a = Math.max(a0, reserve[0]), b = Math.min(b0, L - reserve[1]);
+      if (b - a < 8) continue;
       const was = stored.filter((x) => overlap(x.s0, x.s1, a, b) > 0).sort((x, y) => overlap(y.s0, y.s1, a, b) - overlap(x.s0, x.s1, a, b))[0];
       // the stored type, if it still fits (its era may have passed: built bridges stay); else the
       // chooser's. Blueprints are refused where nothing fits, but the network can still change
