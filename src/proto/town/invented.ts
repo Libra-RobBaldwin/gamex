@@ -38,7 +38,7 @@ export function inventedWorld(rand: () => number): World {
     water: { polys: [circlePoly(LAKE, LAKE.r, 72)], isWater, shores: [circlePoly(LAKE, LAKE.r + 7, 72)] },
     zones: [{ kind: 'industrial', outer: [estate], inner: [] }, { kind: 'water', outer: [circlePoly(LAKE, LAKE.r, 72)], inner: [], name: 'The lake' }],
     zoneAt: (p): ZoneKind | undefined => (isWater(p) ? 'water' : industrial(p) ? 'industrial' : undefined),
-    industrial, industry: townWishes(industrial, (p) => !industrial(p) && Math.hypot(p.x, p.z) > 300), stations: [], stops: STARTER_STOPS, names: new Map(), hints: new Map(), standing: [],
+    industrial, industry: townWishes(industrial, (p) => !industrial(p) && Math.hypot(p.x, p.z) > 300), stations: [], stops: STARTER_STOPS, structures: new Map(), names: new Map(), hints: new Map(), standing: [],
     growAlong: () => [...net.segs.keys()], growNow: 0.8, canGrow: () => true, invent: true,
     trees, notes: [],
   };

@@ -45,7 +45,7 @@ import { type World } from './town';
 |---|---|
 | **Industries** | `world.zones.filter(z => z.kind === 'industrial')` for estates to place on, and `world.industrial(p)` for a point. On the invented town that's the estate south of the centre. |
 | **Water** | `world.water.polys` and `world.water.isWater`. On a real town that means rivers, canals and lakes from the map. Replace the flat drawing in `main.ts` (`flatPolys`) if you draw water properly. Keep `water.shores` for beaches. |
-| **Bridges** | `net` roads and railways crossing `world.water.isWater`. A real town's roads also carry OSM `bridge`, `tunnel` and `layer`: `realWorld()` can pass them on from the importer's `roads` map if you need them. |
+| **Bridges** | `world.structures`: the segments the map says are bridges or tunnels, with their OSM `layer`. They're laid at ground level for now, so in Horley the road bridges over the Brighton Main Line cross it on the level. Raising them is the bridges code's job. Also `net` roads and railways crossing `world.water.isWater`. |
 | **Stations, trains, terminals** | `world.stations` (name, position, rail segment). The invented town has none. |
 | **Vehicles and people** | Nothing new: traffic still runs on `net` and the buildings' lots. |
 | **The ground** | `GameGround` takes `water` (polygons), `industrial` and `lawns` (the world's parks) from the world. |
@@ -70,6 +70,7 @@ so each chunk is merged once.
 - **Service roads.** Unnamed ones (car-park and yard access, alleys) are left out. At the catalogue's street width they ran through half the buildings. The game's plots have their own access.
 - **One-way streets and slips.** One-way streets are built two-way. One-way slip roads are left out, and the junction designer adds its own. Both are listed in `world.notes`.
 - **Roundabout size.** Roundabouts keep their form, at the designer's standard radius rather than the real one (the real radius is in `hints[].r`).
+- **Bridges and tunnels** are laid at ground level (`world.structures` lists them). Roads cross railways on the level where in reality they go over them.
 - **Garages and sheds** aren't drawn.
 - **Mapping gaps.** A road that stops within 2 m of another road without sharing a node is joined to it (`stitch`).
 - **Growth.** The town grows only along roads with room (less than one building every 40 m), and

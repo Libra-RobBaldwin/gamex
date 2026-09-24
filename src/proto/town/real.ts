@@ -70,6 +70,7 @@ export function realWorld(town: RealTown = REAL_TOWN): World {
     stations: imp.stations.map((s) => ({ name: s.name, at: s.at, seg: s.seg })),
     stops: stopsOf(imp, centre),
     names: new Map([...imp.roads.values()].filter((r) => r.name || r.ref).map((r) => [r.seg, r.name ?? r.ref!])),
+    structures: new Map([...imp.roads.values()].filter((r) => r.bridge || r.tunnel).map((r) => [r.seg, { bridge: r.bridge, tunnel: r.tunnel, layer: r.layer }])),
     hints, standing,
     growAlong: () => sparse(net, standing),
     // streets the map has no buildings on are mostly ones nobody has drawn yet, not empty ones:

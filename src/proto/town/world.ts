@@ -51,6 +51,12 @@ export interface World {
   stops: P[];
   /** Real road names and numbers ("High Street", "A361") by network segment, where the map has them. */
   names: Map<number, string>;
+  /**
+   * Roads and railways the map says are bridges or tunnels, by segment. They're laid at ground level
+   * for now (the importer doesn't lift them), so a road bridge over a railway crosses it on the level
+   * until the bridges code raises it.
+   */
+  structures: Map<number, { bridge: boolean; tunnel: boolean; layer: number }>;
   /** Junction forms keyed by network node. */
   hints: Map<number, WorldHint>;
   /** Buildings already standing at the start (real ones). Placed after junctions claim land. */
