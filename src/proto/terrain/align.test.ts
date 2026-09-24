@@ -117,6 +117,10 @@ describe('vertical alignment on terrain', () => {
     expect(t.ok).toBe(true);
     for (let i = 0; i < n; i++) if (b.s[i] > 400 && b.s[i] < 600) { expect(t.structure[i]).toBe('tunnel'); expect(t.y[i]).toBeLessThanOrEqual(-road.under + 1e-6); }
     expect(align({ length: L, ground, water }, { ...road, bridges: false, tunnels: false }).ok).toBe(false);
+    // ending in the lake is refused with a reason, unless a height is given (a pier's deck)
+    const short = { length: 500, ground: ground.slice(0, 101), water: water.slice(0, 101) };
+    expect(align(short, road).reason).toBe('The end is in the water');
+    expect(align({ ...short, yL: 7 }, road).ok).toBe(true);
   });
 
   it('costs add up and spans tile the route', () => {

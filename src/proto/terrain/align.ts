@@ -205,6 +205,9 @@ export function align(inp: AlignInput, sp: AlignSpec): Alignment {
   for (const [i, v] of anchor) { const k = Math.round((v - yRef) / dy); band.lo[i] = Math.max(band.lo[i], k); band.hi[i] = Math.min(band.hi[i], k); if (i === 0 || i === n - 1) loWhy[i] = hiWhy[i] = i === 0 ? 'the start' : 'the end'; }
 
   const fail = (reason: string): Alignment => ({ ok: false, reason, s, ground: g, y: [], depth: [], kind: [], structure: [], spans: [], cost: { total: Infinity, earth: 0, bridge: 0, tunnel: 0, ends: 0 }, volume: { cut: 0, fill: 0 }, maxGrade: 0 });
+  // an end in the water with no height given would sit on the bed: say so rather than "no way through"
+  if (w[0] !== null && inp.y0 === undefined) return fail('The start is in the water');
+  if (w[n - 1] !== null && inp.yL === undefined) return fail('The end is in the water');
   const lo0 = band.lo.slice(), hi0 = band.hi.slice();
   const bad = envelope(band, K);
   if (bad) {

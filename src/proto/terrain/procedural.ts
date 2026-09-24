@@ -185,13 +185,6 @@ export class ProceduralTerrain extends BaseHeight {
     return h;
   }
 
-  // Height without lakes (lake levels are set from this, so it must not depend on lakes).
-  private land(x: number, z: number) {
-    this.fields(x, z);
-    const f = this.f;
-    return this.finish(x, z, f[0], f[1], f[2], f[3], undefined);
-  }
-
   private lake(ci: number, cj: number): Lake | null {
     const k = (ci + 32768) * 65536 + (cj + 32768);
     let l = this.lakes.get(k);
@@ -203,7 +196,10 @@ export class ProceduralTerrain extends BaseHeight {
       const cx = (ci + 0.2 + 0.6 * r()) * C, cz = (cj + 0.2 + 0.6 * r()) * C;
       const rad = (90 + 260 * r()) * Math.sqrt(this.p.scale);
       // the surface sits a little below the land at its centre, so the bowl reads as a hollow
-      const level = this.land(cx, cz) - 1.5;
+      // (worked out directly at the centre: no lattice block needed there)
+      const d = new Float32Array(F);
+      this.smooth(cx, cz, d, 0);
+      const level = this.finish(cx, cz, d[0], d[1], d[2], d[3], undefined) - 1.5;
       l = { cx, cz, r: rad, level, depth: 3 + 12 * r() };
     }
     this.lakes.set(k, l);
@@ -254,12 +250,17 @@ export class ProceduralTerrain extends BaseHeight {
     }
     // 1. the lattice patch under the grid, copied from the cached blocks
     const lat = new Float32Array(LX * LZ * F);
+    // (a block that only a thin strip of the patch reaches into, like the border a mesh asks for
+    // to get its edge normals, isn't built: those few points are worked out directly)
+    const reach = (b: number, a0: number, a1: number) => Math.min(a1, b * BLOCK + BLOCK - 1) - Math.max(a0, b * BLOCK) + 1;
     for (let Z = lz0; Z <= lz1; Z++) {
       const bj = Math.floor(Z / BLOCK), j = Z - bj * BLOCK + 1;
       for (let X = lx0; X <= lx1;) {
-        const bi = Math.floor(X / BLOCK), d = this.block(bi, bj).d;
-        const run = Math.min(lx1, bi * BLOCK + BLOCK - 1) - X + 1, src = (j * SIDE + X - bi * BLOCK + 1) * F;
-        lat.set(d.subarray(src, src + run * F), ((Z - lz0) * LX + X - lx0) * F);
+        const bi = Math.floor(X / BLOCK), run = Math.min(lx1, bi * BLOCK + BLOCK - 1) - X + 1, at = ((Z - lz0) * LX + X - lx0) * F;
+        if (this.blocks.has((bi + 32768) * 65536 + (bj + 32768)) || (reach(bi, lx0, lx1) >= 4 && reach(bj, lz0, lz1) >= 4)) {
+          const d = this.block(bi, bj).d, src = (j * SIDE + X - bi * BLOCK + 1) * F;
+          lat.set(d.subarray(src, src + run * F), at);
+        } else for (let q = 0; q < run; q++) this.smooth((X + q) * st, Z * st, lat, at + q * F);
         X += run;
       }
     }
