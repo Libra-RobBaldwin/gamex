@@ -7,6 +7,8 @@
 //   1. everything below the plane, straight to the screen, over a dark background;
 //   2. everything above it into an off-screen target, which is then laid over the first at the
 //      surface's opacity.
+// Meshes wholly on one side of the plane are left out of the other pass altogether (and anything
+// that's always on the surface can say so: `userData.surface`).
 // With the surface at full opacity that's the ordinary picture, so the fade in and out runs
 // smoothly from it, and once the view is off the passes stop and the game draws as it always has.
 // The sun's shadows are drawn with the surface pass (the clipping leaves what's under the ground
@@ -36,6 +38,9 @@ export class UnderView {
   private clearWas = new THREE.Color();
   private shadowsOwed = false;
   private last = 0;
+  private box = new THREE.Box3();
+  private onlyAbove: THREE.Object3D[] = [];
+  private onlyBelow: THREE.Object3D[] = [];
 
   // `hideBelow`: things under the ground that aren't built (the lake bed, the map's cut edge),
   // left out of the first pass
@@ -65,6 +70,39 @@ export class UnderView {
   get showing() { return this.on || this.k < 1; }
   set(on: boolean) { this.on = on; }
 
+  // Which meshes lie wholly above the plane, or wholly below it: each pass leaves the other's out
+  // altogether, rather than clipping every pixel of them (most of the town is buildings, trees and
+  // vehicles, all above it).
+  private split(scene: THREE.Scene) {
+    this.onlyAbove.length = 0; this.onlyBelow.length = 0;
+    scene.updateMatrixWorld();
+    const walk = (o: THREE.Object3D, surface: boolean) => {
+      if (!o.visible) return;
+      // (anything that says it's always on the surface, like the woods' instanced trees, and all in it)
+      surface ||= o.userData.surface === true;
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.geometry) {
+        if (surface) this.onlyAbove.push(o);
+        // (otherwise only what stays put: anything that moves, vehicles and trains and people among
+        // them, isn't frustum culled either, and instances are moved about in place; those go in
+        // both passes)
+        else if (o.frustumCulled && !(o as THREE.InstancedMesh).isInstancedMesh) {
+          if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+          this.box.copy(m.geometry.boundingBox!);
+          if (!this.box.isEmpty()) {
+            this.box.applyMatrix4(o.matrixWorld);
+            if (this.box.min.y > CUT + 0.01) this.onlyAbove.push(o);
+            else if (this.box.max.y < CUT - 0.01) this.onlyBelow.push(o);
+          }
+        }
+      }
+      for (const c of o.children) walk(c, surface);
+    };
+    walk(scene, false);
+  }
+  private hide(list: THREE.Object3D[]) { for (const o of list) o.visible = false; }
+  private show(list: THREE.Object3D[]) { for (const o of list) o.visible = true; }
+
   // Draw a frame (in place of renderer.render).
   render(scene: THREE.Scene, cam: THREE.Camera, now = performance.now()) {
     const r = this.renderer, dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
@@ -85,6 +123,7 @@ export class UnderView {
     else if (this.rt.width !== this.size.x || this.rt.height !== this.size.y) this.rt.setSize(this.size.x, this.size.y);
     const t = Math.min(1, (1 - this.k) / (1 - FADED)), was = scene.background, clear = r.getClearColor(this.clearWas), clearA = r.getClearAlpha();
     if (was instanceof THREE.Color) this.sky.copy(was); else this.sky.set('#000000');
+    this.split(scene);
     // 1: the surface, off the screen, on nothing. The shadows are drawn with it, as they are every
     // frame: only what's on the surface casts them onto the surface. (They're then left out of
     // the ones below ground, which is why they're drawn again once the view is off.)
@@ -92,13 +131,16 @@ export class UnderView {
     r.clippingPlanes = this.above;
     r.setRenderTarget(this.rt);
     r.setClearColor(0x000000, 0);
+    this.hide(this.onlyBelow);
     r.render(scene, cam);
+    this.show(this.onlyBelow);
     this.shadowsOwed = true;
     scene.background = was;
     r.setClearColor(clear, clearA);
     // 2: below the ground, on the screen, over the dark (with the same shadows: not drawn again)
     const hidden = this.hideBelow().filter((o) => o.visible), owed = r.shadowMap.needsUpdate;
     for (const o of hidden) o.visible = false;
+    this.hide(this.onlyAbove);
     scene.background = this.bg.copy(this.sky).lerp(DARK, t);
     r.shadowMap.needsUpdate = false;
     r.clippingPlanes = this.below;
@@ -107,6 +149,7 @@ export class UnderView {
     this.cam2.copy(cam);
     r.render(scene, this.cam2);
     r.shadowMap.needsUpdate = owed;
+    this.show(this.onlyAbove);
     for (const o of hidden) o.visible = true;
     scene.background = was;
     r.clippingPlanes = [];

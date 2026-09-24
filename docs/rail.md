@@ -7,8 +7,9 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
 
 ## What's in the game
 
-- **Build > Stops > Railway station** is unlocked. You tap a straight, level stretch of track, on
-  the side where you want the building. The sheet offers each layout that fits, with its price
+- **Build > Stops > Railway station** is unlocked. You tap a level stretch of track (straight or
+  gently curving: on the ground, on a viaduct or deep in a tunnel), on the side where you want the
+  building. The sheet offers each layout that fits, with its price
   and the platform length (Short 60 m, Long 130 m, Very long 215 m). You then tap **Build this
   station**.
   - The blueprint shows green, or red where something is in the way.
@@ -30,10 +31,86 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
 - **A station is refused** on:
   - a gradient steeper than 1 in 200;
   - a curve tighter than 1,000 m;
-  - a bridge, embankment or cutting;
+  - an embankment, a ramp, a cutting or a shallow tunnel;
+  - a bridge that can't be widened for platforms (below);
   - too little track;
   - points, or another station or level crossing, within its span.
   The sheet says which.
+
+## Stations on curves, on viaducts and underground
+
+- **On a curve** (`rail/station.ts`):
+  - Platforms follow the track round any curve of 1,000 m radius or more. That's UK practice for
+    new platforms: on a tighter curve the gap at the doors gets too wide.
+  - Each platform edge that faces a track is set back by the train's overhang there, so the gap
+    is never less than on the straight. A 23 m coach on bogies 16 m apart hangs in by
+    16²/8R on the inside of the curve (its middle) and out by (23² − 16²)/8R on the outside (its
+    ends): 32 mm and 34 mm at 1,000 m. The sheet gives the radius and the set-back.
+  - The curve is measured as the circle through points 75 m apart all along the station (a curve
+    is a polyline; `minRadius` on a piece of one reads its corners).
+  - Island and side platforms, canopies, the footbridge and the subway all follow it: the
+    footbridge crosses square to the track where it is, and its stairs meet each platform under it.
+- **On a viaduct:**
+  - Where the whole station stands on bridges 4.5 m up or more, it's a viaduct station. Its deck is
+    widened under every track and platform, with parapets along its edges and cross-heads on
+    columns every 18 m. No column stands on a road passing underneath.
+  - Each platform has stairs and a lift down to a booking hall at street level beside the viaduct.
+  - Only bridges that can be widened carry one: masonry arches, steel girders, concrete beams and
+    box girders. A timber trestle, a truss either side of the tracks, a long main span or a bridge
+    that lifts are refused, and the sheet says why.
+  - The bridge stops a metre into the station's deck and ends on a pier there
+    (`setBridgeSkip`, `game/bridges.ts`); roaddraw leaves the stretch alone (`setDeckSkip`).
+  - The deck is the railway's, like a bridge: roads may pass under it later, buildings can't go
+    there. Only the booking hall is the station's land.
+- **Underground:**
+  - Where the rails are at least 10 m down (a bored tunnel, not an open cutting), it's an
+    underground station. The platforms stand in a box of walls round the tracks, with a passage
+    over them at the middle and stairs down to each platform. A shaft of stairs, escalators and a
+    lift rises from the passage to the booking hall (or, for a halt, a canopy over the stairs) at
+    street level beside the line. No canopies below ground.
+  - Only the entrance is the station's land: the ground over the platforms stays free to build on.
+  - The rail tool's height has a fourth setting, **Deep**, to get a line down there: it dives to
+    14 m below the ground as soon as the gradient allows, and stays there (`grade.ts`, `DEEP`).
+- **None of these gets a depot siding:** their lines' trains start at a platform.
+- **Trains** call at all of them as anywhere else: the track graph and the signalling don't care
+  what a station stands on.
+- **The economy:** they're `rail_station` stops like any other (`RailGame.econ`).
+- **Prices** (list, before the purse's share): on top of the platforms, the building and the
+  track, a viaduct station's widened deck is £650 a square metre and its stairs and lifts £320,000
+  a platform; an underground station's box is £2,400 a square metre of its plan, its shafts and
+  lifts £450,000 a platform, and its entrance shaft £900,000. So a two-platform 130 m station costs
+  about £1.4m on the ground, £3.1m on a viaduct and £9m underground (the game charges a tenth of that: `Purse.price`).
+
+## The underground view
+
+- The round button under the compass (the view button, while a tool is in use, is between them)
+  turns it on and off (`ui/shell.ts`, `#ugbtn`). The ground, the buildings and everything else on
+  the surface fade back, over a dark green, so tunnels, underground platforms and the trains in
+  them show (`game/underview.ts`).
+- **How it's drawn:** in two passes split by a level plane 0.3 m under the ground, so every
+  triangle is drawn exactly once and nothing is sorted against anything else:
+  1. the surface, into an off-screen target (sRGB, 4× multisampled, with its depth);
+  2. everything under the plane, straight to the screen;
+  3. the surface laid over it at 25%.
+- At full opacity the passes give the ordinary picture, pixel for pixel (checked: 0.3/255 on
+  average, the rest at anti-aliased edges), so the fade in and out (0.35 s) starts and ends
+  without a jump. Once the view is off, the game draws in one pass again.
+- Covered tunnels have walls now (roaddraw), hidden under the ground until the view is on, and no
+  grass verges inside them.
+- **Taps** in the view mean what's drawn deep down: the station tool and a tap on a station or a
+  train look 12.6 m under the ground.
+- **What it costs** (the whole town, SwiftShader, Fast tier, 412×915 DPR 2, median frame):
+  | View | Frame | Draw calls | Triangles |
+  |---|---|---|---|
+  | Ordinary | 593–660 ms | 693–797 | 964k–1,064k |
+  | Underground view | 834 ms | 758 | 1,069k |
+
+  Each pass leaves out the meshes wholly on the other side of the plane (and anything marked
+  `userData.surface`, like the woods' trees), so the view draws no more than the ordinary one; the
+  extra is the off-screen target and laying it over. (The shadow passes are counted in the calls.)
+- **Gotchas found on the way:** three.js only re-applies clipping planes when the camera changes
+  between draws, so the second pass looks through a copy of the camera. And the sun's shadows are
+  drawn with the surface pass (only what's on the surface casts them there).
 - **Rail lines:** use **New line from here** on a station's sheet, or **Transport > Railway >
   New rail line**. Tap stations in order, then Create. Tapping the first station again (with three
   or more) makes the line circular.
@@ -177,6 +254,22 @@ rw.sim.log                                    // every call: { train, line, stat
   - depot sidings keep off roads;
   - the region's railway laid and run;
   - the same railway for the same region.
+- `src/proto/rail/stations.test.ts`:
+  - a station on a 1,250 m curve: platform edges never nearer a platform track than on the
+    straight, nor further by more than the overhang; trains call there;
+  - an 800 m curve refused;
+  - a viaduct station: its platforms on the deck, its hall at street level, the hall claimed and
+    the deck not (a street can be built under it), dearer than on the ground;
+  - refused on a trestle, a through truss and a suspension bridge, and on the ramp up;
+  - trains call at it, and it gets no depot;
+  - an underground station in a Deep tunnel: platforms 10 m down or more, only the entrance
+    claimed, dearer than a viaduct one, found by a tap over it, trains calling;
+  - refused in a cutting.
+- `e2e/stations.e2e.mjs`: by touch at 412×915, DPR 2, in the starter town: a curve, a viaduct and a
+  deep tunnel laid; a station built on each from Build > Stops (the underground ones by tapping
+  the track in the underground view); a line drawn between the two underground stations and its
+  train calling at both with its doors open, 14 m down; the view off again with nothing left over;
+  no console errors.
 - `e2e/rail.e2e.mjs`: by touch at 412×915, DPR 2:
   - the starter line runs;
   - a branch line across the north road gets a level crossing;

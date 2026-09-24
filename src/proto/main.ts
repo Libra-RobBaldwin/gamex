@@ -136,6 +136,7 @@ ground.receiveShadow = true;
 for (const m of [...GRASS_MATS, ...grassMats()]) { m.color.set('#ffffff'); patchGround(m, gameGround.ground.uniforms); }
 // the ground leaves out any cutting a road or railway runs down into (they mark the stencil first)
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
+gameGround.ground.hedges.userData.surface = true;
 scene.add(gameGround.ground.hedges);
 scene.add(ground);
 // the cut face round the edge of the map (the roads running off it are added once they're built)
@@ -174,7 +175,7 @@ const MAXT = Math.max(1600, MAP.trees.count + 200);
 const crowns = new THREE.InstancedMesh(crownGeo, crownMat, MAXT);
 const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAXT);
 const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
-for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); }
+for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; m.userData.surface = true; scene.add(m); } // (surface: the underground view needn't draw them twice)
 
 // Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
 // registry (a spatial hash, so this looks only at claims near the tree); plots through `lots`.
