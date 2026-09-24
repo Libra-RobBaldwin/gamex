@@ -15,7 +15,12 @@ export interface ScenarioOpts {
   bend?: number; // sideways offset of the route's middle (m), for a curved deck
 }
 
-export interface Scenario { crossing: Crossing; water: { s0: number; s1: number; level: number }[]; under: { s0: number; s1: number; kind: 'road' | 'rail' }[]; ok: boolean; reason?: string }
+// `bench`: where a road or railway underneath crosses sloping ground it runs on a level bench, cut
+// into the slope on the high side and built out on the low; slopes start at bench0/bench1 and
+// meet the natural ground by toe0/toe1 at the latest.
+export interface Scenario { crossing: Crossing; water: { s0: number; s1: number; level: number }[]; under: { s0: number; s1: number; kind: 'road' | 'rail'; level?: number; bench0?: number; bench1?: number; toe0?: number; toe1?: number }[]; ok: boolean; reason?: string }
+// the benches' side slopes: horizontal per vertical
+export const BENCH_BATTER = 2;
 
 export function scenario(o: ScenarioOpts, need: { raise: number; grade?: number } = { raise: 0 }): Scenario {
   const up = need.raise;
@@ -31,11 +36,22 @@ export function scenario(o: ScenarioOpts, need: { raise: number; grade?: number 
   };
   const r = o.river, drop = r?.drop ?? 1.2, depth = r?.depth ?? 4;
   const level = r ? Math.min(base(r.s0), base(r.s1)) - drop : 0;
-  const ground = (s: number) => {
+  const natural = (s: number) => {
     const g = base(s);
     if (!r || s <= r.s0 || s >= r.s1) return g;
     const bank = Math.min(12, (r.s1 - r.s0) / 5), into = Math.min(s - r.s0, r.s1 - s);
     return Math.min(g, level - depth * Math.min(1, into / bank));
+  };
+  // level benches for the roads and railways underneath: level across their width and a metre
+  // either side, then side slopes back to the natural ground
+  const benches = (o.under ?? []).map((u) => ({ s: u.s, half: u.half + 1, level: natural(u.s) }));
+  const ground = (s: number) => {
+    let g = natural(s);
+    for (const b of benches) {
+      const d = Math.abs(s - b.s) - b.half;
+      g = d <= 0 ? b.level : Math.min(b.level + d / BENCH_BATTER, Math.max(b.level - d / BENCH_BATTER, g));
+    }
+    return g;
   };
   if (r) {
     const ch = r.channel, mid = (r.s0 + r.s1) / 2;
@@ -48,7 +64,9 @@ export function scenario(o: ScenarioOpts, need: { raise: number; grade?: number 
   for (const u of o.under ?? []) {
     const s0 = u.s - u.half, s1 = u.s + u.half;
     obstacles.push({ kind: u.kind, s0, s1, surface: ground(u.s), name: u.kind === 'rail' ? 'the railway' : 'the road' });
-    under.push({ s0, s1, kind: u.kind });
+    // how far the bench's slopes can reach: until the natural ground is met
+    const b = benches.find((q) => q.s === u.s)!, reach = (dir: number) => { let d = 0; while (d < 200 && Math.abs(natural(u.s + dir * (b.half + d)) - b.level) > d / BENCH_BATTER + 1e-3) d += 0.5; return u.s + dir * (b.half + d); };
+    under.push({ s0, s1, kind: u.kind, level: b.level, bench0: u.s - b.half, bench1: u.s + b.half, toe0: reach(-1), toe1: reach(1) });
     limits.push({ s0: s0 - 2, s1: s1 + 2, lo: ground(u.s) + (u.kind === 'rail' ? GRADES.rail.clear : spec.clear) + up, why: u.kind === 'rail' ? 'the railway' : 'the road' });
   }
   const G = Math.min(o.road.maxGrade, spec.max, need.grade ?? 1);

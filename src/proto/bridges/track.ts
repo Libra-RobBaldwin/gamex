@@ -28,6 +28,16 @@ export const DETAIL_MPP = 0.13;
 export type SleeperKind = 'timber' | 'concrete';
 export type TrackForm = 'ballast' | 'open';
 export const sleeperKind = (year: number): SleeperKind => (year < 1960 ? 'timber' : 'concrete');
+// How a bridge type carries track: steel girders, trusses and timber trestles have bare timbers
+// (longitudinal bearers or transoms) with guard rails; masonry and concrete carry the ballast across.
+const OPEN_DECKS = ['trestle', 'girder', 'truss-through', 'truss-deck', 'bascule'];
+export const deckForm = (bridgeId: string): TrackForm => (OPEN_DECKS.includes(bridgeId) ? 'open' : 'ballast');
+// How far below the track level the deck (or formation) under it lies: the ballast depth, or on
+// an open deck the underside of the timbers, which sit straight on the steelwork.
+export const formationDrop = (form: TrackForm) => (form === 'ballast' ? BALLAST_DEPTH : SLEEPERS.timber.depth - SLEEPER_PROUD);
+// Sleepers and rails are built in chunks of about this length, so zoomed in only the chunks on
+// screen are drawn.
+export const CHUNK = 120;
 
 interface SleeperDef { len: number; width: number; depth: number; colour: string; seat: { across: number; along: number; colour: string } }
 export const SLEEPERS: Record<SleeperKind, SleeperDef> = {
@@ -133,6 +143,13 @@ export function ballastTexture(kind: SleeperKind) {
   if (!cache.has(key)) cache.set(key, paintTexture(256, 32, (n, s, px) => trackTop(n, s, px, kind, shade(hex(BALLAST[kind]), 0.8 + 0.4 * stone(n, s)), false)));
   return cache.get(key)!;
 }
+// close in, real sleepers and rails stand on the bed, so it shows only stones (no painted twins
+// peeping out beside them at an angle)
+export function plainBallastTexture(kind: SleeperKind) {
+  const key = `plain-${kind}`;
+  if (!cache.has(key)) cache.set(key, paintTexture(256, 32, (n, s) => shade(hex(BALLAST[kind]), 0.8 + 0.4 * stone(n, s))));
+  return cache.get(key)!;
+}
 // bare timbers on a steel deck: dark gaps between them, guard rails inside the running rails
 export function openDeckTexture() {
   if (!cache.has('open')) cache.set('open', paintTexture(256, 32, (n, s, px) => trackTop(n, s, px, 'timber', hex('#26231f'), true)));
@@ -141,12 +158,13 @@ export function openDeckTexture() {
 
 // ---------- materials ----------
 
-let mats: { bed: Record<SleeperKind, THREE.MeshLambertMaterial>; open: THREE.MeshLambertMaterial; rail: THREE.MeshLambertMaterial; sleeper: THREE.MeshLambertMaterial } | null = null;
+let mats: { bed: Record<SleeperKind, THREE.MeshLambertMaterial>; plain: Record<SleeperKind, THREE.MeshLambertMaterial>; open: THREE.MeshLambertMaterial; rail: THREE.MeshLambertMaterial; sleeper: THREE.MeshLambertMaterial } | null = null;
 export function trackMaterials() {
   if (mats) return mats;
   const lit = (o: THREE.MeshLambertMaterialParameters) => new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, flatShading: true, ...o });
   return (mats = {
     bed: { timber: lit({ map: ballastTexture('timber') }), concrete: lit({ map: ballastTexture('concrete') }) },
+    plain: { timber: lit({ map: plainBallastTexture('timber') }), concrete: lit({ map: plainBallastTexture('concrete') }) },
     open: lit({ map: openDeckTexture() }),
     rail: lit({ color: '#8d9196' }),
     sleeper: lit({ vertexColors: true }),
@@ -204,17 +222,23 @@ export interface Track {
   dispose(): void;
 }
 
-// Collects every run of track in a scene, then builds it as a handful of meshes.
+// Collects every run of track in a scene, then builds it as a handful of meshes: the ballast bed
+// (one per sleeper kind, with a painted twin for the far view), the open-deck strip, and close in
+// the rails and sleepers in chunks of about CHUNK metres.
 export class TrackBuilder {
   runs: TrackRun[] = [];
   add(r: TrackRun) { if (r.s1 - r.s0 > 0.05) this.runs.push(r); return this; }
 
   build(): Track {
-    const bed = { timber: new Tris(), concrete: new Tris() }, open = new Tris(), rails = new Tris();
-    const inst: Record<SleeperKind, THREE.Matrix4[]> = { timber: [], concrete: [] };
+    const bed = { timber: new Tris(), concrete: new Tris() }, open = new Tris();
+    const rails = new Map<number, Tris>(), inst = new Map<string, THREE.Matrix4[]>();
+    const railsOf = (k: number) => { let t = rails.get(k); if (!t) rails.set(k, (t = new Tris())); return t; };
+    const instOf = (kind: SleeperKind, k: number) => { const key = `${kind}:${k}`; let a = inst.get(key); if (!a) inst.set(key, (a = [])); return a; };
     const m4 = new THREE.Matrix4(), X = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3();
     const ballastRuns = this.runs.filter((r) => r.form === 'ballast');
     const joined = (r: TrackRun, s: number) => ballastRuns.some((o) => o !== r && o.path === r.path && (Math.abs(o.s0 - s) < 1e-3 || Math.abs(o.s1 - s) < 1e-3));
+    // chunks are counted along each path, so a run's pieces and its neighbours share them
+    const chunkOf = (r: TrackRun, s: number) => this.runs.indexOf(this.runs.find((o) => o.path === r.path)!) * 100000 + Math.floor(s / CHUNK);
     for (const r of this.runs) {
       const ss = samples(r.s0, r.s1, r.step ?? 3), fr = ss.map((s) => frame(r.path, s)), lv = ss.map((s) => r.level(s));
       const cs = trackCentres(r.tracks), c0 = cs[0], w = bedWidth(r.tracks);
@@ -242,9 +266,12 @@ export class TrackBuilder {
       }
       // rails (and guard rails on open decks), swept along the run
       const railAt = (n: number, sec: [number, number][], base: number) => {
-        for (let i = 1; i < ss.length; i++) for (let e = 0; e + 1 < sec.length; e++) {
-          const [pa, ha] = sec[e], [pb, hb] = sec[e + 1];
-          rails.quad(at(fr[i - 1], n + pa, lv[i - 1] + base + ha), at(fr[i - 1], n + pb, lv[i - 1] + base + hb), at(fr[i], n + pb, lv[i] + base + hb), at(fr[i], n + pa, lv[i] + base + ha));
+        for (let i = 1; i < ss.length; i++) {
+          const t = railsOf(chunkOf(r, (ss[i - 1] + ss[i]) / 2));
+          for (let e = 0; e + 1 < sec.length; e++) {
+            const [pa, ha] = sec[e], [pb, hb] = sec[e + 1];
+            t.quad(at(fr[i - 1], n + pa, lv[i - 1] + base + ha), at(fr[i - 1], n + pb, lv[i - 1] + base + hb), at(fr[i], n + pb, lv[i] + base + hb), at(fr[i], n + pa, lv[i] + base + ha));
+          }
         }
       };
       for (const c of cs) for (const k of [-1, 1]) {
@@ -253,33 +280,38 @@ export class TrackBuilder {
       }
       // sleepers, square to the track, tops SLEEPER_PROUD above the ballast
       for (const s of sleeperStations(r.s0, r.s1)) {
-        const f = frame(r.path, s), y = r.level(s) + SLEEPER_PROUD;
+        const f = frame(r.path, s), y = r.level(s) + SLEEPER_PROUD, list = instOf(kind, chunkOf(r, s));
         X.set(f.nx, 0, f.nz); Z.set(-f.ux, 0, -f.uz);
-        for (const c of cs) { m4.makeBasis(X, Y, Z).setPosition(f.x + f.nx * c, y, f.z + f.nz * c); inst[kind].push(m4.clone()); }
+        for (const c of cs) { m4.makeBasis(X, Y, Z).setPosition(f.x + f.nx * c, y, f.z + f.nz * c); list.push(m4.clone()); }
       }
     }
     const tm = trackMaterials();
     const group = new THREE.Group(), near = new THREE.Group(), far = new THREE.Group();
     group.name = 'track'; near.name = 'track-near'; far.name = 'track-far';
-    const add = (into: THREE.Group, t: Tris, m: THREE.Material, name: string) => {
-      if (!t.pos.length) return;
-      const mesh = new THREE.Mesh(t.geometry(), m);
+    const add = (into: THREE.Group, g: THREE.BufferGeometry, m: THREE.Material, name: string) => {
+      const mesh = new THREE.Mesh(g, m);
       mesh.name = name; mesh.receiveShadow = true;
       into.add(mesh);
     };
-    add(group, bed.timber, tm.bed.timber, 'ballast-timber');
-    add(group, bed.concrete, tm.bed.concrete, 'ballast-concrete');
-    add(far, open, tm.open, 'open-deck');
-    add(near, rails, tm.rail, 'rails');
-    let count = 0;
     for (const kind of ['timber', 'concrete'] as SleeperKind[]) {
-      const list = inst[kind];
-      if (!list.length) continue;
-      const im = new THREE.InstancedMesh(sleeperGeometry(kind), tm.sleeper, list.length);
+      if (!bed[kind].pos.length) continue;
+      // one geometry, two looks: painted sleepers and rails from afar, bare stones close in
+      const g = bed[kind].geometry();
+      add(far, g, tm.bed[kind], `ballast-${kind}`);
+      add(near, g, tm.plain[kind], `ballast-${kind}-near`);
+    }
+    if (open.pos.length) add(far, open.geometry(), tm.open, 'open-deck');
+    for (const [k, t] of rails) add(near, t.geometry(), tm.rail, `rails-${k}`);
+    let count = 0;
+    const shapes = new Map<SleeperKind, THREE.BufferGeometry>();
+    for (const [key, list] of inst) {
+      const kind = key.split(':')[0] as SleeperKind;
+      if (!shapes.has(kind)) shapes.set(kind, sleeperGeometry(kind));
+      const im = new THREE.InstancedMesh(shapes.get(kind)!, tm.sleeper, list.length);
       list.forEach((m, i) => im.setMatrixAt(i, m));
       im.instanceMatrix.needsUpdate = true;
       im.computeBoundingSphere();
-      im.name = `sleepers-${kind}`; im.receiveShadow = true;
+      im.name = `sleepers-${key}`; im.receiveShadow = true;
       near.add(im);
       count += list.length;
     }
@@ -291,9 +323,15 @@ export class TrackBuilder {
         near.visible = on; far.visible = !on; track.detailed = on;
         return on;
       },
-      dispose() { group.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); if (o instanceof THREE.InstancedMesh) o.dispose(); }); },
+      dispose() {
+        const seen = new Set<THREE.BufferGeometry>();
+        group.traverse((o) => { if (o instanceof THREE.Mesh && !seen.has(o.geometry)) { seen.add(o.geometry); o.geometry.dispose(); } });
+      },
     };
     track.setDetail(Infinity);
     return track;
   }
 }
+
+// Metres per screen pixel at the middle of an orthographic view: what setDetail() wants.
+export const metresPerPixel = (cam: THREE.OrthographicCamera, heightPx: number) => (cam.top - cam.bottom) / cam.zoom / Math.max(1, heightPx);

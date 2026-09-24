@@ -9,6 +9,8 @@ import { depthOf, type BridgeDef } from './catalogue';
 import { deckAt, groundAt, pointOn, type Crossing } from './crossing';
 import { underside, type BridgeLayout, type Span, type Support } from './layout';
 import { bridgeMaterials, type Mat } from './materials';
+import { dashCuts, dashOn, mirrored, roadTop, type SectionKind } from './earthworks';
+import { deckForm, formationDrop, TrackBuilder, type Track, type TrackRun } from './track';
 
 type V = [number, number, number];
 
@@ -108,14 +110,20 @@ function lookOf(d: BridgeDef, year: number): Look {
   }
 }
 
-export interface Leaf { parts: Partial<Record<Mat, THREE.BufferGeometry>>; pivot: V; axis: V; sign: 1 | -1; max: number }
-export interface BridgeGeometry { parts: Partial<Record<Mat, THREE.BufferGeometry>>; leaves: Leaf[] }
-export interface GeometryOpts { surface?: boolean } // draw the road or track surface (the game draws its own)
+// `track`: runs of railway track on the deck, built by track.ts (bridgeObject does it for you);
+// a leaf's runs are in world space, like its pivot.
+export interface Leaf { parts: Partial<Record<Mat, THREE.BufferGeometry>>; pivot: V; axis: V; sign: 1 | -1; max: number; track?: TrackRun[] }
+export interface BridgeGeometry { parts: Partial<Record<Mat, THREE.BufferGeometry>>; leaves: Leaf[]; track?: TrackRun[] }
+// surface: draw the road or track surface (the game draws its own).
+// track: on a railway, lay detailed track (ballast bed or open timbers, sleepers, rails) with
+// track.ts rather than the plain ballast and bar rails; on by default.
+export interface GeometryOpts { surface?: boolean; track?: boolean }
 
 export function buildBridge(c: Crossing, lay: BridgeLayout, opts: GeometryOpts = {}): BridgeGeometry {
   const g = new Geo();
   const hw = lay.width / 2, rail = c.road.cls === 'rail';
   const surface = opts.surface !== false;
+  const track: TrackRun[] | null = rail && surface && opts.track !== false ? [] : null;
   const leaves: Leaf[] = [];
   const main = lay.spans.find((sp) => sp.role === 'main');
 
@@ -128,18 +136,51 @@ export function buildBridge(c: Crossing, lay: BridgeLayout, opts: GeometryOpts =
       if (a0) deckRuns.push([sp.s0, sp.s0 + a0, sp]);
       if (b0) deckRuns.push([sp.s1 - b0, sp.s1, sp]);
       const mid = (sp.s0 + sp.s1) / 2;
-      leaves.push(leaf(c, sp, sp.s0 + a0, mid - 0.1, hw, surface, rail));
-      leaves.push(leaf(c, sp, sp.s1 - b0, mid + 0.1, hw, surface, rail));
+      leaves.push(leaf(c, sp, sp.s0 + a0, mid - 0.1, hw, surface, rail, !!track));
+      leaves.push(leaf(c, sp, sp.s1 - b0, mid + 0.1, hw, surface, rail, !!track));
     } else deckRuns.push([sp.s0, sp.s1, sp]);
   }
-  for (const [s0, s1, sp] of deckRuns) deck(g, c, s0, s1, sp.def, hw, surface, rail);
+  for (const [s0, s1, sp] of deckRuns) deck(g, c, s0, s1, sp.def, hw, surface, rail, track);
   for (const sp of lay.spans) spanStructure(g, c, lay, sp, hw);
   for (const q of lay.supports) support(g, c, lay, q, hw, main);
-  return { parts: g.geometries(), leaves };
+  return { parts: g.geometries(), leaves, ...(track ? { track } : {}) };
 }
 
-function deck(g: Geo, c: Crossing, s0: number, s1: number, d: BridgeDef, hw: number, surface: boolean, rail: boolean) {
+// Materials for the stretches of a road's cross-section on a deck or an approach.
+export function routeMat(k: SectionKind, s0: number, s1: number): Mat | null {
+  switch (k) {
+    case 'surface': return 'surface';
+    case 'line': return 'line';
+    case 'centre': return dashOn((s0 + s1) / 2) ? 'line' : 'surface';
+    case 'kerb': return 'concrete';
+    case 'footway': return 'deck';
+    default: return null;
+  }
+}
+
+function deck(g: Geo, c: Crossing, s0: number, s1: number, d: BridgeDef, hw: number, surface: boolean, rail: boolean, track: TrackRun[] | null) {
   const L = lookOf(d, c.year), y = (s: number) => deckAt(c, s);
+  if (track) {
+    // detailed track: the slab's top is the deck the ballast (or the open timbers) sit on
+    const form = deckForm(d.id), drop = formationDrop(form);
+    sweep(g, c, s0, s1, (s) => rect(-hw, hw, y(s) - Math.max(L.slab, drop + 0.2), y(s) - drop), [form === 'open' ? 'bearer' : 'deck', L.edge, L.edge, L.edge]);
+    track.push({ path: c.path, s0, s1, level: y, tracks: c.road.tracks, form, year: c.year });
+    parapets(g, c, s0, s1, L, hw, drop);
+    return;
+  }
+  if (surface && !rail) {
+    // the road's own cross-section as the top of the slab: carriageway, lines, kerbs and
+    // footways are stretches of one surface, so nothing is laid over anything else
+    const { pts, kinds } = mirrored(roadTop(c.road, hw, true));
+    const cuts = [s0, ...dashCuts(s0, s1), s1];
+    for (let i = 1; i < cuts.length; i++) {
+      const a = cuts[i - 1], b = cuts[i];
+      const top = kinds.map((k) => routeMat(k, a, b) ?? 'surface');
+      sweep(g, c, a, b, (s) => [...pts.map((p): [number, number] => [p.n, y(s) + p.dy]), [hw, y(s) - L.slab], [-hw, y(s) - L.slab]], [...top, L.edge, L.edge, L.edge], 3, i === 1 || i === cuts.length - 1);
+    }
+    parapets(g, c, s0, s1, L, hw);
+    return;
+  }
   // slab: the top is the road (or ballast), the rest shows the type's colour
   sweep(g, c, s0, s1, (s) => rect(-hw, hw, y(s) - L.slab, y(s)), [surface ? (rail ? 'ballast' : 'surface') : 'deck', L.edge, L.edge, L.edge]);
   if (surface) markings(g, c, s0, s1, hw, rail);
@@ -160,19 +201,20 @@ function markings(g: Geo, c: Crossing, s0: number, s1: number, hw: number, rail:
   for (let s = s0 + 2; s + 3 < s1; s += 9) sweep(g, c, s, s + 3, (t) => rect(-0.08, 0.08, y(t), y(t) + 0.01), 'line', 3, false);
 }
 
-function parapets(g: Geo, c: Crossing, s0: number, s1: number, L: Look, hw: number) {
-  const y = (s: number) => deckAt(c, s);
+// `drop`: how far below the track level the deck surface lies, so the parapets reach down to it
+function parapets(g: Geo, c: Crossing, s0: number, s1: number, L: Look, hw: number, drop = 0) {
+  const y = (s: number) => deckAt(c, s), b = (s: number) => y(s) - drop;
   for (const k of [-1, 1]) {
     const o = k * hw;
     if (L.parapet === 'stone') {
-      sweep(g, c, s0, s1, (s) => rect(o - k * 0.5, o, y(s) - 0.1, y(s) + 1.0), 'stone');
+      sweep(g, c, s0, s1, (s) => rect(o - k * 0.5, o, b(s) - 0.1, y(s) + 1.0), 'stone');
       sweep(g, c, s0, s1, (s) => rect(o - k * 0.55, o + k * 0.05, y(s) + 1.0, y(s) + 1.15), 'stoneDark', 3, false); // coping
     } else if (L.parapet === 'concrete') {
-      sweep(g, c, s0, s1, (s) => rect(o - k * 0.4, o + k * 0.05, y(s) - 0.1, y(s) + 0.95), 'concrete');
+      sweep(g, c, s0, s1, (s) => rect(o - k * 0.4, o + k * 0.05, b(s) - 0.1, y(s) + 0.95), 'concrete');
     } else if (L.parapet === 'steel' || L.parapet === 'timber') {
       const m = L.rail, w = L.parapet === 'timber' ? 0.18 : 0.1;
       sweep(g, c, s0, s1, (s) => rect(o - k * 0.25, o, y(s) + 1.0, y(s) + 1.0 + w), m, 3, false);
-      for (const s of samples(s0, s1, 3)) { const f = frameAt(c, s); const p = at(f, o - k * 0.12, 0); g.box(m, p[0], p[2], f.ux, f.uz, w / 2, w / 2, y(s), y(s) + 1.05, false); }
+      for (const s of samples(s0, s1, 3)) { const f = frameAt(c, s); const p = at(f, o - k * 0.12, 0); g.box(m, p[0], p[2], f.ux, f.uz, w / 2, w / 2, b(s), y(s) + 1.05, false); }
     }
   }
 }
@@ -519,22 +561,24 @@ function stays(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number, H
 }
 
 // A bascule leaf, built around its pivot so it can be swung up.
-function leaf(c: Crossing, sp: Span, from: number, to: number, hw: number, surface: boolean, rail: boolean): Leaf {
+function leaf(c: Crossing, sp: Span, from: number, to: number, hw: number, surface: boolean, rail: boolean, withTrack: boolean): Leaf {
   const g = new Geo();
-  const a = Math.min(from, to), b = Math.max(from, to);
-  deck(g, c, a, b, sp.def, hw, surface, rail);
+  const a = Math.min(from, to), b = Math.max(from, to), track: TrackRun[] | null = withTrack ? [] : null;
+  deck(g, c, a, b, sp.def, hw, surface, rail, track);
   const y = (s: number) => deckAt(c, s);
   for (const k of [-1, 1]) sweep(g, c, a, b, (s) => rect(k * hw * 0.6 - 0.35, k * hw * 0.6 + 0.35, y(s) - 1.6, y(s) - 0.8), 'steelBlue');
   const f = frameAt(c, from), pivot: V = [f.x, y(from) - 0.8, f.z];
   // which way round the axis lifts the free end
   const dir = to > from ? 1 : -1;
   const sign: 1 | -1 = dir > 0 ? 1 : -1;
-  return { parts: g.geometries(pivot), pivot, axis: [f.nx, 0, f.nz], sign, max: (78 * Math.PI) / 180 };
+  return { parts: g.geometries(pivot), pivot, axis: [f.nx, 0, f.nz], sign, max: (78 * Math.PI) / 180, ...(track ? { track } : {}) };
 }
 
 // A three.js object for a bridge: one mesh per material, and the bascule leaves on their pivots.
-// setOpen(0..1) lifts the leaves.
-export function bridgeObject(bg: BridgeGeometry, mats = bridgeMaterials()) {
+// setOpen(0..1) lifts the leaves. The deck's track is built here too, unless `opts.track` is given:
+// then its runs are added to that builder, so a scene can build all its track together.
+// setDetail(metres per pixel) switches the track between its near and far looks.
+export function bridgeObject(bg: BridgeGeometry, mats = bridgeMaterials(), opts: { track?: TrackBuilder } = {}) {
   const group = new THREE.Group();
   const meshes = (parts: BridgeGeometry['parts'], into: THREE.Object3D) => {
     for (const [m, geo] of Object.entries(parts) as [Mat, THREE.BufferGeometry][]) {
@@ -553,8 +597,24 @@ export function bridgeObject(bg: BridgeGeometry, mats = bridgeMaterials()) {
     return o;
   });
   const axes = bg.leaves.map((l) => new THREE.Vector3(...l.axis).normalize());
+  const tracks: Track[] = [];
+  if (bg.track?.length) {
+    if (opts.track) for (const r of bg.track) opts.track.add(r);
+    else { const t = new TrackBuilder(); for (const r of bg.track) t.add(r); tracks.push(t.build()); group.add(tracks[0].group); }
+  }
+  bg.leaves.forEach((l, i) => {
+    if (!l.track?.length) return;
+    const t = new TrackBuilder();
+    for (const r of l.track) t.add(r);
+    const built = t.build();
+    built.group.position.set(-l.pivot[0], -l.pivot[1], -l.pivot[2]); // the leaf's parts are about its pivot
+    pivots[i].add(built.group);
+    tracks.push(built);
+  });
   return {
     object: group,
+    track: tracks[0] as Track | undefined,
+    setDetail(mpp: number) { for (const t of tracks) t.setDetail(mpp); },
     setOpen(t: number) { bg.leaves.forEach((l, i) => pivots[i].setRotationFromAxisAngle(axes[i], l.sign * l.max * Math.max(0, Math.min(1, t)))); },
   };
 }
