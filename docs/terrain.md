@@ -286,3 +286,17 @@ earthworkPolys(route, secs).forEach((e, k) => land.claim(`earth:${seg.id}:${k}`,
 - Both go behind `CachedHeight` like the procedural terrain. Everything above is unchanged.
 - Inland water isn't in elevation data. Pass `water: (x, z) => …` built from OpenStreetMap
   water polygons.
+
+## Drawing tiles
+
+The library stays free of three.js (it runs in workers). To draw a tile, use the shared ground
+(`src/proto/ground/`, see `docs/ground.md`), so tiles look like the rest of the game:
+
+```ts
+const ground = new Ground({ terrain: true }); // rock and scree on steep ground, heather up high
+scene.add(groundTile(tileMesh(src, ti, tj, { cells: 256 }), ground.material, origin));
+```
+
+The ground samples everything in world space, so it needs no UVs and runs on seamlessly across
+tiles. Place tiles at `offset − origin` and call `ground.setOrigin(origin.x, origin.z)` whenever
+the floating origin moves.

@@ -2,7 +2,9 @@
 // region of the world, from the parcel layout and the input shapes. It can repaint any rectangle
 // of texels on its own, giving exactly what a full paint gives there: every texel depends only on
 // the world within a fixed margin of it, and the margin is painted too (then thrown away).
-import { CROP } from './covers';
+import { CROP, DIRS } from './covers';
+
+const DPI = DIRS / Math.PI;
 import { bbox, GRID, Layout, toGrid, type Cell, type ParcelInfo, type XZ } from './layout';
 
 export interface Region { x0: number; z0: number; size: number; n: number } // n texels across
@@ -81,14 +83,12 @@ function blur(a: Float32Array, W: number, H: number, tmp: Float32Array) {
 export interface Spot { x: number; z: number; r: number; v: number } // a dab: bare earth at gateways
 
 export class CoverMap {
-  readonly a: Uint8Array;
-  readonly b: Uint8Array;
+  readonly a: Uint8Array; // (see packCover in covers.ts)
   readonly texel: number;
   // how long the last paint spent on each step (ms)
   times = { parcels: 0, shapes: 0, distances: 0, write: 0 };
   constructor(readonly region: Region) {
     this.a = new Uint8Array(region.n * region.n * 4);
-    this.b = new Uint8Array(region.n * region.n * 4);
     this.texel = region.size / region.n;
   }
   // scratch layers, kept between paints (zeroed for each)
@@ -132,8 +132,9 @@ export class CoverMap {
     // to it, so field margins and wood edges follow the hedges to the centimetre
     const P = layout.parcels;
     const corners = [toGrid(x0, z0), toGrid(x1, z0), toGrid(x0, z1), toGrid(x1, z1)];
-    const gi0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 1, gi1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 1;
-    const gj0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 1, gj1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 1;
+    // (the grid bends up to a cell and a half from where it would be)
+    const gi0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 3, gi1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 3;
+    const gj0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 3, gj1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 3;
     const cellOf: Cell[] = [], own: number[] = [];
     const CA = Math.cos(GRID.angle), SA = Math.sin(GRID.angle), SX = GRID.sx, SZ = GRID.sz;
     edge.fill(1e9);
@@ -227,8 +228,8 @@ export class CoverMap {
       const ia = Math.max(0, Math.floor((x - r - x0) / t)), ib = Math.min(W - 1, Math.floor((x + r - x0) / t));
       const ja = Math.max(0, Math.floor((z - r - z0) / t)), jb = Math.min(H - 1, Math.floor((z + r - z0) / t));
       for (let j = ja; j <= jb; j++) for (let i = ia; i <= ib; i++) {
-        const k = j * W + i, d = Math.hypot(x0 + (i + 0.5) * t - x, z0 + (j + 0.5) * t - z) / r;
-        if (d < 1 && !town[k]) layer[k] = Math.max(layer[k], v * (1 - d * d));
+        const k = j * W + i, dx = x0 + (i + 0.5) * t - x, dz = z0 + (j + 0.5) * t - z, d2 = (dx * dx + dz * dz) / (r * r);
+        if (d2 < 1 && !town[k]) { const u = v * (1 - d2); if (u > layer[k]) layer[k] = u; }
       }
     };
     for (const p of inp.trees ?? []) dab(wood, p.x, p.z, 5.5, 0.75);
@@ -255,14 +256,16 @@ export class CoverMap {
     lap('distances');
     // 5. soften, keep the four weights summing to at most one, and write the rectangle out
     for (const l of [lawn, field, bare]) blur(l, W, H, tmp); // (wood and field edges are already soft)
-    const n = R.n, A = this.a, B = this.b;
+    const n = R.n, A = this.a;
     for (let j = rect.j0; j < rect.j1; j++) {
       let k = (j - ej0) * W + (rect.i0 - ei0), o = (j * n + rect.i0) * 4;
       for (let i = rect.i0; i < rect.i1; i++, k++, o += 4) {
-        const s = lawn[k] + field[k] + wood[k] + bare[k], f = (s > 1 ? 255 / s : 255);
-        A[o] = lawn[k] * f + 0.5; A[o + 1] = field[k] * f + 0.5; A[o + 2] = wood[k] * f + 0.5; A[o + 3] = bare[k] * f + 0.5;
-        const r = rough[k], w = wet[k];
-        B[o] = crop[k] * 32 + 16; B[o + 1] = dir[k] * (255.9 / Math.PI); B[o + 2] = (r > 1 ? 1 : r) * 255 + 0.5; B[o + 3] = (w > 1 ? 1 : w) * 255 + 0.5;
+        // (packCover, inlined: this runs for every texel)
+        const s = lawn[k] + field[k] + wood[k] + bare[k], f = s > 1 ? 127.5 / s : 127.5, r = rough[k], w = wet[k];
+        A[o] = 128 + (field[k] - lawn[k]) * f;
+        A[o + 1] = crop[k] * DIRS + (((dir[k] * DPI + 0.5) | 0) % DIRS);
+        A[o + 2] = 128 + (wood[k] - bare[k]) * f;
+        A[o + 3] = 128 + ((r > 1 ? 1 : r) - (w > 1 ? 1 : w)) * 127.5;
       }
     }
     lap('write');
