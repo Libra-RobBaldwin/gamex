@@ -354,6 +354,8 @@ export class TownCrowds {
     return `${u.waiting} waiting · ${u.boarded} boarded and ${u.alighted} got off today`;
   }
   // The same, as facts for the stop's info sheet.
+  // passengers aboard a bus (as the crowds count them at its doors)
+  aboard(bus: number) { return this.loads.get(bus) ?? 0; }
   stopFacts(seg: RSeg, st: Stop): [string, string][] {
     const u = this.stopUse(seg, st);
     return [['Waiting', `${u.waiting}`], ['Boarded today', `${u.boarded}`], ['Got off today', `${u.alighted}`]];

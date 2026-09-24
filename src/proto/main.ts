@@ -24,6 +24,7 @@ import { Industries, townWishes, type IndustrySite } from './game/industry'; // 
 import { PLAIN_MAT } from './buildgen';
 import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
+import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
 import { starterStops } from './game/crowdsites';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -418,7 +419,7 @@ function seedTown() {
 }
 
 // ---------------- UI ----------------
-type Mode = 'look' | 'road' | 'rail' | 'stop';
+type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line';
 type RoadKind = 'straight' | 'curve' | 'smooth';
 let mode: Mode = 'look';
 let roadKind: RoadKind = 'straight';
@@ -461,7 +462,7 @@ function setMode(m: Mode) {
   if (building && (mode === 'road' || mode === 'rail') && m !== mode) lastType[mode] = opts.type;
   mode = m;
   // each mode has its colourway (green roads, blue rail, orange stops); the HUD reads it from here
-  document.body.dataset.mode = m;
+  document.body.dataset.mode = m === 'line' ? 'stop' : m;
   if (m === 'rail' && opts.cross === 'junction') opts.cross = 'bridge';
   clearDraft();
 }
@@ -472,12 +473,13 @@ function setKind(k: RoadKind) {
 }
 // The hint over the map. It leads with the current tool's icon unless given its own. With a tool
 // in use it stays until replaced; otherwise it's a short message that clears itself.
-const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop' };
+const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop', line: 'transport' };
 function hint(text?: string, ic?: Icon) {
   let t = text;
   if (t === undefined) {
     if (!tool) return shell.hint(null);
     if (mode === 'stop') t = 'Tap a road, on the side you want the stop · the bus will call there';
+    else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : lineDraft.length === 1 ? 'Tap the next stop' : 'Tap more stops, or the first again for a circular line · then Create';
     else if (draft) t = 'Drag the white handles to adjust, then Build';
     else if (roadKind === 'straight') t = mode === 'rail' ? 'Drag to lay track · tap a junction to see how it works' : 'Drag to draw a road · tap a junction to redesign it';
     else if (roadKind === 'smooth') t = 'Drag from a road: the new one curves smoothly out of it';
@@ -494,6 +496,7 @@ function endTool() {
   shell.endTool();
   shell.closeSheet();
   stopPreview = null;
+  if (mode === 'line') { lineDraft = []; showLine(null); }
   setMode('look');
 }
 function startRoadTool(t: RoadType) {
@@ -512,6 +515,60 @@ function startStopTool() {
   setMode('stop');
   hint();
 }
+// ---- the line tool: tap stops in the order the buses call; the first again makes it circular ----
+let lineDraft: number[] = [];
+let lineLoop = false;
+let busOffer: string | undefined; // the bus model new lines get (picked in Transport > Buy vehicles)
+function startLineTool() {
+  lineDraft = []; lineLoop = false;
+  tool = shell.startTool({ name: 'New line', spec: 'Buses call only at the stops you tap', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
+  setMode('line');
+  lineChanged();
+}
+function lineChanged() {
+  const n = lineDraft.length;
+  showLine(n ? callOrder(lineDraft, lineLoop) : [], lineDraft);
+  tool?.setUndo(n > 0);
+  tool?.setPrimary({ label: 'Create', icon: 'check', kind: 'primary', disabled: n < 2, onClick: finishLine });
+  tool?.setPanel(n ? `<div class="what">${icon('transport')}<span>${lineDraft.map((id, i) => `<b>${i + 1}</b> ${esc(lines.name(id))}`).join(' · ')}${lineLoop ? ' · <b>back to 1</b>' : n > 2 ? ' · and back' : ''}</span></div>` : null);
+  hint();
+}
+function lineTap(sx: number, sy: number) {
+  const id = stopNear(sx, sy);
+  if (id === null) { hint(allStops().length ? 'Tap one of the orange stop badges' : 'There are no stops yet · add them from Build > Stops', 'alert'); return; }
+  if (lineDraft.length && lines.same(lineDraft[lineDraft.length - 1], id)) return;
+  if (lineDraft.length >= 2 && lines.same(lineDraft[0], id)) { lineLoop = !lineLoop; lineChanged(); return; }
+  if (lineDraft.some((x) => lines.same(x, id))) { hint('That stop is on the line already · a line calls at each stop once each way', 'alert'); return; }
+  lineLoop = false;
+  lineDraft.push(id);
+  lineChanged();
+}
+function finishLine() {
+  if (lineDraft.length < 2) return;
+  const l = lines.add(lineDraft, lineLoop, 2, busOffer);
+  lineDraft = [];
+  endTool();
+  showLineInfo(l);
+  hint(`Line ${l.num} is running · ${lines.buses(l).length} buses`, 'bus');
+}
+// the stop badge nearest a tap, within a finger's width
+function stopNear(sx: number, sy: number): number | null {
+  let best: number | null = null, bd = 30;
+  for (const { id, p } of markers.places()) {
+    const q = toScreen(p), d = Math.hypot(q.x - sx, q.y - sy);
+    if (d < bd) { bd = d; best = id; }
+  }
+  if (best === null) { const st = stopAt(groundAt(sx, sy)); if (st) best = st.stop.id; }
+  return best;
+}
+// the route and the stop badges on the map, for a line being drawn or looked at (null: neither)
+let routeShown: ReturnType<typeof routeMesh> = null;
+function showLine(seq: number[] | null, stops: number[] = []) {
+  if (routeShown) { scene.remove(routeShown); routeShown.geometry.dispose(); routeShown.material.dispose(); routeShown = null; }
+  if (seq && seq.length > 1) { routeShown = routeMesh(net, traffic, seq); if (routeShown) scene.add(routeShown); }
+  markers.show(seq ? new Map(stops.map((id, i) => [id, String(i + 1)])) : null);
+}
+
 // Undo steps back through what's being placed: the blueprint, then the curve's taps.
 function undoStep() {
   if (draft) { draft = null; picks = []; draftChanged(); }
@@ -687,14 +744,17 @@ function openRoadPicker(fresh = false) {
 // ---- Transport: lines (the stops buses call at) and buying vehicles ----
 function allStops() { return [...net.segs.values()].flatMap((seg) => seg.stops.map((stop) => ({ seg, stop }))); }
 shell.addTransportTab({
-  id: 'lines', label: 'Lines', icon: 'transport', sub: 'Your stops and lines',
+  id: 'lines', label: 'Lines', icon: 'transport', sub: 'Your bus lines and stops',
   render: (el) => {
-    const stops = allStops();
-    el.innerHTML = `<p class="note">Buses wander the roads and call at every stop on their side. ${stops.length ? `${stops.length} stop${stops.length === 1 ? '' : 's'} so far:` : 'There are no stops yet.'}</p>
-      ${stops.map(({ seg, stop }, i) => `<button class="lrow tone-stop" data-stop="${i}"><span class="num">${icon('busStop')}</span><b>${stop.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by'}</b><span>${esc(net.def(seg).label)} · tap to show it</span></button>`).join('')}
-      <div class="acts"><button class="act primary tone-stop" data-addstop="1">${icon('plus')}<span>Add a bus stop</span></button><button class="act" disabled>${icon('transport')}<span>New line</span></button></div>
-      <p class="note">New line (tap stops in order, then pick vehicles) comes with timetabled routes.</p>`;
+    const stops = markers.places().map(({ id }) => { const pl = traffic.place(id)!; return { seg: pl.seg, stop: pl.stops[0], sides: pl.stops.length }; });
+    el.innerHTML = `<p class="note">${lines.list.length ? 'Buses call only at their line’s stops. Tap a line to see its route.' : 'No lines yet. A line is stops in order; its buses call at those and nothing else.'}</p>
+      ${lines.list.map((l, i) => `<button class="lrow tone-stop" data-line="${i}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${l.stops.length} stops · ${lines.buses(l).length} bus${lines.buses(l).length === 1 ? '' : 'es'} · ${l.loop ? 'circular' : 'there and back'}</span></button>`).join('')}
+      <div class="acts"><button class="act primary tone-stop" data-newline="1" ${stops.length < 2 ? 'disabled' : ''}>${icon('transport')}<span>New line</span></button><button class="act" data-addstop="1">${icon('plus')}<span>Add a bus stop</span></button></div>
+      <div class="grp"><span class="tab">Stops</span><small>${stops.length ? `${stops.length} stop${stops.length === 1 ? '' : 's'}, tap one to show it` : 'There are no stops yet.'}</small>
+      ${stops.map(({ seg, stop, sides }, i) => `<button class="lrow tone-stop" data-stop="${i}"><span class="num">${icon('busStop')}</span><b>${esc(lines.name(stop.id))}</b><span>${sides > 1 ? 'Both sides' : 'One side'} · ${stop.kind === 'kerb' ? 'kerbside' : 'lay-by'} · ${esc(net.def(seg).label)}</span></button>`).join('')}</div>`;
     el.querySelector('[data-addstop]')!.addEventListener('click', () => startStopTool());
+    el.querySelector('[data-newline]')!.addEventListener('click', () => startLineTool());
+    el.querySelectorAll<HTMLButtonElement>('[data-line]').forEach((b) => b.addEventListener('click', () => showLineInfo(lines.list[+b.dataset.line!])));
     el.querySelectorAll<HTMLButtonElement>('[data-stop]').forEach((b) => b.addEventListener('click', () => {
       const { seg, stop } = stops[+b.dataset.stop!];
       const at = pointAt(net.path(seg), stop.s);
@@ -703,6 +763,40 @@ shell.addTransportTab({
     }));
   },
 });
+// A line's sheet: its stops, its buses, and its route on the map while the sheet is open.
+function showLineInfo(l: Line) {
+  if (!lines.list.includes(l)) { closeSheet(); return; }
+  const n = lines.buses(l).length;
+  lastLine = l;
+  showLine(l.bus.seq, l.stops);
+  shell.openInfo({
+    key: `line:${l.id}`, title: `Line ${l.num}`, sub: lines.title(l), icon: 'transport', tone: 'stop',
+    facts: [['Stops', l.stops.map((id) => lines.name(id)).join(' · ')], ['Runs', l.loop ? 'Circular, round and round' : 'There and back'], ['Buses', `${n}`]],
+    note: 'Buses take the quickest way between stops, and call on whichever side of the road they come along.',
+    actions: [
+      { label: 'Add a bus', icon: 'plus', kind: 'primary', onClick: () => { const c = lines.addBus(l); hint(c ? `Bus ${c.dress?.fleetNo ?? ''} joins line ${l.num}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert'); showLineInfo(l); } },
+      { label: 'Remove a bus', icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); setTimeout(() => showLineInfo(l), 50); } },
+      { label: 'Delete line', icon: 'trash', kind: 'danger', onClick: () => { lines.remove(l); closeSheet(); hint(`Line ${l.num} withdrawn`, 'transport'); } },
+    ],
+    onClose: () => { if (mode !== 'line') showLine(null); },
+  });
+}
+let lastLine: Line | null = null;
+// A bus's sheet, when it's tapped on the map.
+function showBusInfo(id: number) {
+  const b = traffic.bus(id);
+  if (!b) return;
+  const l = lines.of(id);
+  const facts: [string, string][] = [['Line', l ? `${l.num} · ${lines.title(l)}` : 'Not on a line'], ['Model', b.model || 'Bus']];
+  if (l && b.next !== undefined) facts.push([b.dwelling ? 'At' : 'Next stop', lines.name(b.next)]);
+  facts.push(['On board', `${people.aboard(id)}`], ['Speed', `${Math.round(b.speed * 2.237)} mph`]);
+  if (l) showLine(l.bus.seq, l.stops);
+  shell.openInfo({
+    key: `bus:${id}`, title: `Bus ${b.fleetNo}`, sub: l ? `Line ${l.num}` : 'Bus', icon: 'bus', tone: 'stop', facts,
+    actions: l ? [{ label: `Line ${l.num}`, icon: 'transport', onClick: () => showLineInfo(l) }] : [],
+    onClose: () => { if (mode !== 'line') showLine(null); },
+  });
+}
 shell.addTransportTab({
   id: 'buy', label: 'Buy vehicles', icon: 'bus', sub: 'Buses, trains and how busy the roads are',
   render: (el) => {
@@ -715,7 +809,7 @@ shell.addTransportTab({
     const buses = list.filter((o) => o.kind === 'bus' || o.kind === 'coach'), trains = list.filter((o) => o.kind === 'train' || o.kind === 'tram');
     const later = list.filter((o) => !buses.includes(o) && !trains.includes(o));
     el.innerHTML = `
-      <div class="grp"><span class="tab">Buses and coaches</span><small>In your company's colours with fleet numbers. They wander the roads and call at every stop on their side.</small>
+      <div class="grp"><span class="tab">Buses and coaches</span><small>In your company's colours with fleet numbers. Tap one to put it on ${lastLine && lines.list.includes(lastLine) ? `line ${lastLine.num}` : lines.list.length ? `line ${lines.list[0].num}` : 'your next line'}; new lines get that model.</small>
         ${buses.map((o) => row(o, `data-bus="${o.id}"`, 'bus')).join('')}</div>
       <div class="grp"><span class="tab">Trains and trams</span><small>Each runs only on track it can manage: rack, electric wires, gradient</small>
         ${trains.map((o) => row(o, `data-set="${o.id}"`, trainIcon(trainKind(o)))).join('')}</div>
@@ -724,8 +818,12 @@ shell.addTransportTab({
       <div class="grp"><span class="tab">Lorries, vans, boats and planes</span><small>On sale in ${year}; not in the game yet</small>
         ${later.map((o) => row(o, '', o.kind === 'boat' ? 'droplet' : o.kind === 'plane' ? 'route' : 'building', true)).join('')}</div>`;
     el.querySelectorAll<HTMLButtonElement>('[data-bus]').forEach((b) => b.addEventListener('click', () => {
-      const o = buses.find((x) => x.id === b.dataset.bus)!, c = traffic.addBus(o.id);
-      hint(c ? `${o.name} added · fleet number ${c.dress?.fleetNo ?? ''}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert');
+      const o = buses.find((x) => x.id === b.dataset.bus)!, l = lastLine && lines.list.includes(lastLine) ? lastLine : lines.list[0];
+      busOffer = o.id;
+      if (!l) { hint(`New lines will run the ${o.name}`, 'bus'); return; }
+      l.offer = o.id;
+      const c = lines.addBus(l);
+      hint(c ? `${o.name} joins line ${l.num} · fleet number ${c.dress?.fleetNo ?? ''}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert');
     }));
     el.querySelectorAll<HTMLButtonElement>('[data-set]').forEach((b) => b.addEventListener('click', () => {
       const o = trains.find((x) => x.id === b.dataset.set)!, t = fleet.defFor(o);
@@ -1118,8 +1216,9 @@ function showStopInfo(seg: RSeg, st: Stop) {
     t.land ? `${t.land.toFixed(1)} m of front gardens bought` : '',
   ].filter(Boolean);
   shell.openInfo({
-    key: `stop:${seg.id}:${st.id}`, title: st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by', sub: d.label, icon: 'busStop', tone: 'stop',
-    facts: [['Buses call for', 'about 7 seconds, longer while people board'], ...people.stopFacts(seg, st)], note: bits.join(' · '),
+    key: `stop:${seg.id}:${st.id}`, title: lines.name(st.id), sub: `${st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by'} · ${d.label}`, icon: 'busStop', tone: 'stop',
+    facts: [['Lines', lines.list.filter((l) => l.stops.some((x) => lines.same(x, st.id))).map((l) => `${l.num}`).join(', ') || 'None yet'], ...people.stopFacts(seg, st)], note: bits.join(' · '),
+    actions: lines.list.filter((l) => l.stops.some((x) => lines.same(x, st.id))).slice(0, 3).map((l) => ({ label: `Line ${l.num}`, icon: 'transport' as Icon, onClick: () => showLineInfo(l) })),
   });
 }
 
@@ -1199,6 +1298,9 @@ function tapMap(sx: number, sy: number): Mode {
     return mode;
   }
   if (mode === 'stop') { stopTap(g); return mode; }
+  if (mode === 'line') { lineTap(sx, sy); return mode; }
+  const bus = traffic.busNear(g);
+  if (bus !== null) { showBusInfo(bus); return 'look'; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
   const br = st || jn !== null ? null : bridgeAt(sx, sy); // (a bridge is tapped where it's drawn, up in the air)
@@ -1333,8 +1435,16 @@ const traffic = new Traffic(net, scene, rng(5));
 traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
-onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; };
-for (let i = 0; i < 4; i++) traffic.addBus();
+onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); };
+const lines = new Lines(traffic);
+const markers = new StopMarkers(net, traffic);
+scene.add(markers.group);
+// the starter line: the high street's west end, its east end, and up the road north
+{
+  const near = (q: P) => allStops().map(({ seg, stop }) => ({ id: stop.id, d: Math.hypot(pointAt(net.path(seg), stop.s).x - q.x, pointAt(net.path(seg), stop.s).z - q.z) })).sort((a, b) => a.d - b.d)[0]?.id;
+  const ids = [{ x: -85, z: 0 }, { x: 120, z: 0 }, { x: 0, z: 150 }].map(near).filter((x): x is number => x !== undefined);
+  if (ids.length >= 2) lines.add(ids, false, 3);
+}
 for (const t of ['intercity', 'dmu']) traffic.addTrain(t);
 const dbSize = new THREE.Vector2();
 let clock = 7 * 60; // minutes since midnight: a day passes in six minutes
@@ -1479,6 +1589,8 @@ function frame(now: number) {
   } else traffic.redraw();
   for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, simNow) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
+  markers.frame(cam, canvas.clientHeight);
+  if (routeShown) routeShown.material.resolution.set(canvas.width, canvas.height);
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
   if (now - statsAt > 250) {
     statsAt = now;
@@ -1513,7 +1625,7 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)

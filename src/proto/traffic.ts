@@ -70,12 +70,19 @@ interface Car {
   ents?: Entry[]; ne?: number; users?: User[]; // (reused from frame to frame, so the garbage collector isn't kept busy)
   why?: string; // why it isn't going into the junction yet (for debugging)
   roomWait?: number; // how long it has stood at the line for want of room beyond
+  line?: BusLine; leg?: number; // a bus on a line, and which of its calls it's making next
+  sold?: boolean; // taken off the roads as soon as it's clear of junctions
   divertAt?: number; // when it last looked for another way out of a junction with no room beyond
   readmit?: number; // when it last asked, standing at the line, whether it could go ahead of whoever it waits for
   pose?: Pose;
 }
 interface Train { def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; dress: Dress; gone?: boolean }
 interface Access { seg: RSeg; s: number }
+// A bus line: the stops its buses call at, in order, over and over (A, B, C, B for A-B-C and
+// back). Each call is at the stop or at any stop facing it across the road, whichever side the
+// bus arrives on.
+export interface BusLine { id: number; seq: number[] }
+interface Place { key: number; seg: RSeg; stops: Stop[] }
 interface SegInfo { L: number; fwd: P[]; rev: P[]; ends: Ends2; spans: Map<number, [number, number]>; course?: Course; offs?: Map<number, Float32Array> }
 type Obstacle = (gap: number, vl: number, s0?: number) => void;
 
@@ -149,6 +156,8 @@ export class Traffic {
   private legsC = new Map<number, Leg[]>();
   private halfC = new Map<number, number>();
   private jd = new Map<number, JData>();
+  private placeC = new Map<number, Place | null>(); // bus lines' calls, by stop id
+  private lineC = new Map<string, number>(); // a line bus's next road, by junction, road and call (-1: no way)
   private tables = new Map<number, Map<number, { a: View; b: View }>>(); // by the two courses, then the two bodies
   private edgeList: Access[] | null = null;
   private buckets = new Map<number, Entry[]>();
@@ -173,6 +182,8 @@ export class Traffic {
   // the road network changed: routes, access points and anyone on a removed road are reset
   invalidate() {
     this.graph = null;
+    this.placeC.clear();
+    this.lineC.clear();
     this.edgeList = null;
     this.access.clear();
     this.gradeCache.clear();
@@ -440,11 +451,17 @@ export class Traffic {
 
   // A bus that tours the network, calling at every stop on its side of the road: one of the
   // player's, in the company livery with a fleet number (offer: which model, from the Vehicles panel).
-  addBus(offer?: string): Car | undefined {
+  // On a line, it starts on the road of that call's stop if there's room, else nearby.
+  // `leg`: which of the line's calls it starts at (so a line's buses spread out along it).
+  addBus(offer?: string, line?: BusLine, leg = 0): Car | undefined {
     const segs = [...this.net.segs.values()].filter((s) => this.net.def(s).cls === 'road' && this.net.def(s).family !== 'Motorway');
+    if (line?.seq.length) leg %= line.seq.length;
+    const first = line?.seq.length ? this.place(line.seq[leg]) : null;
+    const near = first ? segs.filter((s) => s !== first.seg && [s.a, s.b].some((n) => n === first.seg.a || n === first.seg.b)) : [];
     let dm: Dressed | undefined;
     for (let tries = 0; tries < 30 && segs.length; tries++) {
-      const seg = segs[Math.floor(this.rand() * segs.length)], from = this.rand() < 0.5 ? seg.a : seg.b;
+      const pick = first && tries < 4 ? first.seg : near.length && tries < 16 ? near[Math.floor(this.rand() * near.length)] : segs[Math.floor(this.rand() * segs.length)];
+      const seg = pick, from = first && tries < 4 ? (tries % 2 ? seg.b : seg.a) : this.rand() < 0.5 ? seg.a : seg.b;
       const bd = (dm ??= this.fleet.dressBus(offer));
       const lo = this.startGuard(seg, from) + bd.back, hi = this.endGuard(seg, from) - bd.front;
       if (hi < lo) continue;
@@ -454,6 +471,7 @@ export class Traffic {
       const c: Car = {
         id: this.ids++, kind: 'bus', front: bd.front, back: bd.back, seg, from, s, v: 0, vmax: 11, route: [], goal: Infinity, lorry: false, bus: true,
         heading: 0, born: this.clock, wait: 0, lane: 0, off: this.laneOff(seg, from, s, lane), uref: [], cls: bd.cls, hw: bd.hw, dress: bd.dress,
+        line, leg,
       };
       this.cars.push(c);
       c.entry = this.put(keyOf(seg, from, lane), c, s, 0, true);
@@ -462,14 +480,153 @@ export class Traffic {
     return undefined;
   }
   private nextStop(c: Car) {
-    const L = this.len(c.seg), side = c.from === c.seg.a ? 1 : -1;
+    const L = this.len(c.seg), side = c.from === c.seg.a ? 1 : -1, call = c.line ? this.callOf(c) : null;
+    if (c.line && call?.seg !== c.seg) return null;
     let best: { st: Stop; at: number } | null = null;
     for (const st of c.seg.stops) {
-      if (st.side !== side || st.id === c.served) continue;
+      if (st.side !== side || st.id === c.served || (call && !call.stops.includes(st))) continue;
       const at = side === 1 ? st.s : L - st.s;
       if (at > c.s - 1 && (!best || at < best.at)) best = { st, at };
     }
     return best;
+  }
+
+  // ---------- bus lines ----------
+  // A line's call: the stop, and any stop facing it across the road (within a lay-by's length),
+  // found again after roads are rebuilt (a stop keeps its id when its road is split).
+  place(id: number): Place | null {
+    const had = this.placeC.get(id);
+    if (had !== undefined && (!had || (this.net.segs.get(had.seg.id) === had.seg && had.seg.stops.includes(had.stops[0])))) return had;
+    let p: Place | null = null;
+    for (const seg of this.net.segs.values()) {
+      const st = seg.stops.find((x) => x.id === id);
+      if (st) { p = { key: id, seg, stops: [st, ...seg.stops.filter((x) => x !== st && x.side !== st.side && Math.abs(x.s - st.s) < 45)] }; break; }
+    }
+    this.placeC.set(id, p);
+    return p;
+  }
+  private callOf(c: Car) { const q = c.line!.seq; return q.length ? this.place(q[(c.leg ?? 0) % q.length]) : null; }
+  // done at a stop: on to the line's next call (and a fresh way there, unless already turning)
+  private called(c: Car) {
+    if (!c.line) return;
+    const call = this.callOf(c);
+    if (call && call.seg === c.seg && !call.stops.some((st) => st.id === c.served)) return;
+    c.leg = ((c.leg ?? 0) + 1) % Math.max(1, c.line.seq.length);
+    if (!c.turn && c.adm === undefined) { c.nextSeg = undefined; c.plan = undefined; }
+  }
+  // The next road for a bus on a line at the end of the road it's on: the first of the shortest
+  // way to its next call, arriving on the stop's side of the road. It never turns back at a
+  // junction, only at a dead end. Undefined when there's no way (the call is skipped).
+  private lineNext(c: Car, at: number): RSeg | undefined {
+    const q = c.line!.seq, L0 = this.len(c.seg), dir = c.from === c.seg.a ? 1 : -1;
+    for (let tries = 0; tries < q.length; tries++) {
+      let call = this.callOf(c);
+      // (a call still ahead on this road is made before the junction: route on to the one after)
+      const ahead = call && call.seg === c.seg && call.stops.some((st) => st.side === dir && st.id !== c.served && (dir === 1 ? st.s : L0 - st.s) > c.s - 1);
+      if (ahead) call = this.place(q[((c.leg ?? 0) + 1) % q.length]);
+      if (call) {
+        const key = `${at}:${c.seg.id}:${call.key}`;
+        let id = this.lineC.get(key);
+        if (id === undefined) this.lineC.set(key, (id = this.wayTo(at, c.seg, call)));
+        const seg = id >= 0 ? this.net.segs.get(id) : undefined;
+        if (seg) return seg;
+      }
+      if (ahead) return undefined;
+      c.leg = ((c.leg ?? 0) + 1) % q.length; // no way there: skip it
+    }
+    return undefined;
+  }
+  // shortest way on, by road and direction (so a turn back is only ever at a dead end): the
+  // first road's id, or -1
+  private wayTo(at: number, seg0: RSeg, call: Place): number { return this.search2(at, seg0, call)?.[0]?.seg.id ?? -1; }
+  // the roads, each with the end it's driven from, then where on the last the stop is
+  private search2(at: number, seg0: RSeg, call: Place): { seg: RSeg; from: number }[] | null {
+    const g = this.adj(), ok = (s: RSeg) => this.net.def(s).family !== 'Motorway';
+    const leave = (node: number, via: RSeg) => { const o = (g.get(node) ?? []).filter((e) => e.seg !== via && ok(e.seg)); return o.length ? o : (g.get(node) ?? []).filter((e) => e.seg === via); };
+    // state: a road driven from one end, keyed seg*2 + (from its b end); its cost is at its far end
+    type E = { seg: RSeg; to: number; len: number };
+    const dist = new Map<number, number>(), prev = new Map<number, number>(), open = new Set<number>(), edge = new Map<number, E>();
+    const push = (e: E, cost: number, from: number) => {
+      const k = e.seg.id * 2 + (e.to === e.seg.a ? 1 : 0);
+      if (cost < (dist.get(k) ?? Infinity)) { dist.set(k, cost); prev.set(k, from); edge.set(k, e); open.add(k); }
+    };
+    for (const e of leave(at, seg0)) push(e, e.len, -1);
+    let best = Infinity, bestK = -1;
+    const T = call.seg, LT = this.len(T);
+    while (open.size) {
+      let k = -1, dk = Infinity;
+      for (const n of open) { const v = dist.get(n)!; if (v < dk) { dk = v; k = n; } }
+      open.delete(k);
+      if (dk >= best) break;
+      const e = edge.get(k)!, start = dk - e.len, fromA = e.to === e.seg.b;
+      if (e.seg === T) for (const st of call.stops) if ((st.side === 1) === fromA) {
+        const c = start + (fromA ? st.s : LT - st.s);
+        if (c < best) { best = c; bestK = k; }
+      }
+      for (const n of leave(e.to, e.seg)) push(n, dk + n.len, k);
+    }
+    if (bestK < 0) return null;
+    const out: { seg: RSeg; from: number }[] = [];
+    for (let k = bestK; k >= 0; k = prev.get(k)!) { const e = edge.get(k)!; out.unshift({ seg: e.seg, from: this.net.other(e.seg, e.to) }); }
+    return out;
+  }
+  // The way a line's buses go, for drawing: for each leg, runs of road (a seg, the end it's driven
+  // from, and from where to where along it in that direction).
+  lineRoute(seq: number[]): { seg: RSeg; from: number; s0: number; s1: number }[][] {
+    const legs: { seg: RSeg; from: number; s0: number; s1: number }[][] = [];
+    if (seq.length < 2) return legs;
+    const along = (seg: RSeg, from: number, st: Stop) => (from === seg.a ? st.s : this.len(seg) - st.s);
+    let here = this.place(seq[0]), st = here?.stops[0];
+    let from = here && st ? (st.side === 1 ? here.seg.a : here.seg.b) : 0;
+    for (let i = 1; i <= seq.length && here && st; i++) {
+      const next = this.place(seq[i % seq.length]);
+      if (!next) break;
+      const s0 = along(here.seg, from, st), leg: { seg: RSeg; from: number; s0: number; s1: number }[] = [];
+      const dir = from === here.seg.a ? 1 : -1;
+      const onSame = next.seg === here.seg ? next.stops.find((x) => x.side === dir && along(here!.seg, from, x) > s0 + 1) : undefined;
+      if (onSame) { leg.push({ seg: here.seg, from, s0, s1: along(here.seg, from, onSame) }); st = onSame; }
+      else {
+        const way = this.search2(this.net.other(here.seg, from), here.seg, next);
+        if (!way) { legs.push(leg); here = next; st = next.stops[0]; from = st.side === 1 ? next.seg.a : next.seg.b; continue; }
+        leg.push({ seg: here.seg, from, s0, s1: this.len(here.seg) });
+        way.forEach((w, j) => {
+          const L = this.len(w.seg);
+          if (j < way.length - 1) { leg.push({ seg: w.seg, from: w.from, s0: 0, s1: L }); return; }
+          const dirW = w.from === w.seg.a ? 1 : -1, end = next.stops.find((x) => x.side === dirW) ?? next.stops[0];
+          leg.push({ seg: w.seg, from: w.from, s0: 0, s1: along(w.seg, w.from, end) }); st = end; from = w.from;
+        });
+      }
+      legs.push(leg);
+      here = next;
+    }
+    return legs;
+  }
+  // put a bus on a line (or take it off one, with null): it heads for the line's first call
+  setBusLine(id: number, line: BusLine | null) {
+    const c = this.cars.find((x) => x.id === id && x.bus);
+    if (!c) return;
+    c.line = line ?? undefined; c.leg = 0;
+    if (!c.turn && c.adm === undefined) { c.nextSeg = undefined; c.plan = undefined; }
+  }
+  // take a bus off the roads (sold): it goes as soon as it isn't in a junction
+  removeBus(id: number) { const c = this.cars.find((x) => x.id === id && x.bus); if (c) c.sold = true; }
+  busesOn(line: number) { return this.cars.filter((c) => c.bus && c.gone === undefined && !c.sold && c.line?.id === line).map((c) => c.id); }
+  // what a bus is doing, for its info sheet
+  bus(id: number) {
+    const c = this.cars.find((x) => x.id === id && x.bus && x.gone === undefined);
+    if (!c) return null;
+    const call = c.line ? this.callOf(c) : null;
+    return { id: c.id, line: c.line?.id, fleetNo: c.dress?.fleetNo ?? '', model: c.dress?.chain[0]?.name ?? '', next: call?.key, dwelling: c.dwell !== undefined, speed: c.v, x: c.pose?.x ?? 0, z: c.pose?.z ?? 0 };
+  }
+  // the bus nearest a point on the ground, within r metres
+  busNear(p: P, r = 7) {
+    let best: Car | null = null, bd = r;
+    for (const c of this.cars) {
+      if (!c.bus || c.gone !== undefined || !c.pose) continue;
+      const d = Math.hypot(c.pose.x - p.x, c.pose.z - p.z) - (c.front + c.back) / 4;
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best?.id ?? null;
   }
 
   // ---------- lanes: who is where ----------
@@ -844,7 +1001,9 @@ export class Traffic {
   }
   private nextOf(c: Car, at: number): RSeg | undefined {
     if (c.nextSeg === undefined || !this.net.segs.has(c.nextSeg)) {
-      if (c.bus) {
+      const ln = c.bus && c.line ? this.lineNext(c, at) : null;
+      if (ln) c.nextSeg = ln.id;
+      else if (c.bus) {
         // anywhere but back, and not down a road that only leads off the map if there's a choice
         const g = this.adj(), opts = (g.get(at) ?? []).filter((e) => e.seg.id !== c.seg.id && this.net.def(e.seg).family !== 'Motorway');
         const on = opts.filter((e) => (g.get(e.to)?.length ?? 0) > 1);
@@ -1257,6 +1416,7 @@ export class Traffic {
     this.index();
     for (const c of this.cars) {
       if (c.gone !== undefined) { if (c.away) c.s += c.v * dt; continue; } // (one leaving the map drives on out as it fades)
+      if (c.sold && !c.turn && c.adm === undefined && c.dwell === undefined && !c.inBay) { c.gone = now; continue; }
       if (c.turn) this.stepTurn(c, dt, now);
       else this.stepLane(c, dt, now);
     }
@@ -1422,7 +1582,7 @@ export class Traffic {
     if (c.inBay) {
       if (c.dwell !== undefined) {
         c.dwell -= dt;
-        if (c.dwell <= 0) { c.served = c.bay?.id; c.dwell = undefined; }
+        if (c.dwell <= 0) { c.served = c.bay?.id; c.dwell = undefined; this.called(c); }
         return true;
       }
       if (c.served !== c.bay?.id) {
@@ -1442,7 +1602,7 @@ export class Traffic {
     const togo = ns.at - c.s;
     if (c.dwell !== undefined) {
       c.dwell -= dt;
-      if (c.dwell <= 0) { c.served = ns.st.id; c.dwell = undefined; }
+      if (c.dwell <= 0) { c.served = ns.st.id; c.dwell = undefined; this.called(c); }
       return true;
     }
     // (a bus longer than a lay-by's stand, a bendy bus, calls there from the lane as at a kerbside stop)
@@ -1726,7 +1886,7 @@ export class Traffic {
   }
 
   get live() { return this.cars.filter((c) => c.gone === undefined && !c.bus).length; }
-  get buses() { return this.cars.filter((c) => c.bus).length; }
+  get buses() { return this.cars.filter((c) => c.bus && c.gone === undefined).length; }
 }
 
 // How busy the roads are through the day: two rush hours, a lunchtime bump, quiet nights.
