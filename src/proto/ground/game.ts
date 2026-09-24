@@ -44,7 +44,9 @@ export class GameGround {
     const fixed = (this.fixed ??= this.fixedInput());
     const plots: GroundInput['plots'] = [];
     for (const l of net.lots) plots.push({ poly: net.parcelRect(l), kind: l.kind === 'industry' ? 'yard' : 'garden' });
-    this.sites = new Set(q.filter((l) => net.lotFree(l)).slice(0, SITES));
+    // (the first few free plots in the queue: looking no further than that)
+    this.sites = new Set();
+    for (const l of q) { if (this.sites.size >= SITES) break; if (net.lotFree(l)) this.sites.add(l); }
     for (const l of this.sites) plots.push({ poly: net.parcelRect(l), kind: 'site' });
     return { seed: 11, ...fixed, plots, trees: this.w.trees(), town: q.map((l) => ({ x: l.x, z: l.z })) };
   }
@@ -70,6 +72,13 @@ export class GameGround {
   }
   // The roads or the landscaping changed: repaint everything (next time `sync` runs).
   invalidate() { this.full = true; this.fixed = null; }
+  // The roads changed only within these boxes (an edit on a big map): repaint round them rather
+  // than everything. (Before the first paint there's nothing to repaint.)
+  changed(boxes: { x0: number; z0: number; x1: number; z1: number }[]) {
+    if (this.full) return;
+    this.fixed = null;
+    if (boxes.length) this.ground.change(this.input(), boxes.map((b) => ({ x0: b.x0 - 10, z0: b.z0 - 10, x1: b.x1 + 10, z1: b.z1 + 10 })));
+  }
   // A plot was built: repaint round it (and round the building sites that moved up the queue).
   built(l: Lot) {
     if (this.full) return;

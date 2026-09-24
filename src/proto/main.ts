@@ -16,6 +16,7 @@ import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
 import { patchGround, setGroundQuality } from './ground';
+import { Occupancy, planHedges, type HedgeTree, type Piece } from './ground/hedgerows';
 import { GameWater, LAKE, WATER_LEVEL } from './game/water';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
@@ -42,6 +43,7 @@ import { Loading } from './loading';
 import { Drape } from './drape';
 import { PlaceLabels, openPlaces } from './game/places';
 import { makeRelief } from './region/terrain';
+import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; // a big map streamed in tiles (docs/region.md R4)
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
 import { deleteSave, getSave, listSaves, putSave, saveSearch } from './game/savedb';
@@ -157,16 +159,21 @@ for (const m of [...GRASS_MATS, ...grassMats()]) { m.color.set('#ffffff'); patch
 scene.add(gameGround.ground.hedges);
 scene.add(ground);
 // the cut face round the edge of the map (the roads running off it are added once they're built)
-let mapEdge = edgeMesh(EDGE, [], gameWater.shapes.ground, WATER_LEVEL);
+// (a big map's is cut into tiles, so only the stretch in view is drawn)
+const edgeOf = (m: THREE.Mesh): THREE.Object3D => (BIG ? splitByTile(m) : m);
+let mapEdge = edgeOf(edgeMesh(EDGE, [], gameWater.shapes.ground, WATER_LEVEL));
 scene.add(mapEdge);
-function refreshEdge() { scene.remove(mapEdge); mapEdge.geometry.dispose(); mapEdge = edgeMesh(EDGE, edgeCrossings(net, EDGE), gameWater.shapes.ground, WATER_LEVEL); scene.add(mapEdge); }
+let edgeSig = '';
+function refreshEdge() {
+  if (BIG) { const sig = JSON.stringify(edgeCrossings(net, EDGE)); if (sig === edgeSig) return; edgeSig = sig; } // (a big map's only when the roads off it changed)
+  scene.remove(mapEdge); mapEdge.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); mapEdge = edgeOf(edgeMesh(EDGE, edgeCrossings(net, EDGE), gameWater.shapes.ground, WATER_LEVEL)); scene.add(mapEdge); }
 // the lake (src/proto/game/water.ts): beaches and the bed laid over the ground (chained after the
 // ground's own patch), and the water and reeds on top: two draw calls
 gameWater.patch(gameGround.ground.material);
 scene.add(gameWater.group);
 gameWater.light(scene, sun); // (evening light: the sun, sky and water change together)
 // rivers' beds, in a ground material of their own (the flat ground leaves out what they cover)
-for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshLambertMaterial(), gameGround.ground.uniforms)))) scene.add(m);
+for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshLambertMaterial(), gameGround.ground.uniforms)))) scene.add(BIG ? splitByTile(m) : m); // (a big map's cut into tiles, so only what's in view is drawn)
 
 // ---------------- trees (instanced) ----------------
 interface Tree { x: number; z: number; s: number; kind: number }
@@ -188,7 +195,7 @@ const MAXT = Math.max(1600, MAP.trees.count + 200);
 const crowns = new THREE.InstancedMesh(crownGeo, crownMat, MAXT);
 const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAXT);
 const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
-for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); }
+for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; if (!BIG) scene.add(m); } // (a big map draws its woods a tile at a time: regionView)
 
 // Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
 // registry (a spatial hash, so this looks only at claims near the tree); plots through `lots`.
@@ -207,9 +214,23 @@ function treeBlocked(t: Tree, lots: Lot[]) {
 
 // Clear trees from where things now stand. Given a new plot, only trees on it are looked at
 // (a building going up shouldn't re-check the whole map); with nothing given, all of them are.
-function refreshTrees(only?: Lot) {
+function refreshTrees(only?: Lot | Box[]) {
   const before = trees.length;
-  if (only) {
+  if (Array.isArray(only)) {
+    // (a big map's edit: only trees within the boxes it touched)
+    if (!only.length) return;
+    const B = 60, near = new Map<string, Lot[]>();
+    for (const l of net.lots) {
+      if (!inBoxes(l, only, 80)) continue;
+      const c = net.parcelCentre(l), r = net.parcelR(l) + 3;
+      for (let i = Math.floor((c.x - r) / B); i <= Math.floor((c.x + r) / B); i++) for (let j = Math.floor((c.z - r) / B); j <= Math.floor((c.z + r) / B); j++) {
+        const k = `${i},${j}`, a = near.get(k);
+        if (a) a.push(l); else near.set(k, [l]);
+      }
+    }
+    trees = trees.filter((t) => !inBoxes(t, only, 3) || !treeBlocked(t, near.get(`${Math.floor(t.x / B)},${Math.floor(t.z / B)}`) ?? []));
+    if (trees.length === before) return;
+  } else if (only) {
     const c = net.parcelCentre(only), r = net.parcelR(only) + 3;
     trees = trees.filter((t) => Math.abs(t.x - c.x) > r || Math.abs(t.z - c.z) > r || !treeBlocked(t, [only]));
     if (trees.length === before) return;
@@ -225,6 +246,7 @@ function refreshTrees(only?: Lot) {
     }
     trees = trees.filter((t) => !treeBlocked(t, near.get(`${Math.floor(t.x / B)},${Math.floor(t.z / B)}`) ?? []));
   }
+  if (regionView) { regionView.setTrees(trees, { crown: crownGeo, pine: pineGeo, trunk: trunkGeo }, [crownMat, pineMat, trunkMat]); return; }
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
   let nc = 0, np = 0;
   trees.forEach((t, i) => {
@@ -272,22 +294,108 @@ function claimJunctions() {
   net.land.releaseWhere((k) => k.startsWith('junction:') && !junctions.has(Number(k.slice(9))));
   for (const j of junctions.values()) net.land.claim(`junction:${j.node}`, 'junction', j.shape?.claims ?? []);
 }
+// ---- a big map re-derives only what an edit touched (docs/region.md R4; ENGINE.md, "Dirty areas") ----
+// Each road's and each node's signature is kept from the last commit. A junction is designed again
+// only when the roads meeting there changed (or it's new), its land claimed again only when its
+// design changed (here or in the junction panel), and only the buildings, queued plots, ground,
+// trees and leftover land within reach of what changed are looked at again. (The town does it all
+// every time, as it always has.)
+interface Box { x0: number; z0: number; x1: number; z1: number }
+let segSigs = new Map<number, { sig: string; box: Box }>(), legSigs = new Map<number, string>();
+const claimed = new Map<number, Junction>();
+let editBoxes: Box[] = []; // what the last commit touched
+const bridgesWere = new Map<number, string>(); // (each road's bridges as the last commit left them)
+const inBoxes = (p: P, boxes: Box[], pad = 0) => boxes.some((b) => p.x >= b.x0 - pad && p.x <= b.x1 + pad && p.z >= b.z0 - pad && p.z <= b.z1 + pad);
+const boxOfClaim = (key: string): Box | null => { const c = net.land.get(key); return c ? { x0: c.box[0], z0: c.box[1], x1: c.box[2], z1: c.box[3] } : null; };
+function commitTouched(): Box[] {
+  const boxes: Box[] = [], at = new Map<number, RSeg[]>();
+  for (const s of net.segs.values()) for (const n of [s.a, s.b]) { const a = at.get(n); if (a) a.push(s); else at.set(n, [s]); }
+  // roads new, changed or gone
+  const segs = new Map<number, { sig: string; box: Box }>();
+  for (const s of net.segs.values()) {
+    const p = net.path(s), h = net.half(s) + 4;
+    const sig = `${s.type}|${s.oneway ? 1 : 0}|${s.aux ?? 0}|${s.a}|${s.b}|${p.map((q) => `${q.x.toFixed(2)},${q.z.toFixed(2)},${(q.y ?? 0).toFixed(2)}`).join(';')}`;
+    const was = segSigs.get(s.id);
+    if (was?.sig === sig) { segs.set(s.id, was); continue; }
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const q of p) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
+    const box = { x0: x0 - h, z0: z0 - h, x1: x1 + h, z1: z1 + h };
+    segs.set(s.id, { sig, box });
+    boxes.push(box);
+    if (was) boxes.push(was.box);
+  }
+  for (const [id, was] of segSigs) if (!segs.has(id)) boxes.push(was.box);
+  segSigs = segs;
+  // junctions where the roads meeting changed (as redesignJunctions decides, for those alone)
+  const legs2 = new Map<number, string>();
+  for (const n of net.nodes.values()) {
+    const sig = (at.get(n.id) ?? []).map((s) => `${s.id}:${segs.get(s.id)!.sig}`).join('|');
+    legs2.set(n.id, sig);
+    if (legSigs.get(n.id) === sig) continue;
+    const legs = legsAt(net, n.id);
+    if (legs.length < 3) { junctions.delete(n.id); continue; }
+    const old = junctions.get(n.id);
+    const same = old && old.legs.length === legs.length && legs.every((l) => old.legs.includes(l.seg.id));
+    if (same && !old!.auto) continue;
+    const j = design(net, n.id, geoFor(n.id), seenAt(n.id), preferAt(n.id));
+    if (j) junctions.set(n.id, j);
+  }
+  for (const id of [...junctions.keys()]) if (!net.nodes.has(id)) junctions.delete(id);
+  legSigs = legs2;
+  // their land: claimed again where the design is new, released where the junction's gone
+  for (const [id, was] of [...claimed]) {
+    if (junctions.get(id) === was) continue;
+    const b = boxOfClaim(`junction:${id}`);
+    if (b) boxes.push(b);
+    net.land.release(`junction:${id}`);
+    claimed.delete(id);
+  }
+  for (const j of junctions.values()) {
+    if (claimed.get(j.node) === j) continue;
+    net.land.claim(`junction:${j.node}`, 'junction', j.shape?.claims ?? []);
+    claimed.set(j.node, j);
+    const b = boxOfClaim(`junction:${j.node}`);
+    if (b) boxes.push(b);
+  }
+  return boxes;
+}
+// (evictFromWorks, for what stands within the boxes)
+function evictWithin(boxes: Box[]) {
+  const works = (c: { owner: string }) => c.owner === 'road';
+  industries.evict();
+  for (const b of buildings) {
+    if (b.dying || b.lot.id < 0 || !inBoxes(b.lot, boxes, 40)) continue;
+    const l = b.lot;
+    if (!net.land.free(rectCorners(l.x, l.z, l.rot, l.w, l.d))) { net.lots = net.lots.filter((x) => x !== l); demolish(b); continue; }
+    if (!net.land.free(net.parcelRect(l, -0.3), works)) { const was = l.back; net.fitParcel(l); if (l.back !== was) regenerate(b); }
+  }
+  queue = queue.filter((l) => !inBoxes(l, boxes, 40) || net.lotFree(l));
+}
 // The one place the town changes shape. Roads first, then the junctions they form (which claim
 // their land), then anything standing on land that's now taken moves out, then plots fill in.
 // Every step reads the land registry, so the order can't let one thing be built over another.
 function commitRoads(made: number[] = []) {
-  redesignJunctions();
-  claimJunctions();
-  evictFromWorks();
+  if (regionView) { editBoxes = commitTouched(); evictWithin(editBoxes); }
+  else {
+    redesignJunctions();
+    claimJunctions();
+    evictFromWorks();
+  }
   // lays out the bridges (short of the junctions at their ends) and stores their types on the
   // segments, which drawRoads reads
   const reach = (s: RSeg, node: number) => (net.segsAt(node).length > 2 ? (junctions.get(node)?.shape?.mouth[s.id] ?? 0) + 2 : 0);
-  bridgeLayer.sync(net, (s) => [reach(s, s.a), reach(s, s.b)]);
+  // (a big map's: only the roads round what changed, or whose bridges were changed in the bridge editor)
+  bridgeLayer.sync(net, (s) => [reach(s, s.a), reach(s, s.b)], regionView ? (s) => { const e = segSigs.get(s.id); return !e || (bridgesWere.get(s.id) ?? '0') !== JSON.stringify(s.bridges ?? 0) || editBoxes.some((b) => e.box.x0 <= b.x1 && e.box.x1 >= b.x0 && e.box.z0 <= b.z1 && e.box.z1 >= b.z0); } : undefined);
+  if (regionView) { bridgesWere.clear(); for (const sg of net.segs.values()) if (sg.bridges) bridgesWere.set(sg.id, JSON.stringify(sg.bridges)); }
   railway.rebuild(); // (its stations tell drawRoads where they lay their own track)
-  lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
+  // (a big map redraws only the tiles whose roads or junctions changed, as they're shown)
+  if (regionView) regionView.roadsChanged();
+  else lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
-  gameGround.invalidate();
+  // (a big map's ground is repainted round the edit on the next frame, so the edit and the repaint don't land in one)
+  if (regionView) { groundBoxes.push(...editBoxes); infillBoxes.push(...editBoxes); }
+  else gameGround.invalidate();
   refreshEdge();
 }
 let lamps: Lamp[] = [];
@@ -302,8 +410,20 @@ interface Built { lot: Lot; born: number; height: number; name: string; detail: 
 const buildings: Built[] = [];
 const cityGroup = new THREE.Group();
 scene.add(cityGroup);
-const CH = BIG ? 240 : 120; // (bigger on a big map: fewer draw calls when it's all in view)
+const CH = BIG ? TILE_CELL : 120; // (bigger on a big map, a quarter of a tile: fewer draw calls when it's all in view)
 const chunks = new Map<string, { members: Set<Built>; group: THREE.Group; dirty: boolean }>();
+// A big map is drawn in 1 km tiles, each at a level of detail picked from the zoom and whether it's
+// in view (game/regionview.ts); the invented town is drawn whole, as it always was.
+// (its hedgerows are planted a tile at a time, on the near tiles: from the ground's own field layout)
+let hedgeOcc: { input: unknown; occ: Occupancy } | null = null;
+function hedgesIn(box: { x0: number; z0: number; x1: number; z1: number }) {
+  const L = gameGround.ground.layout, R = gameGround.ground.cover!.region, m = 5;
+  if (hedgeOcc?.input !== L.input) hedgeOcc = { input: L.input, occ: new Occupancy(L.input) };
+  const pieces: Piece[] = [], trees: HedgeTree[] = [];
+  for (const g of planHedges(L, box, hedgeOcc.occ, true, { x0: R.x0 + m, z0: R.z0 + m, x1: R.x0 + R.size - m, z1: R.z0 + R.size - m })) { pieces.push(...g.pieces); trees.push(...g.trees); }
+  return { pieces, trees };
+}
+const regionView = BIG ? new RegionView({ scene, net, junctions, editing: () => editJ, treeMats: { trunk: trunkMat, crown: crownMat }, chunks, bound: EDGE, ground: new Set([...GRASS_MATS, ...grassMats()]), hedges: hedgesIn }) : null;
 
 function bakeGroup(group: THREE.Group) {
   group.updateMatrixWorld(true);
@@ -330,11 +450,12 @@ function toChunk(b: Built) {
   let c = chunks.get(key);
   if (!c) { c = { members: new Set(), group: new THREE.Group(), dirty: true }; chunks.set(key, c); cityGroup.add(c.group); }
   c.members.add(b); c.dirty = true; b.chunk = key;
+  regionView?.chunkChanged(key);
 }
 function fromChunk(b: Built) {
   if (!b.chunk) return;
   const c = chunks.get(b.chunk)!;
-  c.members.delete(b); c.dirty = true; b.chunk = null;
+  c.members.delete(b); c.dirty = true; regionView?.chunkChanged(b.chunk); b.chunk = null;
 }
 function rebuildChunk(c: { members: Set<Built>; group: THREE.Group; dirty: boolean }) {
   for (const m of [...c.group.children]) { c.group.remove(m); (m as THREE.Mesh).geometry.dispose(); }
@@ -423,6 +544,8 @@ let infill: Built[] = [];
 const infillCells = new Map<string, Built>();
 const cellKey = (x: number, z: number) => `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
 let infillDue = true;
+const infillBoxes: Box[] = []; // (a big map: where edits have touched since the leftover land was last looked at)
+const groundBoxes: Box[] = []; // (and since the ground was last repainted)
 // Find the gaps the plots leave and fill them: community buildings where one fits, else parks,
 // playgrounds, allotments, car parks, verges. Plots still waiting to be built count as taken.
 function refreshInfill() {
@@ -431,16 +554,43 @@ function refreshInfill() {
   infillCells.clear();
   const { regions, civics } = findRegions(net, queue);
   for (const l of civics) spawnLot(l, false);
-  for (const r of regions) {
-    const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges });
-    const lot: Lot = { id: -1, x: r.centre.x, z: r.centre.z, rot: 0, w: 0, d: 0, h: 0, kind: 'civic', seg: -1, seed: r.seed, row: 0, front: 0, back: 0, px: 0, pw: 0, arch: r.kind };
-    const b: Built = { lot, born: 0, height: shape.height, name: shape.name, detail: shape.detail, parts: bakeGroup(shape.group), solo: null, chunk: null, region: r };
-    toChunk(b);
-    infill.push(b);
-    for (const c of r.cells) infillCells.set(cellKey(c.x, c.z), b);
-  }
+  for (const r of regions) addInfill(r);
   refreshTrees();
   gameGround.invalidate();
+}
+function addInfill(r: Region) {
+  const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges });
+  const lot: Lot = { id: -1, x: r.centre.x, z: r.centre.z, rot: 0, w: 0, d: 0, h: 0, kind: 'civic', seg: -1, seed: r.seed, row: 0, front: 0, back: 0, px: 0, pw: 0, arch: r.kind };
+  const b: Built = { lot, born: 0, height: shape.height, name: shape.name, detail: shape.detail, parts: bakeGroup(shape.group), solo: null, chunk: null, region: r };
+  toChunk(b);
+  infill.push(b);
+  for (const c of r.cells) infillCells.set(cellKey(c.x, c.z), b);
+}
+// A big map, after edits: the leftover land looked at again only round what they touched. The box
+// grows until no gap it cuts across reaches what changed, so every gap re-found is whole; gaps
+// wholly inside it are replaced, the rest kept.
+function refreshInfillWithin(boxes: Box[]) {
+  const pad = (b: Box, m: number): Box => ({ x0: b.x0 - m, z0: b.z0 - m, x1: b.x1 + m, z1: b.z1 + m });
+  const union = (list: Box[]): Box => ({ x0: Math.min(...list.map((b) => b.x0)), z0: Math.min(...list.map((b) => b.z0)), x1: Math.max(...list.map((b) => b.x1)), z1: Math.max(...list.map((b) => b.z1)) });
+  const meets = (a: Box, b: Box) => a.x0 <= b.x1 && a.x1 >= b.x0 && a.z0 <= b.z1 && a.z1 >= b.z0;
+  const boxOf = (b: Built): Box => { const cs = b.region!.cells; return { x0: Math.min(...cs.map((c) => c.x)) - CELL / 2, z0: Math.min(...cs.map((c) => c.z)) - CELL / 2, x1: Math.max(...cs.map((c) => c.x)) + CELL / 2, z1: Math.max(...cs.map((c) => c.z)) + CELL / 2 }; };
+  const inside = (a: Box, g: Box) => a.x0 > g.x0 + CELL && a.z0 > g.z0 + CELL && a.x1 < g.x1 - CELL && a.z1 < g.z1 - CELL;
+  const D = union(boxes);
+  let G = pad(D, 60), res = findRegions(net, queue, G);
+  for (let tries = 0; tries < 4; tries++) {
+    const more = [...res.cut.filter((c) => meets(c, D)), ...infill.map(boxOf).filter((b) => meets(b, D) && !inside(b, G))];
+    if (!more.length) break;
+    G = pad(union([G, ...more]), 60);
+    res = findRegions(net, queue, G);
+  }
+  const gone = infill.filter((b) => inside(boxOf(b), G));
+  for (const b of gone) { fromChunk(b); for (const p of b.parts) p.g.dispose(); for (const c of b.region!.cells) if (infillCells.get(cellKey(c.x, c.z)) === b) infillCells.delete(cellKey(c.x, c.z)); }
+  infill = infill.filter((b) => !gone.includes(b));
+  for (const l of res.civics) spawnLot(l, false);
+  for (const r of res.regions) addInfill(r);
+  refreshTrees([G]);
+  gameGround.changed([G]);
+  regionView?.groundChanged([G]);
 }
 
 // the centre to lay a road's plots out from: its settlement's, as central as its size says (region/mapspec.ts)
@@ -1403,7 +1553,7 @@ function buildDraft() {
     for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
     for (const l of net.touched) { const x = buildings.find((y) => y.lot === l); if (x && !x.dying) regenerate(x); }
     commitRoads(segs);
-    refreshTrees();
+    refreshTrees(regionView ? editBoxes : undefined); // (a big map's only round what the edit touched)
     infillDue = true;
     draft = null;
     draftChanged();
@@ -1425,7 +1575,7 @@ function buildDraft() {
     for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
     for (const l of net.touched) { const x = buildings.find((y) => y.lot === l); if (x && !x.dying) regenerate(x); }
     commitRoads(made);
-    refreshTrees();
+    refreshTrees(regionView ? editBoxes : undefined); // (a big map's only round what the edit touched)
     infillDue = true;
   } else buildRoad(draft.a, draft.b, ctrlOf(draft), opts);
   draft = null;
@@ -1445,7 +1595,7 @@ function buildJunctionDraft(d: Draft, pick: { form: IxForm; style: SlipStyle; si
   interchanges.push(r.ix);
   for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
   commitRoads([...net.segs.keys()].filter((id) => !had.has(id)));
-  refreshTrees();
+  refreshTrees(regionView ? editBoxes : undefined); // (a big map's only round what the edit touched)
   infillDue = true;
   draft = null; ixPick = null;
   draftChanged();
@@ -1458,7 +1608,7 @@ function buildRoad(a: End, b: End, ctrl: P | undefined, o: RoadOpts) {
   for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
   for (const l of net.touched) { const x = buildings.find((y) => y.lot === l); if (x && !x.dying) regenerate(x); }
   commitRoads(made);
-  refreshTrees();
+  refreshTrees(regionView ? editBoxes : undefined); // (a big map's only round what the edit touched)
   infillDue = true;
   return made;
 }
@@ -1986,12 +2136,14 @@ setType('street');
 resize();
 await loading.stage('Parks, playgrounds and car parks', 0.14);
 refreshInfill();
+infillBoxes.length = 0; // (the whole map was just looked at)
 await loading.stage(MAP.style === 'arctic' ? 'Laying the snow' : MAP.style === 'desert' ? 'Spreading the sand' : 'Painting the fields and woods', 0.07);
 gameGround.start(trees);
 refreshTrees();
 // every building merged into its chunk before the first frame (not two a frame as it plays)
 await loading.stage('Finishing the buildings', 0.03);
 { const dirty = [...chunks.values()].filter((c) => c.dirty); for (const [i, c] of dirty.entries()) { rebuildChunk(c); await loading.tick(i / dirty.length); } }
+if (regionView) { await loading.stage('Drawing the map round you', 0.05); await regionView.settle(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), (f) => loading.tick(f)); }
 await loading.stage('Starting the traffic and the town', 0.15);
 
 // ---------------- clock and traffic ----------------
@@ -2028,6 +2180,30 @@ function getPlaces(): Places {
     works: live.filter((l) => l.kind === 'industry').concat(industries.works()),
     weight: (l) => USE[l.kind].pop,
   });
+}
+// A big map's traffic is only near the camera (docs/region.md R4; ENGINE.md, "Simulate flows, show
+// agents"): trips start from the homes and places within about a kilometre of it (or what's in view,
+// zoomed out), so how many cars there are follows who lives there, and a car that drives well out
+// of that is taken off the road (once it's clear of junctions: traffic.ts `sold`). Buses on the
+// player's lines always run. Further out there are only the economy's flows. The invented town
+// runs all its traffic, as it always has.
+const NEAR_TRAFFIC = 1000;
+let nearPlaces: Places | null = null, nearOf: Places | null = null, nearAt = { x: 0, z: 0, r: 0 }, cullAt = 0;
+function trafficReach() { const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight); return Math.max(NEAR_TRAFFIC, Math.hypot((view.h * aspect) / 2, view.h / Math.max(0.2, Math.sin(view.el)) / 2)); }
+function trafficPlaces(): Places {
+  const all = getPlaces();
+  if (!BIG) return all;
+  const r = trafficReach();
+  if (nearPlaces && nearOf === all && Math.hypot(view.x - nearAt.x, view.z - nearAt.z) < 150 && Math.abs(r - nearAt.r) < 0.15 * r) return nearPlaces;
+  const near = (l: Lot) => Math.hypot(l.x - view.x, l.z - view.z) < r;
+  nearOf = all; nearAt = { x: view.x, z: view.z, r };
+  return (nearPlaces = { homes: all.homes.filter(near), jobs: all.jobs.filter(near), shops: all.shops.filter(near), works: all.works.filter(near), weight: all.weight });
+}
+function cullTraffic(now: number) {
+  if (!BIG || now - cullAt < 500) return;
+  cullAt = now;
+  const r = trafficReach() + 300;
+  for (const c of traffic.cars) if (!c.bus && !c.sold && c.gone === undefined && c.pose && Math.hypot(c.pose.x - view.x, c.pose.z - view.z) > r) c.sold = true;
 }
 const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
 // a count short enough for the stats line however big the town gets: 9,999 then 23.4k, 123k, 1.2m
@@ -2078,7 +2254,7 @@ const town = new TownEconomy({
   towns: MAP.settlements.length > 1 ? MAP.settlements : undefined, // (each place a town of its own: docs/region.md R5)
   standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
   free: () => queue,
-  build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); },
+  build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); regionView?.groundChanged([{ x0: l.x - 40, z0: l.z - 40, x1: l.x + 40, z1: l.z + 40 }]); },
   rebuild: (l, kind) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; l.kind = kind; regenerate(b); placesDirty = true; },
   clear: (l) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; net.lots = net.lots.filter((x) => x !== l); demolish(b); queue.push(l); },
 }, 1, SAVED?.town);
@@ -2238,7 +2414,11 @@ function frame(now: number) {
       if (b.solo.scale.y >= 1) toChunk(b); // settled: merge into its chunk
     }
   }
-  if (infillDue && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
+  if (regionView) {
+    if (groundBoxes.length) { const b = groundBoxes.splice(0); gameGround.changed(b); regionView.groundChanged(b); }
+    else if (infillBoxes.length && !buildings.some((b) => b.solo)) refreshInfillWithin(infillBoxes.splice(0));
+  }
+  else if (infillDue && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
   // merge at most a couple of changed chunks a frame
   let merged = 0;
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
@@ -2256,18 +2436,19 @@ function frame(now: number) {
   // 1/30 s so cars don't jump through each other or past their stop lines. Paused, it holds still.
   // the vehicles' levels of detail, culling and lamps (game/fleet.ts): how many device pixels a metre is, and the hour
   traffic.fleet.frame(cam, renderer.getDrawingBufferSize(dbSize).y / view.h, hour);
+  cullTraffic(now);
   if (speed > 0) {
     const n = speed > 1 ? Math.ceil(gdt * 30 - 1e-9) : 1, step = gdt / n;
     simNow = Math.max(simNow, now - gdt * 1000); // so it's caught up with real time by the last step
     for (let i = 0; i < n; i++) {
       simNow += step * 1000;
-      traffic.generate(getPlaces(), hour, LEVELS[level][1], simNow);
-      traffic.generate(getPlaces(), hour, LEVELS[level][1], simNow);
+      traffic.generate(trafficPlaces(), hour, LEVELS[level][1], simNow);
+      traffic.generate(trafficPlaces(), hour, LEVELS[level][1], simNow);
       railway.update(step);
       traffic.update(step, simNow);
     }
   } else traffic.redraw();
-  for (const l of lamps) l.mesh.material = (l.pedx ? people.pelicanLight(l.pedx) : traffic.lightFor(l.node, l.seg, simNow)) === l.col ? LAMP_ON[l.col] : LAMP_OFF; // (a pelican's lights follow its people)
+  for (const l of regionView ? regionView.lamps() : lamps) l.mesh.material = (l.pedx ? people.pelicanLight(l.pedx) : traffic.lightFor(l.node, l.seg, simNow)) === l.col ? LAMP_ON[l.col] : LAMP_OFF; // (a pelican's lights follow its people)
   railGame.frame(dt, cam, canvas.clientHeight);
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   markers.frame(cam, canvas.clientHeight);
@@ -2289,6 +2470,7 @@ function frame(now: number) {
     shell.setMoney(money(purse.balance));
     if (++goalTick % 4 === 0) updateGoal();
   }
+  regionView?.update(view, canvas.clientWidth / Math.max(1, canvas.clientHeight)); // (the tiles' levels, for where the camera is now)
   const t1 = performance.now();
   const q = TIERS[tier];
   if (q.every && ++frameNo % q.every === 0) renderer.shadowMap.needsUpdate = true;
@@ -2317,14 +2499,14 @@ loading.finish();
 let loaded = false;
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
 Object.assign((window as unknown as { proto: object }).proto, { interchanges, blueprint: (a: P, b: P) => { draft = { a: net.snapStart(a, 4), b: net.snapEnd(net.snapStart(a, 4), b, 4, true) }; draftChanged(); } });
 Object.assign((window as unknown as { proto: object }).proto, { railway, railDraw, railGame }); // (rail/)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
-Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading }); // (the map being played, and how long its loading took, stage by stage)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

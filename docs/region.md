@@ -31,9 +31,9 @@ Checked against `claude/cloud-session-history-rvqkm1` at 95f5d5d.
 | No railway stations or platforms. | Build > Stops shows "Railway station — Not in the game yet". |
 | Trains don't signal each other. | `moveTrains` picks the straightest track and reverses at dead ends. There are no blocks or signals, and no timetable. Two trains on one line can run through each other. |
 | No level crossings or depots, and no choice at points. | |
-| Every edit rebuilds the whole network. | `commitRoads()` redesigns every junction and `drawRoads` redraws every road. That's fine for one town, but ~30 times the work on a region. |
-| Traffic has one global cap. | `MAX = 300` cars for the whole map, spawned from all homes and jobs. There's no "near the camera" rule yet (ENGINE.md, "Simulate flows, show agents"). |
-| The world tiles and streaming aren't used. | `src/proto/world/` (tiles, `StreamManager`, `DirtyPipeline`, workers) is built and tested, but nothing in the game uses it. |
+| Every edit rebuilds the whole network. | Done on the region (R4, `docs/streaming.md`): an edit designs again only the junctions whose roads changed and redraws only the 250 m cells that changed. The town still does it all, as before. |
+| Traffic has one global cap. | Done on the region (R4): trips start near the camera and cars well away from it leave the road, so the cap is per view. |
+| The world tiles and streaming aren't used. | Done (R4): the region streams 1 km tiles through `world/StreamManager` at three levels of detail (`game/regionview.ts`). The workers aren't used yet. |
 | The economy isn't in the game yet. | Loop M2. It's per town (`TState`), so many towns fit, but there are no trips between towns. |
 | No way to find your way round a big map. | There are no town names or labels when zoomed out, no overview map and no "go to town" list. |
 
@@ -111,6 +111,10 @@ no slower than before.
   - A level crossing never lets a car onto the track while a train is in its block (test).
 
 ### R4. Keeping 6 km smooth (90–120 min)
+
+**Done** (`claude/work-streaming`): how it works and what was measured is in `docs/streaming.md`.
+Not done: building generation and the generator in the worker; spawning at each link's flow rate.
+
 - **Streaming:** plug in `world/StreamManager` with 1 km tiles:
   - near tiles: full buildings and markings;
   - middle tiles: building massing and roads as ribbons;
