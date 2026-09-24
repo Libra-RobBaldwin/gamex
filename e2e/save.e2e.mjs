@@ -1,6 +1,6 @@
 // Saving and loading (docs/production.md §4), by touch on a phone-sized page: the town is changed
-// (a road, a bus stop, a line, a junction of the player's own design), a game day passes, and
-// Menu > Save town saves it. The save opened in a second tab has the same roads, stops, lines,
+// (a road, bus stops and a line, a branch railway with two stations and a rail line, a junction
+// of the player's own design), a game day passes, and Menu > Save town saves it. The save opened in a second tab has the same roads, stops, lines,
 // buildings, money, clock and economy; then both run on two game days, paused so only the town's
 // clock moves, and must still agree exactly. Menu > Load town lists it; the start menu's Continue
 // opens it; autosave on hiding the page works. No console errors.
@@ -8,7 +8,7 @@
 import { chromium } from 'playwright-core';
 const url = process.argv[2] ?? 'http://localhost:5173/?map=town';
 const out = process.argv[3] ?? '.';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: 'en-GB', serviceWorkers: 'block' });
 const errs = [];
 const fail = (m) => { console.log('FAIL', m); process.exitCode = 1; };
@@ -43,23 +43,44 @@ const A = await open(url);
 await A.evaluate(() => window.proto.setSpeed(0)); // (paused from here: only the town's clock moves, by skip)
 const changed = await A.evaluate(() => {
   const P = window.proto, net = P.net;
-  // a new road off the high street, and a bus stop on it
-  P.buildRoad({ x: 120, z: 0 }, { x: 120, z: -90 });
-  let best = null, bd = 1e9;
-  for (const s of net.segs.values()) { if (net.def(s).cls !== 'road' || net.def(s).family === 'Motorway' || net.length(s) < 40 || s.stops.length) continue; const p = net.path(s), m = p[Math.floor(p.length / 2)], d = Math.hypot(m.x - -110, m.z - -96); if (d < bd) { bd = d; best = s; } }
-  const L = net.length(best); let stop = null;
-  for (const side of [1, -1]) { const { plans } = net.planStop(best.id, L / 2, side); const pl = plans.find((x) => x.ok); if (pl) { net.addStop(best.id, L / 2, side, pl); stop = best.stops[best.stops.length - 1].id; break; } }
+  // a branch line across the north of the town, two stations on it and a rail line between them
+  P.purse.balance += 3_000_000;
+  P.buildRoad({ x: -480, z: 340 }, { x: 480, z: 340 }, 'rail-branch');
   P.rebuild();
-  // a line from it to the high street's two stops
-  const pl = P.markers.places(), near = (q) => pl.map((m) => ({ id: m.id, d: Math.hypot(m.p.x - q.x, m.p.z - q.z) })).sort((a, b) => a.d - b.d)[0].id;
-  const line = P.lines.add([stop, near({ x: -85, z: 0 }), near({ x: 120, z: 0 })], false, 2);
+  const R = P.railway, seg = [...net.segs.values()].filter((x) => net.def(x).cls === 'rail').sort((a, b) => net.length(b) - net.length(a))[0];
+  const made = [];
+  for (const at of [0.25, 0.75]) { const pl = [1, -1].flatMap((side) => R.plan(seg.id, net.length(seg) * at, side, 130).plans).find((x) => x.ok); if (pl) made.push(R.build(pl).station.id); }
+  const f = P.traffic.fleet, dmu = f.defFor(f.offerFor('dmu'));
+  const rl = made.length === 2 ? R.addLine(made, false, [dmu]) : 'no stations';
+  P.rebuild();
+  // a new road off the high street, and three bus stops (the town starts with none)
+  P.buildRoad({ x: 120, z: 0 }, { x: 120, z: -90 });
+  // (on the nearest road that has room for one, kerbside or in a lay-by)
+  const stopNear = (q) => {
+    const segs = [...net.segs.values()].filter((s) => net.def(s).cls === 'road' && net.def(s).family !== 'Motorway' && net.length(s) >= 40 && !s.stops.length)
+      .map((s) => { const p = net.path(s), m = p[Math.floor(p.length / 2)]; return { s, d: Math.hypot(m.x - q.x, m.z - q.z) }; }).sort((a, b) => a.d - b.d);
+    for (const { s: seg } of segs.slice(0, 8)) {
+      const L = net.length(seg);
+      for (const side of [1, -1]) for (const f of [0.5, 0.35, 0.65]) { const { plans } = net.planStop(seg.id, L * f, side); const pl = plans.find((x) => x.ok); if (pl) { net.addStop(seg.id, L * f, side, pl); return seg.stops[seg.stops.length - 1].id; } }
+    }
+    return null;
+  };
+  const stops = [{ x: -110, z: -96 }, { x: -85, z: 0 }, { x: 120, z: 0 }].map(stopNear);
+  const stop = stops[0];
+  if (stops.includes(null)) return { error: `no room for a bus stop (${stops})` };
+  P.rebuild();
+  // a line through them
+  const line = P.lines.add(stops, false, 2);
+  P.rebuild();
+  if (!P.lines.list.includes(line)) return { error: 'the new line was dropped as the roads were redrawn' };
   // a junction of the player's own design (it keeps its form, and no longer redesigns itself)
   const j = [...P.junctions.values()].find((x) => x.form === 'signals' || x.form === 'roundabout' || x.form === 'priority');
   j.auto = false;
   P.rebuild();
-  return { stop, line: line.id, junction: j.node, segs: net.segs.size };
+  return { stop, line: line.id, junction: j.node, segs: net.segs.size, stations: made.length, railLine: typeof rl === 'string' ? rl : rl.id };
 });
 console.log('changed', JSON.stringify(changed));
+if (changed.error) fail(changed.error);
 await A.evaluate(() => window.proto.skip(1440 + 200));
 // ---- Menu > Save town, by touch ----
 await A.tap('[data-bar="menu"]'); await A.waitForTimeout(400);
@@ -97,6 +118,8 @@ ok(sb.lines.some((l) => l.startsWith(`${changed.line}:`)), 'the new line is kept
 ok(sb.segs.some((s) => s.includes(`:${changed.stop}`)), 'the new stop is kept');
 ok(sb.segs.some((s) => s.split(':')[3] === '1'), 'one-way carriageways (the motorway) are kept');
 ok(sb.segs.some((s) => s.split(':')[5]), 'bridges and their types are kept');
+ok(changed.stations === 2 && sb.stations.length === 2 && sb.raillines === 1, `railway stations and the rail line are kept (${JSON.stringify(changed)})`);
+ok(await B.evaluate(() => window.proto.railway.trains.length) === await A.evaluate(() => window.proto.railway.trains.length), 'the rail line runs as many trains');
 await B.screenshot({ path: `${out}/save-3-loaded.png` });
 
 // ---- both run on: the same town ----
