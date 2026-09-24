@@ -323,7 +323,7 @@ function refreshInfill() {
   for (const b of infill) { fromChunk(b); for (const p of b.parts) p.g.dispose(); }
   infill = [];
   infillCells.clear();
-  const { regions, civics } = findRegions(net, queue, { civics: world.civics });
+  const { regions, civics } = world.invent ? findRegions(net, queue) : { regions: [], civics: [] };
   for (const l of civics) spawnLot(l, false);
   for (const r of regions) {
     const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges });

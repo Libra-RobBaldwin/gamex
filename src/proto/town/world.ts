@@ -44,6 +44,8 @@ export interface World {
   /** Industrial land: where factories go rather than houses (the network's zoneAt says the same). */
   industrial: (p: P) => boolean;
   stations: WorldStation[];
+  /** Real road names and numbers ("High Street", "A361") by network segment, where the map has them. */
+  names: Map<number, string>;
   /** Junction forms keyed by network node. */
   hints: Map<number, WorldHint>;
   /** Buildings already standing at the start (real ones). Placed after junctions claim land. */
@@ -54,8 +56,11 @@ export interface World {
   growNow: number;
   /** Whether a new plot may go here (a real town's parks, water and railway land stay as they are). */
   canGrow: (p: P) => boolean;
-  /** Whether leftover land may get invented community buildings (a real town has its own). */
-  civics: boolean;
+  /**
+   * Whether leftover land gets invented parks, car parks, allotments and community buildings. A real
+   * town keeps its own: its gaps stay grass and its parks come from the map.
+   */
+  invent: boolean;
   /** Woods and scattered trees; the game clears the ones that end up on roads or plots. */
   trees: Tree[];
   /** What didn't import cleanly, for the player and for the next pass (see real.ts). */

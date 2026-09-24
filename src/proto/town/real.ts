@@ -48,21 +48,27 @@ export function realWorld(town: RealTown = REAL_TOWN): World {
   const hints = new Map<number, WorldHint>(imp.hints.map((h) => [h.netNode, { form: h.form, r: h.radius }]));
   const industrial = (p: P) => imp.zoneAt(p)?.kind === 'industrial';
 
+  // the town centre is where the shops are (the box is only roughly centred on it)
+  const shops = standing.filter((l) => l.kind === 'shop');
+  const median = (v: number[]) => v.sort((x, y) => x - y)[Math.floor(v.length / 2)];
+  const centre = shops.length >= 10 ? { x: median(shops.map((l) => l.x)), z: median(shops.map((l) => l.z)) } : { x: 0, z: 0 };
+
   const kinds: Record<string, number> = {};
   for (const u of imp.unsupported) kinds[u.kind] = (kinds[u.kind] ?? 0) + 1;
   const notes = Object.entries(kinds).map(([k, n]) => `${n} × ${k}${k === 'one-way street' ? ' (built two-way)' : k === 'slip road' ? ' (left out; junctions add their own)' : ''}`);
 
   return {
     id: 'real', name: town.name, real: true, attribution: ATTRIBUTION, attributionUrl: 'https://www.openstreetmap.org/copyright',
-    net, bound, centre: { x: 0, z: 0 }, view: { x: 0, z: 20, h: 300 },
+    net, bound, centre, view: { x: centre.x, z: centre.z + 20, h: 300 },
     water: { polys: water, isWater: imp.isWater, shores: [] },
     zones, zoneAt: (p) => imp.zoneAt(p)?.kind, industrial,
     stations: imp.stations.map((s) => ({ name: s.name, at: s.at, seg: s.seg })),
+    names: new Map([...imp.roads.values()].filter((r) => r.name || r.ref).map((r) => [r.seg, r.name ?? r.ref!])),
     hints, standing,
     growAlong: () => sparse(net, standing),
     growNow: 0,
     canGrow: (p) => { const k = imp.zoneAt(p)?.kind; return k !== 'park' && k !== 'water' && !imp.isWater(p); },
-    civics: false,
+    invent: false,
     trees: treesOf(imp, bound),
     notes,
   };

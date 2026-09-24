@@ -14,8 +14,7 @@ const FREE = 0, LOT = 1, ROAD = 2, WATER = 3;
 // a cell is taken if any part of it (not just its centre) is on claimed land
 const landNear = (net: Network, p: P) => { const h = CELL * 0.45; return !net.land.free([{ x: p.x - h, z: p.z - h }, { x: p.x + h, z: p.z - h }, { x: p.x + h, z: p.z + h }, { x: p.x - h, z: p.z + h }]); };
 
-// `civics: false` leaves out invented community buildings (a real town has its own).
-export function findRegions(net: Network, pending: Lot[], opts: { civics?: boolean } = {}) {
+export function findRegions(net: Network, pending: Lot[]) {
   const all = [...net.lots, ...pending];
   if (!all.length) return { regions: [] as Region[], civics: [] as Lot[] };
   // grid over the built-up area, aligned to world multiples of CELL
@@ -126,7 +125,7 @@ export function findRegions(net: Network, pending: Lot[], opts: { civics?: boole
 
     // try a community building that fits, facing the road
     let civic: Lot | null = null;
-    if (opts.civics !== false && !industrial && touching.length && n >= 6) {
+    if (!industrial && touching.length && n >= 6) {
       const options = n > 40 ? ['church', 'school', 'pub', 'petrol', 'surgery'] : n > 16 ? ['pub', 'surgery', 'hall', 'petrol', 'cornershop'] : (r < 0.15 ? ['substation'] : ['cornershop', 'hall']);
       const want = options.filter((o) => o !== 'petrol' || fromCentre > 110).sort(() => rand() - 0.5);
       const set = new Set(cells.map(([a, b]) => a + b * nx));

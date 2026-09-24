@@ -1,7 +1,7 @@
 // The game's side of the ground: turns the road network, plots, trees and water into a GroundInput,
 // and keeps the ground up to date as the town changes. main.ts only calls these few functions.
 import { ROADS } from '../catalog';
-import type { Lot, Network } from '../roads';
+import { closestOnPath, type Lot, type Network } from '../roads';
 import { Ground, type GroundInput, type XZ } from './index';
 
 export interface GameWorld {
@@ -41,12 +41,15 @@ export class GameGround {
     const blocked: XZ[][] = [];
     for (const c of net.land.all()) blocked.push(...c.polys);
     const lanes: GroundInput['lanes'] = [];
+    const rails = [...net.segs.values()].filter((s) => ROADS[s.type]?.cls === 'rail').map((s) => ({ id: s.id, path: net.path(s) }));
     for (const s of net.segs.values()) {
       const d = ROADS[s.type];
       if (!d || (d.family !== 'Rural' && d.cls !== 'rail')) continue;
       const path = net.path(s);
       if (path.some((p) => (p.y ?? 0) < -2)) continue; // (not in tunnels)
-      lanes.push({ path, half: net.half(s) });
+      // tracks running side by side (a station throat, sidings) share one fenced corridor: no hedge between
+      const beside = d.cls === 'rail' && rails.some((o) => o.id !== s.id && path.some((p, i) => i % 4 === 0 && closestOnPath(p, o.path).d < net.half(s) + 14));
+      lanes.push({ path, half: net.half(s), ...(beside ? { hedge: false } : {}) });
     }
     const parks: GroundInput['parks'] = [];
     for (const r of this.w.parks?.() ?? []) for (const c of r.cells) { const h = r.size / 2; parks.push({ poly: [{ x: c.x - h, z: c.z - h }, { x: c.x + h, z: c.z - h }, { x: c.x + h, z: c.z + h }, { x: c.x - h, z: c.z + h }] }); }
