@@ -42,6 +42,20 @@ nothing should be built at the start, the HUD was too big, and the tools were to
 - **Build sheet:** the cards for things not in the game yet are gone (bus station, lorry depot,
   Freight, Landscape). Add them back when they exist. Save and Load in the menu are left to the
   save session.
+- **Merged overnight (24–25 Sep):**
+  - #35: save and load;
+  - #36: CI timing budgets scaled by machine speed, and the phone tests in CI;
+  - #37: region hills, place names, Places, and trips between towns;
+  - #38: region streaming.
+
+  The merges were checked with tsc, vitest (only the known economy test fails), the lines, loop,
+  rail and save phone tests, and a region-map smoke test (it loads in 29 s with no errors). The
+  region and streaming sessions are archived.
+- **Still open:**
+  - #39: traffic. Gap-taking is done; the roundabout pull-out and steering are to follow on the
+    same branch.
+  - #36: follow-up commits.
+  - Stations session: `work-stations-2`.
 - **Parallel sessions** each push a `claude/work-*` branch; merge them here as they land:
   - traffic feel: `work-traffic-2`;
   - save and CI: `work-save`;
