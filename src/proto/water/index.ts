@@ -6,3 +6,5 @@ export { buildRegion, isRiverTerrain, type Region, type RiverTerrain } from './r
 export { priorityFlood, accumulate, label, edt, type Flood } from './flood';
 export { waterSurface, shoreColours, reedSpots, SHORE_COLOURS, type WaterMesh } from './surface';
 export { Coastal, type CoastOpts } from './coast';
+export { waterClaims, claimWater, contours, type WaterClaim, type ClaimOpts } from './claims';
+export { planCanal, canalReach, findQuays, navGrid, shipRoute, navLimits, pierBans, type Canal, type CanalOpts, type Lock, type Pound, type Quay, type Port, type NavGrid, type Route, type FerryRoute } from './hooks';
