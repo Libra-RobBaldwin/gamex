@@ -303,6 +303,7 @@ function openTurntable(m?: Model) {
   // sit the vehicle in the upper half of the screen, clear of the spec card
   const k = S.ui ? view.h * 0.16 : 0;
   view.x = Math.sin(view.az) * k; view.z = Math.cos(view.az) * k;
+  const fx = +(q.get('fx') ?? 0), fy = +(q.get('fy') ?? 0) / Math.tan(view.el); view.x += fx * Math.cos(S.angle) - Math.sin(view.az) * fy; view.z += fx * Math.sin(S.angle) - Math.cos(view.az) * fy;
   showCard();
 }
 const fmt = (n: number) => n.toLocaleString('en-GB');
