@@ -48,7 +48,7 @@ const made = await page.evaluate(() => {
 // draw the line by touch: housing, the high street's two stops, housing
 await page.evaluate(() => { window.proto.startLineTool(); window.proto.focusOn({ x: 0, z: 0 }, 520); });
 await page.waitForTimeout(2500);
-const taps = await page.evaluate((ids) => { const P = window.proto, pl = P.markers.places(); const find = (id) => pl.find((m) => m.id === id || P.traffic.place(id)?.stops.some((s) => s.id === m.id)); return ids.map((id) => { const m = find(id); const s = P.toScreen(m.p); return { id, x: s.x, y: s.y }; }); }, [made[0], 599, 601, made[1]]);
+const taps = await page.evaluate((ids) => { const P = window.proto, pl = P.markers.places(); const find = (id) => pl.find((m) => m.id === id || P.traffic.place(id)?.stops.some((s) => s.id === m.id)); return ids.map((id) => { const m = find(id); const s = P.toScreen(m.p); return { id, x: s.x, y: s.y }; }); }, [made[0], ...(await page.evaluate(() => { const pl = window.proto.markers.places(); const near = (q) => pl.map((m) => ({ id: m.id, d: Math.hypot(m.p.x - q.x, m.p.z - q.z) })).sort((a, b) => a.d - b.d)[0].id; return [near({ x: -85, z: 0 }), near({ x: 120, z: 0 })]; })), made[1]]); // (the high street's two stops, found by where they are)
 for (const t of taps) {
   if (t.x < 10 || t.x > 402 || t.y < 110 || t.y > 760) fail(`stop ${t.id} is off screen`);
   await page.touchscreen.tap(t.x, t.y); await page.waitForTimeout(400);
