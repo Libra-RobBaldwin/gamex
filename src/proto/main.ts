@@ -26,7 +26,7 @@ import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
 import { starterStops } from './game/crowdsites';
-import { IX_BLURB, IX_FORMS, IX_NAME, motorwayWithJunction, type Interchange, type IxForm, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
+import { IX_BLURB, IX_FORMS, IX_NAME, motorwayWithJunction, pairToNode, type Interchange, type IxForm, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
 import { planJunction, roadCrossed, type IxPlan } from './interchange/plan';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -404,7 +404,9 @@ function seedTown() {
   road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 });
   // a motorway along the south edge, reached from the estate by a dual carriageway
   // the motorway ends at a roundabout, where it carries on east as a fast dual carriageway
-  road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway'));
+  // (as a pair of one-way carriageways, splaying into the roundabout: interchange/build.ts)
+  const pair = pairToNode(net, [{ x: -510, z: -470 }, { x: 0, z: -470 }], 'motorway', { x: 0, z: -470 });
+  if (!pair.ok) { console.warn(pair.reason); road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway')); }
   road({ x: 0, z: -470 }, { x: 510, z: -470 }, undefined, as('dual-2-70-0'));
   road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
   // a main line railway along the north, lifted over the high road, and a road tunnel under the lake

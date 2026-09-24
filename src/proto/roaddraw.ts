@@ -2,7 +2,7 @@
 // and tunnels, stops. Everything is batched into a handful of meshes per material.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BAY, ROADS, bayWeight, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
+import { BAY, ROADS, bayWeight, closestOnPath, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
 import { legsAt, type Junction } from './junction';
 import { STD } from './standards';
 import { legAt, legDir, legFrameOf, ringA, type ShapeLeg } from './jshape';
@@ -533,9 +533,13 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     // reservation, on its offside verge (the other carriageway has its own, a little way off)
     if (d.oneway && d.id.endsWith('~1') && d.verge > 1 && (d.family === 'Motorway' || (d.family === 'Dual' && d.mph >= 60))) {
       const o = -(kerbOf(d) + d.verge - 0.6), bq = part(s0 + 0.3, s1 - 0.3);
+      // (not where it would stand on another carriageway: where the pair splays in to a junction, say)
+      const others = [...net.segs.values()].filter((x) => x !== s && x.oneway && net.def(x).cls === 'road');
+      const clear = (x: number, z: number) => !others.some((x2) => { const c = closestOnPath({ x, z }, net.path(x2)); return c.d < net.half(x2) + 0.3; });
       for (let i = 1; i < bq.p.length; i++) {
         const p = bq.p[i - 1], q = bq.p[i], L2 = Math.hypot(q.x - p.x, q.z - p.z) || 1, nx = (q.z - p.z) / L2, nz = -(q.x - p.x) / L2;
         const P0 = [p.x + nx * o, p.z + nz * o], Q0 = [q.x + nx * o, q.z + nz * o];
+        if (!clear(P0[0], P0[1]) || !clear(Q0[0], Q0[1])) continue;
         barrier.quad([P0[0], (p.y ?? 0) + 0.25, P0[1]], [Q0[0], (q.y ?? 0) + 0.25, Q0[1]], [Q0[0], (q.y ?? 0) + 1.05, Q0[1]], [P0[0], (p.y ?? 0) + 1.05, P0[1]]);
       }
     }

@@ -91,6 +91,36 @@ export function buildPair(net: Network, mw: P[], type: string, opts: Partial<Roa
   return { ok: true as const, ab: A.segs, ba: B.segs };
 }
 
+// A motorway pair that ends at a junction (a roundabout, say) at the far end of mw: the two
+// carriageways splay in over their last stretch and meet the node at `splay` either side of the
+// line, so each has its own mouth on the ring; the one running the way mw was drawn arrives there,
+// the other leaves from it. `end` is the node, or where one is to be.
+export function pairToNode(net: Network, mw: P[], type: string, end: End, splay = 0.3, opts: Partial<RoadOpts> = {}) {
+  const g = pairGap(type) / 2, o = { ...DEFAULT_OPTS, ...opts, type, oneway: true }, L = pathLength(mw);
+  const q = pointAt(mw, L), u = { x: q.ux, z: q.uz }, n = left(u), run = Math.min(L * 0.4, g / Math.tan(splay) * 2.2);
+  const side = (k: 1 | -1) => {
+    const straight = offsetPath(subPathOf(mw, 0, L - run), k * g), A = straight[straight.length - 1];
+    // heading in towards the node, `splay` off the line on this side (towards its middle)
+    const h = unit({ x: u.x * Math.cos(splay) - n.x * k * Math.sin(splay), z: u.z * Math.cos(splay) - n.z * k * Math.sin(splay) });
+    return [...straight.slice(0, -1), ...curve(A, u, { x: end.x, z: end.z }, h, 0.4)];
+  };
+  const ab = side(1), ba = side(-1).reverse();
+  const A = road(net, at(net, ab[0]), end, { ...o, path: ab }, 'One carriageway');
+  if (!A.ok) return A;
+  const nd = net.nearestNode(end, 0.5);
+  const B = road(net, nd ? { x: nd.x, z: nd.z, node: nd.id } : end, at(net, ba[ba.length - 1]), { ...o, path: ba }, 'The other carriageway');
+  if (!B.ok) return B;
+  return { ok: true as const, ab: A.segs, ba: B.segs };
+}
+// the part of a path between two distances along it
+function subPathOf(path: P[], s0: number, s1: number): P[] {
+  const out: P[] = [pointAt(path, s0)];
+  let acc = 0;
+  for (let i = 1; i < path.length; i++) { acc += dist(path[i - 1], path[i]); if (acc > s0 + 1e-6 && acc < s1 - 1e-6) out.push(path[i]); }
+  out.push(pointAt(path, s1));
+  return out.map((p) => ({ x: p.x, z: p.z }));
+}
+
 // The carriageway of a pair running in direction w at a point (within a couple of metres).
 function carriagewayAt(net: Network, p: P, w: V, type: string): RSeg | null {
   let best: RSeg | null = null, bd = 2.5;

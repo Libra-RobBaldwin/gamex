@@ -6,7 +6,7 @@ import { DEFAULT_OPTS, Network, rng, type P } from './roads';
 import { design, landFits, legsAt, type Form, type Junction } from './junction';
 import { Traffic, type Places } from './traffic';
 import { laneSpan } from './xsection';
-import { motorwayWithJunction, type IxForm, type SlipStyle } from './interchange/build';
+import { motorwayWithJunction, pairToNode, type IxForm, type SlipStyle } from './interchange/build';
 
 const as = (type: string) => ({ ...DEFAULT_OPTS, type });
 const geo = (n: Network, node: number) => ({ fits: (polys: Parameters<typeof landFits>[2]) => landFits(n, node, polys) });
@@ -130,7 +130,7 @@ export const SCENARIOS: Scenario[] = [
       road({ x: 0, z: -200 }, { x: 0, z: -380 });
       road({ x: -190, z: -290 }, { x: 150, z: -290 });
       road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 });
-      road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway'));
+      pairToNode(n, [{ x: -510, z: -470 }, { x: 0, z: -470 }], 'motorway', { x: 0, z: -470 }); // (a pair of carriageways splaying into the roundabout)
       road({ x: 0, z: -470 }, { x: 510, z: -470 }, undefined, as('dual-2-70-0'));
       road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
       n.build({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
