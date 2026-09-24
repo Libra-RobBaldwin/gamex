@@ -373,7 +373,8 @@ function commitRoads(made: number[] = []) {
   else lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
-  if (regionView) { gameGround.changed(editBoxes); regionView.groundChanged(editBoxes); infillBoxes.push(...editBoxes); }
+  // (a big map's ground is repainted round the edit on the next frame, so the edit and the repaint don't land in one)
+  if (regionView) { groundBoxes.push(...editBoxes); infillBoxes.push(...editBoxes); }
   else gameGround.invalidate();
   refreshEdge();
 }
@@ -523,6 +524,7 @@ const infillCells = new Map<string, Built>();
 const cellKey = (x: number, z: number) => `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
 let infillDue = true;
 const infillBoxes: Box[] = []; // (a big map: where edits have touched since the leftover land was last looked at)
+const groundBoxes: Box[] = []; // (and since the ground was last repainted)
 // Find the gaps the plots leave and fill them: community buildings where one fits, else parks,
 // playgrounds, allotments, car parks, verges. Plots still waiting to be built count as taken.
 function refreshInfill() {
@@ -2137,7 +2139,10 @@ function frame(now: number) {
       if (b.solo.scale.y >= 1) toChunk(b); // settled: merge into its chunk
     }
   }
-  if (regionView) { if (infillBoxes.length && !buildings.some((b) => b.solo)) refreshInfillWithin(infillBoxes.splice(0)); }
+  if (regionView) {
+    if (groundBoxes.length) { const b = groundBoxes.splice(0); gameGround.changed(b); regionView.groundChanged(b); }
+    else if (infillBoxes.length && !buildings.some((b) => b.solo)) refreshInfillWithin(infillBoxes.splice(0));
+  }
   else if (infillDue && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
   // merge at most a couple of changed chunks a frame
   let merged = 0;
