@@ -207,7 +207,7 @@ function slipRoads(net: Network, site: Site, sp: NonNullable<ReturnType<typeof s
 function slipPaths(site: Site, side: 1 | -1, R: P, radius: number, X: P, ring?: { offTo: P; onFrom: P; hOff: V; hOn: V; clear: number }) {
   const g = pairGap(site.type) / 2, Dc = oneWay(ROADS[site.type]), S = ROADS.slip, K = kerbOf(Dc), Ks = kerbOf(S);
   const q = pointAt(site.mw, site.s), u = { x: q.ux, z: q.uz }, w = side === 1 ? u : { x: -u.x, z: -u.z }, m = left(w);
-  const eN = K + STD.noseTip + Ks + 0.3, run = 20;
+  const eN = K + STD.noseTip + Ks, run = 20; // (the nose starts exactly where it runs alongside: see slips.ts)
   // a point t metres along the carriageway from level with X (in its direction), e out from its centreline
   const F = (t: number, e: number) => { const s = site.s + side * t, c = pointAt(site.mw, s), n = left({ x: c.ux, z: c.uz }); return add(c, n, side * (g + e)); };
   const vs = unit(sub(R, X));
@@ -218,7 +218,10 @@ function slipPaths(site: Site, side: 1 | -1, R: P, radius: number, X: P, ring?: 
   const offTo = ring?.offTo ?? R, onFrom = ring?.onFrom ?? R;
   const Qoff = add(offTo, hOff, -(radius + 22)), Qon = add(onFrom, hOn, radius + 22);
   const along = (p: P) => dot(sub(p, X), w), lateral = (p: P) => dot(sub(p, X), m) - g;
-  const dv = STD.diverge(Dc.mph), mg = STD.merge(Dc.mph);
+  const dv0 = STD.diverge(Dc.mph), mg0 = STD.merge(Dc.mph);
+  // (the nose starts where the kerbs have parted by its tip, a little short of the point the slip road
+  // is laid alongside from: laid a few metres longer, so the nose the junction finds meets the standard)
+  const dv = { ...dv0, nose: dv0.nose + 5 }, mg = { ...mg0, nose: mg0.nose + 5 };
   for (const k of [1.1, 1.4, 1.8, 2.3]) {
     // the diverge: its node where the lanes part (td), the nose beyond, alongside, then round to the road
     const spanOff = Math.max(40, k * (lateral(Qoff) - eN)), td = along(Qoff) - spanOff - dv.nose - run;

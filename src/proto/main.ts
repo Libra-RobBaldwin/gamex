@@ -26,6 +26,7 @@ import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
 import { starterStops } from './game/crowdsites';
+import { motorwayWithJunction, type Interchange, type IxForm } from './interchange/build'; // motorway junctions (docs/motorways.md)
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -174,6 +175,10 @@ scene.add(bridgeLayer.group);
 const junctions = new Map<number, Junction>();
 let seenAt: (node: number) => Map<string, number> | undefined = () => undefined;
 const geoFor = (node: number) => ({ fits: (polys: P[][]) => landFits(net, node, polys) });
+// motorway junctions built (interchange/build.ts): each is one junction to the player, and says
+// which form each of its own junctions takes (its roundabouts, give-ways, merges and diverges)
+const interchanges: Interchange[] = [];
+const preferAt = (node: number) => { for (const ix of interchanges) if (ix.prefer[node]) return { form: ix.prefer[node] }; return undefined; };
 function redesignJunctions() {
   for (const id of [...junctions.keys()]) if (!net.nodes.has(id) || legsAt(net, id).length < 3) junctions.delete(id);
   for (const n of net.nodes.values()) {
@@ -182,7 +187,7 @@ function redesignJunctions() {
     const old = junctions.get(n.id);
     const same = old && old.legs.length === legs.length && legs.every((l) => old.legs.includes(l.seg.id));
     if (same && !old!.auto) continue;
-    const j = design(net, n.id, geoFor(n.id), seenAt(n.id));
+    const j = design(net, n.id, geoFor(n.id), seenAt(n.id), preferAt(n.id));
     if (j) junctions.set(n.id, j);
   }
 }
@@ -872,7 +877,7 @@ let editJ: number | null = null;
 function junctionNear(p: P) {
   let best: number | null = null, bd = Infinity;
   for (const j of junctions.values()) {
-    if (j.form === 'join' || j.form === 'merge') continue;
+    if (j.form === 'join' || j.form === 'merge' || j.form === 'diverge') continue;
     const n = net.node(j.node), d = Math.hypot(n.x - p.x, n.z - p.z);
     if (d < Math.max(10, j.R, net.nodeHalf(j.node)) + 2 && d < bd) { bd = d; best = j.node; }
   }
@@ -1420,8 +1425,21 @@ nav.onChange(() => {
   shell.syncView();
 });
 
+// A motorway junction on its own, to look at: /proto.html?junction=dumbbell (or gsr, diamond)
+function seedJunctionDemo(form: IxForm) {
+  const R = form === 'gsr' ? 780 : 510;
+  net.bound = Math.max(BOUND, R + 10); // (a grade-separated roundabout's slip roads reach past the town's edge)
+  net.build({ x: 0, z: -510 }, { x: 0, z: 510 }, undefined, { ...DEFAULT_OPTS, type: 'dual' });
+  const r = motorwayWithJunction(net, form, [{ x: -R, z: 0 }, { x: R, z: 0 }], 'motorway', [...net.segs.values()][0], 1);
+  if (r.ok) interchanges.push(r.ix); else console.warn(r.reason);
+  commitRoads([...net.segs.keys()]);
+  for (const l of queue.splice(0, Math.floor(queue.length * 0.8))) if (net.lotFree(l)) spawnLot(l, false);
+}
+
 // ---------------- loop ----------------
-seedTown();
+const demoJunction = new URLSearchParams(location.search).get('junction') as IxForm | null;
+if (demoJunction === 'dumbbell' || demoJunction === 'gsr' || demoJunction === 'diamond') seedJunctionDemo(demoJunction);
+else seedTown();
 starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
 rebuildRoads();
 refreshTrees();

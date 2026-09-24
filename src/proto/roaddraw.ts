@@ -690,7 +690,16 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       }
       continue;
     }
-    for (const q of sh.paves) (noPave ? verge : pave).poly(q, y + 0.15);
+    // (where some of its roads have footways and some verges, each road's own piece is what it has, the
+    // shared ones footway; footway a centimetre up and verge a little down, so where they overlap the
+    // footway is drawn cleanly over the verge and never at the same height, which would flicker)
+    const mixed = !noPave && segs.some((x) => net.def(x).pave === 0);
+    sh.paves.forEach((q, i) => {
+      const leg = sh.paveLeg?.[i], ls = leg != null ? net.segs.get(leg) : undefined;
+      if (!mixed) (noPave ? verge : pave).poly(q, y + 0.15);
+      else if (ls && net.def(ls).pave === 0) verge.poly(q, y + 0.145);
+      else pave.poly(q, y + 0.16);
+    });
     for (const q of sh.aprons) asph.poly(q, y + 0.25);
     for (const isl of sh.islands) {
       kerbed(isl, y);

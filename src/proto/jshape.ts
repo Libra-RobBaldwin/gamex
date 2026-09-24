@@ -38,6 +38,8 @@ export interface Shape {
   island: number; // roundabout: radius of the central island
   claims: XZ[][]; // the land it takes
   marks?: SlipMarks; // a merge or diverge's own markings
+  // which road each of `paves` is the footway (or verge) of, where it's only one road's (null: shared)
+  paveLeg?: (number | null)[];
 }
 
 const add = (p: XZ, u: XZ, k: number) => ({ x: p.x + u.x * k, z: p.z + u.z * k });
@@ -412,7 +414,8 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     // (the footway's outline crosses each road no nearer than its road's footway starts)
     const pv = ringOutline(n, legs, R + F, B, Math.max(1, std.entryRadius - F), (l) => Math.max(...paveTrim[l.id]));
     const apron = kerb.pts, pave = pv.pts, aprons = kerb.pieces, paves = pv.pieces;
-    legs.forEach((l, i) => { const nx = legs[(i + 1) % N], q = nose(n, l, nx, B(l), B(nx), pv.at[i].m); if (q) paves.push(q); });
+    const paveLeg: (number | null)[] = [null, ...legs.map((l) => l.id)]; // (the ring, then each road's arm)
+    legs.forEach((l, i) => { const nx = legs[(i + 1) % N], q = nose(n, l, nx, B(l), B(nx), pv.at[i].m); if (q) { paves.push(q); paveLeg.push(null); } });
     const claims = paves;
     // splitter islands at single-lane entries: only where one fits on its own road, clear of the
     // next road's carriageway (where mapped roads meet the ring close together, say)
@@ -425,7 +428,7 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
       islands.push(isl);
       splitter[l.id] = a0 + sl - 0.8;
     }
-    return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter, slip: null, R, island: std.island, claims };
+    return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter, slip: null, R, island: std.island, claims, paveLeg };
   }
   // priority and signals: corners with proper kerb radii, one of them perhaps a slip road
   let slip: SlipShape | null = null;
@@ -460,7 +463,7 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
   // as pieces: the middle, where every road's kerbs leave the node; each road out to its mouth; each
   // corner's rounding (or, round the outside of a bend, the bit behind the node)
   const hull = (b: (l: ShapeLeg) => number) => convexHull(legs.flatMap((l) => [legAt(n, l, 0, -b(l)), legAt(n, l, 0, b(l))]));
-  const aprons: XZ[][] = [hull(K)], paves: XZ[][] = [hull(B)];
+  const aprons: XZ[][] = [hull(K)], paves: XZ[][] = [hull(B)], paveLeg: (number | null)[] = [null];
   const half = (l: ShapeLeg, b: number, a: number) => [legAt(n, l, 0, 0), ...run(n, l, 0, a, 0), legAt(n, l, a, 0), legAt(n, l, a, b), ...run(n, l, a, 0, b), legAt(n, l, 0, b)];
   const arm = (l: ShapeLeg, b: number, a0: number, a1: number) => [legAt(n, l, 0, -b), ...run(n, l, 0, a0, -b), legAt(n, l, a0, -b), legAt(n, l, a1, b), ...run(n, l, a1, 0, b), legAt(n, l, 0, b)];
   // (a rounded corner is fanned from the node, so it meets both roads' arms whichever way they curve)
@@ -471,13 +474,14 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     aprons.push(arm(l, K(l), m, m));
     // (the footway a half at a time, each ending square where its road's own footway starts)
     paves.push(half(l, -B(l), Math.max(m, tm)), half(l, B(l), Math.max(m, tp)));
+    paveLeg.push(l.id, l.id);
     const ka = round(c.kerb, l, nx, K(l), K(nx));
     if (ka) aprons.push(ka);
     // (a slip road's corner: the footway runs out to the kerbs' corner, the island sitting on it)
     const kb = c.isSlip && c.kerb.x ? [legAt(n, l, 0, B(l)), legAt(n, l, Math.max(m, tp), B(l)), c.kerb.x, legAt(n, nx, Math.max(mouth[nx.id], paveTrim[nx.id][1]), -B(nx)), legAt(n, nx, 0, -B(nx)), n] : round(c.back, l, nx, B(l), B(nx));
-    if (kb) paves.push(kb);
+    if (kb) { paves.push(kb); paveLeg.push(null); }
     const q = c.isSlip ? null : nose(n, l, nx, B(l), B(nx), Math.max(m, tp));
-    if (q) paves.push(q);
+    if (q) { paves.push(q); paveLeg.push(null); }
   });
   // (along a curving road the outlines follow its kerb and footway between the corners and the mouth)
   legs.forEach((l, i) => {
@@ -491,7 +495,7 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     islands.push(slip.island);
     claims.push(...bandPolys(slip.path, STD.slipWidth / 2 + 0.5, STD.slipWidth / 2 + STD.slipFootway + 0.5), slip.island);
   }
-  return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter: {}, slip, R: 0, island: 0, claims };
+  return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter: {}, slip, R: 0, island: 0, claims, paveLeg };
 }
 
 // The footprint of a roundabout of radius R: can it go here? (the ring and its footway)

@@ -66,9 +66,11 @@ export function slipShape(net: Network, node: number, r: SlipRoles): Shape | nul
   // (the nose on the far side of the node from the taper, and both on the carriageway)
   if (merge ? rhoN > -10 || -rhoN > Lin - 10 || T > Lout - 10 : rhoN < 10 || rhoN > Lout - 10 || T > Lin - 10) return null;
   // where the slip lane's centre is, along the carriageway
+  // (the taper is straight, as CD 122 draws it; the lane eases across the nose)
+  const lin = (x: number) => Math.max(0, Math.min(1, x));
   const e = (rho: number) => merge
-    ? (rho < 0 ? eN + (ec - eN) * smooth((rho - rhoN) / -rhoN) : ec + (lane0 - ec) * smooth(rho / T))
-    : (rho < 0 ? lane0 + (ec - lane0) * smooth((rho + T) / T) : ec + (eN - ec) * smooth(rho / rhoN));
+    ? (rho < 0 ? eN + (ec - eN) * smooth((rho - rhoN) / -rhoN) : ec + (lane0 - ec) * lin(rho / T))
+    : (rho < 0 ? lane0 + (ec - lane0) * lin((rho + T) / T) : ec + (eN - ec) * smooth(rho / rhoN));
   const [r0, r1] = merge ? [rhoN, T] : [-T, rhoN];
   const at: number[] = [];
   for (let rho = r0; rho < r1 - 0.5; rho += 2) at.push(rho);
@@ -101,8 +103,10 @@ export function slipShape(net: Network, node: number, r: SlipRoles): Shape | nul
   const marks: SlipMarks = {
     solid: [
       { pts: line(nose0, nose1, () => gen), w: edge }, // the carriageway's edge, along the nose
-      { pts: line(nose0, nose1, inner), w: edge }, // the slip lane's offside edge
-      { pts: line(r0, r1, (rho) => e(rho) + wS / 2), w: edge }, // its nearside edge, closing in along the taper
+      // the slip lane's offside edge and its nearside edge (closing in along the taper), run on a metre
+      // past the nose to where the slip road's own lines start
+      { pts: line(nose0 - (merge ? 1 : 0), nose1 + (merge ? 0 : 1), inner), w: edge },
+      { pts: line(r0 - (merge ? 1 : 0), r1 + (merge ? 0 : 1), (rho) => e(rho) + wS / 2), w: edge },
     ],
     broken: [{ pts: line(tap0, tap1, () => gen), w: W, dash: 1, gap: 1 }], // TSRGD diagram 1010, where the lanes meet
     hatch,
