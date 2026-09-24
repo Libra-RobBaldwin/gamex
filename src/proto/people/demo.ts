@@ -87,12 +87,13 @@ flat(-400, -36, 400, -32.2, 0.05, '#7a7166');
 for (const z of [-34.9, -33.4]) flat(-400, z - 0.05, 400, z + 0.05, 0.2, '#5a5a5a');
 box(20, -32.4, 92, -26.5, 0, 0.9, '#b0aca4'); flat(20, -32.4, 92, -32.0, 0.92, '#e0c21f');
 flat(26, -26.5, 30, -BACK, PAVE_Y, '#b9b5ac');
-box(40, -26.5, 70, -25.5, 0.9, 3.4, '#a88a6a'); box(38, -30, 72, -25.3, 3.4, 3.6, '#4a4f57', false); // canopy
+box(40, -26.5, 70, -25.5, 0.9, 3.4, '#a88a6a'); // station building at the back of the platform
 // the school, its yard and wall; the park; the works
 box(-98, 10, -73, 40, 0, 8, '#a8745a'); for (let z = 12; z < 39; z += 3) box(-73.05, z, -72.95, z + 1.6, 1.2, 6.6, '#5a7288', false); flat(-70, 9, -30, 32, 0.03, '#8a8d90');
 box(-70, 8.4, -52, 8.8, 0, 1.2, '#9a6a4a'); box(-48, 8.4, -30, 8.8, 0, 1.2, '#9a6a4a');
 flat(-20, 9, 50, 60, 0.02, '#6f9a4a'); disc(25, 40, 7.2, 0.03, '#cfc7a8'); disc(25, 40, 6.4, 0.05, '#4f93c4');
 for (const [x, z] of [[-14, 20], [-12, 50], [4, 56], [44, 14], [46, 50], [10, 30], [36, 24], [-2, 38]]) tree(x, z, 0.9 + ((x * 7 + z) % 5) / 10);
+const pond = Array.from({ length: 12 }, (_, i) => ({ x: 25 + Math.cos((i / 12) * Math.PI * 2) * 7.4, z: 40 + Math.sin((i / 12) * Math.PI * 2) * 7.4 }));
 const BENCHES = [{ at: { x: 2, z: 14.5 }, facing: Math.PI / 2 }, { at: { x: 22, z: 14.5 }, facing: Math.PI / 2 }, { at: { x: 40, z: 31 }, facing: Math.PI }, { at: { x: 12, z: 50 }, facing: -Math.PI / 2 }];
 for (const b of BENCHES) { const c = Math.cos(b.facing + Math.PI / 2) * 0.8, s = Math.sin(b.facing + Math.PI / 2) * 0.8; box(b.at.x - Math.abs(c) - 0.2, b.at.z - Math.abs(s) - 0.2, b.at.x + Math.abs(c) + 0.2, b.at.z + Math.abs(s) + 0.2, 0.42, 0.48, '#6a4a2e'); }
 box(62, 14, 130, 70, 0, 0.02, '#8a8d90', false); box(90, 24, 130, 66, 0, 11, '#7a8a96'); box(64, 40, 86, 66, 0, 7, '#8a7a6a'); box(118, 26, 122, 30, 11, 26, '#6a5a50');
@@ -121,14 +122,16 @@ const ui = {
   era: document.getElementById('era') as HTMLSelectElement, rain: document.getElementById('rain')!, stress: document.getElementById('stress') as HTMLSelectElement,
   stats: document.getElementById('stats')!, views: document.getElementById('views')!,
 };
-let clock = 7.9 * 60, playing = true, waiting = 12, stressN = 0;
+let clock = 7.9 * 60, playing = true, waiting = 12, stressN = 0, platformWaiting = 14;
+// the economy's stand-in for the platform: people arrive at a rate by the hour, and trains take them
+const platformArrivals = (m: number, dt: number) => { platformWaiting = Math.min(60, platformWaiting + dt * MINUTES_PER_S * 0.9 * DAY.commute(m)); };
 const MINUTES_PER_S = 1;
 
 function townFlows(m: number): Flow[] {
   const st = DAY.street(m), sh = DAY.shops(m);
   return [
     { kind: 'queue', id: 'stop', site: stop, waiting },
-    { kind: 'queue', id: 'platform', site: platform, waiting: Math.round(4 + 26 * DAY.commute(m)) },
+    { kind: 'queue', id: 'platform', site: platform, waiting: Math.round(platformWaiting) },
     { kind: 'walk', id: 'north', footway: northFoot, count: Math.round(10 + 45 * Math.max(st, sh)), mix: MIXES.highStreet },
     { kind: 'walk', id: 'south', footway: southFoot, count: Math.round(8 + 35 * st) },
     { kind: 'walk', id: 'station-path', footway: { line: walkLine({ x: 28, z: -25 }, { x: 28, z: -6.5 }), width: 3.6, y: PAVE_Y }, count: Math.round(2 + 10 * DAY.commute(m)) },
@@ -145,7 +148,7 @@ function townFlows(m: number): Flow[] {
     {
       kind: 'park', id: 'park', area: [{ x: -18, z: 10 }, { x: 48, z: 10 }, { x: 48, z: 58 }, { x: -18, z: 58 }], benches: BENCHES,
       walkers: Math.round(10 * DAY.park(m)), dogWalkers: Math.round(8 * DAY.dogs(m)), joggers: Math.round(4 * DAY.joggers(m)), looseDogs: Math.round(4 * DAY.dogs(m)),
-      sitters: Math.round(7 * DAY.park(m)), kids: Math.round(7 * DAY.park(m) * (m > 15.5 * 60 ? 1 : 0.3)), play: { x: 0, z: 44 },
+      sitters: Math.round(7 * DAY.park(m)), avoid: [pond], kids: Math.round(7 * DAY.park(m) * (m > 15.5 * 60 ? 1 : 0.3)), play: { x: 0, z: 44 },
     },
     {
       kind: 'school', id: 'school', gate: { x: -50, z: 8.2 }, yard: [{ x: -68, z: 11 }, { x: -32, z: 11 }, { x: -32, z: 31 }, { x: -68, z: 31 }], pupils: 90, school: 0,
@@ -231,6 +234,7 @@ function stepVehicles(dt: number) {
     if (bus.x > 170) { bus.x = -170; bus.served = false; }
   }
   busM.position.set(bus.x, 0, -1.62);
+  platformArrivals(clock, dt);
   // train: every couple of minutes, stops, doors, people on and off
   train.t += dt;
   if (train.state === 'away' && train.t > 50) { train.state = 'in'; train.x = -260; train.v = 22; }
@@ -243,7 +247,7 @@ function stepVehicles(dt: number) {
       const doors: XZ[] = [];
       for (let i = 0; i < 3; i++) for (const d of [-5, 5]) doors.push({ x: train.x - 30 + i * 20.4 + d, z: -32.3 });
       crowds.alight('platform', doors, Math.round(6 + 30 * DAY.commute(clock)));
-      crowds.board('platform', doors, 999);
+      platformWaiting -= crowds.board('platform', doors, 999).n;
     }
   } else if (train.state === 'dwell' && train.t > 22) { train.state = 'out'; train.v = 0; }
   else if (train.state === 'out') { train.v = Math.min(24, train.v + dt * 1.2); train.x += train.v * dt; if (train.x > 420) { train.state = 'away'; train.t = 0; } }
@@ -252,7 +256,7 @@ function stepVehicles(dt: number) {
 
 // ---------------- views, input and the frame loop ----------------
 const VIEWS: Record<string, Partial<typeof view>> = {
-  'Bus stop': { x: 36, z: -3, h: 26 }, 'High street': { x: -20, z: -2, h: 55 }, Station: { x: 52, z: -29, h: 40, az: -Math.PI * 0.75 + 0.25 }, 'Works gate': { x: 70, z: 4, h: 40 },
+  'Bus stop': { x: 36, z: -3, h: 26 }, 'High street': { x: -20, z: -2, h: 55 }, Station: { x: 50, z: -27, h: 40, el: 0.95 }, 'Works gate': { x: 70, z: 4, h: 40 },
   Park: { x: 16, z: 34, h: 60 }, School: { x: -52, z: 18, h: 44 }, Fields: { x: -185, z: 5, h: 150 }, Town: { x: -20, z: 0, h: 260 }, Turntable: { x: TT.x, z: TT.z + 1, h: 16 },
 };
 let spin = false;
@@ -264,7 +268,6 @@ for (const name of Object.keys(VIEWS)) {
 }
 function setView(name: string) {
   Object.assign(view, { az: Math.PI / 4, el: 0.6 }, VIEWS[name]);
-  if (name === 'Station') view.az = Math.PI * 1.25 - 0.3;
   spin = name === 'Turntable';
   for (const b of ui.views.querySelectorAll('button')) b.classList.toggle('on', b.textContent === name);
   placeCamera();
@@ -332,6 +335,29 @@ window.__people = {
   // run the town forward without drawing (for screenshots on slow software GL)
   advance: (sec: number) => { for (let t = 0; t < sec; t += 0.05) { if (playing) clock = (clock + 0.05 * MINUTES_PER_S) % 1440; crowds.set(stressN ? [...townFlows(clock), ...stressFlows(stressN)] : townFlows(clock), clock); stepVehicles(0.05); store.update(cam, canvas.clientHeight, 0.05); } },
   bus, train,
+  // Time n figures at one level of detail: CPU placement and store update, then GPU frames
+  // (each forced to finish with a one-pixel read so the time is the real draw time).
+  measure: async (n: number, lod: number, frames = 8, shadows = true) => {
+    stressN = n; store.forceLod = lod; playing = false; sun.castShadow = shadows;
+    store.setBudget({ ...BUDGETS[0], near: 1e6, mid: 1e6, far: 1e6, buildsPerFrame: 1e6 });
+    Object.assign(view, { x: 20, z: -112, h: 170, az: Math.PI / 4, el: 0.6 }); placeCamera();
+    // only the measuring crowd
+    const flows = stressFlows(n);
+    crowds.set(flows, clock); store.update(cam, canvas.clientHeight, 0.016);
+    let cpu = 0, upd = 0;
+    for (let i = 0; i < 60; i++) { const a = performance.now(); crowds.set(flows, clock); const b = performance.now(); store.update(cam, canvas.clientHeight, 0.016); upd += performance.now() - b; cpu += b - a; }
+    const gl = renderer.getContext(), px = new Uint8Array(4);
+    const draw = () => { renderer.render(scene, cam); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); };
+    for (let i = 0; i < 2; i++) draw();
+    for (const o of scene.children) if (o !== store.root && !(o instanceof THREE.Light)) o.visible = false;
+    for (let i = 0; i < 2; i++) draw();
+    const t0 = performance.now();
+    for (let i = 0; i < frames; i++) { store.update(cam, canvas.clientHeight, 0.016); draw(); }
+    const ms = (performance.now() - t0) / frames;
+    const r = { n, lod, figures: store.stats.byLod[lod], instances: store.stats.instances, triangles: store.stats.triangles, peopleCalls: store.stats.drawCalls, calls: renderer.info.render.calls, renderTris: renderer.info.render.triangles, frameMs: ms, flowsMs: cpu / 60, updateMs: upd / 60, shadows };
+    for (const o of scene.children) o.visible = true;
+    return r;
+  },
   setPlaying: (p: boolean) => { playing = p; },
   setWaiting: (n: number) => { waiting = n; ui.wait.value = String(n); },
   setStress: (n: number) => { stressN = n; },
