@@ -31,9 +31,11 @@ a stream with review and fixes takes 45–90 minutes, and a merge about 5.
   car's `doorPositions`.
 
 ### 3. Traffic that looks and feels right
-- [ ] **Quicker to take a gap:** drivers react too slowly when a gap opens. Look at the
-  reaction delay, the acceptance checks each step and the commit hysteresis, and measure time
-  from gap to go.
+- [x] **Quicker to take a gap** (work-traffic-2): measured in the harness (`trafficsim.ts`:
+  `gaps` in `simulate`, `gapTrial`, `queueTrial`, `ringTrial`; `traffic.gaps.test.ts`). A queue at
+  a give-way line now discharges at 2.4–2.7 s a vehicle (was 3.0–3.5 s), each driver moving off
+  0.6–0.7 s after the one ahead (was 1.1 s); drivers go 0.6 s after the way clears; no more waits
+  on the ring behind someone earlier in the order who is still coming round.
 - [ ] **Pulling out at roundabouts:** give way to the right. Accept a gap from a vehicle's
   arrival time rather than its distance, count a vehicle leaving before your arm as no conflict,
   and don't wait for circulating traffic already past.

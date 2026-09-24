@@ -1,5 +1,20 @@
 # Handover: where everything stands
 
+## Traffic that feels right (work-traffic-2, 24 Sep 2026, late)
+
+Session https://claude.ai/code/session_018DK8CF7BYZZHj49auA1MyH, production.md §3.
+- **Gap to go (done):** measured in the harness (`simulate(..., { gaps: true })`, `gapTrial`,
+  `queueTrial`, `ringTrial` in `trafficsim.ts`; `Traffic.gapProbe()` says who stands at a line with
+  the way clear). There was no reaction delay as such; the slowness was in following. IDM waited for
+  the gap to grow before a queue moved off, and at a crawl it kept a 1.1 s time gap. A flaky "does
+  the limit move with the leader" test also made followers brake for a moving car as if it were a
+  wall. Order locks held drivers on the ring for someone still coming round, and let a driver keep a
+  place it couldn't use. Fixes in `traffic.ts`: `follow()` (anticipation, a shorter time gap at a
+  crawl), `movesWith()`, re-admission inside the junction, `ringRoom` counting only those near the
+  ring, and no committing while someone uncommitted stands in the way.
+- Bench: `src/proto/*.local.test.ts` in this session only; to rebuild it, run `simulate` over the
+  scenarios with `{ gaps: true }` on seeds 11–13.
+
 ## Latest: the bus loop is playable (24 Sep 2026, evening)
 
 Session https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. **Read `docs/loop.md`

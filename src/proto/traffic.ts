@@ -126,6 +126,10 @@ function offIn(m: number, lanes: number, w: number, bus: number, lane: number) {
 }
 // the speed allowed at t along a junction's path (for the bends at and beyond it)
 const spd = (P: JPath, t: number) => P.env[Math.max(0, Math.min(P.env.length - 1, Math.floor(t / STEP)))];
+// Does the limit `it` at p puts on us move along with it (following it into the same lane) rather
+// than stay put (a crossing)? (judged over a few metres: the table is in metre steps, and where a
+// body's chord cuts a bend the limit can stand still for a metre or two while it moves on)
+const movesWith = (vw: View, p: number, lim: number) => vw.limitMe(p + 5) - lim > 2.5;
 const keyOf = (s: RSeg, from: number, lane: number) => s.id * 32 + (from === s.a ? 0 : 16) + lane;
 const clsOf = (c: Car): Cls => c.cls ?? (c.lorry ? 1 : c.bus ? 2 : 0);
 
@@ -134,6 +138,16 @@ function idm(v: number, v0: number, gap: number, vl: number, p: { a: number; b: 
   const ss = s0 + Math.max(0, v * p.T + (v * (v - vl)) / (2 * Math.sqrt(p.a * p.b)));
   const r = Math.min(2, v / Math.max(0.5, v0));
   return p.a * (1 - r * r * r * r - (ss / Math.max(0.05, gap)) ** 2);
+}
+// Following: as IDM, but a driver whose leader is pulling away judges the gap as it will be a moment
+// from now, so a queue moves off as briskly as drivers really do (IDM on its own waits for the gap
+// to grow, and a queue at a give-way line trickles out). It never moves further than the space
+// there is now (the caller's gmin), and following at the same speed it's IDM exactly.
+// And at a crawl (in a queue, through a junction) drivers close up to a shorter time gap than at speed.
+const ANTICIPATE = 1.0; // seconds
+function follow(v: number, v0: number, gap: number, vl: number, p: { a: number; b: number; T: number; s0: number }, s0 = p.s0) {
+  const k = 0.7 + 0.3 * Math.min(1, v / 12);
+  return idm(v, v0, vl > v ? gap + (vl - v) * ANTICIPATE : gap, vl, k < 1 ? { a: p.a, b: p.b, T: p.T * k, s0: p.s0 } : p, s0);
 }
 const idmFree = (v: number, v0: number, p: { a: number }) => { const r = Math.min(2, v / Math.max(0.5, v0)); return p.a * (1 - r * r * r * r); };
 
@@ -1081,7 +1095,7 @@ export class Traffic {
       // whoever is already where the other would have to wait goes first; otherwise precedence
       const eIt = x.t >= limIt, eMe = u.t >= limMe;
       if (!(eIt !== eMe ? eIt : this.first(x, u))) continue;
-      const band = vw.limitMe(x.t + 2) - limMe > 1;
+      const band = movesWith(vw, x.t, limMe);
       ob(limMe - u.t, band ? x.v : 0, 0.5);
     }
   }
@@ -1137,7 +1151,7 @@ export class Traffic {
         const p = h.p;
         if (vw.apart(p, q)) continue;
         const lim = vw.limitMe(p);
-        if (lim - 0.5 < cap) { cap = lim - 0.5; moving = h.v > 0.5 && vw.limitMe(p + 2) - lim > 1; }
+        if (lim - 0.5 < cap) { cap = lim - 0.5; moving = h.v > 0.5 && movesWith(vw, p, lim); }
       }
       let nv = Math.min(spd(P, q), vq + a * dt);
       if (q + nv * dt > cap) nv = Math.max(0, (cap - q) / dt);
@@ -1194,7 +1208,9 @@ export class Traffic {
   // committed to it would fill its nearside lane end to end at their true lengths, or it locks solid.
   private ringRoom(c: Car, node: number, j: Junction) {
     let used = c.front + c.back;
-    for (const x of this.users.get(node) ?? []) if (x.c !== c && x.adm !== Infinity && x.t < x.path.ext1) used += x.c.front + x.c.back + 1;
+    // (counting those on it, and those committed to it who'll be on it within a couple of seconds:
+    // one committed far back up its approach may yet find the ring moving again by the time it's there)
+    for (const x of this.users.get(node) ?? []) if (x.c !== c && x.adm !== Infinity && x.t < x.path.ext1 && x.t > x.path.ext0 - 3 - 2 * x.v) used += x.c.front + x.c.back + 1;
     return used <= 2 * Math.PI * Math.max(3.5, j.R - 2.6);
   }
   // May this vehicle commit to the junction now? Returns its place in the junction's order, or null
@@ -1236,6 +1252,11 @@ export class Traffic {
       // course sweeps past) is in our way until it goes, like anyone we give way to
       else if (x.t >= o.vw.limitIt(me.t)) yieldTo.push(o);
     }
+    // (but we don't take a place in the order while one of those is in our way: it hasn't a place to
+    // go ahead of, so everyone after us would wait for us while we wait for it, and it may itself be
+    // waiting for one of them; we wait at our line until it has gone)
+    const inWay = yieldTo.find((o) => o.x.adm === Infinity);
+    if (inWay && !c.turn) return this.no(c, `waits for #${inWay.x.c.id} to go`);
     // (not those coming up behind us on our own approach: whatever they're doing, they're queued behind us)
     for (const x of this.approaching(pl.jd, now)) { if (x.c !== c && (x.rank ?? 0) < P.rank && x.path.inSeg !== P.inSeg && this.related(P, x.path)) { const o = near(x); if (o) outside.push(o); } }
     const ring = j.form === 'roundabout' || j.form === 'mini';
@@ -1282,6 +1303,8 @@ export class Traffic {
     const was = c.adm!, why = c.why;
     this.uncommit(c, pl);
     const ok = this.admit(c, pl, now);
+    // (at the line, with someone not yet committed standing in our way: we give our place back)
+    if (ok === null && !c.turn && c.why?.startsWith('waits for')) return;
     this.commitTo(c, pl, ok !== null && ok < was ? ok : was);
     c.why = why;
   }
@@ -1530,12 +1553,15 @@ export class Traffic {
       } else if (pl.jd.j && pl.path.lineS - c.s - c.front > (c.v * c.v) / 6 + 0.5 && (c.merge !== undefined || !this.leaderFirst(c, pl.path, pl.node) || !this.exitRoom(c, pl.path, true))) {
         // (nor ahead of the one in front of us, if it has given its place back or pulled in ahead of us)
         this.uncommit(c, pl); admitted = false; hold = true;
-      } else if (pl.jd.j && c.v < 0.5 && pl.path.lineS - c.s - c.front < 3 && now - (c.readmit ?? 0) > 500) this.readmit(c, pl, now);
+      } else if (pl.jd.j && c.v < 0.5 && pl.path.lineS - c.s - c.front < 3 && now - (c.readmit ?? 0) > 500) {
+        this.readmit(c, pl, now);
+        if (c.admNode !== pl.node) { admitted = false; hold = true; } // (it gave its place back: it waits at the line)
+      }
     }
     if (pl) v0 = Math.min(v0, Math.sqrt(spd(pl.path, pl.path.ext0) ** 2 + 4 * Math.max(0, pl.path.lineS - c.s)));
     // everything in the way, as the gentlest acceleration that respects all of it
     let acc = idmFree(c.v, v0, dr), gmin = Infinity;
-    const ob: Obstacle = (g, vl, s0 = dr.s0) => { acc = Math.min(acc, idm(c.v, v0, g, vl, dr, s0)); gmin = Math.min(gmin, g); };
+    const ob: Obstacle = (g, vl, s0 = dr.s0) => { acc = Math.min(acc, follow(c.v, v0, g, vl, dr, s0)); gmin = Math.min(gmin, g); };
     const still = c.bus ? this.busStops(c, dt, ob) : false;
     if (c.inBay) {
       const e = this.leader(keyOf(c.seg, c.from, BAYLANE), c.s, c);
@@ -1745,7 +1771,14 @@ export class Traffic {
     const T = c.turn!, P = T.path, dr = DRIVE[c.kind];
     const v0 = Math.min(c.vmax, spd(P, T.t));
     let acc = idmFree(c.v, v0, dr), gmin = Infinity;
-    const ob: Obstacle = (g, vl, s0 = dr.s0) => { acc = Math.min(acc, idm(c.v, v0, g, vl, dr, s0)); gmin = Math.min(gmin, g); };
+    const ob: Obstacle = (g, vl, s0 = dr.s0) => { acc = Math.min(acc, follow(c.v, v0, g, vl, dr, s0)); gmin = Math.min(gmin, g); };
+    // Standing in the junction behind someone earlier in the order who is still some way off (going
+    // round the ring behind us to cut across our lane on the way out, say): as at the line, if they'd
+    // all let us go first we take a place ahead of them, rather than wait for them to come by
+    if (c.v < 0.5 && c.adm !== undefined && !P.slip && now - (c.readmit ?? 0) > 500) {
+      const jd = this.jdata(T.node);
+      if (jd?.j) this.readmit(c, { seg: c.seg.id, from: c.from, lane: P.lane, slip: false, bus: !!c.bus, jd, path: P, node: T.node, next: T.next }, now);
+    }
     for (const u of c.uref) this.junctionLimits(u, ob);
     // a slip road: until it's clear of the lane it's leaving, it follows the traffic in that lane
     if (P.leave && T.t < this.slipFor(P, clsOf(c))[0]) {
@@ -2150,6 +2183,47 @@ export class Traffic {
       out.push(`${itFirst ? 'held by' : 'holds'} #${x.c.id}(${x.path.move} t=${x.t.toFixed(1)} adm=${x.adm === Infinity ? '-' : +x.adm.toFixed(2)}) gap=${((itFirst ? limMe : limIt) - (itFirst ? u.t : x.t)).toFixed(1)}${eIt ? ' it-engaged' : ''}${eMe ? ' me-engaged' : ''}`);
     }
     return `#${id} adm=${c.adm === undefined ? '-' : +c.adm.toFixed(2)} ${c.admNode === undefined ? `(waiting: ${c.why ?? '?'}) ` : ''}users=${c.uref.map((u) => `${u.path.node}:${u.path.move}@${u.t.toFixed(1)}`).join(',')} :: ${out.join('; ')}`;
+  }
+
+  // For the harness (trafficsim.ts): everyone at a give-way line (or a roundabout's entry), first
+  // in the queue with room beyond, and whether anyone they have to let by is in their way right now:
+  // past where it could still stop for them and not yet clear of their way (for one they'd follow,
+  // until it's moving off with room behind it to pull away into), or due there sooner than a driver
+  // would pull out in front of it. `own`: the one in the way came from their own approach.
+  // Off the hot path: only the harness asks.
+  gapProbe(): { id: number; node: number; ring: boolean; committed: boolean; v: number; blocked: boolean; own: boolean; why?: string }[] {
+    const out: { id: number; node: number; ring: boolean; committed: boolean; v: number; blocked: boolean; own: boolean; why?: string }[] = [];
+    for (const c of this.cars) {
+      if (c.nextSeg === undefined) continue; // (working out its way on can draw random numbers: never here)
+      const pl = this.planOf(c), j = pl?.jd.j;
+      if (!pl || !j || pl.wrong || pl.path.rank === 0 || j.form === 'signals' || c.gone !== undefined || c.merge !== undefined) continue;
+      const P = pl.path;
+      if (P.lineS - c.s - c.front > 2.5 || !this.leaderFirst(c, P, pl.node)) continue;
+      const committed = c.admNode === pl.node;
+      if (!committed && !this.exitRoom(c, P)) continue;
+      const me = c.uref.find((u) => u.path === P);
+      if (!me) continue;
+      const ring = j.form === 'roundabout' || j.form === 'mini', tc = ring ? 3 : 4.5;
+      let blocked = false, own = false;
+      const check = (x: User) => {
+        const vw = this.view(P, clsOf(c), x.path, clsOf(x.c));
+        if (vw.empty || vw.apart(x.t, me.t) || (vw.limitMe(x.t) >= me.t + 3 && x.v > 1)) return;
+        const lim = vw.limitIt(me.t);
+        // (one still coming: in the way if it will be there sooner than a driver would pull out in front of it)
+        if (x.t < lim && (x.path.inSeg === P.inSeg || (lim - x.t) / Math.max(0.1, x.v) >= tc)) return;
+        blocked = true;
+        if (x.path.inSeg === P.inSeg) own = true;
+      };
+      for (const x of this.users.get(pl.node) ?? []) {
+        if (x.c === c || !this.related(P, x.path)) continue;
+        if (x.path.inKey === P.inKey && !x.c.turn && x.c.seg === c.seg && x.c.s < c.s) continue;
+        // (one not yet committed that doesn't have priority only counts if it's already in our way)
+        if (x.adm === Infinity && x.path.rank >= P.rank) { const vw = this.view(P, clsOf(c), x.path, clsOf(x.c)); if (vw.empty || vw.apart(x.t, me.t) || x.t < vw.limitIt(me.t)) continue; }
+        check(x);
+      }
+      out.push({ id: c.id, node: pl.node, ring, committed, v: c.v, blocked, own, why: committed ? undefined : c.why });
+    }
+    return out;
   }
 
   get live() { return this.cars.filter((c) => c.gone === undefined && !c.bus).length; }
