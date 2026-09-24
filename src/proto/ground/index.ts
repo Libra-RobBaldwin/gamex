@@ -15,6 +15,7 @@ import { CoverMap, type Region } from './paint';
 import { Layout, type GroundInput, type XZ } from './layout';
 import { Occupancy, planHedges, type HedgeGroup } from './hedgerows';
 import { Hedges } from './hedges';
+import { packCover } from './covers';
 import { coverTexture, forgetGround, groundUniforms, patchGround, setOrigin, sharedTextures, type GroundUniforms } from './material';
 
 export { setGroundQuality, getGroundQuality, patchGround, sharedTextures } from './material';
@@ -28,8 +29,11 @@ export interface GroundOptions {
   seed?: number;
   base?: THREE.MeshLambertMaterial; // patch this material instead of making one (keeps its settings)
   hedges?: boolean; // plant hedgerows (true)
+  terrain?: boolean; // for meshes that aren't flat: rock and scree on steep slopes, heather high up (false)
 }
 type Box = { x0: number; z0: number; x1: number; z1: number };
+// covers at a point, for paintWith (weights 0..1; crop from CROP; dir in radians)
+export interface Covers { lawn?: number; field?: number; wood?: number; bare?: number; rough?: number; wet?: number; crop?: number; dir?: number }
 // Boxes that overlap or nearly touch become one (one repaint's margin costs more than a gap).
 function merge(boxes: Box[]) {
   const out = boxes.map((b) => ({ ...b }));
@@ -55,8 +59,7 @@ export class Ground {
   readonly uniforms: GroundUniforms;
   readonly cover: CoverMap | null;
   readonly layout: Layout;
-  private texA: THREE.DataTexture;
-  private texB: THREE.DataTexture;
+  private tex: THREE.DataTexture;
   private plants: Hedges | null;
   private groups = new Map<string, HedgeGroup>();
   private origin = { x: 0, z: 0 };
@@ -68,12 +71,11 @@ export class Ground {
     let region: Region | null = null;
     if (o.region) { const n = Math.ceil(o.region.size / t); region = { x0: o.region.x0, z0: o.region.z0, size: n * t, n }; }
     this.cover = region ? new CoverMap(region) : null;
-    this.texA = this.cover ? coverTexture(this.cover.a, region!.n) : coverTexture(new Uint8Array([0, 0, 0, 0]), 1);
-    this.texB = this.cover ? coverTexture(this.cover.b, region!.n) : coverTexture(new Uint8Array([16, 0, 0, 0]), 1);
-    this.uniforms = groundUniforms(this.texA, this.texB);
-    this.material = patchGround(o.base ?? new THREE.MeshLambertMaterial(), this.uniforms);
+    this.tex = this.cover ? coverTexture(this.cover.a, region!.n) : coverTexture(new Uint8Array([128, 0, 128, 128]), 1);
+    this.uniforms = groundUniforms(this.tex);
+    this.material = patchGround(o.base ?? new THREE.MeshLambertMaterial(), this.uniforms, o.terrain);
     this.layout = new Layout({ seed: o.seed ?? 1 });
-    this.plants = o.hedges === false ? null : new Hedges();
+    this.plants = o.hedges === false || !region ? null : new Hedges(); // (nothing to plant without a map)
     this.hedges = this.plants?.group ?? new THREE.Group();
     this.setOrigin(0, 0);
   }
@@ -93,8 +95,8 @@ export class Ground {
       const R = this.cover.region, box = { x0: R.x0, z0: R.z0, x1: R.x0 + R.size, z1: R.z0 + R.size };
       if (this.plants) { this.groups.clear(); this.replan(box); }
       this.cover.paint(this.layout, undefined, this.gates());
-      this.texA.updateRanges.length = this.texB.updateRanges.length = 0;
-      this.texA.needsUpdate = this.texB.needsUpdate = true;
+      this.tex.updateRanges.length = 0;
+      this.tex.needsUpdate = true;
     }
     this.stats.paint = performance.now() - t0;
   }
@@ -130,8 +132,8 @@ export class Ground {
       if (!r) continue;
       this.cover.paint(this.layout, r, gates);
       const n = this.cover.region.n;
-      for (let j = r.j0; j < r.j1; j++) { this.texA.addUpdateRange((j * n + r.i0) * 4, (r.i1 - r.i0) * 4); this.texB.addUpdateRange((j * n + r.i0) * 4, (r.i1 - r.i0) * 4); }
-      this.texA.needsUpdate = this.texB.needsUpdate = true;
+      for (let j = r.j0; j < r.j1; j++) this.tex.addUpdateRange((j * n + r.i0) * 4, (r.i1 - r.i0) * 4);
+      this.tex.needsUpdate = true;
     }
     this.stats.change = performance.now() - t0;
   }
@@ -150,19 +152,17 @@ export class Ground {
     this.stats.pieces = pieces.length; this.stats.trees = trees.length;
   }
   private gates() { const s = []; for (const g of this.groups.values()) s.push(...g.gates); return s; }
-  // Paint the cover map from a function of the texel's centre, writing its 8 bytes (A then B; see
-  // covers.ts) straight into `out`. For swatches and tests that want exact covers.
-  paintWith(f: (x: number, z: number, out: Uint8Array) => void) {
+  // Paint the cover map from a function of the texel's centre, which returns the covers there
+  // (as packCover takes them). For swatches and tests that want exact covers.
+  paintWith(f: (x: number, z: number) => Covers | null) {
     if (!this.cover) return;
-    const { region: R, texel: t, a, b } = this.cover, out = new Uint8Array(8);
+    const { region: R, texel: t, a } = this.cover;
     for (let j = 0; j < R.n; j++) for (let i = 0; i < R.n; i++) {
-      out.fill(0); out[4] = 16;
-      f(R.x0 + (i + 0.5) * t, R.z0 + (j + 0.5) * t, out);
-      const o = (j * R.n + i) * 4;
-      a.set(out.subarray(0, 4), o); b.set(out.subarray(4, 8), o);
+      const c = f(R.x0 + (i + 0.5) * t, R.z0 + (j + 0.5) * t) ?? {};
+      packCover(c.lawn ?? 0, c.field ?? 0, c.wood ?? 0, c.bare ?? 0, c.rough ?? 0, c.wet ?? 0, c.crop ?? 0, c.dir ?? 0, a, (j * R.n + i) * 4);
     }
-    this.texA.updateRanges.length = this.texB.updateRanges.length = 0;
-    this.texA.needsUpdate = this.texB.needsUpdate = true;
+    this.tex.updateRanges.length = 0;
+    this.tex.needsUpdate = true;
   }
   // every hedge piece and hedgerow tree (for tests and for anything placing things near hedges)
   hedgeList() { const p = [], t = []; for (const g of this.groups.values()) { p.push(...g.pieces); t.push(...g.trees); } return { pieces: p, trees: t }; }
@@ -190,12 +190,12 @@ export class Ground {
   textureBytes() {
     const s = sharedTextures(), mip = (t: THREE.DataTexture) => t.image.width * t.image.height * 4 * (4 / 3);
     const n = this.cover ? this.cover.region.n : 1;
-    return { shared: mip(s.detail) + mip(s.macro), cover: n * n * 8 };
+    return { shared: mip(s.detail) + mip(s.macro), cover: n * n * 4 };
   }
 
   dispose() {
     forgetGround(this.material);
-    this.material.dispose(); this.texA.dispose(); this.texB.dispose();
+    this.material.dispose(); this.tex.dispose();
     this.plants?.dispose();
   }
 }

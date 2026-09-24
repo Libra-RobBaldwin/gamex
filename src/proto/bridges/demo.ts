@@ -73,7 +73,7 @@ function place() {
 
 const lit = (c: string, o: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color: c, side: THREE.DoubleSide, flatShading: true, ...o });
 // the shared ground (rock and scree come through on steep cuts by themselves)
-const grass = new Ground({ base: lit('#ffffff') }).material, bank = lit('#8d8a62'), waterMat = lit('#3f86b8', { transparent: true, opacity: 0.88 });
+const grass = new Ground({ base: lit('#ffffff'), terrain: true }).material, bank = lit('#8d8a62'), waterMat = lit('#3f86b8', { transparent: true, opacity: 0.88 });
 // the cut face at the edge of the map: turf, topsoil, subsoil, then rock
 const turf = lit('#5f8a3e'), topsoil = lit('#5b4632'), subsoil = lit('#9b7a4c'), rock = lit('#7c7872'), waterCut = lit('#2f6f9e', { transparent: true, opacity: 0.8 });
 const asph = lit('#4a4e54', { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), mark = lit('#eeeeea', { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });

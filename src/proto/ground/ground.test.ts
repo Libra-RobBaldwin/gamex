@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { bandPolys, circlePoly, pointInPoly } from '../land';
-import { SAMPLES, type GroundQuality } from './covers';
+import { DIRS, packCover, SAMPLES, unpackCover, type GroundQuality } from './covers';
 import { Ground, type GroundInput, type XZ } from './index';
 import { Layout } from './layout';
 import { groundFragment, patchGround, groundUniforms, setOrigin } from './material';
@@ -66,9 +66,24 @@ describe('generated textures', () => {
     }
   });
   it('fit the memory budget with a game-sized cover map (4 MB with mipmaps)', () => {
-    const detail = 512 * 512 * 4 * (4 / 3), macro = 256 * 256 * 4 * (4 / 3), cover = Math.ceil(1200 / 2.5) ** 2 * 8;
+    const detail = 512 * 512 * 4 * (4 / 3), macro = 256 * 256 * 4 * (4 / 3), cover = Math.ceil(1200 / 2.5) ** 2 * 4;
     expect(detail + macro + cover).toBeLessThanOrEqual(4 * 1024 * 1024);
     expect(MACRO_PERIOD % 8).toBe(0); // (detail repeats fit the period, so rebasing the origin never jumps)
+  });
+});
+
+describe('the packed cover map', () => {
+  it('round-trips every cover, crop and direction', () => {
+    const d = new Uint8Array(4);
+    for (const [lawn, field, wood, bare, rough, wet] of [[0, 0, 0, 0, 0, 0], [1, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0.8, 0], [0, 0, 1, 0, 0, 0], [0, 0, 0, 1, 0, 1], [0.3, 0, 0.2, 0, 0, 0.5]]) {
+      for (let crop = 0; crop < 8; crop++) for (let k = 0; k < DIRS; k++) {
+        packCover(lawn, field, wood, bare, rough, wet, crop, (k * Math.PI) / DIRS, d, 0);
+        const c = unpackCover(d, 0);
+        expect(c.crop).toBe(crop);
+        expect(c.dir).toBeCloseTo((k * Math.PI) / DIRS, 6);
+        for (const [x, y] of [[c.lawn, lawn], [c.field, field], [c.wood, wood], [c.bare, bare], [c.rough, rough], [c.wet, wet]]) expect(Math.abs(x - y)).toBeLessThan(0.01);
+      }
+    }
   });
 });
 
@@ -97,13 +112,14 @@ describe('painting', () => {
   it('gives valid weights and crop codes', () => {
     const g = new Ground({ region: REGION });
     g.paint(town());
-    const { a, b } = g.cover!;
-    let fields = 0;
+    const { a } = g.cover!;
+    let fields = 0, bad = 0;
     for (let o = 0; o < a.length; o += 4) {
-      expect(a[o] + a[o + 1] + a[o + 2] + a[o + 3]).toBeLessThanOrEqual(257);
-      expect((b[o] - 16) % 32).toBe(0);
-      if (a[o + 1] > 200) fields++;
+      const c = unpackCover(a, o);
+      if (c.lawn + c.field + c.wood + c.bare > 1.02 || c.crop > 7 || c.dir >= Math.PI) bad++;
+      if (c.field > 0.8) fields++;
     }
+    expect(bad).toBe(0);
     expect(fields).toBeGreaterThan(a.length / 4 / 10); // there's countryside, and it's farmed
     g.dispose();
   });
@@ -111,7 +127,6 @@ describe('painting', () => {
     const g1 = new Ground({ region: REGION }), g2 = new Ground({ region: REGION });
     g1.paint(town()); g2.paint(town());
     expect(diffs(g1.cover!.a, g2.cover!.a)).toBe(0);
-    expect(diffs(g1.cover!.b, g2.cover!.b)).toBe(0);
     expect(g1.hedgeList()).toEqual(g2.hedgeList());
   });
   it('an incremental repaint after a plot is built equals a full repaint', () => {
@@ -124,7 +139,7 @@ describe('painting', () => {
     inc.change(B, boxes);
     full.paint(B);
     let diff = 0;
-    for (let i = 0; i < full.cover!.a.length; i++) if (inc.cover!.a[i] !== full.cover!.a[i] || inc.cover!.b[i] !== full.cover!.b[i]) diff++;
+    for (let i = 0; i < full.cover!.a.length; i++) if (inc.cover!.a[i] !== full.cover!.a[i]) diff++;
     expect(diff).toBe(0);
     const key = (l: ReturnType<Ground['hedgeList']>) => JSON.stringify([...l.pieces].sort((p, q) => p.x - q.x || p.z - q.z));
     expect(key(inc.hedgeList())).toBe(key(full.hedgeList()));
@@ -137,7 +152,6 @@ describe('painting', () => {
     inc.change(inp, [{ x0: 100000 + 280, z0: -250000, x1: 100000 + 320, z1: -250000 + 30 }]);
     full.paint(inp);
     expect(diffs(inc.cover!.a, full.cover!.a)).toBe(0);
-    expect(diffs(inc.cover!.b, full.cover!.b)).toBe(0);
     // and the far-off map has fields and hedges of its own
     expect(full.hedgeList().pieces.length).toBeGreaterThan(20);
   });
@@ -213,7 +227,7 @@ describe('budgets', () => {
 });
 
 describe('the material', () => {
-  it('reads at most 6 textures at high quality and 3 at low', () => {
+  it('reads at most 6 textures at high quality and 3 at low (in fact 4 and 2)', () => {
     const count = (q: GroundQuality) => (groundFragment(q).match(/texture2D\s*\(/g) ?? []).length;
     expect(count('high')).toBeLessThanOrEqual(6);
     expect(count('low')).toBeLessThanOrEqual(3);
@@ -225,7 +239,7 @@ describe('the material', () => {
     const m = new THREE.MeshLambertMaterial();
     let before = false;
     m.onBeforeCompile = (sh) => { before = true; sh.fragmentShader = sh.fragmentShader.replace('#include <alphamap_fragment>', '// earlier patch\n#include <alphamap_fragment>'); };
-    const u = groundUniforms(new THREE.Texture(), new THREE.Texture());
+    const u = groundUniforms(new THREE.Texture());
     patchGround(m, u);
     // a later patch that chains, as water/material.ts patchGroundMaterial does
     const prev = m.onBeforeCompile;
@@ -234,7 +248,7 @@ describe('the material', () => {
     m.onBeforeCompile(sh, null as unknown as THREE.WebGLRenderer);
     expect(before).toBe(true);
     expect(sh.fragmentShader).toContain('// earlier patch');
-    expect(sh.fragmentShader).toContain('uCoverA');
+    expect(sh.fragmentShader).toContain('uCoverMap');
     expect(sh.fragmentShader).toContain('vColor.a');
     expect(sh.fragmentShader).not.toContain('#include <map_fragment>');
     expect(sh.vertexShader).toContain('vGW = gw.xyz');
@@ -242,7 +256,7 @@ describe('the material', () => {
     expect(m.customProgramCacheKey()).toContain('ground');
   });
   it('keeps precision far from the origin: the shader only sees the origin modulo the period', () => {
-    const u = groundUniforms(new THREE.Texture(), new THREE.Texture());
+    const u = groundUniforms(new THREE.Texture());
     setOrigin(u, 100000.25, -250000.5, { x0: 99500, z0: -250500, size: 1000, n: 400 });
     const m = u.uOriginMod.value;
     expect(m.x).toBeGreaterThanOrEqual(0); expect(m.x).toBeLessThan(MACRO_PERIOD);

@@ -66,7 +66,7 @@ function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, fa
 window.addEventListener('resize', resize);
 
 // the shared ground, with the water system's shore colours over it; heather only on the fells
-const land = new Ground();
+const land = new Ground({ terrain: true });
 land.uniforms.uSlope.value.set(0.2, 0.34, 180, 270);
 const groundMat = patchGroundMaterial(land.material);
 const ripple = rippleTexture(128);
