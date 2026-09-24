@@ -19,34 +19,73 @@ map, in about 30 ms, and the URL carries them all:
 | `towns` | 0–6 | 3 |
 | `villages` | 0–12 | six to eight (the seed decides) |
 | `style` | `temperate`, `desert`, `arctic`: the ground's palette and crops, the woods (how many, how many conifers, their colour) and the sky | temperate |
-| `relief` | `flat`, `lowland`, `rolling`, `upland`, `mountain` (the terrain library's presets) | flat. It's recorded now; see "Hills" |
+| `relief` | `flat`, `lowland`, `rolling`, `upland`, `mountain` (see "Hills") | rolling |
 
 `optionsQuery(options)` gives the URL back, which is what a new-game screen (the front-menu session's `maps.ts`)
 would build. Names, positions and water each draw from their own seeded stream, so changing one setting doesn't
 reshuffle the rest more than it has to.
 
-## Next: hills, and real places, on the same pipeline
+## Hills (`terrain.ts`, `drape.ts`)
+
+The region is rolling by default (`relief=rolling`). `relief` goes from `flat` to `mountain`, with hills of
+0, 10, 32, 60 or 110 m. The town stays flat.
+
+- **The height field** (`region/terrain.ts`, pure): seeded gradient noise on a 25 m grid, three octaves, plus
+  ridges on upland and mountain maps. It's level in and round every settlement (60 m past its industrial edge),
+  along every river and round every lake, then swells up over the next 450–650 m. So towns, their streets and plots,
+  and the water stand on the flat as before, and the hills are the country between them, where the motorway and the
+  railway run. Rolling hills reach about 28 m, and the steepest grid slope is about 8%. It takes about 240 ms to make.
+- **Everything follows it** (`drape.ts`): each material's vertex shader adds the height at its world x, z.
+  - Built-in materials get this through `project_vertex` and `worldpos_vertex`, so shadows are received right.
+  - Sprites, route lines and the water shader get targeted replacements.
+  - Shadows are cast through a draped depth material.
+  - `drape.apply(scene)` runs before each frame. It patches new materials once (a WeakSet), gives them their own
+    program (`|drape`), and widens bounds by the hills' height so nothing is culled early.
+- **Exact fit:** the height is the grid's planar value over the two triangles of each cell, split along the same
+  diagonal as the ground mesh. `GameWater.groundGeometry(size, relief)` builds the ground on that grid with the
+  heights in it, snaps lake boxes onto it, and lights it with normals from the heights. So anything draped lies
+  exactly on the ground, with no gaps and no fighting.
+- **The camera and taps** find the ground on the hills through `nav.setGround(heightAt)`, and screen positions add
+  the height.
+- **What it doesn't do yet (terrain.md steps 4–7):**
+  - roads follow the ground rather than keeping to gradient limits with cuttings and embankments;
+  - vehicles and buildings are sheared by the slope rather than turned (right for gentle hills; towns are flat);
+  - traffic's grade speeds ignore the hills.
+
+## Finding your way (`game/places.ts`)
+
+- **Place names** float over each settlement once you zoom out: the city from 420 m of view height, towns from
+  480 m, villages from 560 m until 3.8 km. Bigger places win when two would overlap. Each shows how many people
+  live there, and tapping a name goes there.
+- **Menu → Places** lists every settlement, nearest first, with its kind, its people and how far away it is. Tap
+  one to go there.
+
+## Loading the region (why it's about a minute)
+
+With the motorway, A and B roads (`interchange/region.ts`, wired in by this stream) the region first took over 6
+minutes to load. Four fixes, each checked to give the same result, brought it down:
+
+| Fix | Result |
+|---|---|
+| The land registry files a claim's pieces separately (`land.ts`), so a road claim across the map isn't tested by every question in its box | 227 s |
+| Bridge checks walk a road with a cursor instead of `pointAt` from the start each metre, and look at a long path's nearby pieces only (`game/bridges.ts`) | roads 96 s → 21 s |
+| The "too close to another road" test skips segments whose box it's outside (`roads.ts`) | roads 21 s → 8 s |
+| Parks and verges ask the land registry only near buildings, and walk roads with a cursor, piece by piece (`infill.ts`) | parks 28 s → 7 s |
+
+That's 68 s on the cloud box under SwiftShader. The rest is junction design, drawing the roads (twice),
+starting the traffic and the first frame, which is streaming work (R4).
+
+## Next: real places, on the same pipeline
 
 The generator's steps are the same whether the map is invented or real. Only where each input comes from changes:
 
 | Step | Invented (seed + options) | Real (a postcode or place) |
 |---|---|---|
-| Ground | `ProceduralTerrain` from `relief` and the seed | `TerrariumHeight` (AWS terrain tiles, world-wide) or OS Terrain 50 (UK), both already in `src/proto/terrain/` |
-| Water | rivers and lakes from the options (later: down the terrain's valleys) | OpenStreetMap water |
-| Settlements | Poisson-disc sites on gentle, dry ground | OSM places (city, town, village) and their built-up areas |
+| Ground | `makeRelief` from `relief` and the seed | `TerrariumHeight` (AWS terrain tiles, world-wide) or OS Terrain 50 (UK), both already in `src/proto/terrain/`, sampled onto the same 25 m grid |
+| Water | rivers and lakes from the options | OpenStreetMap water |
+| Settlements | Poisson-disc sites on the flat and dry | OSM places (city, town, village) and their built-up areas |
 | Streets | the lattice in `layStreets` | OSM roads (`src/proto/osm/`, as the Real Town Plans page and the parked Horley work do) |
 | Look | `style` | picked from latitude and land cover |
-
-So the next step for "hillier" is the terrain integration plan in `docs/terrain.md` (8 steps). Steps 1–3 change
-nothing on screen. Steps 4–5 replace the grade solver in `roads.ts` and the cutting drawing in `roaddraw.ts`, which
-the motorway session is editing now, so the steps clash unless they're sequenced. Recommended order:
-
-1. Once motorways (R2) merges: terrain steps 1–3, plus the generator placing settlements on gentle ground and
-   running rivers down valleys (a "rolling" region).
-2. Terrain steps 4–7: roads, rail, plots and water on real slopes, first on the region with `relief=rolling`, then
-   the town.
-3. Real places: a postcode gives a centre, and step 8 (real elevation), OSM water, places and roads fill the same
-   `MapSpec`.
 
 ## Maps as data (`mapspec.ts`, `town.ts`, `index.ts`)
 

@@ -40,7 +40,7 @@ export function mapOfRegion(g: Region): MapSpec {
     bound: g.bound,
     water: g.water,
     zones: g.zones,
-    settlements: g.settlements.map(({ id, name, kind, x, z, r }) => ({ id, name, kind, x, z, r })),
+    settlements: g.settlements.map(({ id, name, kind, x, z, r, gates }) => ({ id, name, kind, x, z, r, gates })),
     streets: g.streets,
     generated: true,
     links: g.links,

@@ -36,10 +36,14 @@ import { Railway } from './rail/railway'; // stations, signalling and rail lines
 import { RailDraw } from './rail/draw';
 import { RailGame } from './rail/game';
 import { layRegionRail, planRegionRail } from './rail/region';
+import { layRegionRoads } from './interchange/region';
 import { edgeCrossings, edgeMesh } from './game/edge';
 import { STD } from './standards';
 import { Loading } from './loading';
-import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
+import { Drape } from './drape';
+import { PlaceLabels, openPlaces } from './game/places';
+import { makeRelief } from './region/terrain';
+import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
@@ -61,7 +65,7 @@ function mapLine() {
   if (!o) return '';
   return [`seed ${o.seed}`, n(MAP.settlements.length, 'place', 'places'), n(MAP.water.rivers.length, 'river', 'rivers'), n(MAP.water.lakes.length, 'lake', 'lakes'), o.style].join(' · ');
 }
-await loading.stage(MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
+await loading.stage(MAP.relief !== 'flat' ? 'Raising the hills and filling the rivers' : MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
 const BOUND = MAP.bound;
 // the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
 // A big map (the region) is drawn more coarsely until it streams (docs/region.md R4); the town, even
@@ -69,6 +73,8 @@ const BOUND = MAP.bound;
 // on further, for its rivers), and the camera goes right out to it.
 const BIG = BOUND > 2000;
 const gameWater = new GameWater(BIG ? BOUND * 1.5 : BOUND + STD.mapEdge + 10, MAP.water); // (the ground's half-width)
+// the hills, if the map has them (region/terrain.ts): everything drawn follows them (drape.ts)
+const RELIEF = makeRelief(MAP, gameWater.half);
 const isWater = (p: P) => gameWater.isWater(p);
 const EDGE = gameWater.half; // (where the ground ends, in a cut face: game/edge.ts)
 const net = new Network(isWater, BOUND, 11);
@@ -127,7 +133,10 @@ window.addEventListener('resize', resize);
 const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
-const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2), gameGround.ground.material);
+const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
+ground.userData.noDrape = true; // (the hills are in its heights already)
+const drape = RELIEF ? new Drape(RELIEF) : null;
+if (RELIEF) nav.setGround(RELIEF.heightAt, [-1, RELIEF.max + 1]); // (the camera and taps find the ground on the hills)
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 // Grass drawn on top of the ground (verges, roundabout islands, cutting slopes, gardens, parks)
@@ -461,6 +470,12 @@ async function seedTown() {
       await loading.stage(i ? `Laying out ${st.name}` : `Laying out ${st.name}'s streets`, 0.06 / MAP.settlements.length);
       buildStreets(net, MAP.streets.filter((x) => x.settlement === st.id), DEFAULT_OPTS, true);
     }
+    // then the roads between them: a motorway across the map with its junctions, A roads between
+    // the city and the towns, B roads out to the villages (interchange/region.ts)
+    await loading.stage('Building the motorway and the roads between places', 0.04);
+    const roads = layRegionRoads(net, { bound: BOUND, settlements: MAP.settlements, links: MAP.links });
+    interchanges.push(...roads.interchanges);
+    if (roads.failed.length) console.info('region roads:', roads.failed.join(' · '));
   } else {
     await loading.stage('Laying out the streets', 0.06);
     buildStreets(net, MAP.streets, DEFAULT_OPTS, false);
@@ -1686,7 +1701,26 @@ function groundAt(sx: number, sy: number): P {
   const g = nav.groundUnder(sx, sy);
   return { x: g.x, z: g.z };
 }
-const toScreen = (p: P) => nav.groundToScreen(p);
+const toScreen = (p: P) => (RELIEF ? nav.groundToScreen({ ...p, y: (p.y ?? 0) + RELIEF.heightAt(p.x, p.z) }) : nav.groundToScreen(p));
+
+// ---- finding your way (game/places.ts): place names over the map when zoomed out, and a Places list ----
+let peopleAt = 0, people0 = new Map<number, number>();
+// how many live in each settlement (homes, by the settlement they're nearest; worked out at most every few seconds)
+function peopleIn(st: SettlementInfo) {
+  if (performance.now() - peopleAt > 4000) {
+    peopleAt = performance.now();
+    people0 = new Map();
+    for (const b of buildings) {
+      if (b.dying || b.region || USE[b.lot.kind].unit === 'jobs') continue;
+      const id = settlementAt(MAP, b.lot).id;
+      people0.set(id, (people0.get(id) ?? 0) + USE[b.lot.kind].pop);
+    }
+  }
+  return people0.get(st.id) ?? 0;
+}
+const goTo = (st: SettlementInfo) => { closeSheet(); focusOn(st, Math.max(260, st.r * 2.6)); };
+const placeLabels = MAP.settlements.length > 1 ? new PlaceLabels($('#ui'), MAP.settlements, { toScreen, onPick: goTo, count: peopleIn }) : null;
+if (placeLabels) shell.addMenuItem({ id: 'places', label: 'Places', icon: 'pin', sub: `${MAP.settlements.length} towns and villages · go to one`, onClick: () => openPlaces(shell, MAP.settlements, view, goTo, peopleIn) });
 
 let grabbed: 'a' | 'b' | 'c' = 'b';
 // what a finger the game has taken is doing: dragging a blueprint handle, or drawing a road
@@ -2015,6 +2049,7 @@ function frame(now: number) {
   railGame.frame(dt, cam, canvas.clientHeight);
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   markers.frame(cam, canvas.clientHeight);
+  placeLabels?.update(view.h);
   if (routeShown) routeShown.material.resolution.set(canvas.width, canvas.height);
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
   if (now - statsAt > 250) {
@@ -2034,6 +2069,7 @@ function frame(now: number) {
   const t1 = performance.now();
   const q = TIERS[tier];
   if (q.every && ++frameNo % q.every === 0) renderer.shadowMap.needsUpdate = true;
+  drape?.apply(scene); // (whatever's new since the last frame follows the hills)
   renderer.render(scene, cam);
   if (!loaded) { loaded = true; loading.done(); } // (the first frame is drawn: the loading screen goes)
   const t2 = performance.now();
@@ -2052,6 +2088,7 @@ function frame(now: number) {
 }
 // the shaders compile before the first frame, not during it (where the screen would sit still)
 await loading.stage('Getting ready to draw', 0.1);
+drape?.apply(scene);
 await renderer.compileAsync(scene, cam).catch(() => {});
 loading.finish();
 let loaded = false;
