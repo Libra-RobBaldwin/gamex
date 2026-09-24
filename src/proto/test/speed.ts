@@ -6,18 +6,19 @@
 // Machines differ by kind of work, not just overall: a CI runner can be quicker than the
 // reference at plain arithmetic and slower at hashing strings or collecting garbage, which is
 // where the builders and painters spend their time. So it times one fixed workload of each kind
-// the budgets cover (typed-array geometry, Maps keyed by numbers, Maps keyed by strings), takes the
-// best of several runs of each, and counts the slowest kind against its reference. The factor is
-// clamped to 0.5–4. (Garbage collection is left out: its time swings threefold between runs.)
+// the budgets cover (typed-array geometry, Maps keyed by numbers, Maps keyed by strings, and
+// point-in-polygon tests and sorts over small objects), takes the best of several runs of each,
+// and counts the slowest kind against its reference. The factor is clamped to 0.5–4. (Garbage
+// collection is left out: its time swings threefold between runs.)
 
 // Each workload's best time on the reference machine, in ms of process CPU time. Calibrated on
 // 24 Sep 2026 against the ground painter, whose budgets were set where a full paint took 26–30 ms
 // (a cloud container that painted in about 37 ms ran the first workload in 7.4 ms at best, so its
 // reference is 7.4 × 28 / 37 = 5.6). The Map workloads were added on the same kind of container,
 // quiet, where the first ran in 6.15 ms at best: their best times there (2.0 and 8.1 ms) scaled
-// by the same 5.6 / 6.15. To recalibrate, compare parts() with a budget's own
+// by the same 5.6 / 6.15, and the polygon workload's (5.35 ms) likewise. To recalibrate, compare parts() with a budget's own
 // measure on a machine where the budget was set.
-const REFERENCE = { geometry: 5.6, numberMap: 1.82, stringMap: 7.4 };
+const REFERENCE = { geometry: 5.6, numberMap: 1.82, stringMap: 7.4, polygons: 4.87 };
 
 const proc = (globalThis as unknown as { process?: { cpuUsage(p?: { user: number; system: number }): { user: number; system: number } } }).process;
 // CPU time spent by this process (wall-clock where there's no process), in ms
@@ -68,6 +69,25 @@ const WORKLOADS: Record<keyof typeof REFERENCE, () => void> = {
     let n = 0;
     for (let i = 0; i < 60000; i++) n += grid.get(`${(i * 31) % 250},${(i * 17) % 250}`)?.length ?? 0;
     sink += n;
+  },
+  // point-in-polygon tests and sorting over small objects, through closures, as hedge and plot
+  // planning do (the ground's repaint is mostly this)
+  polygons() {
+    const polys: { x: number; z: number }[][] = [];
+    for (let i = 0; i < 400; i++) { const cx = (i * 37) % 500, cz = (i * 91) % 500, p = []; for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; p.push({ x: cx + Math.cos(a) * (8 + (i % 5)), z: cz + Math.sin(a) * (6 + (i % 7)) }); } polys.push(p); }
+    const inside = (q: { x: number; z: number }, poly: { x: number; z: number }[]) => {
+      let c = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a.z > q.z) !== (b.z > q.z) && q.x < ((b.x - a.x) * (q.z - a.z)) / (b.z - a.z) + a.x) c = !c; }
+      return c;
+    };
+    const hits: { x: number; z: number; n: number }[] = [];
+    for (let i = 0; i < 3000; i++) {
+      const q = { x: (i * 7919) % 500, z: (i * 104729) % 500 };
+      const n = polys.filter((p) => Math.abs(p[0].x - q.x) < 30 && Math.abs(p[0].z - q.z) < 30 && inside(q, p)).length;
+      hits.push({ ...q, n });
+    }
+    hits.sort((a, b) => b.n - a.n || a.x - b.x || a.z - b.z);
+    sink += hits[0].n + hits.length;
   },
 };
 
