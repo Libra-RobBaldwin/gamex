@@ -471,11 +471,21 @@ export class Network {
     // motorways only meet other roads where they end (at a roundabout, or running on as another
     // road); along their length they're crossed on a bridge or in a tunnel, never joined
     const isMotorway = (x: RSeg) => this.def(x).family === 'Motorway';
+    // (a node is part-way along a motorway where one runs straight on through it: two two-way
+    // pieces, or a one-way carriageway arriving and one leaving straight on; slip roads don't count,
+    // and a pair of carriageways ending at a roundabout is the motorway's end)
+    const midway = (n: number) => {
+      const m = this.segsAt(n).filter((x) => isMotorway(x) && x.type !== 'slip');
+      if (m.filter((x) => !x.oneway).length > 1) return true;
+      const dir = (x: RSeg) => { const p = this.pathFrom(x, n), L = dist(p[0], p[1]) || 1; return { x: (p[1].x - p[0].x) / L, z: (p[1].z - p[0].z) / L }; };
+      const ins = m.filter((x) => x.oneway && x.b === n), outs = m.filter((x) => x.oneway && x.a === n);
+      return ins.some((i) => outs.some((o) => { const u = dir(i), v = dir(o); return u.x * v.x + u.z * v.z < -0.95; }));
+    };
     for (const e of [a, b]) {
       const on = e.seg !== undefined ? this.segs.get(e.seg) : undefined;
       const at = e.node !== undefined ? this.segsAt(e.node) : [];
       if ([on, ...at].some((x) => x && this.def(x).cls !== def.cls)) return res('Roads and railways can’t join each other');
-      if (def.family !== 'Motorway' && ((on && isMotorway(on)) || at.filter(isMotorway).length > 1))
+      if (def.family !== 'Motorway' && ((on && isMotorway(on)) || (e.node !== undefined && midway(e.node))))
         return res('Roads can’t join a motorway part-way along — cross it with Over or Under, or join it where it ends');
     }
     // railways need gentler gradients and more headroom (for the wires) than roads
