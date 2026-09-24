@@ -565,7 +565,7 @@ function hint(text?: string, ic?: Icon) {
   let t = text;
   if (t === undefined) {
     if (!tool) return shell.hint(null);
-    if (mode === 'stop') t = 'Tap a road, on the side you want the stop · the bus will call there';
+    if (mode === 'stop') t = stopPreview ? '' : 'Tap a road, on the side you want the stop'; // (with a blueprint down, the card says it all)
     else if (mode === 'station') t = 'Tap a straight, level stretch of railway · platforms go either side';
     else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : lineDraft.length === 1 ? 'Tap the next stop' : 'Tap more stops, or the first again for a circular line · then Create';
     else if (draft && slipPlan) t = 'A slip road: drag ahead and out to leave the motorway, back and out to join it · then Build';
@@ -600,7 +600,7 @@ function startRoadTool(t: RoadType) {
   hint();
 }
 function startStopTool() {
-  tool = shell.startTool({ name: 'Bus stop', spec: 'Kerbside, or a lay-by where there is room', icon: 'busStop', tone: 'stop', onDone: endTool, onCancel: endTool });
+  tool = shell.startTool({ name: 'Bus stop', spec: 'Tap the side of a road', icon: 'busStop', tone: 'stop', onDone: endTool, onCancel: endTool });
   setMode('stop');
   hint();
 }
@@ -1343,6 +1343,7 @@ const badMat = new THREE.MeshBasicMaterial({ color: '#ff5a4d', transparent: true
 const handleMat = new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false });
 const handleRing = new THREE.MeshBasicMaterial({ color: '#1f8fd6', depthTest: false });
 const guideMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7, depthWrite: false });
+const xrayMat = new THREE.MeshBasicMaterial({ color: '#4cc3ff', transparent: true, opacity: 0.3, depthTest: false, depthWrite: false });
 const doomMat = new THREE.MeshBasicMaterial({ color: '#ff2a1a', transparent: true, opacity: 0.45, depthWrite: false });
 const ghost = new THREE.Group();
 ghost.renderOrder = 5;
@@ -1409,12 +1410,16 @@ function drawGhost() {
     }
   }
   if (stopPreview) {
-    const { seg, t, side } = stopPreview, probe = { id: 0, s: t, side, kind: 'layby' as const, take: { pave: 0, lane: 0, land: 0, park: 0 } };
+    // (the blueprint: a lay-by reaches out past the kerb; a kerbside stop takes the edge of the lane)
+    const { seg, t, side, kind = 'kerb' } = stopPreview, probe = { id: 0, s: t, side, kind, take: { pave: 0, lane: 0, land: 0, park: 0 } };
     const [a, b] = stopSpan(probe), path = net.path(seg), K = kerbOf(net.def(seg));
     const sp = subPath(path, Math.max(0, a), Math.min(pathLength(path), b));
     const pf = new Flat();
-    pf.strip(sp, () => (side === 1 ? [K - 3.2, K + 0.2] : [-K - 0.2, -K + 3.2]), 0.8);
+    const [i0, i1] = kind === 'layby' ? [K - 0.4, K + 3.0] : [K - 3.2, K + 0.2];
+    pf.strip(sp, () => (side === 1 ? [i0, i1] : [-i1, -i0]), 0.8);
     const m = pf.mesh(ghostMat); m.renderOrder = 5; ghost.add(m);
+    // and faintly through any building in front of it, so it's never lost behind one
+    const xm = pf.mesh(xrayMat); xm.renderOrder = 8; ghost.add(xm);
   }
   for (const [f, mat, order] of [[gf, guideMat, 9], [rf, handleRing, 10], [hf, handleMat, 11]] as const) {
     if (!f.pos.length) continue;
@@ -1546,7 +1551,7 @@ function openBridgeEditor(b: BuiltBridge, fresh = true) {
 }
 
 // ---------------- bus stops ----------------
-let stopPreview: { seg: RSeg; t: number; side: 1 | -1 } | null = null;
+let stopPreview: { seg: RSeg; t: number; side: 1 | -1; kind?: 'kerb' | 'layby' } | null = null;
 function stopAt(p: P) {
   for (const seg of net.segs.values()) for (const stop of seg.stops) {
     const q = closestOnPath(p, net.path(seg));
@@ -1576,66 +1581,49 @@ function showStopInfo(seg: RSeg, st: Stop) {
   });
 }
 
-// The cross-section at the stop, before and after, with the stop's side on the right.
-function crossSvg(d: RoadDef, plan: StopPlan) {
-  const W = 320, t = plan.take, lay = plan.kind === 'layby';
-  const K = kerbOf(d), total = (K + d.pave + d.verge) * 2 + t.land + 1;
-  const sc = W / total;
-  const row = (y: number, after: boolean) => {
-    const parts: string[] = [];
-    let x = 0;
-    const seg = (w: number, fill: string, label = '') => {
-      if (w <= 0.01) return;
-      parts.push(`<rect x="${(x * sc).toFixed(1)}" y="${y}" width="${(w * sc).toFixed(1)}" height="18" fill="${fill}"/>`);
-      if (label && w * sc > 20) parts.push(`<text x="${((x + w / 2) * sc).toFixed(1)}" y="${y + 30}" text-anchor="middle">${label}</text>`);
-      x += w;
-    };
-    const laneW = after && lay ? d.lane - t.lane / (d.lanes > 1 ? d.lanes : 2) : d.lane;
-    const otherLane = after && lay && d.lanes === 1 ? laneW : d.lane;
-    seg(d.pave, '#bdb8ad', d.pave.toFixed(1));
-    for (let i = 0; i < d.lanes; i++) seg(otherLane, '#4a4e54', otherLane.toFixed(2));
-    seg(d.median, '#9d9a92');
-    for (let i = 0; i < d.lanes; i++) seg(laneW, '#4a4e54', laneW.toFixed(2));
-    if (after && lay) seg(3, '#6b5f2a', 'bay 3.0');
-    if (after && !lay) parts.push(`<rect x="${((x - laneW) * sc).toFixed(1)}" y="${y}" width="${(laneW * sc).toFixed(1)}" height="18" fill="none" stroke="#e8c33a" stroke-width="2"/>`);
-    // with a lay-by the pavement keeps its reduced width, pushed back into any land bought
-    const pv = after && lay ? d.pave - t.pave : d.pave;
-    seg(pv, after && t.land ? '#d9b36a' : '#bdb8ad', after && t.land ? `${pv.toFixed(1)} moved back` : pv.toFixed(1));
-    if (!after || !lay) seg(t.land, '#6aa046', t.land ? 'garden' : '');
-    return parts.join('');
-  };
-  return `<svg class="xs" viewBox="0 0 ${W} 96"><text x="0" y="9" class="h">now</text>${row(12, false)}<text x="0" y="57" class="h">with the ${lay ? 'lay-by' : 'stop'}</text>${row(60, true)}</svg>`;
-}
 
+// Tap a road: the stop's blueprint appears there, with a choice of two (kerbside or lay-by, each
+// with its price) in a small card above the tool strip, and Build to confirm. Tap again to move it.
 function stopTap(p: P) {
   const q = net.nearestSeg(p, 30, (x) => net.def(x).cls === 'road');
-  if (!q) { hint('Tap on a road'); return; }
+  if (!q) { hint('Tap on a road', 'alert'); return; }
   const side = net.sideOf(q.seg, p);
   const res = net.planStop(q.seg.id, q.s, side);
-  stopPreview = { seg: q.seg, t: q.s, side };
-  drawGhost();
-  const feeds = industries.servedFrom(industries.kerbPoint(q.seg, q.s, side)).map((x) => x.model.variant.name); // (game/industry.ts)
-  let el: HTMLElement;
-  if (res.reason) el = openPanel('stop', 'Can’t put a stop here', 'busStop', `<div class="bad">${icon('alert')}<span>${res.reason}</span></div>`, true);
-  else {
-    const d = net.def(q.seg);
-    el = openPanel('stop', `Stop on this ${d.family.toLowerCase()}`, 'busStop',
-      res.plans.map((pl, i) => `<div class="plan${pl.ok ? '' : ' no'}"><div class="row"><span class="tab">${pl.title}</span><span class="cost">${money(price(pl.cost))}</span></div>
-        ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${icon('alert')}<span>${pl.blocked}</span></div>` : ''}
-        <button class="act primary" data-plan="${i}" ${pl.ok && purse.can(price(pl.cost)) ? '' : 'disabled'} ${purse.can(price(pl.cost)) ? '' : `title="${esc(short(price(pl.cost)))}"`}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
+  if (res.reason) {
+    stopPreview = null; drawGhost();
+    tool?.setPanel(`<div class="bad">${icon('alert')}<span>${esc(res.reason)}</span></div>`);
+    tool?.setPrimary(null);
+    return;
   }
-  if (feeds.length) el.insertAdjacentHTML('afterbegin', `<p class="note">${icon('warehouse')} This stop would serve the ${esc(feeds.join(' and the '))} too, raising ${feeds.length > 1 ? 'their' : 'its'} production.</p>`);
-  // turn the road to run up the screen in the clear map above the sheet, so the lay-by can be seen as it's chosen
-  focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
-  el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
-    const pl = res.plans[+b.dataset.plan!];
-    if (!purse.spend(price(pl.cost), 'building')) { hint(short(price(pl.cost)), 'alert'); return; }
+  const afford = (pl: StopPlan) => pl.ok && purse.can(price(pl.cost));
+  let pick = Math.max(0, res.plans.findIndex(afford));
+  const feeds = industries.servedFrom(industries.kerbPoint(q.seg, q.s, side)).map((x) => x.model.variant.name); // (game/industry.ts)
+  const WHAT = { kerb: ['Kerbside', 'Buses stop in the lane'], layby: ['Lay-by', 'Buses pull in, clear of the traffic'] } as const;
+  // (centred in the clear map above the card, closer in if far out, so the blueprint can be seen)
+  focusOn({ x: q.x, z: q.z }, Math.min(view.h, 140));
+  const show = () => {
+    const pl = res.plans[pick], cost = price(pl.cost);
+    stopPreview = { seg: q.seg, t: q.s, side, kind: pl.kind };
+    drawGhost();
+    const why = !pl.ok ? pl.blocked ?? 'Can’t be built here' : !purse.can(cost) ? short(cost) : `${WHAT[pl.kind][1]}${feeds.length ? ` · serves the ${feeds.join(' and the ')} too` : ''} · tap elsewhere to move it`;
+    tool?.setPanel(`<div class="choice">${res.plans.map((x, i) => `<button data-pick="${i}" class="${i === pick ? 'on' : ''}" ${x.ok ? '' : 'disabled'}><b>${WHAT[x.kind][0]}</b><span>${money(price(x.cost))}</span></button>`).join('')}</div>
+      <p class="why">${esc(why)}</p>`, (el) => el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => b.addEventListener('click', () => { pick = +b.dataset.pick!; show(); })));
+    tool?.setPrimary({ label: `Build · ${money(cost)}`, icon: 'check', kind: 'primary', disabled: !afford(pl), onClick: build });
+    hint();
+  };
+  const build = () => {
+    const pl = res.plans[pick], cost = price(pl.cost);
+    if (!afford(pl) || !purse.spend(cost, 'building')) { hint(short(cost), 'alert'); return; }
     net.addStop(q.seg.id, q.s, side, pl);
     for (const l of net.touched) { const bb = buildings.find((x) => x.lot === l); if (bb && !bb.dying) regenerate(bb); }
-    closeSheet();
+    stopPreview = null;
+    drawGhost();
     rebuildRoads();
-    hint(`${pl.title} built for ${money(price(pl.cost))}${pl.take.land ? ` · ${pl.lots.length} front garden${pl.lots.length === 1 ? '' : 's'} trimmed` : ''}`, 'check');
-  }));
+    tool?.setPanel(null);
+    tool?.setPrimary(null);
+    hint(`${WHAT[pl.kind][0]} stop built for ${money(cost)} · tap to place another, or Done`, 'check');
+  };
+  show();
 }
 
 // A tap on the map. With a tool in use it goes to the tool; with none, it inspects whatever it
