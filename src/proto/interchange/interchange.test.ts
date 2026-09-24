@@ -83,6 +83,17 @@ describe('motorway junctions', () => {
     expect(bad.filter((d) => d.area >= (d.kind === 'spur' ? 0.15 : 0.05)).map((d) => `${d.kind} at ${d.at.x.toFixed(0)},${d.at.z.toFixed(0)} (${d.area.toFixed(2)} m²) node ${d.node}`)).toEqual([]);
   }, 60_000);
 
+  it('a junction that can’t be built is not built at all', () => {
+    // (a motorway too short for its slip roads: found only after its carriageways are built)
+    const net = new Network(() => false, 900);
+    net.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
+    const before = JSON.stringify([...net.segs.values()].map((s) => [s.id, s.a, s.b]));
+    const r = motorwayWithJunction(net, 'dumbbell', [{ x: -380, z: 0 }, { x: 380, z: 0 }], 'motorway', [...net.segs.values()][0]);
+    expect(r.ok).toBe(false);
+    expect(r.ok ? '' : r.reason).toMatch(/further/);
+    expect(JSON.stringify([...net.segs.values()].map((s) => [s.id, s.a, s.b]))).toBe(before);
+  });
+
   it('the dumbbell has a roundabout either side and the local road bridges the motorway', () => {
     const { net, js, ix } = junctionTown('dumbbell');
     expect(ix.nodes.slice(0, 2).map((n) => js.get(n)?.form)).toEqual(['roundabout', 'roundabout']);

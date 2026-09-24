@@ -104,7 +104,7 @@ add(rail('rail-rack', 'Rack railway', { mph: 25, tracks: 1, maxGrade: 0.2, minR:
 add({ ...road('slip', 'Motorway', { lanes: 1, mph: 50, lane: 3.65, shoulder: 1, pave: 0, verge: 2.5 }), label: 'Slip road · 50 mph', blurb: '1 lane, one way · hard strips · joins or leaves a motorway part-way', oneway: true, strip: 1 });
 ROADS.slip.cost = priceOf(ROADS.slip);
 // the one-way ring of a grade-separated roundabout: two lanes, hard strips, a verge, 40 mph
-add({ ...road('gsr-ring', 'Dual', { lanes: 2, mph: 40, lane: 3.65, shoulder: 0.7, pave: 0, verge: 2.5 }), label: 'Roundabout ring · 40 mph', blurb: '2 lanes, one way round · the ring of a grade-separated roundabout', oneway: true, strip: 0.7 });
+add({ ...road('gsr-ring', 'Dual', { lanes: 2, mph: 40, lane: 3.65, shoulder: 0.7, pave: 0, verge: 2.5, frontage: false }), label: 'Roundabout ring · 40 mph', blurb: '2 lanes, one way round · the ring of a grade-separated roundabout', oneway: true, strip: 0.7 });
 ROADS['gsr-ring'].cost = priceOf(ROADS['gsr-ring']);
 
 // The one-way version of a road: the same lanes, all running one way on one carriageway, no

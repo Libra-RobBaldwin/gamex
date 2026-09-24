@@ -1429,8 +1429,9 @@ nav.onChange(() => {
 function seedJunctionDemo(form: IxForm) {
   const R = form === 'gsr' ? 780 : 510;
   net.bound = Math.max(BOUND, R + 10); // (a grade-separated roundabout's slip roads reach past the town's edge)
-  net.build({ x: 0, z: -510 }, { x: 0, z: 510 }, undefined, { ...DEFAULT_OPTS, type: 'dual' });
-  const r = motorwayWithJunction(net, form, [{ x: -R, z: 0 }, { x: R, z: 0 }], 'motorway', [...net.segs.values()][0], 1);
+  // (north of the lake)
+  net.build({ x: -60, z: -510 }, { x: -60, z: 510 }, undefined, { ...DEFAULT_OPTS, type: 'dual' });
+  const r = motorwayWithJunction(net, form, [{ x: -R, z: 230 }, { x: R, z: 230 }], 'motorway', [...net.segs.values()][0], 1);
   if (r.ok) interchanges.push(r.ix); else console.warn(r.reason);
   commitRoads([...net.segs.keys()]);
   for (const l of queue.splice(0, Math.floor(queue.length * 0.8))) if (net.lotFree(l)) spawnLot(l, false);

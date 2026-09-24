@@ -149,6 +149,15 @@ function localNodes(net: Network, site: Site, R1: P, R2: P): { ok: true; n: [num
 // Build a junction on a motorway pair that already exists. `nodes`: the local road's two nodes, if
 // already made (motorwayWithJunction cuts the road before the carriageways go through).
 export function buildJunction(net: Network, form: IxForm, site: Site, id = 0, nodes?: [number, number]): { ok: true; ix: Interchange } | Fail {
+  return allOrNothing(net, (n) => buildJunctionOn(n, form, { ...site, road: site.road ? n.segs.get(site.road.id) ?? null : null }, id, nodes));
+}
+// A junction is built whole or not at all: it's tried on a copy of the network first, and only built
+// for real if every piece of it can be.
+function allOrNothing<R extends { ok: boolean }>(net: Network, f: (n: Network) => R): R {
+  const r = f(scratch(net));
+  return r.ok ? f(net) : r;
+}
+function buildJunctionOn(net: Network, form: IxForm, site: Site, id = 0, nodes?: [number, number]): { ok: true; ix: Interchange } | Fail {
   const lay = layout(net, form, site);
   if (lay.sin < 0.6) return { ok: false, reason: 'The road crosses the motorway at too shallow an angle for a junction' };
   let ends = nodes;
@@ -282,6 +291,9 @@ function buildGSR(net: Network, site: Site, lay: Lay, [rn1, rn2]: [number, numbe
 // the junction's nodes, the pair of carriageways built through the gap, then the junction's pieces.
 // (Try it on scratch(net) first, for a blueprint that says what it costs and why it can't be built.)
 export function motorwayWithJunction(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id = 0) {
+  return allOrNothing(net, (n) => motorwayWithJunctionOn(n, form, mw, type, n.segs.get(road.id)!, id));
+}
+function motorwayWithJunctionOn(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id = 0) {
   const X = crossingOf(mw, net.path(road));
   if (!X) return { ok: false as const, reason: 'The motorway doesn’t cross that road' };
   const site: Site = { mw, type, s: X.s, road };
@@ -291,7 +303,7 @@ export function motorwayWithJunction(net: Network, form: IxForm, mw: P[], type: 
   if (!ln.ok) return ln;
   const pair = buildPair(net, mw, type);
   if (!pair.ok) return pair;
-  const r = buildJunction(net, form, { ...site, road: null, roadType: road.type }, id, ln.n);
+  const r = buildJunctionOn(net, form, { ...site, road: null, roadType: road.type }, id, ln.n);
   if (!r.ok) return r;
   return { ok: true as const, ix: r.ix, carriageways: [...pair.ab, ...pair.ba] };
 }
@@ -312,7 +324,7 @@ export function crossingOf(a: P[], b: P[]): { s: number; x: number; z: number } 
   return null;
 }
 
-// A copy of the network to try things on (a blueprint): its roads and plots, not its land.
+// A copy of the network to try things on (a blueprint): its roads, plots and land.
 export function scratch(net: Network): Network {
   const n = Object.create(Object.getPrototypeOf(net)) as Network;
   Object.assign(n, net);
@@ -320,5 +332,6 @@ export function scratch(net: Network): Network {
   n.segs = new Map([...net.segs].map(([k, v]) => [k, { ...v, mid: v.mid.map((p) => ({ ...p })), stops: [...v.stops], bridges: v.bridges ? [...v.bridges] : undefined }]));
   n.lots = [...net.lots];
   n.land = new Land();
+  for (const c of net.land.all()) n.land.claim(c.key, c.owner, c.polys);
   return n;
 }
