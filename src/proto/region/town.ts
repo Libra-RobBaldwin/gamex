@@ -16,7 +16,8 @@ function townStreets(): MapStreet[] {
   const road = (a: XZ, b: XZ, c?: XZ, type = 'street', o: Partial<MapStreet> = {}): MapStreet => ({ a, b, c, type, ...o });
   // the high street is a tree-lined avenue, from under the flyover to a roundabout on the bypass
   // (it ends exactly where the bypass's curve will cross it, so the two meet there)
-  const bypass = bezier({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 });
+  // (net.makePath(a, b, ctrl) is bezier(a, ctrl, b))
+  const bypass = bezier({ x: 110, z: 110 }, { x: 230, z: 40 }, { x: 170, z: -98 });
   const cross = bypass.findIndex((p) => p.z < 0), [p0, p1] = [bypass[cross - 1], bypass[cross]];
   const over = { cross: 'bridge' as const };
   return [
@@ -59,6 +60,7 @@ export const TOWN_MAP: MapSpec = {
   zones: [{ kind: 'industrial', box: { x0: -280, z0: -Infinity, x1: 280, z1: -215 } }],
   settlements: [{ id: 0, name: 'Town', kind: 'town', x: 0, z: 0, r: 250 }],
   streets: townStreets(),
+  generated: false,
   links: [],
   view: { x: 0, z: 20, h: 300 },
   // the high street either side of the centre, the road north, and the industrial estate

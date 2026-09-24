@@ -37,13 +37,14 @@ export function mapOfRegion(g: Region): MapSpec {
     zones: g.zones,
     settlements: g.settlements.map(({ id, name, kind, x, z, r }) => ({ id, name, kind, x, z, r })),
     streets: g.streets,
+    generated: true,
     links: g.links,
     view: { x: city.x, z: city.z + 20, h: 300 },
     stops: [...line, at(0, 160)],
     line,
     industries: false,
-    // woods over the whole map (a third of the town's density: it's 33 times the area), fewer in the places
-    trees: { count: Math.round(1400 * (g.bound / 520) ** 2 * 0.11) },
+    // woods over the whole map (a fifth of the town's density: it's 33 times the area, and the ground paints woods too)
+    trees: { count: Math.round(1400 * (g.bound / 520) ** 2 * 0.07) },
   };
 }
 

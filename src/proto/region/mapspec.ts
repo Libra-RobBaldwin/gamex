@@ -23,6 +23,7 @@ export interface MapSpec {
   zones: ZoneRule[];
   settlements: SettlementInfo[];
   streets: MapStreet[];
+  generated: boolean; // streets from the generator: each is checked, and left out if the Network refuses it (apply.ts)
   links: Link[]; // suggested links between settlements (for the road and rail sessions)
   view: { x: number; z: number; h: number }; // where the camera starts
   stops: XZ[]; // a few bus stops to start with, near these points

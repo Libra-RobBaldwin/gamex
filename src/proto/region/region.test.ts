@@ -59,9 +59,9 @@ describe('the region generator', () => {
       expect(w.lakes.length).toBeLessThanOrEqual(2);
       expect(w.rivers).toHaveLength(1);
       const p = w.rivers[0].path, a = p[0], b = p[p.length - 1];
-      // (off both edges of the ground, which reaches 1.3 times the bound)
-      expect(Math.max(Math.abs(a.x), Math.abs(a.z))).toBeGreaterThan(1.3 * REGION_BOUND);
-      expect(Math.max(Math.abs(b.x), Math.abs(b.z))).toBeGreaterThan(1.3 * REGION_BOUND);
+      // (off both edges of the ground, which reaches 1.5 times the bound)
+      expect(Math.max(Math.abs(a.x), Math.abs(a.z))).toBeGreaterThan(1.5 * REGION_BOUND);
+      expect(Math.max(Math.abs(b.x), Math.abs(b.z))).toBeGreaterThan(1.5 * REGION_BOUND);
     }
   });
 
@@ -210,7 +210,7 @@ describe('maps as data', () => {
     expect(centrality(TOWN_MAP, { x: 30, z: 40 })).toBe(50);
     expect(TOWN_MAP.bound).toBe(520);
     // the high street ends where the bypass's curve crosses z = 0, as seedTown() worked it out
-    const bypass = bezier({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 });
+    const bypass = bezier({ x: 110, z: 110 }, { x: 230, z: 40 }, { x: 170, z: -98 });
     const i = bypass.findIndex((p) => p.z < 0), [p0, p1] = [bypass[i - 1], bypass[i]];
     expect(TOWN_MAP.streets[0].b).toEqual({ x: p0.x + ((p1.x - p0.x) * p0.z) / (p0.z - p1.z), z: 0 });
     expect(TOWN_MAP.streets).toHaveLength(21);

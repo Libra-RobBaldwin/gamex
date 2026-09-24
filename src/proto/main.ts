@@ -26,23 +26,25 @@ import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
 import { starterStops } from './game/crowdsites';
+import { buildStreets, centrality, centreDistance, inCentre, mapById, plotCentre, settlementAt, zoneOf } from './region'; // maps as data (docs/region.md)
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // ---------------- world ----------------
-// the lake: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
-const gameWater = new GameWater(520 * 1.3); // (the ground's half-width, BOUND * 1.3)
+// The map is data (region/mapspec.ts): ?map= picks it, the invented town by default.
+const MAP = mapById(new URLSearchParams(location.search).get('map'));
+const BOUND = MAP.bound;
+// the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
+const gameWater = new GameWater(BOUND * (BOUND > 520 ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
 const isWater = (p: P) => gameWater.isWater(p);
-const BOUND = 520;
 const net = new Network(isWater, BOUND, 11);
-gameWater.claim(net.land); // the lake's land ('water', 3 m past the waterline): plots and parks keep off it
-// an industrial estate south of the centre
-const INDUSTRIAL = (p: P) => p.z < -215 && Math.abs(p.x) < 280;
+gameWater.claim(net.land); // the water's land ('water', 3 m past the waterline): plots and parks keep off it
+// the map's industrial estates (the town's is south of the centre)
+const INDUSTRIAL = (p: P) => zoneOf(MAP, p) === 'industrial';
 net.zoneAt = (p) => (INDUSTRIAL(p) ? 'industrial' : 'town');
-const CENTRE = { x: 0, z: 0 };
-const rand = rng(99);
+const rand = rng(MAP.seed);
 
 // ---------------- three setup ----------------
 const canvas = $<HTMLCanvasElement>('#c');
@@ -62,6 +64,7 @@ sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
+const SCALE = BOUND / 520; // (a bigger map: the camera stands further back and can zoom further out)
 const HOME = { az: Math.PI / 4, el: 0.6 };
 const EL_MIN = 0.35, EL_MAX = 1.52;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -70,11 +73,14 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 // its shadow area only changes size in big steps and slides in whole shadow-map texels, so edges
 // don't shimmer. The game's own input hooks are set with the rest of the input code below.
 const nav = new NavRig(cam, canvas, {
-  view: { x: 0, z: 20, h: 300, ...HOME },
-  limits: { hMin: 35, hMax: 900, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
+  view: { ...MAP.view, ...HOME },
+  distance: 1200 * SCALE,
+  limits: { hMin: 35, hMax: 900 * SCALE, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
   shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
 });
 const view = nav.view;
+// (and its depth range follows the zoom, so depth stays as fine as the town's)
+if (SCALE > 1) { const fit = () => { const r = (2 * view.h) / Math.sin(view.el) + 600; cam.near = Math.max(1, 1200 * SCALE - r); cam.far = 1200 * SCALE + r; cam.updateProjectionMatrix(); }; nav.onChange(fit); fit(); }
 
 function resize() {
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
@@ -84,9 +90,9 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND);
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, SCALE > 1 ? 4 : undefined, SCALE === 1); // (no 3D hedgerows on a big map until it streams: docs/region.md R4)
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
-const ground = new THREE.Mesh(gameWater.groundGeometry(BOUND * 2.6), gameGround.ground.material);
+const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 // Grass drawn on top of the ground (verges, roundabout islands, cutting slopes, gardens, parks)
@@ -101,15 +107,16 @@ scene.add(ground);
 gameWater.patch(gameGround.ground.material);
 scene.add(gameWater.group);
 gameWater.light(scene, sun); // (evening light: the sun, sky and water change together)
+// rivers' beds, in a ground material of their own (the flat ground leaves out what they cover)
+for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshLambertMaterial(), gameGround.ground.uniforms)))) scene.add(m);
 
 // ---------------- trees (instanced) ----------------
 interface Tree { x: number; z: number; s: number; kind: number }
 let trees: Tree[] = [];
-for (let i = 0; i < 1400; i++) {
+for (let i = 0; i < MAP.trees.count; i++) {
   const p = { x: (rand() * 2 - 1) * BOUND, z: (rand() * 2 - 1) * BOUND };
   // woods on the outskirts, a few in town
-  const dc = Math.hypot(p.x, p.z);
-  if (dc < 140 && rand() < 0.85) continue;
+  if (inCentre(MAP, p) && rand() < 0.85) continue;
   if (isWater(p) || gameWater.near(p, 10)) continue;
   trees.push({ ...p, s: 0.8 + rand() * 0.7, kind: rand() < 0.3 ? 1 : 0 });
 }
@@ -119,7 +126,7 @@ const trunkGeo = new THREE.CylinderGeometry(0.35, 0.5, 3.5, 6);
 const crownMat = new THREE.MeshLambertMaterial({ color: '#4f8a36', flatShading: true });
 const pineMat = new THREE.MeshLambertMaterial({ color: '#2f6b35', flatShading: true });
 const trunkMat = new THREE.MeshLambertMaterial({ color: '#6b4a2f' });
-const MAXT = 1600;
+const MAXT = Math.max(1600, MAP.trees.count + 200);
 const crowns = new THREE.InstancedMesh(crownGeo, crownMat, MAXT);
 const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAXT);
 const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
@@ -148,7 +155,18 @@ function refreshTrees(only?: Lot) {
     const c = net.parcelCentre(only), r = net.parcelR(only) + 3;
     trees = trees.filter((t) => Math.abs(t.x - c.x) > r || Math.abs(t.z - c.z) > r || !treeBlocked(t, [only]));
     if (trees.length === before) return;
-  } else trees = trees.filter((t) => !treeBlocked(t, net.lots));
+  } else {
+    // (plots bucketed by where they stand, so each tree looks only at those near it)
+    const B = 60, near = new Map<string, Lot[]>();
+    for (const l of net.lots) {
+      const c = net.parcelCentre(l), r = net.parcelR(l) + 3;
+      for (let i = Math.floor((c.x - r) / B); i <= Math.floor((c.x + r) / B); i++) for (let j = Math.floor((c.z - r) / B); j <= Math.floor((c.z + r) / B); j++) {
+        const k = `${i},${j}`, a = near.get(k);
+        if (a) a.push(l); else near.set(k, [l]);
+      }
+    }
+    trees = trees.filter((t) => !treeBlocked(t, near.get(`${Math.floor(t.x / B)},${Math.floor(t.z / B)}`) ?? []));
+  }
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
   let nc = 0, np = 0;
   trees.forEach((t, i) => {
@@ -216,7 +234,7 @@ interface Built { lot: Lot; born: number; height: number; name: string; detail: 
 const buildings: Built[] = [];
 const cityGroup = new THREE.Group();
 scene.add(cityGroup);
-const CH = 120;
+const CH = BOUND > 520 ? 240 : 120; // (bigger on a big map: fewer draw calls when it's all in view)
 const chunks = new Map<string, { members: Set<Built>; group: THREE.Group; dirty: boolean }>();
 
 function bakeGroup(group: THREE.Group) {
@@ -355,11 +373,14 @@ function refreshInfill() {
   gameGround.invalidate();
 }
 
+// the centre to lay a road's plots out from: its settlement's, as central as its size says (region/mapspec.ts)
+const centreFor = (a: P, b: P = { x: a.x + 1, z: a.z }) => plotCentre(MAP, a, b);
 function queuePlots(segs: number[]) {
   for (const id of segs) {
-    const plots = net.plotsFor(id, CENTRE);
+    const sg = net.segs.get(id);
+    const plots = sg ? net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))) : [];
     // denser, taller near the centre; a few gaps elsewhere
-    for (const p of plots) if (Math.hypot(p.x, p.z) < 200 || rand() < 0.75) queue.push(p);
+    for (const p of plots) if (centrality(MAP, p) < 200 || rand() < 0.75) queue.push(p);
   }
   // and around any roundabout these roads meet at
   const nodes = new Set(segs.flatMap((id) => { const s = net.segs.get(id); return s ? [s.a, s.b] : []; }));
@@ -367,56 +388,36 @@ function queuePlots(segs: number[]) {
     const j = junctions.get(id);
     if (!j || j.form !== 'roundabout' || !j.shape) continue;
     const legs = legsAt(net, id).map((l) => ({ seg: l.seg.id, ang: l.ang, half: net.half(l.seg) }));
-    queue.push(...net.plotsAround(id, j.R + 3, legs, CENTRE));
+    queue.push(...net.plotsAround(id, j.R + 3, legs, centreFor(net.node(id))));
   }
-  queue.sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+  // nearest a settlement's centre first
+  queue.sort((a, b) => centreDistance(MAP, a) - centreDistance(MAP, b));
 }
 
-// ---------------- starter town ----------------
+// ---------------- the map's roads and towns ----------------
 function seedTown() {
-  const road = (a: P, b: P, c?: P, o = DEFAULT_OPTS) => net.build(net.snapStart(a, 3), net.snapStart(b, 3), c, o);
-  const as = (type: RoadType, o = DEFAULT_OPTS) => ({ ...o, type });
-  // the high street is a tree-lined avenue, from under the flyover to a roundabout on the bypass
-  // (it ends exactly where the bypass's curve will cross it, so the two meet there)
-  const bypass = net.makePath({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 });
-  const cross = bypass.findIndex((p) => p.z < 0), [p0, p1] = [bypass[cross - 1], bypass[cross]];
-  road({ x: -230, z: 0 }, { x: p0.x + ((p1.x - p0.x) * p0.z) / (p0.z - p1.z), z: 0 }, undefined, as('avenue'));
-  road({ x: 0, z: -200 }, { x: 0, z: 200 });
-  road({ x: 0, z: 0 }, { x: 170, z: -98 }); // a 30° diagonal
-  road({ x: -185, z: -96 }, { x: 0, z: -96 }); // (a cul-de-sac, its turning head clear of the flyover's ramp)
-  road({ x: -110, z: -96 }, { x: -170, z: 0 }); // a slanting link
-  road({ x: 0, z: 70 }, { x: -80, z: 150 }, { x: -80, z: 70 }); // a crescent
-  road({ x: 60, z: 0 }, { x: 60, z: 110 });
-  road({ x: 0, z: 110 }, { x: 110, z: 110 });
-  road({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 }, as('dual')); // a sweeping dual-carriageway bypass
-  const over = { ...DEFAULT_OPTS, cross: 'bridge' as const };
-  road({ x: -215, z: -150 }, { x: -215, z: 150 }, undefined, over); // a flyover across the main road
-  road({ x: 0, z: -150 }, { x: 510, z: -200 }, undefined, over); // a bridge over the lake, and on out of town to the east
-  // the industrial estate
-  road({ x: 0, z: -200 }, { x: 0, z: -380 });
-  road({ x: -190, z: -290 }, { x: 150, z: -290 });
-  road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 });
-  // a motorway along the south edge, reached from the estate by a dual carriageway
-  // the motorway ends at a roundabout, where it carries on east as a fast dual carriageway
-  road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway'));
-  road({ x: 0, z: -470 }, { x: 510, z: -470 }, undefined, as('dual-2-70-0'));
-  road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
-  // a main line railway along the north, lifted over the high road, and a road tunnel under the lake
-  net.build({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
-  road({ x: 250, z: -470 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 }); // from the dual carriageway
-  // roads out of town: west from the end of the high street, north under the railway (both run off the map)
-  road({ x: -230, z: 0 }, { x: -510, z: 0 }, undefined, as('rural-60'));
-  road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
+  // the map's streets (region/: the town's hand-drawn roads, or a generated region's settlements)
+  buildStreets(net, MAP.streets, DEFAULT_OPTS, MAP.generated);
   // junctions are designed (and take their land) before any plot is laid out
   commitRoads([...net.segs.keys()]);
   // industry: library sites on the estate and out of town claim their land before any plot is
   // built; the estate's plots are theirs, so its buildgen sheds are dropped (game/industry.ts)
-  industries.placeAll(townWishes(INDUSTRIAL, (p) => !INDUSTRIAL(p) && Math.hypot(p.x, p.z) > 300));
-  queue = queue.filter((l) => !INDUSTRIAL(l) && net.lotFree(l));
+  if (MAP.industries) {
+    industries.placeAll(townWishes(INDUSTRIAL, (p) => !INDUSTRIAL(p) && Math.hypot(p.x, p.z) > 300));
+    queue = queue.filter((l) => !INDUSTRIAL(l) && net.lotFree(l));
+  }
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
-  for (const l of queue.splice(0, now)) if (net.lotFree(l)) spawnLot(l, false);
+  const start = queue.splice(0, now);
+  // (a generated map builds the settlement you start over now, and the others over the next frames,
+  // nearest first: they stay in the queue till then, so nothing else is built on their plots)
+  const here = MAP.generated ? settlementAt(MAP, MAP.view) : null;
+  const later = here ? start.filter((l) => settlementAt(MAP, l) !== here).sort((a, b) => Math.hypot(a.x - here.x, a.z - here.z) - Math.hypot(b.x - here.x, b.z - here.z)) : [];
+  seeding = new Set(later);
+  for (const l of start) if (!seeding.has(l) && net.lotFree(l)) spawnLot(l, false);
+  queue.unshift(...later);
 }
+let seeding = new Set<Lot>();
 
 // ---------------- UI ----------------
 type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line';
@@ -1422,7 +1423,7 @@ nav.onChange(() => {
 
 // ---------------- loop ----------------
 seedTown();
-starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
+starterStops(net, MAP.stops); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
 rebuildRoads();
 refreshTrees();
 setMode('look');
@@ -1432,6 +1433,7 @@ resize();
 refreshInfill();
 gameGround.start(trees);
 refreshTrees();
+if (MAP.generated) for (const c of chunks.values()) if (c.dirty) rebuildChunk(c); // (the settlement you start over, whole from the first frame)
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
@@ -1445,7 +1447,7 @@ scene.add(markers.group);
 // the starter line: the high street's west end, its east end, and up the road north
 {
   const near = (q: P) => allStops().map(({ seg, stop }) => ({ id: stop.id, d: Math.hypot(pointAt(net.path(seg), stop.s).x - q.x, pointAt(net.path(seg), stop.s).z - q.z) })).sort((a, b) => a.d - b.d)[0]?.id;
-  const ids = [{ x: -85, z: 0 }, { x: 120, z: 0 }, { x: 0, z: 150 }].map(near).filter((x): x is number => x !== undefined);
+  const ids = MAP.line.map(near).filter((x): x is number => x !== undefined);
   if (ids.length >= 2) lines.add(ids, false, 3);
 }
 for (const t of ['intercity', 'dmu']) traffic.addTrain(t);
@@ -1546,7 +1548,13 @@ function frame(now: number) {
   // the town grows at a town's pace: about one new building every 20 minutes of game time
   // (so it speeds up and slows down with the clock), with some randomness so it doesn't tick
   growAt -= gdt * GAME_MIN_PER_S;
-  if (growAt <= 0 && queue.length) {
+  // a generated map's other settlements go up in the first frames, a few milliseconds' worth a frame
+  if (seeding.size) {
+    const t = performance.now();
+    while (queue.length && seeding.has(queue[0]) && performance.now() - t < 6) { const l = queue.shift()!; seeding.delete(l); if (net.lotFree(l)) spawnLot(l, false); }
+    if (!queue.length || !seeding.has(queue[0])) { seeding.clear(); refreshTrees(); gameGround.invalidate(); }
+  }
+  if (growAt <= 0 && queue.length && !seeding.size) {
     growAt = 12 + rand() * 16;
     const l = queue.shift()!;
     if (net.lotFree(l)) { spawnLot(l); refreshTrees(l); gameGround.built(l); }
@@ -1632,6 +1640,7 @@ requestAnimationFrame(frame);
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, seeding: () => seeding.size }); // (the map being played, and how many of its plots are still to go up at the start)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

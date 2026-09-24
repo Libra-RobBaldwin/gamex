@@ -69,14 +69,14 @@ export function generateRegion(seed: number, bound = REGION_BOUND): Region {
 }
 
 // ---------------- water ----------------
-// A river right across the map (it runs off both edges, past the ground's edge at 1.3× the bound),
+// A river right across the map (it runs off both edges, past the ground's edge at 1.5× the bound),
 // meandering on two slow waves, and one or two lakes clear of it.
 function makeWater(r: Rand, B: number): WaterSpec {
   const eastWest = r() < 0.5;
   const base = range(r, -0.55, 0.55) * B, a1 = range(r, 150, 320), w1 = range(r, 1300, 2000), p1 = range(r, 0, 6.28);
   const a2 = range(r, 50, 120), w2 = range(r, 500, 800), p2 = range(r, 0, 6.28), drift = range(r, -0.12, 0.12);
   const path: XZ[] = [];
-  for (let t = -1.45 * B; t <= 1.45 * B + 1e-6; t += 20) {
+  for (let t = -1.65 * B; t <= 1.65 * B + 1e-6; t += 20) {
     const off = base + drift * t + a1 * Math.sin((t / w1) * 2 * Math.PI + p1) + a2 * Math.sin((t / w2) * 2 * Math.PI + p2);
     path.push(eastWest ? { x: t, z: off } : { x: off, z: t });
   }
