@@ -8,7 +8,7 @@ the user's current priority is the core game loop.**
 
 - **Branch:** `claude/cloud-session-history-rvqkm1`, with PR #9 into
   `claude/runescape-transport-puzzle-game-q1uhy8`. Everything that merged is in it.
-- **Checks:** tsc is clean. vitest passes everything except
+- **Checks:** tsc is clean. vitest passes 914 tests; two fail. One is new since the economy merge: `src/proto/economy.test.ts` "a well-served town grows and gets denser" (796 is not above 902.4). The economy session was stopped partway through its review fixes, so fix this before wiring the economy into the game. The other failure is
   `src/proto/bridges/perf.review.test.ts`. Its 150 ms budget fails on slower machines (210–330 ms on a
   4-CPU cloud box) and on its own branch too. The fix is to scale timing budgets by a measured machine
   factor, not to loosen them; a session was started for it but never pushed.
