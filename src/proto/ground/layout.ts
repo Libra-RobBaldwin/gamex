@@ -40,6 +40,7 @@ export interface GroundInput {
 // ---- the parcel grid ----
 const ANGLE = 0.33; // the grid's rotation: fields don't line up with the map
 const SX = 240, SZ = 165; // seed spacing in metres: cells of ~4 ha, 2 ha when split, 8 when merged
+export const GRID = { angle: ANGLE, sx: SX, sz: SZ };
 const JIT = 0.3; // seeds stay within ±0.3 of their cell's middle, so the 3x3 cells round a point hold its nearest seed
 const CA = Math.cos(ANGLE), SA = Math.sin(ANGLE);
 // world -> grid coordinates (cells are unit squares)
@@ -123,7 +124,33 @@ export class Parcels {
   }
   // The cell's Voronoi polygon in world metres (the square round its seed, clipped by the
   // bisectors with its eight neighbours), with the neighbour across each edge.
+  private polys = new Map<Cell, { pts: XZ[]; across: (Cell | null)[] }>();
   polygon(c: Cell): { pts: XZ[]; across: (Cell | null)[] } {
+    let got = this.polys.get(c);
+    if (!got) { got = this.clipCell(c); this.polys.set(c, got); if (this.polys.size > 5000) this.polys.clear(); }
+    return got;
+  }
+  // A split cell's hedge line, clipped to the cell (grid-space bisection is exact enough: 1 cm).
+  splitLine(c: Cell): [XZ, XZ] | null {
+    if (!c.split) return null;
+    const s = c.split, { pts } = this.polygon(c), tu = s.nv, tv = -s.nu;
+    const f = s.nu * c.u + s.nv * c.v - s.c, mu = c.u - s.nu * f, mv = c.v - s.nv * f;
+    const g = pts.map((p) => toGrid(p.x, p.z));
+    // the line's parameter range inside the convex polygon
+    let lo = -Infinity, hi = Infinity;
+    for (let e = 0; e < g.length; e++) {
+      const a = g[e], b = g[(e + 1) % g.length];
+      // inside is to the left of a->b: cross(b − a, p − a) ≥ 0, with p = m + t·T
+      const ex = b[0] - a[0], ey = b[1] - a[1];
+      const c0 = ex * (mv - a[1]) - ey * (mu - a[0]), c1 = ex * tv - ey * tu;
+      if (Math.abs(c1) < 1e-12) { if (c0 < 0) return null; continue; }
+      const t = -c0 / c1;
+      if (c1 > 0) lo = Math.max(lo, t); else hi = Math.min(hi, t);
+    }
+    if (!(hi > lo)) return null;
+    return [fromGrid(mu + tu * lo, mv + tv * lo), fromGrid(mu + tu * hi, mv + tv * hi)];
+  }
+  private clipCell(c: Cell): { pts: XZ[]; across: (Cell | null)[] } {
     let poly: { u: number; v: number; n: Cell | null }[] = [
       { u: c.i - 1, v: c.j - 1, n: null }, { u: c.i + 2, v: c.j - 1, n: null }, { u: c.i + 2, v: c.j + 2, n: null }, { u: c.i - 1, v: c.j + 2, n: null },
     ];
@@ -154,20 +181,36 @@ function clip(poly: { u: number; v: number; n: Cell | null }[], a: number, b: nu
 // ---- what each parcel is ----
 export interface ParcelInfo { kind: ParcelKind; crop: number; dir: number }
 
-// A coarse grid (20 m) marking the town and the water, for deciding what parcels are.
+// A coarse grid (20 m cells, in 16x16 blocks) of flags marking the town, industry and water, for
+// deciding what parcels are.
+export const TOWN = 1, INDUS = 2, WET = 4;
 export class Coarse {
   static C = 20;
-  town = new Set<number>();
-  indus = new Set<number>();
-  wet = new Set<number>();
-  static key = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
-  mark(set: Set<number>, x: number, z: number, r: number) {
+  private blocks = new Map<number, Uint8Array>();
+  mark(flag: number, x: number, z: number, r: number) {
     const C = Coarse.C;
-    for (let i = Math.floor((x - r) / C); i <= Math.floor((x + r) / C); i++) for (let j = Math.floor((z - r) / C); j <= Math.floor((z + r) / C); j++) set.add(Coarse.key(i, j));
+    for (let i = Math.floor((x - r) / C); i <= Math.floor((x + r) / C); i++) for (let j = Math.floor((z - r) / C); j <= Math.floor((z + r) / C); j++) {
+      const k = ((i >> 4) + 32768) * 65536 + ((j >> 4) + 32768);
+      let b = this.blocks.get(k);
+      if (!b) this.blocks.set(k, (b = new Uint8Array(256)));
+      b[(i & 15) * 16 + (j & 15)] |= flag;
+    }
   }
-  has(set: Set<number>, x: number, z: number) { return set.has(Coarse.key(Math.floor(x / Coarse.C), Math.floor(z / Coarse.C))); }
+  at(x: number, z: number) {
+    const i = Math.floor(x / Coarse.C), j = Math.floor(z / Coarse.C);
+    const b = this.blocks.get(((i >> 4) + 32768) * 65536 + ((j >> 4) + 32768));
+    return b ? b[(i & 15) * 16 + (j & 15)] : 0;
+  }
 }
 
+function inPoly(x: number, z: number, poly: XZ[]) {
+  let inside = false;
+  for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
+    const p = poly[a], q = poly[b];
+    if ((p.z > z) !== (q.z > z) && x < ((q.x - p.x) * (z - p.z)) / (q.z - p.z) + p.x) inside = !inside;
+  }
+  return inside;
+}
 export function centroid(poly: XZ[]): XZ {
   let x = 0, z = 0;
   for (const p of poly) { x += p.x; z += p.z; }
@@ -184,25 +227,25 @@ export class Layout {
     this.parcels = new Parcels(this.seed);
     this.setInput(input);
   }
-  // A new input. With `near` (a world box round what changed), parcels away from it keep what they
+  // A new input. With `near` (world boxes round what changed), parcels away from it keep what they
   // were; the boxes of those near it that became something else are returned.
-  setInput(input: GroundInput, near?: { x0: number; z0: number; x1: number; z1: number }) {
+  setInput(input: GroundInput, near?: { x0: number; z0: number; x1: number; z1: number }[]) {
     this.input = input;
     const old = this.info;
     this.info = new Map();
     if (near) for (const [id, v] of old) this.info.set(id, v);
     const c = (this.coarse = new Coarse());
     // the town reaches 30 m past its plots and parks, the industrial estate likewise
-    for (const p of input.plots ?? []) { const m = centroid(p.poly); c.mark(p.kind === 'yard' ? c.indus : c.town, m.x, m.z, 30); }
-    for (const p of input.parks ?? []) for (const q of p.poly) c.mark(c.town, q.x, q.z, 20);
-    for (const p of input.town ?? []) c.mark(c.town, p.x, p.z, 30);
-    for (const p of input.industrial ?? []) c.mark(c.indus, p.x, p.z, 30);
-    for (const w of input.water ?? []) for (const q of w) c.mark(c.wet, q.x, q.z, 10);
+    for (const p of input.plots ?? []) { const m = centroid(p.poly); c.mark(p.kind === 'yard' ? INDUS : TOWN, m.x, m.z, 30); }
+    for (const p of input.parks ?? []) { const m = centroid(p.poly); c.mark(TOWN, m.x, m.z, 20); }
+    for (const p of input.town ?? []) c.mark(TOWN, p.x, p.z, 30);
+    for (const p of input.industrial ?? []) c.mark(INDUS, p.x, p.z, 30);
+    for (const w of input.water ?? []) for (const q of w) c.mark(WET, q.x, q.z, 10);
     const changed: { x0: number; z0: number; x1: number; z1: number }[] = [];
     if (!near) return changed;
     // every parcel with ground within 40 m of the box (a plot marks the town 30 m round it)
     const ids = new Set<number>(), h = { id: 0, cell: this.parcels.cell(0, 0), edge: 0 };
-    for (let x = near.x0 - 40; x <= near.x1 + 40; x += 10) for (let z = near.z0 - 40; z <= near.z1 + 40; z += 10) ids.add(this.parcels.hit(x, z, h).id);
+    for (const b of near) for (let x = b.x0 - 40; x <= b.x1 + 40; x += 10) for (let z = b.z0 - 40; z <= b.z1 + 40; z += 10) ids.add(this.parcels.hit(x, z, h).id);
     for (const id of ids) {
       const was = this.info.get(id);
       this.info.delete(id);
@@ -227,19 +270,23 @@ export class Layout {
     // always judged from the parcel's own cell (a merged pair's left one), whoever asks
     const k = Math.floor(h.id / 2), c = this.parcels.cell(Math.floor(k / 65536) - 32768, (k % 65536) - 32768);
     const { pts } = this.parcels.polygon(c);
-    // sample the cell (and a merged partner) every ~20 m
+    // sample the parcel's polygon (both cells of a merged pair, one side of a split) every 16 m
     let n = 0, town = 0, ind = 0, wet = 0;
-    const cells = [c];
-    if (c.merge) cells.push(this.parcels.cell(c.i + 1, c.j));
-    const left = this.parcels.cell(c.i - 1, c.j);
-    if (!c.split && left.merge) cells.push(left);
-    for (const cc of cells) for (let a = 0.05; a < 1; a += 0.1) for (let b = 0.05; b < 1; b += 0.1) {
-      const p = fromGrid(cc.i + a, cc.j + b), hh = this.parcels.hit(p.x, p.z);
-      if (hh.id !== h.id) continue;
-      n++;
-      if (this.coarse.has(this.coarse.town, p.x, p.z)) town++;
-      if (this.coarse.has(this.coarse.indus, p.x, p.z)) ind++;
-      if (this.coarse.has(this.coarse.wet, p.x, p.z)) wet++;
+    const polys = [pts];
+    if (c.merge) polys.push(this.parcels.polygon(this.parcels.cell(c.i + 1, c.j)).pts);
+    const side = h.id % 2;
+    for (const poly of polys) {
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const p of poly) { x0 = Math.min(x0, p.x); z0 = Math.min(z0, p.z); x1 = Math.max(x1, p.x); z1 = Math.max(z1, p.z); }
+      for (let x = x0 + 8; x < x1; x += 16) for (let z = z0 + 8; z < z1; z += 16) {
+        if (!inPoly(x, z, poly)) continue;
+        if (c.split) { const [u, v] = toGrid(x, z); if ((c.split.nu * u + c.split.nv * v - c.split.c > 0 ? 1 : 0) !== side) continue; }
+        n++;
+        const f = this.coarse.at(x, z);
+        if (f & TOWN) town++;
+        if (f & INDUS) ind++;
+        if (f & WET) wet++;
+      }
     }
     n = Math.max(1, n);
     const r = (k: number) => hash2(h.id % 65536, Math.floor(h.id / 65536), this.seed + k);

@@ -11,6 +11,8 @@ import { Traffic, rushLabel, type Places } from './traffic';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CIVIC, makeBuilding as generate, makeRegion, USE } from './buildgen';
 import { CELL, findRegions, type Region } from './infill';
+import { GameGround } from './ground/game';
+import { setGroundQuality } from './ground';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
 import { NAME, markSvg, needleSvg, ridgeSvg } from './ui/brand';
@@ -88,36 +90,15 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
-// ---------------- textures ----------------
-function canvasTex(w: number, h: number, draw: (x: CanvasRenderingContext2D) => void, repeat = true) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  draw(c.getContext('2d')!);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; }
-  t.anisotropy = 4;
-  return t;
-}
-
-const grassTex = canvasTex(256, 256, (x) => {
-  x.fillStyle = '#6f9e48';
-  x.fillRect(0, 0, 256, 256);
-  const r = rng(3);
-  for (let i = 0; i < 5000; i++) {
-    const g = 120 + r() * 60;
-    x.fillStyle = `rgba(${60 + r() * 40},${g},${40 + r() * 30},0.35)`;
-    x.fillRect(r() * 256, r() * 256, 2, 2);
-  }
-});
-grassTex.repeat.set(60, 60);
-
 // ---------------- ground, water ----------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND * 2.6, BOUND * 2.6), new THREE.MeshLambertMaterial({ map: grassTex }));
+// the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND * 2.6, BOUND * 2.6), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 // the ground leaves out any cutting a road or railway runs down into (they mark the stencil first)
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
+scene.add(gameGround.ground.hedges);
 scene.add(ground);
 const beach = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 7, 72), new THREE.MeshLambertMaterial({ color: '#d9c894' }));
 beach.rotation.x = -Math.PI / 2;
@@ -224,6 +205,7 @@ function commitRoads(made: number[] = []) {
   lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
+  gameGround.invalidate();
 }
 let lamps: Lamp[] = [];
 const rebuildRoads = () => commitRoads();
@@ -351,6 +333,7 @@ function refreshInfill() {
     for (const c of r.cells) infillCells.set(cellKey(c.x, c.z), b);
   }
   refreshTrees();
+  gameGround.invalidate();
 }
 
 function queuePlots(segs: number[]) {
@@ -1353,6 +1336,8 @@ setKind('straight');
 setType('street');
 resize();
 refreshInfill();
+gameGround.start(trees);
+refreshTrees();
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
@@ -1423,6 +1408,7 @@ function setTier(t: number) {
   sun.castShadow = q.shadow > 0;
   if (q.shadow && sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
   renderer.shadowMap.needsUpdate = true;
+  setGroundQuality(tier >= 3 ? 'low' : tier === 2 ? 'medium' : 'high');
 }
 function judgeFrames(now: number) {
   const avg = perf.frameMs / Math.max(1, perf.frames);
@@ -1439,6 +1425,7 @@ function frame(now: number) {
   perf.frames++; perf.frameMs += rawMs; perf.worst = Math.max(perf.worst, rawMs);
   stepCamera(dt);
   placeCamera();
+  if (gameGround.sync()) renderer.shadowMap.needsUpdate = true;
   // keep blueprint handles a finger's width wide at any zoom
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
   doomMat.opacity = 0.3 + 0.25 * Math.sin(now / 160);
@@ -1449,7 +1436,7 @@ function frame(now: number) {
   if (growAt <= 0 && queue.length) {
     growAt = 12 + rand() * 16;
     const l = queue.shift()!;
-    if (net.lotFree(l)) { spawnLot(l); refreshTrees(l); }
+    if (net.lotFree(l)) { spawnLot(l); refreshTrees(l); gameGround.built(l); }
   }
   for (let i = buildings.length - 1; i >= 0; i--) {
     const b = buildings[i];
@@ -1515,4 +1502,4 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, growAll: () => { for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };

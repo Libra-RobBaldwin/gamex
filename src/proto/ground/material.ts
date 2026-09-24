@@ -108,10 +108,12 @@ varying vec3 vGN;
 // how much of a pixel footprint [u − fw/2, u + fw/2] lies where fract(u) < w: a line (or
 // stripe) of width w per unit, filtered, so it greys out smoothly instead of aliasing
 float gPulse( float u, float w, float fw ) {
-  fw = max( fw, 1e-4 );
+  // (u is brought near zero first: the difference below loses precision on big numbers)
+  u = mod( u, 64.0 );
+  fw = max( fw, 1e-3 );
   float a = u - 0.5 * fw, b = u + 0.5 * fw;
   float ia = floor( a ) * w + min( fract( a ), w ), ib = floor( b ) * w + min( fract( b ), w );
-  return ( ib - ia ) / fw;
+  return clamp( ( ib - ia ) / fw, 0.0, 1.0 );
 }`;
 
 const FRAG_BODY = `
@@ -212,7 +214,7 @@ const FRAG_BODY = `
   col = mix( col, heathC, heath );
   col = mix( col, rockC, rockW );
 
-  diffuseColor.rgb *= col;
+  diffuseColor.rgb *= max( col, 0.0 );
 }`;
 
 // Turn a MeshLambertMaterial into ground. Any onBeforeCompile already on it runs first (and one

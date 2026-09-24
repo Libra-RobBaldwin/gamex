@@ -30,6 +30,8 @@ export interface GroundOptions {
   hedges?: boolean; // plant hedgerows (true)
 }
 type Box = { x0: number; z0: number; x1: number; z1: number };
+// (hedge pieces, trees and gates are flat records of numbers)
+const same = <T extends object>(a: T[], b: T[]) => a.length === b.length && a.every((x, i) => Object.entries(x).every(([k, v]) => (b[i] as Record<string, unknown>)[k] === v));
 
 export class Ground {
   readonly material: THREE.MeshLambertMaterial;
@@ -86,23 +88,26 @@ export class Ground {
   change(input: GroundInput, boxes: Box[]) {
     const t0 = performance.now();
     if (!this.cover) { this.layout.setInput(input); return; }
-    const dirty: Box[] = [];
-    for (const b of boxes) dirty.push(b, ...this.layout.setInput(input, b));
-    if (!boxes.length) this.layout.setInput(input);
+    const dirty: Box[] = [...boxes, ...this.layout.setInput(input, boxes)];
     if (this.plants && dirty.length) {
       // hedges within reach of the change (a hedge keeps 2 m off a plot), and wherever a gateway
       // (painted as worn earth) came or went
-      const occ = new Occupancy(input), gateBoxes: Box[] = [];
-      for (const b of [...dirty]) {
-        for (const g of planHedges(this.layout, { x0: b.x0 - 8, z0: b.z0 - 8, x1: b.x1 + 8, z1: b.z1 + 8 }, occ)) {
+      const plan = dirty.map((b) => ({ x0: b.x0 - 8, z0: b.z0 - 8, x1: b.x1 + 8, z1: b.z1 + 8 }));
+      // hedges run on past the box, so the occupancy they check must reach well beyond it
+      const occ = new Occupancy(input, plan.map((b) => ({ x0: b.x0 - 260, z0: b.z0 - 260, x1: b.x1 + 260, z1: b.z1 + 260 })));
+      const gateBoxes: Box[] = [];
+      let moved = false;
+      for (const b of plan) {
+        for (const g of planHedges(this.layout, b, occ)) {
           const was = this.groups.get(g.key);
-          if (was && JSON.stringify(was.gates) === JSON.stringify(g.gates)) { this.groups.set(g.key, g); continue; }
-          for (const s of [...(was?.gates ?? []), ...g.gates]) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
           this.groups.set(g.key, g);
+          if (was && same(was.pieces, g.pieces) && same(was.trees, g.trees) && same(was.gates, g.gates)) continue;
+          moved = true;
+          for (const s of [...(was?.gates ?? []), ...g.gates]) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
         }
       }
       dirty.push(...gateBoxes);
-      this.plantAll();
+      if (moved) this.plantAll();
     }
     const gates = this.gates();
     for (const b of dirty) {

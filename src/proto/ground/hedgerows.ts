@@ -3,7 +3,7 @@
 // for a gateway in most of them and the odd hedgerow tree (oak, ash) standing out of the line.
 // Plain numbers, no three.js (hedges.ts turns this into instanced meshes).
 import { hash2 } from './noise';
-import { fromGrid, Layout, toGrid, type GroundInput, type XZ } from './layout';
+import { Layout, toGrid, type Cell, type GroundInput, type XZ } from './layout';
 import type { Spot } from './paint';
 
 export interface Piece { x: number; z: number; a: number; len: number; h: number; w: number } // centre, angle, size
@@ -18,11 +18,13 @@ export class Occupancy {
   private grid = new Map<number, XZ[][]>();
   private static C = 40;
   private key = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
-  constructor(input: GroundInput) {
+  // (with `near`, only polygons within reach of those boxes are kept: enough for replanning there)
+  constructor(input: GroundInput, near?: { x0: number; z0: number; x1: number; z1: number }[]) {
     const all = [...(input.blocked ?? []), ...(input.plots ?? []).map((p) => p.poly), ...(input.parks ?? []).map((p) => p.poly), ...(input.water ?? [])];
     for (const p of all) {
       let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-      for (const q of p) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
+      for (const q of p) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z; }
+      if (near && !near.some((b) => x1 > b.x0 && x0 < b.x1 && z1 > b.z0 && z0 < b.z1)) continue;
       const C = Occupancy.C, r = CLEAR + 1;
       for (let i = Math.floor((x0 - r) / C); i <= Math.floor((x1 + r) / C); i++) for (let j = Math.floor((z0 - r) / C); j <= Math.floor((z1 + r) / C); j++) {
         const k = this.key(i, j);
@@ -89,11 +91,19 @@ export function planHedges(layout: Layout, box: { x0: number; z0: number; x1: nu
   const j0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 1, j1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 1;
   const hit = { id: 0, cell: P.cell(0, 0), edge: 0 };
   const kindAt = (x: number, z: number) => { P.hit(x, z, hit); return { id: hit.id, kind: layout.about(hit).kind }; };
-  // is there a boundary worth a hedge here, across direction (nx, nz)?
-  const boundary = (x: number, z: number, nx: number, nz: number) => {
-    const A = kindAt(x + nx * 1.5, z + nz * 1.5), B = kindAt(x - nx * 1.5, z - nz * 1.5);
-    if (A.id === B.id) return false;
-    return !(A.kind === 'town' && B.kind === 'town');
+  // The parcel of cell c at a point (which side of its split, if it has one), and what it is.
+  const parcelOf = (c: Cell, x: number, z: number) => {
+    let side = 0;
+    if (c.split) { const [u, v] = toGrid(x, z); side = c.split.nu * u + c.split.nv * v - c.split.c > 0 ? 1 : 0; }
+    hit.id = P.owner(c, side);
+    return hit.id;
+  };
+  const kindOf = (id: number) => { hit.id = id; return layout.about(hit).kind; };
+  // is there a boundary worth a hedge between cells c and o here (o on the −n side)?
+  const boundary = (c: Cell, o: Cell, x: number, z: number, nx: number, nz: number) => {
+    const a = parcelOf(c, x + nx * 1.5, z + nz * 1.5), b = parcelOf(o, x - nx * 1.5, z - nz * 1.5);
+    if (a === b) return false;
+    return !(kindOf(a) === 'town' && kindOf(b) === 'town');
   };
   const touches = (a: XZ, b: XZ) => Math.max(a.x, b.x) >= box.x0 && Math.min(a.x, b.x) <= box.x1 && Math.max(a.z, b.z) >= box.z0 && Math.min(a.z, b.z) <= box.z1;
   for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
@@ -105,23 +115,17 @@ export function planHedges(layout: Layout, box: { x0: number; z0: number; x1: nu
       if (!touches(a, b)) continue;
       const L = Math.hypot(b.x - a.x, b.z - a.z) || 1, nx = -(b.z - a.z) / L, nz = (b.x - a.x) / L;
       const g: HedgeGroup = { key: `e${c.i},${c.j}|${o.i},${o.j}`, pieces: [], trees: [], gates: [] };
-      walk(g, a, b, (c.i * 7919 + c.j * 104729 + o.i * 31 + o.j + layout.seed * 613) | 0, occ, (x, z) => boundary(x, z, nx, nz), true);
+      walk(g, a, b, (c.i * 7919 + c.j * 104729 + o.i * 31 + o.j + layout.seed * 613) | 0, occ, (x, z) => boundary(c, o, x, z, nx, nz), true);
       out.push(g);
     }
     if (c.split) {
-      // the split line, clipped to the cell's polygon
-      const s = c.split, [gu, gv] = [c.u, c.v];
-      const tu = s.nv, tv = -s.nu; // along the line in grid space
-      // the point on the line nearest the seed, then out both ways until it leaves the polygon
-      const f = s.nu * gu + s.nv * gv - s.c, mu = gu - s.nu * f, mv = gv - s.nv * f;
-      let lo = -2, hi = 2;
-      for (let t = 0; t > -2; t -= 0.01) { const p = fromGrid(mu + tu * t, mv + tv * t); if (P.hit(p.x, p.z).cell !== c) { lo = t; break; } }
-      for (let t = 0; t < 2; t += 0.01) { const p = fromGrid(mu + tu * t, mv + tv * t); if (P.hit(p.x, p.z).cell !== c) { hi = t; break; } }
-      const a = fromGrid(mu + tu * lo, mv + tv * lo), b = fromGrid(mu + tu * hi, mv + tv * hi);
+      const sl = P.splitLine(c);
+      if (!sl) continue;
+      const [a, b] = sl;
       if (!touches(a, b)) continue;
       const L = Math.hypot(b.x - a.x, b.z - a.z) || 1, nx = -(b.z - a.z) / L, nz = (b.x - a.x) / L;
       const g: HedgeGroup = { key: `s${c.i},${c.j}`, pieces: [], trees: [], gates: [] };
-      walk(g, a, b, (c.i * 5 + c.j * 1009 + 17 + layout.seed * 613) | 0, occ, (x, z) => boundary(x, z, nx, nz), true);
+      walk(g, a, b, (c.i * 5 + c.j * 1009 + 17 + layout.seed * 613) | 0, occ, (x, z) => boundary(c, c, x, z, nx, nz), true);
       out.push(g);
     }
   }
