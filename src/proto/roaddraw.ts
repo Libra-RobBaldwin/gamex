@@ -5,6 +5,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { BAY, ROADS, bayWeight, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
 import { legsAt, type Junction } from './junction';
 import { STD } from './standards';
+import { legAt, legDir, ringA, type ShapeLeg } from './jshape';
 import { TAPER, courseOf, normals, type Course, type Section2 } from './xsection';
 import type { XZ } from './land';
 import type { RoadDef } from './catalog';
@@ -184,6 +185,8 @@ export const holeMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWri
 export const LAMP_OFF = new THREE.MeshBasicMaterial({ color: '#1b1d20' });
 export const LAMP_ON: Record<string, THREE.Material> = { red: new THREE.MeshBasicMaterial({ color: '#ff3b2f' }), amber: new THREE.MeshBasicMaterial({ color: '#ffb020' }), green: new THREE.MeshBasicMaterial({ color: '#35e06b' }) };
 const lampGeo = new THREE.BoxGeometry(0.22, 0.22, 0.06);
+// which surface each material is, for checking the drawing from above (drawcheck.ts)
+export const SURFACES = { pave: [paveMat], asph: [asphaltMat], lines: [lineMat, yellowMat], verge: [vergeMat], island: [islandMat], median: [medianMat], paint: [busMat, cycleMat, bayMat] };
 
 // black boards with white chevrons, the kind on a roundabout's central island (made when first
 // needed, since it paints a canvas)
@@ -637,8 +640,8 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       }
       continue;
     }
-    (noPave ? verge : pave).poly(sh.pave, y + 0.15);
-    asph.poly(sh.apron, y + 0.25);
+    for (const q of sh.paves) (noPave ? verge : pave).poly(q, y + 0.15);
+    for (const q of sh.aprons) asph.poly(q, y + 0.25);
     for (const isl of sh.islands) {
       kerbed(isl, y);
       // a keep-left bollard at the end facing oncoming traffic
@@ -646,13 +649,16 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     }
     const legs = legsAt(net, n.id);
     const ring = j.form === 'roundabout' || j.form === 'mini';
+    const frame = (l: typeof legs[number]): ShapeLeg => ({ id: l.seg.id, dir: l.dir, ang: l.ang, def: net.def(l.seg), len: l.len, path: l.path });
     for (const leg of legs) {
-      const W = (a: number, b: number) => [n.x + leg.dir.x * a - leg.dir.z * b, n.z + leg.dir.z * a + leg.dir.x * b] as const;
+      // `a` out along the road as drawn and `b` across it (+b the side traffic arrives on)
+      const fl = frame(leg);
+      const W = (a: number, b: number) => { const p = legAt(n, fl, a, b); return [p.x, p.z] as const; };
       const rect = (f: Flat, a0: number, a1: number, b0: number, b1: number, yy: number) => { const p = [W(a0, b0), W(a1, b0), W(a1, b1), W(a0, b1)]; f.tri(p[0][0], p[0][1], p[1][0], p[1][1], p[2][0], p[2][1], y + yy); f.tri(p[0][0], p[0][1], p[2][0], p[2][1], p[3][0], p[3][1], y + yy); };
       const triW = (f: Flat, pts: [number, number][], yy: number) => { const q = pts.map(([a, b]) => W(a, b)); f.tri(q[0][0], q[0][1], q[1][0], q[1][1], q[2][0], q[2][1], y + yy); };
       const d = net.def(leg.seg), kIn = kerbOf(d);
       // at a roundabout the give-way line follows the edge of the ring
-      const lineAtB = (b: number) => (ring ? Math.sqrt(Math.max(0, sh.R * sh.R - b * b)) + 0.3 : sh.line[leg.seg.id] ?? 0);
+      const lineAtB = (b: number) => (ring ? ringA(n, fl, b, sh.R) + 0.3 : sh.line[leg.seg.id] ?? 0);
       const lineAt = lineAtB((d.median / 2 + kIn) / 2);
       const approaches = !(j.form === 'priority' && j.major.includes(leg.seg.id));
       // give-way lines (double broken) or a solid stop line across the incoming half
@@ -694,14 +700,14 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       }
       if (j.form === 'signals') {
         // a signal on the nearside of each approach: black head, red / amber / green lamps
-        const p = W(lineAt + 0.8, kIn + 0.7);
-        poles.box(p[0], p[1], leg.dir.x, leg.dir.z, 0.08, 0.08, y, y + 3.5);
-        poles.box(p[0], p[1], leg.dir.x, leg.dir.z, 0.2, 0.2, y + 2.3, y + 3.4);
+        const p = W(lineAt + 0.8, kIn + 0.7), ud = legDir(fl, lineAt);
+        poles.box(p[0], p[1], ud.x, ud.z, 0.08, 0.08, y, y + 3.5);
+        poles.box(p[0], p[1], ud.x, ud.z, 0.2, 0.2, y + 2.3, y + 3.4);
         (['red', 'amber', 'green'] as const).forEach((col, i) => {
           const m = new THREE.Mesh(lampGeo, LAMP_OFF);
           const f = W(lineAt + 1.02, kIn + 0.7);
           m.position.set(f[0], y + 3.15 - i * 0.33, f[1]);
-          m.rotation.y = -Math.atan2(leg.dir.z, leg.dir.x) + Math.PI / 2;
+          m.rotation.y = -Math.atan2(ud.z, ud.x) + Math.PI / 2;
           group.add(m);
           lamps.push({ mesh: m, node: n.id, seg: leg.seg.id, col });
         });
@@ -713,10 +719,10 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
           const c = laneCentre(net, leg.seg, i);
           const co = laneCentre(net, to.seg, net.def(to.seg).lanes - 1);
           const A0 = W(lineAt, c);
-          const r1 = sh.mouth[to.seg.id] ?? 0;
-          const B0 = [n.x + to.dir.x * r1 + to.dir.z * co, n.z + to.dir.z * r1 - to.dir.x * co];
-          const k = Math.hypot(B0[0] - A0[0], B0[1] - A0[1]) * 0.45;
-          const c1 = [A0[0] - leg.dir.x * k, A0[1] - leg.dir.z * k], c2 = [B0[0] - to.dir.x * k, B0[1] - to.dir.z * k];
+          const r1 = sh.mouth[to.seg.id] ?? 0, ft = frame(to), b1 = legAt(n, ft, r1, -co);
+          const B0 = [b1.x, b1.z];
+          const k = Math.hypot(B0[0] - A0[0], B0[1] - A0[1]) * 0.45, ua = legDir(fl, lineAt), ub = legDir(ft, r1);
+          const c1 = [A0[0] - ua.x * k, A0[1] - ua.z * k], c2 = [B0[0] - ub.x * k, B0[1] - ub.z * k];
           const pts: P[] = [];
           for (let t = 0; t <= 1.0001; t += 1 / 16) { const u = 1 - t; pts.push({ x: u * u * u * A0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * B0[0], z: u * u * u * A0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * B0[1], y }); }
           lines.dashes(pts, () => 0, 0.5, pathLength(pts) - 0.5, 0.8, 1, 0.07, 0.36);

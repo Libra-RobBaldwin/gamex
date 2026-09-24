@@ -12,7 +12,7 @@
 import { ROADS, halfOf, kerbOf, type RoadDef } from './catalog';
 import type { Network, P, RSeg } from './roads';
 import { GROUND, STD } from './standards';
-import { headShape, joinShape, type EndShape, type JoinShape } from './jshape';
+import { approachPath, headShape, joinShape, type EndShape, type JoinShape } from './jshape';
 import type { XZ } from './land';
 
 const pathLength = (p: P[]) => p.reduce((t, q, i) => (i ? t + Math.hypot(q.x - p[i - 1].x, q.z - p[i - 1].z) : 0), 0);
@@ -163,8 +163,12 @@ const lerp2 = (a: Section2, b: Section2, f: number): Section2 => ({
 });
 
 export function courseOf(net: Network, s: RSeg, taper: Ends2 = taperOf(net, s)): Course {
-  const d = net.def(s), own = net.path(s), L = pathLength(own);
   const kinds: [EndKind, EndKind] = [endKind(net, s, s.a), endKind(net, s, s.b)];
+  // (into a junction the road runs straight for its first few metres, as the junction is built on it)
+  let own = net.path(s);
+  if (kinds[0] === 'junction') own = approachPath(own);
+  if (kinds[1] === 'junction') own = approachPath(own.slice().reverse()).reverse();
+  const d = net.def(s), L = pathLength(own);
   const joins: [JoinShape | null, JoinShape | null] = [null, null], heads: [EndShape | null, EndShape | null] = [null, null];
   // round a join the cross-section blends to halfway between the two roads' by the middle of the curve
   const halfway: [Section2 | null, Section2 | null] = [null, null], fills: Course['fills'] = [null, null], onward: Course['onward'] = [null, null];
