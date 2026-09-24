@@ -853,6 +853,7 @@ function openQuality() {
     const q = b.dataset.q!;
     tierAuto = q === 'auto';
     if (!tierAuto) setTier(+q);
+    menuLink?.onQuality(tierAuto ? 'auto' : tier);
     openQuality();
   }));
 }
@@ -1421,8 +1422,11 @@ nav.onChange(() => {
 });
 
 // ---------------- loop ----------------
-seedTown();
-starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
+// the map is `?map=<id>` (maps.ts); the sandbox is the same land with nothing built on it yet
+if (new URLSearchParams(location.search).get('map') !== 'sandbox') {
+  seedTown();
+  starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
+}
 rebuildRoads();
 refreshTrees();
 setMode('look');
@@ -1636,4 +1640,14 @@ Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeL
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+// ---- the start menu (src/app/main.ts) loads this module, then links it: the quality set on the
+// menu, the Menu sheet's way back to it, and quality picked here remembered for next time ----
+export interface MenuLink { quality: number | 'auto'; onQuality: (q: number | 'auto') => void; onMenu: () => void }
+let menuLink: MenuLink | null = null;
+export function linkMenu(link: MenuLink) {
+  menuLink = link;
+  if (link.quality !== 'auto') { tierAuto = false; setTier(link.quality); }
+  shell.addMenuItem({ id: 'home', label: 'Main menu', icon: 'home', sub: 'Leave this town for the start menu', onClick: () => link.onMenu() });
 }
