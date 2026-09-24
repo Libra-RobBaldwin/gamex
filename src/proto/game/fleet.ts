@@ -354,17 +354,16 @@ export class Fleet {
       else d.brake -= dt;
       d.lastV = c.v;
     }
-    const lead = d.chain[0];
+    const lead = d.chain[0], r0 = parts[0];
+    // a bus's doors open on the kerb side (the driver's left) while it stands at a stop
+    if (c.bus && dt > 0) this.doors.setDoors(c.id, c.dwell !== undefined && c.gone === undefined ? 1 : 0, 'left', { model: lead });
+    // (off screen: nothing more to work out)
+    if (!r0 || !this.seen(r0.x, y, r0.z, d.length)) return;
     let f = (d.brake > 0 ? FLAGS.brake : 0) | this.indicators(c);
     if (dark(this.hour, d.lampAt)) f |= FLAGS.lights | (lead.category === 'bus' ? FLAGS.interior : 0);
     if (d.beacons) f |= FLAGS.beacons;
     if (d.sign) f |= FLAGS.sign;
-    // a bus's doors open on the kerb side (the driver's left) while it stands at a stop
-    let dl = 0;
-    if (c.bus) {
-      if (dt > 0) { this.doors.setDoors(c.id, c.dwell !== undefined && c.gone === undefined ? 1 : 0, 'left', { model: lead }); }
-      dl = this.doors.get(c.id)[0];
-    }
+    const dl = c.bus ? this.doors.get(c.id)[0] : 0;
     for (let i = 0; i < d.chain.length && i < parts.length; i++) {
       const r = parts[i];
       this.put(d.chain[i], r.x, y + LIFT, r.z, Math.atan2(r.hz, r.hx), pitch, k, d.cols[i], f, d.odo, dl, 0);

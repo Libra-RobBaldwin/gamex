@@ -1607,6 +1607,9 @@ export class Traffic {
     return { q: pointAt(this.pathOf(seg, from), Math.max(0, s)), seg };
   }
 
+  // Paused, nothing moves, but the view may: draw everyone again where they stand (the fleet only
+  // draws what's in view).
+  redraw() { this.draw(0, this.clock); }
   private draw(dt: number, now: number) {
     const net = this.net;
     this.fleet.begin(dt);

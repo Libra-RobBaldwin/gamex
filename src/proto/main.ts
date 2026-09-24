@@ -1474,7 +1474,7 @@ function frame(now: number) {
       traffic.generate(getPlaces(), hour, LEVELS[level][1], simNow);
       traffic.update(step, simNow);
     }
-  }
+  } else traffic.redraw();
   for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, simNow) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
