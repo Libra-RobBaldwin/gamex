@@ -103,6 +103,8 @@ export interface Info {
   icon?: Icon;
   tone?: Tone;
   facts?: [string, string][];
+  /** The few numbers that matter, as big tiles above the facts: [label, value] */
+  stats?: [string, string][];
   /** 0..1, drawn as a bar under the facts */
   meter?: number;
   note?: string;
@@ -350,7 +352,8 @@ export class Shell {
   }
   /** An info sheet for something tapped on the map: title, facts, a note and actions. */
   openInfo(i: Info) {
-    const facts = i.facts?.length ? `<dl class="facts">${i.facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '';
+    const stats = i.stats?.length ? `<div class="tiles">${i.stats.map(([k, v]) => `<div><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('')}</div>` : '';
+    const facts = stats + (i.facts?.length ? `<dl class="facts">${i.facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '');
     const meter = i.meter === undefined ? '' : `<div class="meter" aria-hidden="true"><i style="width:${Math.round(Math.min(1, Math.max(0, i.meter)) * 100)}%"></i></div>`;
     return this.openSheet({
       key: i.key ?? `info:${i.title}`, title: i.title, sub: i.sub, icon: i.icon ?? 'info', tone: i.tone, fresh: true,

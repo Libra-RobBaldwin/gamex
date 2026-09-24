@@ -567,7 +567,7 @@ function hint(text?: string, ic?: Icon) {
     if (!tool) return shell.hint(null);
     if (mode === 'stop') t = stopPreview ? '' : 'Tap a road, on the side you want the stop'; // (with a blueprint down, the card says it all)
     else if (mode === 'station') t = 'Tap a straight, level stretch of railway · platforms go either side';
-    else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : lineDraft.length === 1 ? 'Tap the next stop' : 'Tap more stops, or the first again for a circular line · then Create';
+    else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : ''; // (then the card says what next)
     else if (draft && slipPlan) t = 'A slip road: drag ahead and out to leave the motorway, back and out to join it · then Build';
     else if (draft) t = ''; // (the blueprint's card says what to do)
     else if (roadKind === 'straight') t = mode === 'rail' ? 'Drag to lay track · tap a junction to see how it works' : 'Drag to draw a road · tap a junction to redesign it';
@@ -660,7 +660,7 @@ const draftRail = () => lineDraft.length > 0 && lines.isStation(lineDraft[0]);
 function draftCost() { return draftRail() ? trainPrice(defaultTrain()) * NEW_LINE_TRAINS : busPrice(busOffer) * NEW_LINE_BUSES; }
 function startLineTool() {
   lineDraft = []; lineLoop = false;
-  tool = shell.startTool({ name: 'New line', spec: 'Buses call only at the stops you tap', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
+  tool = shell.startTool({ name: 'New line', spec: 'Tap stops in order', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
   setMode('line');
   lineChanged();
   // (every stop and station in view, so they can all be tapped without hunting for them)
@@ -677,7 +677,8 @@ function lineChanged() {
   tool?.setUndo(n > 0);
   const cost = draftCost();
   tool?.setPrimary({ label: n < 2 ? 'Create' : `Create · ${money(cost)}`, icon: 'check', kind: 'primary', disabled: n < 2 || !purse.can(cost), title: purse.can(cost) ? (draftRail() ? `${NEW_LINE_TRAINS} train` : `${NEW_LINE_BUSES} buses`) : short(cost), onClick: finishLine });
-  tool?.setPanel(n ? `<div class="what">${icon('transport')}<span>${lineDraft.map((id, i) => `<b>${i + 1}</b> ${esc(lines.name(id))}`).join(' · ')}${lineLoop ? ' · <b>back to 1</b>' : n > 2 ? ' · and back' : ''}</span></div>` : null);
+  const next = n === 1 ? 'Tap the next stop' : lineLoop ? 'Circular · tap stop 1 again to make it there and back' : `Tap more stops${n > 2 ? ', or stop 1 again to go round in a circle' : ''} · then Create`;
+  tool?.setPanel(n ? `<div class="what">${icon('transport')}<span>${lineDraft.map((id, i) => `<b>${i + 1}</b> ${esc(lines.name(id))}`).join(' · ')}${lineLoop ? ' · <b>back to 1</b>' : n > 2 ? ' · and back' : ''}</span></div><p class="why">${esc(next)}</p>` : null);
   hint();
 }
 function lineTap(sx: number, sy: number) {
@@ -703,6 +704,7 @@ function finishLine() {
   lineDraft = [];
   endTool();
   showLineInfo(l);
+  updateGoal();
   hint(`Line ${l.num} is running · ${k} ${rail ? (k === 1 ? 'train' : 'trains') : 'buses'} · ${money(each * k)}`, rail ? 'train' : 'bus');
 }
 // what a bus costs (the model the line runs, or the default one)
@@ -949,17 +951,16 @@ function showLineInfo(l: Line) {
   const profit = books.lastFares - books.lastRunning, sell = Math.round(vehiclePrice(l) / 2), rail = l.mode === 'rail', veh = rail ? 'train' : 'bus';
   showLine(l.bus.seq, l.stops);
   shell.openInfo({
-    key: `line:${l.id}`, title: `Line ${l.num}`, sub: lines.title(l), icon: l.mode === 'rail' ? 'train' : 'transport', tone: l.mode === 'rail' ? 'rail' : 'stop',
-    facts: [
-      [rail ? 'Stations' : 'Stops', l.stops.map((id) => lines.name(id)).join(' · ')], ['Runs', l.loop ? 'Circular, round and round' : 'There and back'], [rail ? 'Trains' : 'Buses', `${n}`],
-      ['Passengers last month', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'],
-      ['Fares last month', money(books.lastFares)], ['Running costs', money(-books.lastRunning)], ['Profit', money(profit)],
-    ],
-    note: rail ? `Trains call at each station and turn round at the ends of the line. Each passenger pays £2. A day here is a month in the town's life.` : `Buses take the quickest way between stops, and call on whichever side of the road they come along. Each passenger pays £2. A day here is a month in the town's life.`,
+    // (the three numbers that matter as tiles, the stops in a line, and the actions in a row;
+    // a game day is the town's month, so "a day" is what the player sees)
+    key: `line:${l.id}`, title: `Line ${l.num}`, sub: `${lines.title(l)} · ${l.loop ? 'circular' : 'there and back'}`, icon: l.mode === 'rail' ? 'train' : 'transport', tone: l.mode === 'rail' ? 'rail' : 'stop',
+    stats: [[rail ? 'Trains' : 'Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
+    facts: [[rail ? 'Stations' : 'Stops', l.stops.map((id) => lines.name(id)).join(' · ')]],
+    note: `Each rider pays £2${books.lastRunning ? `; the ${veh}${rail ? 's' : 'es'} cost ${money(books.lastRunning)} a day to run` : `, and the ${veh}${rail ? 's' : 'es'} cost a little each day to run`}.`,
     actions: [
-      { label: `Add a ${veh} · ${money(vehiclePrice(l))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(vehiclePrice(l)), onClick: () => { buyBus(l); showLineInfo(l); } },
-      { label: `Sell a ${veh} · ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`${rail ? 'Train' : 'Bus'} sold for ${money(sell)}`, rail ? 'train' : 'bus'); setTimeout(() => showLineInfo(l), 50); } },
-      { label: 'Withdraw line', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} ${veh}${k === 1 ? '' : rail ? 's' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
+      { label: `${veh === 'bus' ? 'Bus' : 'Train'} · ${money(vehiclePrice(l))}`, title: `Add a ${veh} for ${money(vehiclePrice(l))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(vehiclePrice(l)), onClick: () => { buyBus(l); showLineInfo(l); } },
+      { label: 'Sell', title: `Sell a ${veh} for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`${rail ? 'Train' : 'Bus'} sold for ${money(sell)}`, rail ? 'train' : 'bus'); setTimeout(() => showLineInfo(l), 50); } },
+      { label: 'Withdraw', title: 'Withdraw the line and sell its vehicles', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} ${veh}${k === 1 ? '' : rail ? 's' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
     ],
     onClose: () => { if (mode !== 'line') showLine(null); },
   });
@@ -1645,6 +1646,7 @@ function stopTap(p: P) {
     tool?.setPanel(null);
     tool?.setPrimary(null);
     hint(`${WHAT[pl.kind][0]} stop built for ${money(cost)} · tap to place another, or Done`, 'check');
+    updateGoal();
   };
   show();
 }
@@ -1942,7 +1944,7 @@ function updateGoal() {
   firstLineAt ??= clock;
   const done = () => { goalDone = true; shell.goal(null); };
   if (clock - firstLineAt > 2 * 1440) { done(); return; }
-  shell.goal({ step: 'Step 3 of 3', text: 'Your buses are running · watch the town grow', icon: 'building', onClick: () => { done(); showTown(); } });
+  shell.goal({ step: 'Step 3 of 3', text: 'Buses running · watch the town grow', icon: 'building', onClick: () => { done(); showTown(); } });
 }
 let goalTick = 0;
 let syncAt = 2;
