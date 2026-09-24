@@ -42,7 +42,7 @@ export const CHUNK = 120;
 interface SleeperDef { len: number; width: number; depth: number; colour: string; seat: { across: number; along: number; colour: string } }
 export const SLEEPERS: Record<SleeperKind, SleeperDef> = {
   // creosoted softwood in cast-iron chairs (bullhead rail)
-  timber: { len: 2.6, width: 0.25, depth: 0.13, colour: '#4d3b2b', seat: { across: 0.34, along: 0.2, colour: '#2d2a28' } },
+  timber: { len: 2.6, width: 0.25, depth: 0.13, colour: '#5c4834', seat: { across: 0.34, along: 0.2, colour: '#2d2a28' } },
   // prestressed concrete with baseplates and clips (flat-bottom rail)
   concrete: { len: 2.5, width: 0.28, depth: 0.2, colour: '#b9b4aa', seat: { across: 0.2, along: 0.17, colour: '#2b2c2f' } },
 };
@@ -152,7 +152,7 @@ export function plainBallastTexture(kind: SleeperKind) {
 }
 // bare timbers on a steel deck: dark gaps between them, guard rails inside the running rails
 export function openDeckTexture() {
-  if (!cache.has('open')) cache.set('open', paintTexture(256, 32, (n, s, px) => trackTop(n, s, px, 'timber', hex('#26231f'), true)));
+  if (!cache.has('open')) cache.set('open', paintTexture(256, 32, (n, s, px) => trackTop(n, s, px, 'timber', hex('#3e3831'), true)));
   return cache.get('open')!;
 }
 
