@@ -7,7 +7,7 @@
 // county.
 
 export interface XZ { x: number; z: number }
-export type Owner = 'road' | 'junction' | 'slip' | 'island';
+export type Owner = 'road' | 'junction' | 'slip' | 'island' | 'water'; // ('water': lakes and rivers, from the water system)
 export interface Claim { key: string; owner: Owner; polys: XZ[][]; box: [number, number, number, number] }
 
 const CELL = 40;

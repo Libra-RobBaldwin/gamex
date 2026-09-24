@@ -166,7 +166,7 @@ export function waterGeometry(w: WaterMesh) {
 // settings, texture, shadows) as it is.
 export function patchGroundMaterial<M extends THREE.MeshLambertMaterial | THREE.MeshStandardMaterial>(m: M): M {
   m.vertexColors = true;
-  const prev = m.onBeforeCompile;
+  const prev = m.onBeforeCompile, prevKey = m.customProgramCacheKey;
   m.onBeforeCompile = (sh, r) => {
     prev?.call(m, sh, r);
     sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', `
@@ -176,7 +176,8 @@ export function patchGroundMaterial<M extends THREE.MeshLambertMaterial | THREE.
   diffuseColor.rgb *= vColor;
 #endif`);
   };
-  m.customProgramCacheKey = () => 'water-shore';
+  // (chained, so a patch already on the material, such as the ground's, keeps its own programs)
+  m.customProgramCacheKey = () => `${prevKey.call(m)}|water-shore`;
   return m;
 }
 

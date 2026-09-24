@@ -13,6 +13,7 @@ import { CIVIC, makeBuilding as generate, makeRegion, USE } from './buildgen';
 import { CELL, findRegions, type Region } from './infill';
 import { GameGround } from './ground/game';
 import { setGroundQuality } from './ground';
+import { GameWater, LAKE } from './game/water';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
 import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
@@ -22,10 +23,12 @@ const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // ---------------- world ----------------
-const LAKE = { x: 250, z: -190, r: 90 };
-const isWater = (p: P) => Math.hypot(p.x - LAKE.x, p.z - LAKE.z) < LAKE.r + 4;
+// the lake: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
+const gameWater = new GameWater(520 * 1.3); // (the ground's half-width, BOUND * 1.3)
+const isWater = (p: P) => gameWater.isWater(p);
 const BOUND = 520;
 const net = new Network(isWater, BOUND, 11);
+gameWater.claim(net.land); // the lake's land ('water', 3 m past the waterline): plots and parks keep off it
 // an industrial estate south of the centre
 const INDUSTRIAL = (p: P) => p.z < -215 && Math.abs(p.x) < 280;
 net.zoneAt = (p) => (INDUSTRIAL(p) ? 'industrial' : 'town');
@@ -92,22 +95,19 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND);
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND * 2.6, BOUND * 2.6), gameGround.ground.material);
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND);
+// (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
+const ground = new THREE.Mesh(gameWater.groundGeometry(BOUND * 2.6), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 // the ground leaves out any cutting a road or railway runs down into (they mark the stencil first)
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
 scene.add(gameGround.ground.hedges);
 scene.add(ground);
-const beach = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 7, 72), new THREE.MeshLambertMaterial({ color: '#d9c894' }));
-beach.rotation.x = -Math.PI / 2;
-beach.position.set(LAKE.x, 0.05, LAKE.z);
-const lake = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r, 72), new THREE.MeshPhongMaterial({ color: '#3f86bf', shininess: 90, specular: '#cfe6ff' }));
-lake.rotation.x = -Math.PI / 2;
-lake.position.set(LAKE.x, 0.1, LAKE.z);
-lake.receiveShadow = true;
-scene.add(beach, lake);
+// the lake (src/proto/game/water.ts): beaches and the bed laid over the ground (chained after the
+// ground's own patch), and the water and reeds on top: two draw calls
+gameWater.patch(gameGround.ground.material);
+scene.add(gameWater.group);
 
 // ---------------- trees (instanced) ----------------
 interface Tree { x: number; z: number; s: number; kind: number }
@@ -117,7 +117,7 @@ for (let i = 0; i < 1400; i++) {
   // woods on the outskirts, a few in town
   const dc = Math.hypot(p.x, p.z);
   if (dc < 140 && rand() < 0.85) continue;
-  if (isWater(p) || Math.hypot(p.x - LAKE.x, p.z - LAKE.z) < LAKE.r + 10) continue;
+  if (isWater(p) || gameWater.near(p, 10)) continue;
   trees.push({ ...p, s: 0.8 + rand() * 0.7, kind: rand() < 0.3 ? 1 : 0 });
 }
 const crownGeo = new THREE.IcosahedronGeometry(3.4, 1);
@@ -1486,6 +1486,7 @@ function frame(now: number) {
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
   clock += gdt * GAME_MIN_PER_S;
   const hour = (clock / 60) % 24;
+  gameWater.update(now / 1000, hour); // ripples and reeds, and the water's light from the clock
   // At 1× traffic steps once a frame as it always has; faster, it's cut into steps of at most
   // 1/30 s so cars don't jump through each other or past their stop lines. Paused, it holds still.
   if (speed > 0) {
@@ -1533,3 +1534,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 (window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
