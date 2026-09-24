@@ -100,13 +100,45 @@ Lengths come from `standards.ts`, following DMRB CD 122:
 
 ## Pedestrian crossings
 
-- `jshape.crossingAt(shape, form, leg, y)` says where people cross each arm of a junction. The
-  crowds (`game/crowdsites.ts`) and the drawing both read it, so people cross where the crossing is
-  drawn.
-- Drawn at both kerbs: tactile paving, buff blister for an uncontrolled crossing, red with studs
-  across the carriageway at signals.
-- Only on single-carriageway arms with footways, a little way back from the corner and clear of a
-  roundabout's splitter island. None on dual carriageways, motorways or merges.
+**At junctions** (`jshape.crossingAt`): uncontrolled crossings with dropped kerbs and buff blister
+paving, on each single-carriageway arm with footways, a little way back from the corner and clear of
+a roundabout's splitter island. At signals the paving is red, with studs across the carriageway.
+People cross there when nothing is coming.
+
+**Along the roads** (`pedx.ts`): zebra and pelican crossings.
+
+- **Kind.** A plain 30 mph street gets a zebra. An avenue, a two-lane or 40 mph road, or a road with
+  a reservation to cross gets a pelican. Dual carriageways, motorways and fast roads get neither.
+- **Where.**
+  - Behind each bus stop, in the bus's direction, so people off the bus cross behind it.
+  - Halfway along a long stretch.
+  - Always 22 m clear of a junction's line, 18 m clear of a stop's markings, at grade, and at
+    least 80 m apart.
+- **What's drawn** (TSRGD):
+  - Zig-zags (diagram 1001.1), up to 8 of 2 m, along both kerbs and the middle, either side. The
+    centre line stops for them, and there's no parking on them.
+  - Red blister paving at both kerbs.
+  - A zebra: black and white stripes parallel to the kerb, give-way blocks 1.5 m back, and a
+    Belisha beacon (banded pole, amber globe) at each end.
+  - A pelican: two lines of studs, a stop line 2.5 m back on each approach, and four signal heads
+    (nearside and far side for each direction) with push buttons.
+- **How it works** (`game/crowds.ts`):
+  - At a zebra, people step out once anything coming could stop comfortably (2.5 m/s²) at the
+    give-way line. Traffic then holds there until they're over.
+  - At a pelican, someone waiting calls it once traffic has had 20 s of green: 3 s amber, 1 s
+    all-red, the green man (red for traffic) until everyone's over and at least 6 s, then 3 s
+    flashing amber.
+  - Its lamps follow that cycle (`Lamp.pedx`). Traffic holds at the stop line. A vehicle too close
+    to stop even at 6 m/s² when the amber comes carries on over.
+- `traffic.crossing` points can carry `stand`: how far short of the crossing's middle traffic
+  waits. The junction crossings leave it out and behave as before.
+
+## Give-way markings
+
+- **The give-way line** (diagram 1003) at a priority junction is right against the major road, on
+  its kerb line, not back at the end of the corner radius (`Shape.giveWay`). A road meeting at an
+  angle has it square to the major road. Traffic waits there, so a driver can see along the major road.
+- **The triangle** (diagram 1023) is an outline, with its point towards the approaching driver.
 
 ## Grade-separated junctions (`interchange/build.ts`)
 
@@ -182,6 +214,7 @@ the region session, since this stream doesn't touch `src/proto/region/`.
 | `interchange/interchange.test.ts` | Tapers and noses measured from the course traffic drives against `STD`, for each form and for parallel lanes. The drawn surfaces round every junction window (`drawcheck.ts`): no holes, stray markings or footway/verge fights. A junction that can't be built changes nothing. One-way streets: nobody ever goes the wrong way. |
 | `traffic.test.ts` (scenarios in `trafficsim.ts`) | Motorway junction scenarios for all three forms and for parallel lanes, with lorries running end to end along the motorway: zero overlaps at 30 and 10 frames a second. |
 | `interchange/region.test.ts` | The region's roads. |
+| `game/pedx.test.ts` | Zebras and pelicans: the right kind for each road, clear of junctions and stops, people at both kerbs; a pelican's cycle (green, amber, red with the green man, flashing amber), with traffic held at the stop line. |
 
 ## Known limits
 
@@ -189,7 +222,7 @@ the region session, since this stream doesn't touch `src/proto/region/`.
 - **The grade-separated roundabout's ring can queue back** at the local road's give-ways when the
   local traffic is heavy. In the harness that's up to 2 give-ups in about 200 trips; the limit is 1 in 100.
 - **Junction design:** the give-way corners on the ring's curve leave a 5 cm hairline of asphalt.
-- **No mid-block zebras or refuges yet.** Crossings are only at junctions. Zebras near bus stops and
-  refuges in splitter islands are the obvious next step.
+- **No refuges or staggered crossings yet.** A pelican over a reservation goes straight across. The
+  newer puffin and toucan crossings (kerbside detectors, no flashing amber) are the next step.
 - **Merges and diverges are laid out on the carriageway as it runs.** A tight curve through one
   would bend its taper with it. The builders use straight motorways at their junctions.

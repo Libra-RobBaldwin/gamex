@@ -155,8 +155,9 @@ export class Traffic {
   stationAt?: (id: number) => StationSpot | null; // where a railway station stands (game/rail.ts)
   onTrainStop?: (station: number, train: number) => number; // a train has drawn up: how long it stands (s)
   // People on a crossing now (game/crowds.ts), as points on each road, by the road's id. Vehicles
-  // that haven't reached one stop short of it.
-  crossing = new Map<number, P[]>();
+  // that haven't reached one stop short of it (`stand` metres short, at a zebra's or pelican's line,
+  // where one that couldn't stop comfortably in time carries on over: an amber light)
+  crossing = new Map<number, (P & { stand?: number })[]>();
   stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0 };
   // how many junction conflict tables have been worked out, and how long they took (ms)
   readonly conflictStats = tableStats;
@@ -1532,7 +1533,11 @@ export class Traffic {
       if (c.bus) { const o = this.leader(keyOf(c.seg, c.from, BAYLANE), c.s, c); if (o && o.pos - c.s < 40) ob(o.pos - o.c.back - c.s - c.front, o.c.v); }
       this.squeezed(c, ob);
       const xs = this.crossing.get(c.seg.id); // (people crossing)
-      if (xs) for (const p of xs) { const x = closestOnPath(p, this.pathOf(c.seg, c.from)).s; if (x > c.s + c.front) ob(Math.max(0.1, x - 2 - c.s - c.front), 0, 0.3); }
+      if (xs) for (const p of xs) {
+        const x = closestOnPath(p, this.pathOf(c.seg, c.from)).s, g = x - (p.stand ?? 2) - c.s - c.front;
+        if (p.stand !== undefined && c.v > 3 && g < (c.v * c.v) / (2 * 6)) continue; // (too close to stop even hard: it goes on over)
+        if (x > c.s + c.front) ob(Math.max(0.1, g), 0, 0.3);
+      }
       // and beyond the end of it
       if (!e || e.pos - c.s > this.horizon(c)) {
         if (pl) { if (admitted) this.onward(c, pl.next, pl.node, pl.path.exitLane, pl.path.outS, pl.path.lineS - c.s + (pl.path.ext1 - pl.path.ext0), 1, ob); }

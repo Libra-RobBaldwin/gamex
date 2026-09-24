@@ -43,8 +43,10 @@ describe('junction shapes', () => {
     const sh = j.shape!;
     expect(pointInPoly({ x: 0, z: 0 }, sh.apron)).toBe(true);
     const side = legsAt(n, node).find((l) => !j.major.includes(l.seg.id))!;
-    // the give-way line sits past the major road's kerb plus the corner radius
-    expect(sh.line[side.seg.id]).toBeGreaterThan(kerbOf(ROADS.street) + 4);
+    // the give-way line sits right against the major road, on its kerb line (TSRGD diagram 1003), so
+    // a driver waiting at it can see along the major road
+    expect(sh.line[side.seg.id]).toBeGreaterThanOrEqual(kerbOf(ROADS.street));
+    expect(sh.line[side.seg.id]).toBeLessThan(kerbOf(ROADS.street) + 0.5);
     // the corner is rounded: a point just inside the kerb corner is carriageway
     expect(pointInPoly({ x: 4.5, z: 4.5 }, sh.apron)).toBe(true);
     expect(pointInPoly({ x: 12, z: 12 }, sh.apron)).toBe(false);

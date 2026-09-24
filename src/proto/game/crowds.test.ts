@@ -80,8 +80,8 @@ describe('where the crowds can be', () => {
   });
 
   it('puts both kerbs of each junction arm across the road from each other', () => {
-    // the crossroads' four arms and the T's three
-    expect(sites.crossings.length).toBe(7);
+    // the crossroads' four arms and the T's three (and the zebras and pelicans along the roads, pedx.test.ts)
+    expect(sites.crossings.filter((c) => !c.kind).length).toBe(7);
     for (const c of sites.crossings) {
       const [a, b] = c.kerbs, w = Math.hypot(a.at.x - b.at.x, a.at.z - b.at.z);
       const d = net.def(net.segs.get(c.seg)!), K = kerbOf(d);

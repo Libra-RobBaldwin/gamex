@@ -1889,7 +1889,7 @@ function frame(now: number) {
       traffic.update(step, simNow);
     }
   } else traffic.redraw();
-  for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, simNow) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
+  for (const l of lamps) l.mesh.material = (l.pedx ? people.pelicanLight(l.pedx) : traffic.lightFor(l.node, l.seg, simNow)) === l.col ? LAMP_ON[l.col] : LAMP_OFF; // (a pelican's lights follow its people)
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   markers.frame(cam, canvas.clientHeight);
   if (routeShown) routeShown.material.resolution.set(canvas.width, canvas.height);
