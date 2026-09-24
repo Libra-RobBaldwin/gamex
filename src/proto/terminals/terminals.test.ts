@@ -11,7 +11,7 @@ import { bounds, overlaps, place, roomCheck, waterline, type Box } from './layou
 import { buildTerminals, fxModel } from './models';
 import {
   IDLE_CUT_DAYS, IDLE_MOTHBALL_DAYS, IDLE_WARN_DAYS, MOTHBALL_UPKEEP, REMOVE_REFUND, apply, capacity, dwellFactor, dwellHours, estimateFlows,
-  levelCap, levelsAt, offers, outAt, review, shareOutput, shownFor, specFor, startingTerminals, suggest, terminalFor, tick, townSpec,
+  levelCap, levelsAt, offers, outAt, report, review, shareOutput, shownFor, specFor, startingTerminals, suggest, terminalFor, tick, townSpec,
   type SiteContext, type SiteFlows, type SiteTerminals, type Terminal,
 } from './rules';
 
@@ -172,6 +172,16 @@ describe('capacity and growth', () => {
     expect(r.suggestion).toBeNull();
   });
 
+  it('says what stands in the way when nothing bigger can be built', () => {
+    const depot = withT(3, open('road', 'lorry_depot'));
+    const room = roomCheck(bare.get('coal_mine')!, [{ mode: 'road', tier: 'lorry_depot' }], {}, () => false);
+    const f = estimateFlows(colliery, depot, 2.12, { stockFill: 0.95 });
+    const s = suggest(colliery, depot, { ...CTX, rail: false, room }, 2.12, f);
+    expect(s?.reason).toBe('stuck');
+    expect(s?.text).toBe('Colliery output is stockpiling. Private sidings: needs a rail line to the site'); // the smallest thing that would help
+    expect(suggest(colliery, depot, { ...CTX, room }, 2.12, f)?.text).toMatch(/^Colliery output is stockpiling: private sidings would move/);
+  });
+
   it('tells vehicles from concrete: a full stockyard with idle berths wants more lorries', () => {
     const depot = withT(2, open('road', 'lorry_depot'));
     const f = estimateFlows(colliery, depot, 1, { lift: 0.3, stockFill: 0.95 });
@@ -208,6 +218,25 @@ describe('capacity and growth', () => {
     // a fit from a later era isn't recommended early
     expect(find('coal_mine', 'rail_terminal', { ...CTX, year: 1950 }, withT(2)).fit).not.toBe('rapid_loader');
     expect(find('coal_mine', 'rail_terminal', { ...CTX, year: 1970 }, withT(2)).fit).toBe('rapid_loader');
+    // and each refusal carries a code a UI can turn into an icon or a short label
+    expect(find('coal_mine', 'jetty').block).toBe('mode');
+    expect(find('refinery', 'jetty').block).toBe('water');
+    expect(find('coal_mine', 'sidings', { ...CTX, rail: false }).block).toBe('rail');
+    expect(find('coal_mine', 'road_terminal', { ...CTX, year: 1930 }, withT(3)).block).toBe('era');
+    expect(find('coal_mine', 'road_terminal').block).toBe('grade');
+    expect(find('coal_mine', 'loading_bay').block).toBeUndefined();
+  });
+
+  it('sums it all up for the economy in one call', () => {
+    const st = withT(2, open('road', 'lorry_depot'), open('rail', 'rail_terminal', 'rapid_loader'));
+    const r = report(colliery, st, CTX, 2);
+    expect(r.production).toEqual({ level: 2, out: 132, in: 0 });
+    expect(r.capacity.levelCap).toBeCloseTo(levelCap(colliery, st), 9);
+    expect(r.capacity.byMode.rail?.fit).toBe('rapid_loader');
+    expect(r.dwell('rail', 'coal', 1000)).toBeCloseTo(dwellHours(st.terminals[1], 'coal', 1000), 9);
+    expect(r.dwell('water', 'coal', 1000)).toBeNull();
+    expect(r.offers.length).toBe(9);
+    expect(r.suggestion).toBeNull(); // plenty of room: nothing to say
   });
 
   it('asks whether there is land for the bigger tiers', () => {
@@ -218,14 +247,14 @@ describe('capacity and growth', () => {
     expect(o.find((x) => x.tier === 'sidings')!.status).toBe('available'); // on the site's own siding line
     const depot = o.find((x) => x.tier === 'lorry_depot')!;
     expect(depot.status).toBe('blocked');
-    expect(depot.reason).toMatch(/^No room beside the site for a lorry depot: it needs 38 × 42 m$/);
+    expect(depot.reason).toBe('No room beside the site (it needs 38 × 42 m)');
     expect(o.find((x) => x.tier === 'marshalling_yard')!.reason).toMatch(/^No room behind the site/);
     // a brewery too small for sidings of its own needs land behind even for those
     const small = buildIndustry('brewery', defaultPlot('brewery', 'tower', 0, 0), { seed: 1, bare: true, variant: 'tower' });
     const tiny = buildIndustry('brewery', { poly: [{ x: -25, z: -20 }, { x: 25, z: -20 }, { x: 25, z: 20 }, { x: -25, z: 20 }], facing: { x: 0, z: 1 } }, { seed: 1, bare: true });
     expect(small.anchors.rail.length).toBeGreaterThan(0);
     expect(tiny.anchors.rail.length).toBe(0);
-    expect(roomCheck(tiny, [], {}, () => false)('rail', 'sidings')).toMatch(/^No room behind the site for private sidings/);
+    expect(roomCheck(tiny, [], {}, () => false)('rail', 'sidings')).toMatch(/^No room behind the site \(it needs \d+ × 12 m\)$/);
   });
 
   it('serves a town goods depot, which only unloads', () => {
@@ -282,7 +311,7 @@ describe('buying, upgrading and removing', () => {
     if (!r.ok) expect(r.reason).toBe('Unlocks as the site grows');
     const f = apply(colliery, withT(2), { ...CTX, year: 1950 }, { kind: 'build', mode: 'rail', tier: 'rail_terminal', fit: 'rapid_loader' });
     expect(f.ok).toBe(false);
-    if (!f.ok) expect(f.reason).toBe('Rapid loader silo: From 1965');
+    if (!f.ok) expect(f.reason).toBe('Rapid loader: From 1965');
     const g = apply(colliery, withT(2), CTX, { kind: 'build', mode: 'road', tier: 'lorry_depot', fit: 'gantry' });
     expect(g.ok).toBe(false);
   });

@@ -25,6 +25,34 @@
       .icon.in { border-style: dashed; }
       .icon.starved { animation: pulse 1s infinite; }
       @keyframes pulse { 50% { opacity: 0.35; } }
+      /* the Terminals panel */
+      #tpanel { max-height: 58vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      .thead { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; }
+      .thead span { opacity: 0.85; }
+      .bar { position: relative; height: 10px; margin: 5px 0 3px; border-radius: 5px; background: #253043; overflow: visible; }
+      .bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: #d69a2d; }
+      .bar b { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: #3fa476; border-radius: 2px; }
+      .tline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-height: 18px; }
+      .tline .money { margin-left: auto; opacity: 0.8; font-variant-numeric: tabular-nums; }
+      .pill { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #3a475c; }
+      .pill.warn { background: #8a4b1f; }
+      .suggest { margin: 4px 0 6px; padding: 5px 8px; border-radius: 8px; background: #1b2433; border: 1px solid #2a3240; }
+      .tmode { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+      .tmode .g { font-size: 18px; width: 24px; text-align: center; }
+      .tmode .info { flex: 1; min-width: 0; }
+      .tmode .info small { display: block; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .tmode.off { opacity: 0.55; }
+      .tmode button { min-height: 28px; padding: 3px 8px; }
+      .chips { display: flex; gap: 4px; margin: 3px 0 0 30px; }
+      .chip { flex: 1; min-width: 0; padding: 3px 4px; font-size: 11px; line-height: 1.2; min-height: 36px; white-space: normal; }
+      .chip i { display: block; font-style: normal; font-weight: 700; margin-top: 1px; }
+      .chip.owned { background: #2e7d5b; border-color: #3fa476; }
+      .chip.building { background: #5a4a1f; border-color: #8a7330; }
+      .chip.available { background: #253043; border-color: #d69a2d; }
+      .chip.locked, .chip.era, .chip.blocked, .chip.superseded { opacity: 0.5; }
+      .log { font-size: 11px; opacity: 0.8; margin-top: 4px; }
+      .tstats { display: block; opacity: 0.6; font-size: 11px; margin-top: 2px; }
+      #tpanel .row output { width: 42px; }
     </style>
   </head>
   <body>
@@ -33,13 +61,14 @@
     <div id="icons"></div>
     <div id="panel">
       <div class="row"><button id="prev">◀</button><div id="name"></div><button id="next">▶</button></div>
-      <div class="row"><button id="variant">Variant</button><button id="seed">Reseed</button><button id="all" class="on">All</button><button id="ring">Catchment</button></div>
-      <div class="row"><label>Production</label><input id="prod" type="range" min="0" max="4" step="0.1" value="2" /><output id="prodv"></output></div>
-      <div class="row"><label>Input stock</label><input id="inp" type="range" min="0" max="1" step="0.01" value="0.6" /><output id="inpv"></output></div>
-      <div class="row"><label>Output stock</label><input id="out" type="range" min="0" max="1" step="0.01" value="0.6" /><output id="outv"></output></div>
-      <div class="row"><label>Neglect</label><input id="neg" type="range" min="0" max="1" step="0.01" value="0" /><output id="negv"></output></div>
-      <div class="row"><label>Year</label><input id="year" type="range" min="1850" max="2030" step="1" value="1965" /><output id="yearv"></output></div>
-      <div class="row tog"><button id="running" class="on">Running</button><button id="delivered" class="on">Delivery</button><button id="night">Night</button><button id="zoomall">Gallery</button></div>
+      <div class="row"><button id="variant">Variant</button><button id="seed">Reseed</button><button id="ring">Catchment</button><button id="terms">Terminals</button></div>
+      <div id="tpanel" style="display: none"></div>
+      <div class="row sliders"><label>Production</label><input id="prod" type="range" min="0" max="4" step="0.1" value="2" /><output id="prodv"></output></div>
+      <div class="row sliders"><label>Input stock</label><input id="inp" type="range" min="0" max="1" step="0.01" value="0.6" /><output id="inpv"></output></div>
+      <div class="row sliders"><label>Output stock</label><input id="out" type="range" min="0" max="1" step="0.01" value="0.6" /><output id="outv"></output></div>
+      <div class="row sliders"><label>Neglect</label><input id="neg" type="range" min="0" max="1" step="0.01" value="0" /><output id="negv"></output></div>
+      <div class="row sliders"><label>Year</label><input id="year" type="range" min="1850" max="2030" step="1" value="1965" /><output id="yearv"></output></div>
+      <div class="row tog sliders"><button id="running" class="on">Running</button><button id="delivered" class="on">Delivery</button><button id="all" class="on">All</button><button id="night">Night</button><button id="zoomall">Gallery</button></div>
     </div>
     <script type="module" src="/src/proto/industries/demo.ts"></script>
   </body>

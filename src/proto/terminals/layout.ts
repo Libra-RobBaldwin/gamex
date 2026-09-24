@@ -7,7 +7,6 @@ import { INDUSTRY_TYPES } from '../industries/catalogue';
 import type { IndustryModel } from '../industries/models';
 import { toWorld, type WXZ } from '../industries/site';
 import { TIERS, type Mode, type TierId } from './catalogue';
-import { called } from './rules';
 
 export interface Box { x0: number; x1: number; z0: number; z1: number }
 export type Side = 'plot' | 'back' | 'left' | 'right';
@@ -145,6 +144,6 @@ export function roomCheck(m: IndustryModel, current: Wanted[], o: LayoutOpts = {
     if (!p.land || !landFree || landFree(p.land, mode)) return null;
     const { w, d } = { w: Math.round(p.pad.x1 - p.pad.x0), d: Math.round(p.pad.z1 - p.pad.z0) };
     const where = mode === 'road' ? 'beside the site' : mode === 'rail' ? (p.side === 'back' ? 'behind the site' : 'beside the site') : 'along the water';
-    return `No room ${where} for ${called(tier)}: it needs ${w} × ${d} m`;
+    return `No room ${where} (it needs ${w} × ${d} m)`;
   };
 }

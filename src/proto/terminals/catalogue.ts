@@ -51,7 +51,7 @@ export const STANDARD_SUITS: Record<CargoClass, number> = { bulk: 1, general: 1,
 export const FITS: Record<FitId, FitDef> = {
   standard: { id: 'standard', name: 'Standard', blurb: 'Loading shovel, forklifts and a mobile crane.', suits: {}, dwell: 1, extra: 0, era: [1800, null] },
   conveyor: { id: 'conveyor', name: 'Conveyor and hopper', blurb: 'A belt from the stockyard to a hopper over the loading point, for coal, ore, stone and grain.', suits: { bulk: 1.6 }, dwell: 0.7, extra: 0.3, era: [1880, null] },
-  rapid_loader: { id: 'rapid_loader', name: 'Rapid loader silo', blurb: 'A silo straddling the track fills each wagon as the train creeps under it, and a hopper house empties them. Merry-go-round working.', suits: { bulk: 2.5, general: 0.5 }, dwell: 0.35, extra: 0.6, era: [1965, null] },
+  rapid_loader: { id: 'rapid_loader', name: 'Rapid loader', blurb: 'A silo straddling the track fills each wagon as the train creeps under it, and a hopper house empties them at the other end: merry-go-round working.', suits: { bulk: 2.5, general: 0.5 }, dwell: 0.35, extra: 0.6, era: [1965, null] },
   gantry: { id: 'gantry', name: 'Loading gantry', blurb: 'An overhead crane on a runway over the tracks lifts steel, timber and crates.', suits: { general: 1.6 }, dwell: 0.7, extra: 0.4, era: [1880, null] },
   tank_farm: { id: 'tank_farm', name: 'Tank farm', blurb: 'Storage tanks, pumps and loading arms for oil, fuel and chemicals.', suits: { liquid: 1.5 }, dwell: 0.6, extra: 0.5, era: [1890, null] },
   grab_cranes: { id: 'grab_cranes', name: 'Grab cranes', blurb: 'Portal cranes with grabs and a belt to the stockyard, for bulk ships.', suits: { bulk: 1.8 }, dwell: 0.6, extra: 0.4, era: [1900, null] },

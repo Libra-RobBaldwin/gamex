@@ -53,8 +53,8 @@ export function townSpec(name: string, population: number, waterside = false): S
 
 const sum = (f: Flows) => Object.values(f).reduce<number>((s, v) => s + (v ?? 0), 0);
 export const outAt = (spec: SiteSpec, level: number) => sum(spec.out) * level;
-const makesAny = (spec: SiteSpec) => sum(spec.out) > 0;
 export const inAt = (spec: SiteSpec, level: number) => sum(spec.in) * level;
+const makesAny = (spec: SiteSpec) => sum(spec.out) > 0;
 
 // ---------------- terminals owned ----------------
 export type TerminalStatus = 'building' | 'open' | 'mothballed';
@@ -259,6 +259,8 @@ export interface SiteContext {
 }
 
 export type OfferStatus = 'owned' | 'building' | 'superseded' | 'available' | 'locked' | 'era' | 'blocked' | 'not_offered';
+// Why an offer can't be bought, for a UI that wants an icon or a short label rather than the sentence.
+export type BlockCode = 'mode' | 'water' | 'superseded' | 'era' | 'grade' | 'rail' | 'road' | 'room' | 'busy';
 export interface FitOffer { fit: FitId; cost: number; tph: number; ok: boolean; reason?: string }
 export interface Offer {
   mode: Mode;
@@ -272,10 +274,12 @@ export interface Offer {
   tph: number; // what it would move of this site's traffic
   gain: number; // the site's throughput with it (in place of this mode's current terminal) over without
   reason: string; // plain words for the UI
+  block?: BlockCode;
   fits: FitOffer[];
 }
 
 const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+const upper = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 // "a lorry depot", "private sidings"
 export const called = (tier: TierId) => (tier === 'sidings' ? lc(TIERS[tier].name) : `a ${lc(TIERS[tier].name)}`);
 const times = (g: number) => (g >= 10 ? `${Math.round(g)}x` : `${(Math.round(g * 10) / 10).toString()}x`);
@@ -315,34 +319,34 @@ export function offers(spec: SiteSpec, st: SiteTerminals, ctx: SiteContext): Off
       const trade = cur ? 0.5 * tierCost(cur.tier, cur.fit) : 0;
       const o: Offer = { mode, tier, rank: T.rank, status: 'available', fit: best.fit, cost: Math.max(0, best.cost - trade), upkeep: T.upkeep, buildDays: T.buildDays, tph: best.tph, gain, reason: '', fits };
       const pendingHere = cur?.pending?.tier === tier;
-      if (notHere) { o.status = 'not_offered'; o.reason = notHere; }
+      if (notHere) { o.status = 'not_offered'; o.reason = notHere; o.block = spec.modes.includes(mode) ? 'water' : 'mode'; }
       else if (cur && (cur.tier === tier || pendingHere)) {
         o.fit = pendingHere ? cur.pending!.fit : cur.fit;
         o.cost = 0;
         o.status = cur.status === 'building' || pendingHere ? 'building' : 'owned';
         const ready = pendingHere ? cur.pending!.ready : cur.ready;
         o.reason = o.status === 'building' ? `Being built: opens on day ${ready}` : cur.status === 'mothballed' ? 'Mothballed: reopen it to use it' : `Moves ${Math.round(tphAt(spec, cur))} t/h`;
-      } else if (T.rank < curRank) { o.status = 'superseded'; o.reason = `Part of the ${lc(TIERS[cur!.tier].name)}`; }
-      else if (!inEra(T.era, ctx.year)) { o.status = 'era'; o.reason = `From ${T.era[0]}`; }
+      } else if (T.rank < curRank) { o.status = 'superseded'; o.block = 'superseded'; o.reason = `Part of the ${lc(TIERS[cur!.tier].name)}`; }
+      else if (!inEra(T.era, ctx.year)) { o.status = 'era'; o.block = 'era'; o.reason = `From ${T.era[0]}`; }
       else if (T.rank > st.grade) {
-        o.status = 'locked';
+        o.status = 'locked'; o.block = 'grade';
         o.reason = T.rank > st.grade + 1 ? 'Unlocks as the site grows' : 'Unlocks when output presses against what the terminals can move';
-      } else if (mode === 'rail' && !ctx.rail) { o.status = 'blocked'; o.reason = 'Needs a rail line to the site'; }
-      else if (mode === 'road' && ctx.road === false) { o.status = 'blocked'; o.reason = 'Needs a road to the site'; }
+      } else if (mode === 'rail' && !ctx.rail) { o.status = 'blocked'; o.block = 'rail'; o.reason = 'Needs a rail line to the site'; }
+      else if (mode === 'road' && ctx.road === false) { o.status = 'blocked'; o.block = 'road'; o.reason = 'Needs a road to the site'; }
       else {
         const room = ctx.room?.(mode, tier);
-        if (room) { o.status = 'blocked'; o.reason = room; }
+        if (room) { o.status = 'blocked'; o.block = 'room'; o.reason = room; }
         else o.reason = now > 0 ? `Moves ${Math.round(o.tph)} t/h: ${times(gain)} what the site can move now` : `Moves ${Math.round(o.tph)} t/h`;
       }
       const busy = cur?.pending?.tier ?? (cur?.status === 'building' ? cur.tier : null);
-      if (busy && !pendingHere && o.status === 'available') { o.status = 'blocked'; o.reason = `Wait for the ${lc(TIERS[busy].name)} to open`; }
+      if (busy && !pendingHere && o.status === 'available') { o.status = 'blocked'; o.block = 'busy'; o.reason = `Wait for the ${lc(TIERS[busy].name)} to open`; }
       out.push(o);
     }
   }
   return out;
 }
 
-export type SuggestReason = 'unserved' | 'stockpiling' | 'queueing' | 'capped' | 'underused' | 'idle';
+export type SuggestReason = 'unserved' | 'stockpiling' | 'queueing' | 'capped' | 'stuck' | 'underused' | 'idle';
 export interface Suggestion { reason: SuggestReason; text: string; offer?: Offer }
 
 // The one thing worth telling the player about this site's terminals now, if anything.
@@ -362,9 +366,20 @@ export function suggest(spec: SiteSpec, st: SiteTerminals, ctx: SiteContext, lev
     const t = openOnes(st).sort((a, b) => TIERS[b.tier].rank - TIERS[a.tier].rank)[0];
     return { reason: 'underused', text: `Add ${MODE_NAME[t.mode].vehicles}: the ${lc(TIERS[t.tier].name)} is only ${Math.round(pr.utilisation * 100)}% used` };
   }
-  const avail = offers(spec, st, ctx).filter((o) => o.status === 'available');
-  if (!avail.length) return null;
+  const all = offers(spec, st, ctx), avail = all.filter((o) => o.status === 'available');
   const cap = levelCap(spec, st);
+  // What's holding the site back. A site that makes things is held back by its stockyard
+  // filling; one that only takes them in (a power station, a town) by vehicles waiting to unload.
+  const why = !pr?.pressing ? null
+    : pr.stockpiling && makesAny(spec) ? { reason: 'stockpiling' as const, head: `${name} output is stockpiling` }
+    : pr.queueing ? { reason: 'queueing' as const, head: `${upper(MODE_NAME[pr.queueing].vehicles)} are queueing at the ${lc(TIERS[terminalFor(st, pr.queueing)!.tier].name)}` }
+    : { reason: 'capped' as const, head: `${name} can't grow past ${Math.round(Math.min(4, cap) * 100)}% until more can be moved` };
+  if (!avail.length) {
+    if (!why || cap === 0) return null;
+    // nothing can be bought: say what stands in the way of the smallest bigger terminal
+    const stuck = all.filter((o) => (o.status === 'blocked' || o.status === 'era') && o.gain > 1).sort((a, b) => a.rank - b.rank || b.gain - a.gain)[0];
+    return { reason: 'stuck', text: stuck ? `${why.head}. ${TIERS[stuck.tier].name}: ${lc(stuck.reason)}` : `${why.head}, and its terminals are as big as they come` };
+  }
   // the cheapest that lets the site keep growing; failing that, the one that moves most
   const nextStep = Math.min(4, Math.max(1, level) * 1.12);
   const clears = avail.filter((o) => (cap > 0 ? cap * o.gain : levelsAt(spec, o)) >= nextStep).sort((a, b) => a.cost - b.cost);
@@ -373,15 +388,9 @@ export function suggest(spec: SiteSpec, st: SiteTerminals, ctx: SiteContext, lev
   const what = `${called(best.tier)} ${would}`;
   if (cap === 0 && makesAny(spec)) return { reason: 'unserved', offer: best, text: `Nothing collects from the ${lc(name)} yet: ${what}` };
   if (cap === 0) return { reason: 'unserved', offer: best, text: `Nothing can unload at the ${lc(name)} yet: ${what}` };
-  if (!pr?.pressing) return null;
-  // a site that makes things is held back by its stockyard filling; one that only takes them in
-  // (a power station, a town) by vehicles waiting to unload
-  if (pr.stockpiling && makesAny(spec)) return { reason: 'stockpiling', offer: best, text: `${name} output is stockpiling: ${what}` };
-  if (pr.queueing) {
-    const t = terminalFor(st, pr.queueing)!, v = MODE_NAME[pr.queueing].vehicles;
-    return { reason: 'queueing', offer: best, text: `${v[0].toUpperCase()}${v.slice(1)} are queueing at the ${lc(TIERS[t.tier].name)}: ${called(best.tier)} serves ${TIERS[best.tier].berths} at once` };
-  }
-  return { reason: 'capped', offer: best, text: `${name} can't grow past ${Math.round(Math.min(4, cap) * 100)}% until more can be moved: ${what}` };
+  if (!why) return null;
+  if (why.reason === 'queueing') return { reason: 'queueing', offer: best, text: `${why.head}: ${called(best.tier)} serves ${TIERS[best.tier].berths} at once` };
+  return { reason: why.reason, offer: best, text: `${why.head}: ${what}` };
 }
 
 // ---------------- reviews: growth and unlocking ----------------
