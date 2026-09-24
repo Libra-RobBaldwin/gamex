@@ -428,8 +428,8 @@ describe('deterministic, saveable and cheap', () => {
     const b = Economy.load(w, k.oracles(), JSON.parse(JSON.stringify(saved)), opts);
     expect(JSON.stringify(b.save())).toBe(JSON.stringify(saved));
     months(a, 3); months(b, 3);
-    expect(b.town(1)!.residents).toBeGreaterThan(a.town(1)!.residents * 0.98);
-    expect(b.town(1)!.residents).toBeLessThan(a.town(1)!.residents * 1.02);
+    // the loaded game carries on exactly as the saved one
+    expect(JSON.stringify(b.save())).toBe(JSON.stringify(a.save()));
   });
 
   it('a step costs the same however many people live in the towns', () => {

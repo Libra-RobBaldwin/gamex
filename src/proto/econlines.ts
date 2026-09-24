@@ -41,6 +41,11 @@ export class LineState {
   problem?: string;
   readonly tau: Float64Array; // minutes on each leg, slot i to slot i+1
   readonly dwell: Float64Array; // minutes stood at each slot
+  readonly timedDwell: Float64Array; // the dwells ride times and fares were last worked out from
+  // The ride times and headway the network was last planned on (the skim, freight routes and trip
+  // tables): fixed when those are rebuilt, and saved, so a loaded game plans on the same.
+  readonly planRide: Float64Array;
+  planHeadway = Infinity;
   cycle = Infinity;
   phase = 0; // how far round the loop vehicle 0 is, 0..1
   readonly km: Float64Array; // straight-line km, slot i to slot j
@@ -96,6 +101,8 @@ export class LineState {
     const k = (this.k = this.stops.length);
     this.tau = new Float64Array(k);
     this.dwell = new Float64Array(k).fill(this.def.dwell);
+    this.timedDwell = new Float64Array(k).fill(this.def.dwell);
+    this.planRide = new Float64Array(k * k);
     this.km = new Float64Array(k * k);
     this.ride = new Float64Array(k * k);
     this.q = new Float64Array(this.def.pax ? k * k : 0);
@@ -125,9 +132,17 @@ export class LineState {
   get running() { return this.ok && this.count > 0 && Number.isFinite(this.cycle); }
   get headway() { return this.count > 0 ? this.cycle / this.count : Infinity; }
 
+  // the network is being planned again: on the ride times and headway of the moment
+  fixPlan() {
+    this.planRide.set(this.ride);
+    this.planHeadway = this.running ? this.headway : Infinity;
+  }
+
   // Asks the game how long each leg takes (it knows the route and the traffic), and works out
   // ride times and fares from them. Done daily, not every step: the oracle may be pathfinding.
-  refresh(oracles: Oracles, pos: (id: number) => StopPos | undefined) {
+  // `keepDwell` works them out from the dwells they were last worked out from (a loaded game
+  // carrying on where the saved one was), not from the dwells of the moment.
+  refresh(oracles: Oracles, pos: (id: number) => StopPos | undefined, keepDwell = false) {
     const k = this.k;
     this.ok = true;
     this.problem = undefined;
@@ -146,6 +161,7 @@ export class LineState {
     }
     for (let i = 0; i < k; i++)
       for (let j = 0; j < k; j++) this.km[i * k + j] = Math.hypot(ps[i]!.x - ps[j]!.x, ps[i]!.z - ps[j]!.z) / 1000;
+    if (!keepDwell) this.timedDwell.set(this.dwell);
     this.retime();
   }
 
@@ -155,9 +171,10 @@ export class LineState {
     this.cycle = Infinity;
   }
 
-  // cycle time, ride times and fares from the leg times and current dwells
+  // cycle time from the leg times and current dwells; ride times and fares from the leg times
+  // and the dwells they are timed on
   private retime() {
-    const k = this.k;
+    const k = this.k, dw = this.timedDwell;
     let c = 0;
     for (let m = 0; m < k; m++) c += this.tau[m] + this.dwell[m];
     this.cycle = c;
@@ -166,7 +183,7 @@ export class LineState {
       this.ride[i * k + i] = 0;
       for (let d = 1; d < k; d++) {
         const m = (i + d - 1) % k;
-        t += this.tau[m] + (d > 1 ? this.dwell[m] : 0);
+        t += this.tau[m] + (d > 1 ? dw[m] : 0);
         this.ride[i * k + ((i + d) % k)] = t;
       }
     }
@@ -382,7 +399,8 @@ export class LineState {
   // What's saved: the queues and loads, so a loaded game carries on where it stopped.
   save() {
     return {
-      phase: this.phase, dwell: [...this.dwell], q: [...this.q], qx: [...this.qx], onboard: [...this.onboard], owed: [...this.owed],
+      phase: this.phase, dwell: [...this.dwell], timedDwell: [...this.timedDwell], planRide: [...this.planRide],
+      planHeadway: Number.isFinite(this.planHeadway) ? this.planHeadway : null, q: [...this.q], qx: [...this.qx], onboard: [...this.onboard], owed: [...this.owed],
       fonb: [...this.fonb], fowed: [...this.fowed], load: this.load, month: { ...this.month }, last: { ...this.last },
       room: [...this.room], want: [...this.want], got: [...this.got], judged: [...this.judged],
       lastWant: [...this.lastWant], lastGot: [...this.lastGot],
@@ -391,6 +409,9 @@ export class LineState {
   restore(s: ReturnType<LineState['save']>) {
     this.phase = s.phase;
     s.dwell.forEach((v, i) => (this.dwell[i] = v));
+    if (s.timedDwell?.length === this.k) this.timedDwell.set(s.timedDwell); else this.timedDwell.set(this.dwell);
+    if (s.planRide?.length === this.k * this.k) this.planRide.set(s.planRide);
+    this.planHeadway = s.planHeadway ?? Infinity;
     s.q.forEach((v, i) => (this.q[i] = v));
     s.qx?.forEach((v, i) => (this.qx[i] = v));
     for (let i = 0; i < this.k; i++) { let t = 0; for (let j = 0; j < this.k; j++) t += this.q[i * this.k + j] ?? 0; this.qsum[i] = t; }

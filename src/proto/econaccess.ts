@@ -94,7 +94,7 @@ export class Skim {
         for (let d = 1; d < L.k; d++) {
           const j = (i + d) % L.k, v = this.index.get(L.stops[j]);
           if (v === undefined || v === u) continue;
-          const key = u * S + v, ride = L.ride[i * L.k + j];
+          const key = u * S + v, ride = L.planRide[i * L.k + j];
           let list = byPair.get(key);
           if (!list) byPair.set(key, (list = []));
           const cur = list.find((c) => c.L === L);
@@ -148,10 +148,10 @@ export class Skim {
       let F = 0, FC = 0, FT = 0, n = 0;
       for (const c of list) {
         if (n && c.cost >= Math.min(0.5 / F, tune.maxWaitMin) + FC / F) break;
-        F += 1 / c.L.headway; FC += c.cost / c.L.headway; FT += c.walk / c.L.headway; n++;
+        F += 1 / c.L.planHeadway; FC += c.cost / c.L.planHeadway; FT += c.walk / c.L.planHeadway; n++;
       }
       const wait = Math.min(0.5 / F, tune.maxWaitMin);
-      const h: Hop = list.slice(0, n).map((c) => ({ line: c.L, board: c.i, alight: c.j, share: 1 / c.L.headway / F }));
+      const h: Hop = list.slice(0, n).map((c) => ({ line: c.L, board: c.i, alight: c.j, share: 1 / c.L.planHeadway / F }));
       let r = 0;
       for (const x of h) r += x.share * x.line.room[x.board];
       from.push(u); to.push(v);

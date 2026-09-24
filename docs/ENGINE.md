@@ -120,7 +120,11 @@ industries' production, and the loads on your lines and stops. The game owns the
 Catchments, the transit skim, zone-pair times, reach and trip tables are derived, rebuilt at
 each monthly review or when service changes; catchments, zone pairs and trips are rebuilt too
 when buildings change (the review's own changes included, so what goes up at a review counts
-at once). Only the authority is saved (`save()` and `Economy.load()`), with the time of day.
+at once). Only the authority is saved (`save()` and `Economy.load()`), with the time of day
+and what the derived tables were last worked out from: each line's dwells when its ride times
+and fares were last timed (daily), and the ride times and headway the network was last planned
+on. A load rebuilds the tables from those, so a game loaded at any moment carries on exactly as
+the saved one would have (a test checks the whole save matches, months later).
 
 **Time.** It never runs per frame. `advance(gameMinutes)` steps it an hour at a time and
 reviews every town once a "month" (`tune.monthDays`, default 30). Rates are per hour and

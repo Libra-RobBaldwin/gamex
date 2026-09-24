@@ -114,6 +114,11 @@ export class Economy {
   // rest, so `at` maps each zone reviewed to its place in these arrays)
   private lastReach: { work: Reach; shop: Reach; leisure: Reach; zones: ZState[]; at?: Map<ZState, number> } | null = null;
   private dirty = { times: true, service: true, cover: true }; // cover: catchments, zone pairs and trips
+  // Set by load() until its first rebuild: the lines' ride times are worked out from the dwells
+  // the saved game timed them on, and the network is planned on the rides and headways it was
+  // planned on, so the loaded game carries on exactly as the saved one. Any change to the
+  // network in between drops it.
+  private resumed = { times: false, plan: false };
   private fareStops: SState[] = []; // stops with fares not yet shown in a money event
   private runningOwed = 0; // running costs not yet shown in a money event
   private paxStops: SState[] = []; // passenger stops with lines calling
@@ -319,6 +324,7 @@ export class Economy {
     this.stopMap = keep;
     this.relink();
     this.dirty.times = this.dirty.service = true;
+    this.resumed = { times: false, plan: false };
   }
 
   // Lines keep their queues and loads unless their stops or vehicle type change.
@@ -336,10 +342,11 @@ export class Economy {
     this.lineList = [...keep.values()];
     this.relink();
     this.dirty.times = this.dirty.service = true;
+    this.resumed = { times: false, plan: false };
   }
 
   // The road or rail network changed (or congestion shifted a lot): ask the oracles again.
-  networkChanged() { this.dirty.times = this.dirty.service = true; this.pairCache.cars = []; }
+  networkChanged() { this.dirty.times = this.dirty.service = true; this.pairCache.cars = []; this.resumed = { times: false, plan: false }; }
 
   private relink() {
     for (const s of this.stopMap.values()) s.slots = [];
@@ -432,7 +439,8 @@ export class Economy {
 
   private refreshTimes() {
     const was = this.lineList.map((L) => L.running);
-    for (const L of this.lineList) L.refresh(this.oracles, this.pos);
+    for (const L of this.lineList) L.refresh(this.oracles, this.pos, this.resumed.times);
+    this.resumed.times = false;
     if (this.lineList.some((L, i) => L.running !== was[i])) this.dirty.service = true;
     this.dirty.times = false;
   }
@@ -547,6 +555,9 @@ export class Economy {
     for (const s of this.stopMap.values()) { s.served = false; s.skim = -1; }
     paxStops.forEach((s, i) => { s.served = true; s.skim = i; });
     const p = this.timing.parts, t0 = performance.now();
+    // (a line that has started or stopped running since is planned afresh)
+    for (const L of this.lineList) if (!this.resumed.plan || Number.isFinite(L.planHeadway) !== L.running) L.fixPlan();
+    this.resumed.plan = false;
     this.skim = new Skim(paxStops, this.lineList, this.tune);
     this.reviewWork += this.skim.work;
     p.skim += performance.now() - t0;
@@ -709,7 +720,7 @@ export class Economy {
         if (u < 0) continue;
         for (let d = 1; d < L.k; d++) {
           const j = (i + d) % L.k, v = slotAt(L, j);
-          if (v >= 0 && v !== u) into[v].push({ u, cost: L.ride[i * L.k + j] + L.headway / 2 + H });
+          if (v >= 0 && v !== u) into[v].push({ u, cost: L.planRide[i * L.k + j] + L.planHeadway / 2 + H });
         }
       }
     const near = stops.map((s) => s.near.map((n) => at.get(n) ?? -1).filter((n) => n >= 0));
@@ -758,7 +769,7 @@ export class Economy {
             // only somewhere nearer than here: the best of those this line can manage
             const a = stops[v].fArrive[c];
             if (!(a < here.fPool[c] - 1e-9)) continue;
-            const cost = L.ride[i * L.k + j] + a;
+            const cost = L.planRide[i * L.k + j] + a;
             if (cost < best) { best = cost; L.dest[c * L.k + i] = j; }
           }
           if (L.dest[c * L.k + i] >= 0) here.carries[c] = 1;
@@ -1068,6 +1079,7 @@ export class Economy {
       if (zone) e.pending.set(p.req, { req: p.req, t: p.t as Pending['t'], zone, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building !== undefined ? e.buildingMap.get(p.building) : undefined, cleared: p.cleared ?? undefined });
     }
     e.dirty.times = e.dirty.service = true;
+    e.resumed = { times: true, plan: true };
     return e;
   }
 }
