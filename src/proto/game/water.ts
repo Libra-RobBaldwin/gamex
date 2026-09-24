@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import { FnHeight } from '../terrain/height';
 import { TILE } from '../terrain/height';
-import { WaterSystem, claimWater, navLimits, pierBans, reedSpots, shoreColours, waterClaims, waterSurface, type Crossing, type WaterTile } from '../water';
+import { KIND_CODE, WaterSystem, claimWater, navLimits, pierBans, reedSpots, shoreColours, waterClaims, waterSurface, type Crossing, type WaterMesh, type WaterTile } from '../water';
 import { WATER_LIGHT, patchGroundMaterial, reedGeometry, reedMaterial, reedMesh, rippleTexture, setWaterLight, waterGeometry, waterMaterial, type WaterLight } from '../water/material';
 import type { Land } from '../land';
 
@@ -27,7 +27,7 @@ export const LAKE = { x: 250, z: -190, r: 90 };
 // the lake's surface (a little under the flat map, so its bank shelves down to it)
 export const LEVEL = -0.3;
 const DEEP = 4.2; // m of water in the middle
-const RIM = 0.13; // how far out (as a share of the radius) the bank starts dropping from the flat
+const RIM = 16; // m out from the waterline where the beach starts dropping from the flat (a 3% fall to the water)
 const SHELF = 0.3; // how far in (share of the radius) the bed reaches its full depth
 
 const smooth = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
@@ -38,20 +38,45 @@ export function lakeRadius(a: number) {
 // The map's ground: flat, apart from the lake's bowl.
 export function lakeGround(x: number, z: number) {
   const dx = x - LAKE.x, dz = z - LAKE.z, d = Math.hypot(dx, dz);
-  if (d > LAKE.r * 1.3) return 0;
-  const s = d / lakeRadius(Math.atan2(dz, dx));
-  if (s >= 1 + RIM) return 0;
-  // from the flat down to the waterline over the rim (a beach), then shelving to the full depth
-  if (s >= 1) return LEVEL * smooth((1 + RIM - s) / RIM);
-  return LEVEL - (DEEP + LEVEL) * smooth((1 - s) / SHELF) - 0.08 * smooth((1 - s) / 0.02);
+  if (d > LAKE.r * 1.35) return 0;
+  const R = lakeRadius(Math.atan2(dz, dx)), u = R - d; // m inside the waterline
+  if (u <= -RIM) return 0;
+  // from the flat down to the waterline over the rim (a beach, easing off the flat and meeting the
+  // water on a slope, so the waterline is crisp), then shelving on down to the full depth
+  // (straight for the last 70%, where beaches are drawn, so the shore distance read off the slope is true)
+  // (the water system counts water from 8 cm deep, so the beach runs on down to 10 cm under the level)
+  const edge = LEVEL - 0.1;
+  if (u <= 0) { const t = (u + RIM) / RIM, e = 0.3; return (edge * (t < e ? (t * t) / (2 * e) : t - e / 2)) / (1 - e / 2); }
+  const t = Math.min(1, u / (SHELF * R));
+  return edge - (DEEP + edge) * (0.2 * t + 0.8 * smooth(t)); // (starting at about the beach's slope)
 }
 // the bowl's extent, with room for the bank
-export const LAKE_BOX = { x0: LAKE.x - LAKE.r * 1.3, z0: LAKE.z - LAKE.r * 1.3, x1: LAKE.x + LAKE.r * 1.3, z1: LAKE.z + LAKE.r * 1.3 };
+export const LAKE_BOX = { x0: LAKE.x - LAKE.r * 1.35, z0: LAKE.z - LAKE.r * 1.35, x1: LAKE.x + LAKE.r * 1.35, z1: LAKE.z + LAKE.r * 1.35 }; // (past the widest bay and its beach)
+
+// Still water lies flat right to the edge of its mesh, so the ground (a 2 m mesh) cuts a smooth
+// waterline. (waterSurface drops the dry corners just under the ground, which suits rivers beside
+// lower land, but on a gently shelving lake shore it makes the waterline follow the 4 m raster in
+// stair-steps.) It lies DROP under the level: a point only counts as water 8 cm deep (the water
+// system's film), so ground between the level and 8 cm under it is dry and the mesh doesn't cover
+// all of it; lower, the mesh's 4 m edge never shows. The depth is measured from where it's drawn,
+// so the shallows' colour and the foam fade to nothing right at the waterline.
+const DROP = 0.1;
+function level(w: WaterMesh, t: WaterTile) {
+  const n = t.g.nx, mg = t.margin, step = t.g.step, P = w.positions, W = w.water;
+  for (let v = 0; v < w.vertexCount; v++) {
+    const a = Math.round(P[v * 3] / step), b = Math.round(P[v * 3 + 2] / step), k = (mg + b) * n + mg + a;
+    if (t.nearKind[k] !== KIND_CODE.lake && t.nearKind[k] !== KIND_CODE.sea) continue;
+    P[v * 3 + 1] = t.nearLevel[k] - DROP;
+    W[v * 4] = t.nearLevel[k] - DROP - t.ground[k];
+  }
+}
 
 // how far roads keep from the waterline (as the old circle lake's 4 m)
 const ROAD_GAP = 4;
 // ground mesh spacing over the lake (m), and elsewhere (the map is flat there)
 const FINE = 2, COARSE = 80;
+// how far the water's light goes towards dusk in the evening (0 day, 1 the library's dusk)
+const DUSK = 0.55;
 
 export class GameWater {
   readonly water: WaterSystem;
@@ -78,6 +103,7 @@ export class GameWater {
     for (const t of this.tiles) {
       const w = waterSurface(t);
       if (!w) continue;
+      level(w, t);
       const m = new THREE.Mesh(waterGeometry(w), this.material);
       m.position.set(w.offset[0], 0, w.offset[1]);
       m.renderOrder = 2; // after the ground and the roads
@@ -171,11 +197,13 @@ export class GameWater {
   patch<M extends THREE.MeshLambertMaterial>(m: M) { return patchGroundMaterial(m); }
 
   // Each frame: the ripples and reeds move with real time; the light follows the game clock
-  // (hour 0–24): day, turning to dusk through the evening, back to day after dawn.
+  // (hour 0–24): day, turning towards dusk through the evening, back to day after dawn. (Only part
+  // way while the rest of the scene has no evening light: full dusk water under a noon sky looks
+  // muddy. Raise DUSK when the game gets a day and night.)
   update(seconds: number, hour: number) {
     this.material.uniforms.uTime.value = seconds;
     (this.reedMat.userData.time as { value: number }).value = seconds;
-    const k = hour >= 17 && hour < 20 ? smooth((hour - 17) / 3) : hour >= 20 || hour < 5 ? 1 : hour < 8 ? 1 - smooth((hour - 5) / 3) : 0;
+    const k = DUSK * (hour >= 17 && hour < 20 ? smooth((hour - 17) / 3) : hour >= 20 || hour < 5 ? 1 : hour < 8 ? 1 - smooth((hour - 5) / 3) : 0);
     if (Math.abs(k - this.dusk) < 0.01) return;
     this.dusk = k;
     const D = WATER_LIGHT.day, N = WATER_LIGHT.dusk, L = this.light;

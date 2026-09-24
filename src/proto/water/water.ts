@@ -346,6 +346,26 @@ export class WaterSystem {
         nearKind[m] = nearKind[c]; nearLevel[m] = nearLevel[c]; q[qt++] = m;
       }
     }
+    // By still water (lakes, the sea) the distance above is only good to the raster: its contours,
+    // the foam line and the beaches drawn from it, follow the 4 m cells in stair-steps. Close to the
+    // waterline, the depth over the ground's slope gives it to a fraction of a cell (as far out as
+    // beaches are drawn); that blends back into the raster distance two and a half to four cells out.
+    for (let k = 0; k < N; k++) {
+      const s = shore[k], nk = nearKind[k];
+      if (Math.abs(s) >= 4 * res || (nk !== KIND_CODE.lake && nk !== KIND_CODE.sea)) continue;
+      const i = k % n, j = (k - i) / n;
+      if (i < 1 || j < 1 || i >= n - 1 || j >= n - 1) continue;
+      const grad = Math.hypot(ground[k + 1] - ground[k - 1], ground[k + n] - ground[k - n]) / (2 * res);
+      // (on gently shelving shores only: a steep bank or quay wall is a cliff between samples, and
+      // its waterline is already sharp where the ground cuts the water)
+      if (grad < 1e-3 || grad > 0.2) continue;
+      // (and only where it agrees with the raster to within a cell: land standing well above the
+      // water, like a quay, isn't a slope running down into it)
+      const fine = (nearLevel[k] - FILM - ground[k]) / grad;
+      if (Math.abs(fine - s) > res) continue;
+      const w = Math.max(0, Math.min(1, (Math.abs(s) - 2.5 * res) / (1.5 * res)));
+      shore[k] = fine + (s - fine) * w * w * (3 - 2 * w);
+    }
     const cover = new Uint8Array(N);
     for (let k = 0; k < N; k++) cover[k] = kind[k] || ext[k] === ext[k] ? 1 : 0;
     return { ti, tj, size, g, margin: mg, ground, level, kind, body, bodies, flowX, flowZ, shore, nearKind, nearLevel, cover, wet, ms: performance.now() - t0 };

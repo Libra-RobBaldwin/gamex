@@ -31,6 +31,24 @@ describe('game water', () => {
     expect(gw.isWater({ x: LAKE.x + Math.cos(a) * (r + 1), z: LAKE.z + Math.sin(a) * (r + 1) })).toBe(true);
     expect(gw.isWater({ x: LAKE.x + Math.cos(a) * (r + 6), z: LAKE.z + Math.sin(a) * (r + 6) })).toBe(false);
   });
+  it('knows the shore smoothly, not in the 4 m raster\'s stair-steps (the waterline, foam line and beach)', () => {
+    let worst = 0, jump = 0;
+    const last = new Map<number, number>();
+    for (let a = 0; a < Math.PI * 2; a += 0.05) {
+      // the waterline along this ray: where the bed is the water system's 8 cm film under the level
+      let lo = 0, hi = LAKE.r * 1.2;
+      for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (lakeGround(LAKE.x + Math.cos(a) * m, LAKE.z + Math.sin(a) * m) < LEVEL - 0.08) lo = m; else hi = m; }
+      for (const off of [-3, -1, 1, 3, 6]) {
+        const r = lo + off, d = gw.water.distanceToShore(LAKE.x + Math.cos(a) * r, LAKE.z + Math.sin(a) * r);
+        worst = Math.max(worst, Math.abs(d + off));
+        // (neighbouring rays are about 4.5 m apart along the shore)
+        if (last.has(off)) jump = Math.max(jump, Math.abs(d - last.get(off)!));
+        last.set(off, d);
+      }
+    }
+    expect(worst).toBeLessThan(1.5);
+    expect(jump).toBeLessThan(0.6);
+  });
   it('claims the lake in the land registry as water', () => {
     const land = new Land();
     gw.claim(land);
