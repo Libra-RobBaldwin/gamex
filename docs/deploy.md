@@ -12,6 +12,14 @@ connecting the repo. `vercel.json` only turns on clean addresses (`/places` as w
 | Real Town Plans | `/places` |
 | Demos | `/ground-demo`, `/bridges-demo`, `/industries-demo`, `/people-demo`, `/vehicles-demo`, `/water-demo` |
 
+## Where it's deployed now
+
+The repo is connected to the Vercel project **gamex** under "Rob Baldwin's projects" (Hobby).
+Production follows `claude/cloud-session-history-rvqkm1` at **https://gamex-nu.vercel.app**. Every
+other branch gets a preview at `gamex-git-<branch>-rob-baldwins-projects.vercel.app`, which only
+you can open while you're signed in to Vercel. The steps below are how it was set up, and how to
+set up another copy.
+
 ## Connect the repo (once, from a phone)
 
 It takes about five minutes. The free Hobby plan is enough.
