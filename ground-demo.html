@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f3322" />
+    <title>Untitled · Ground</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root { color-scheme: dark; --forest: #1f5e3f; --darker: #0f3322; --lime: #5cb83a; --gold: #b8964e; --glass: rgba(15, 51, 34, 0.9); --line: rgba(255, 255, 255, 0.14); --muted: #b7c8bb; }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--darker); font-family: Archivo, system-ui, sans-serif; color: #f2f5ef; user-select: none; }
+      #phone { position: absolute; left: 50%; top: 50%; width: 412px; height: 860px; max-width: 100vw; max-height: 100dvh; transform: translate(-50%, -50%); overflow: hidden; border-radius: 22px; box-shadow: 0 0 0 10px #05100a, 0 20px 60px rgba(0, 0, 0, 0.5); }
+      @media (max-width: 500px) { #phone { width: 100vw; height: 100dvh; border-radius: 0; box-shadow: none; } }
+      #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+      .panel { background: var(--glass); border: 1px solid var(--line); border-radius: 4px; clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%); }
+      #top { position: absolute; top: 8px; left: 8px; right: 8px; padding: 8px 10px 7px; border-top: 3px solid var(--lime); }
+      #brand { display: flex; align-items: center; gap: 8px; }
+      #brand .mark { width: 26px; height: 26px; flex: none; }
+      #brand b { font-family: 'League Spartan', Archivo, sans-serif; font-weight: 700; font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; }
+      #brand span { color: var(--gold); font-weight: 700; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: auto; }
+      #desc { color: var(--muted); font-size: 12px; line-height: 1.35; margin-top: 5px; }
+      #perf { color: var(--muted); font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+      #bottom { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 5px; display: flex; flex-direction: column; gap: 5px; border-top: 3px solid var(--lime); }
+      .row { display: flex; gap: 4px; }
+      button { flex: 1; font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.03em; color: #f2f5ef; background: rgba(255, 255, 255, 0.06); border: 0; border-radius: 3px; padding: 10px 0; min-height: 40px; cursor: pointer; }
+      button.on { background: var(--lime); color: var(--darker); }
+      button.gold { color: var(--gold); }
+      #labels { position: absolute; inset: 0; pointer-events: none; }
+      #labels div { position: absolute; transform: translate(-50%, -50%); font-size: 11px; font-weight: 700; color: #fff; background: rgba(15, 51, 34, 0.78); padding: 2px 5px; border-radius: 3px; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div id="phone">
+      <canvas id="c"></canvas>
+      <div id="labels"></div>
+      <div id="top" class="panel">
+        <div id="brand"><span id="mark"></span><b>Untitled</b><span>Ground</span></div>
+        <div id="desc"></div>
+        <div id="perf"></div>
+      </div>
+      <div id="bottom" class="panel">
+        <div class="row" id="scenes">
+          <button data-scene="country">Countryside</button>
+          <button data-scene="town">Town edge</button>
+          <button data-scene="hills">Hills</button>
+          <button data-scene="gallery">Gallery</button>
+        </div>
+        <div class="row">
+          <button data-zoom="35">Close</button>
+          <button data-zoom="200">Mid</button>
+          <button data-zoom="900">Far</button>
+          <button id="before" class="gold">Before</button>
+          <button id="quality">High</button>
+          <button id="dusk">Dusk</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/proto/ground/demo.ts"></script>
+  </body>
+</html>
