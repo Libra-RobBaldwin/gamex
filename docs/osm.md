@@ -50,7 +50,9 @@ The stages can be used on their own:
 
 Scripts:
 
-- `node src/proto/osm/fetch-fixture.mjs` refetches the Banbury fixture. Run it rarely.
+- `node src/proto/osm/fetch-fixture.mjs` refetches the Banbury fixture. Run it rarely. Its
+  query and trim live in `fetch.ts`, which the Real Town Plans page ([places.md](places.md))
+  shares.
 - `node src/proto/osm/render.mjs` redraws `docs/reports/osm-import.svg` and `osm-raw.svg`.
 
 ## Coordinates
