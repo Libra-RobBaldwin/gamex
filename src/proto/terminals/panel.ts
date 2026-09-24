@@ -111,7 +111,10 @@ export class TerminalsPanel {
 
   // The world's water behind a waterside site: a stand-in until the map has real coastlines.
   private addWater(m: IndustryModel) {
-    const B = bounds(m), wl = waterline(m), w = B.x1 - B.x0 + 240, d = 75; // short of the gallery row behind
+    // wide enough for the site and anything built out into the water beside it
+    const wet = this.mesh?.placements.filter((p) => p.water).map((p) => p.pad) ?? [];
+    const B0 = bounds(m), B = { ...B0, x0: Math.min(B0.x0, ...wet.map((p) => p.x0)), x1: Math.max(B0.x1, ...wet.map((p) => p.x1)) };
+    const wl = waterline(m), w = B.x1 - B.x0 + 240, d = 75; // short of the gallery row behind
     const g = new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2);
     this.waterMesh = new THREE.Mesh(g, this.waterMat);
     const c = toWorld(m.frame, (B.x0 + B.x1) / 2, wl - d / 2);

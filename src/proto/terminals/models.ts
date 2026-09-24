@@ -127,17 +127,53 @@ function rack(s: Site, x0: number, x1: number, z: number, h = 4.5) {
 }
 
 // ---------------- road ----------------
-function loadingBay(c: Ctx) {
-  const { s, P } = c, b = P.pad, cx = (b.x0 + b.x1) / 2, cz = P.spine.z;
-  s.bays(cx, cz, 2, 0, 5);
-  s.block(b.x1 - 1.9, b.z0 + 1.6, 3, 2.4, 2.6, '#d8d2c4', PAL.roof);
-  s.floodlight(b.x0 + 0.6, b.z0 + 1, 8);
-  if (c.fit === 'conveyor') hopper(c, cx - 2.5, cz - 1.5, 5.5);
-  if (c.fit === 'tank_farm') {
-    for (const x of [b.x0 + 2.2, b.x0 + 6.6]) s.tank(x, b.z0 + 2.2, 1.9, 4.5, cargoOf(c.m.type, 'liquid')?.cargo ?? 'fuel', 'out', '#e3e0d8');
-    canopy(s, cx - 5, cx + 5, cz - 3.5, cz - 0.5, 4.6, '#d8d6cf', 10);
+// What stands up on the site itself (walls, roofs, tanks, silos), as boxes in site-local metres:
+// the loading bay goes inside the plot, so its second stand, cabin and lamp have to find clear
+// ground among them. Conservative: a sloping roof counts as its whole bounding box.
+const tallCache = new WeakMap<IndustryModel, number[][]>();
+function tallBoxes(m: IndustryModel) {
+  let out = tallCache.get(m);
+  if (out) return out;
+  out = [];
+  const mesh = m.group.children[0] as THREE.Mesh | undefined, g = mesh?.geometry;
+  const pos = g?.getAttribute('position'), idx = g?.getIndex();
+  if (g && pos) {
+    const n = idx ? idx.count : pos.count, at = (i: number) => (idx ? idx.getX(i) : i);
+    for (let t = 0; t + 2 < n; t += 3) {
+      const a = at(t), b = at(t + 1), d = at(t + 2);
+      if (Math.min(pos.getY(a), pos.getY(b), pos.getY(d)) < 0.9) continue;
+      out.push([Math.min(pos.getX(a), pos.getX(b), pos.getX(d)), Math.max(pos.getX(a), pos.getX(b), pos.getX(d)), Math.min(pos.getZ(a), pos.getZ(b), pos.getZ(d)), Math.max(pos.getZ(a), pos.getZ(b), pos.getZ(d))]);
+    }
   }
-  s.notes.push(c.fit === 'standard' ? 'two loading bays' : `loading bays with ${FITS[c.fit].name.toLowerCase()}`);
+  tallCache.set(m, out);
+  return out;
+}
+const clearAt = (m: IndustryModel, x0: number, x1: number, z0: number, z1: number) => !tallBoxes(m).some((b) => b[0] < x1 && x0 < b[1] && b[2] < z1 && z0 < b[3]);
+
+function loadingBay(c: Ctx) {
+  const { s, P, m } = c, b = P.pad;
+  // the stands go where the recipe had its own (it kept them clear), and any it didn't have beside
+  // them, on clear ground; lorries stand along z, 4.5 m apart as the site's own bays
+  const own = m.anchors.lorry.length ? m.anchors.lorry.slice(0, 2).map((a) => ({ x: a.x, z: a.z, rot: a.rot })) : [{ x: (b.x0 + b.x1) / 2, z: P.spine.z, rot: 0 }];
+  const stand = (x: number, z: number) => clearAt(m, x - 1.6, x + 1.6, z - 6, z + 6);
+  const stands = [...own];
+  for (let tries = 1; stands.length < 2 && tries <= 4; tries++) {
+    const a = own[0];
+    for (const side of [1, -1]) {
+      const x = a.x + side * tries * 4.5 * Math.cos(a.rot), z = a.z - side * tries * 4.5 * Math.sin(a.rot);
+      if (stands.length < 2 && stand(x, z)) stands.push({ x, z, rot: a.rot });
+    }
+  }
+  for (const st of stands) s.bays(st.x, st.z, 1, st.rot, 4.5);
+  // the cabin and the lamp by the stands, on the first clear corner (the frontage side first)
+  const xs = stands.map((q) => q.x), zc = stands.reduce((t, q) => t + q.z, 0) / stands.length;
+  const lo = Math.min(...xs) - 2.25, hi = Math.max(...xs) + 2.25;
+  const spots = [[hi + 2.2, zc + 6], [lo - 2.2, zc + 6], [hi + 2.2, zc - 6], [lo - 2.2, zc - 6], [hi + 2.2, zc], [lo - 2.2, zc]];
+  const cabin = spots.find(([x, z]) => clearAt(m, x - 1.7, x + 1.7, z - 1.4, z + 1.4));
+  if (cabin) s.block(cabin[0], cabin[1], 3, 2.4, 2.6, '#d8d2c4', PAL.roof);
+  const lamp = spots.find(([x, z]) => (!cabin || Math.hypot(x - cabin[0], z - cabin[1]) > 3) && clearAt(m, x - 0.6, x + 0.6, z - 0.6, z + 0.6));
+  if (lamp) s.floodlight(lamp[0], lamp[1], 8);
+  s.notes.push('two loading bays');
 }
 
 function lorryDepot(c: Ctx) {

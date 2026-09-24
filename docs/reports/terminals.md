@@ -285,6 +285,41 @@ off the far side when the back is water), or out into the water from the bank.
 |---|---|---|---|
 | ![](terminals/anchors-quarry-bought.png) | ![](terminals/anchors-quarry-removed.png) | ![](terminals/anchors-power-bought.png) | ![](terminals/anchors-power-removed.png) |
 
-| Sawmill | Sawmill, road terminal demolished | The panel |
+| Sawmill | Sawmill, road terminal demolished | Farm | Farm, sidings demolished |
+|---|---|---|---|
+| ![](terminals/anchors-sawmill-bought.png) | ![](terminals/anchors-sawmill-removed.png) | ![](terminals/anchors-farm-bought.png) | ![](terminals/anchors-farm-removed.png) |
+
+![The panel](terminals/panel.png)
+
+## Second adversarial review
+
+The review covered refund farming, stacking past caps, closure oscillation, modes offered where
+an industry can't use them, era violations, costs out of proportion, and models off their
+anchors. It found nine defects. Each has a failing test in `terminals.review2.test.ts`, and each
+is fixed at the root:
+
+| # | Finding | Fix |
 |---|---|---|
-| ![](terminals/anchors-sawmill-bought.png) | ![](terminals/anchors-sawmill-removed.png) | ![](terminals/panel.png) |
+| 1 | Every docks on the map billed the player £600 a day for its own quay, and sent idle and mothball news | The docks' own quay costs the player nothing and never ages |
+| 2 | Switching unfinished kit to a cheaper kit refunded 100%, where cancelling refunds 50% | Cheaper kit gives back half the difference; switching back to the fitted kit is a cancel |
+| 3 | Ordering kit and switching it back, for £0, kept an unused terminal from being mothballed | Fixed by 2, and a finished refit keeps the idle days and warning |
+| 4 | A tick of several days charged upkeep and counted idle days from before a terminal opened | Only the days after opening, or after an upgrade takes over, are charged and aged |
+| 5 | Kit sped up stops for every cargo class, so a colliery was recommended a loading gantry | A fit's shorter stop applies only to the class it suits |
+| 6 | The loading bay's cabin and floodlight stood inside rolling mills, warehouses and Dutch barns | They go on the first clear corner by the stands, checked against the site's mesh |
+| 7 | The farm loading bay's lorries parked inside grain silos | The stands go on the site's own lorry anchors, and any extra one on clear ground |
+| 8 | At a small waterside sawmill, a road terminal ran into the water and a marshalling yard across the road | Land annexes stay between the road and the water; what can't fit is refused by `roomCheck` |
+| 9 | The docks' bulk or container terminal was cut off from the docks and closed their basin to the sea | It's built from the docks' quay line out to sea, beside the basin's mouth |
+
+What held up:
+
+- No sequence of orders pays out more than went in.
+- Idling and cut-backs gain neither money nor capacity.
+- Reviews settle rather than oscillate.
+- Water and rail are offered only where they can work.
+- Kit from a later era is refused.
+- Costs are in proportion with the 2D stations and vehicles.
+- Every model stays on its plot, pad or jetty.
+
+Two older tests changed with the fixes, each with a note saying why: the docks' quay now stays
+open at no cost rather than being mothballed, and the docks' terminal ends at the quay line
+rather than at the waterline.

@@ -181,7 +181,9 @@ A terminal that is building or mothballed also counts for nothing.
 
 `dwellHours(handling, cargo, load)` is how long a vehicle stands at the terminal. It's the mode's
 fixed stop (0.08 h for a lorry, 0.5 h for a train, 2 h for a ship), times the tier's `manoeuvre`
-and the fit's `dwell`, plus the load over the berth's handling rate. `berthRate` is the same stop
+and the fit's `dwell`, plus the load over the berth's handling rate. The fit's `dwell` only
+applies to the cargo class the kit suits: a loading gantry doesn't hurry a coal train, so it's
+never recommended to a colliery. `berthRate` is the same stop
 turned into t/h for the mode's typical vehicle. Capacity is worked out from `berthRate`, so a
 berth's rating and the time vehicles stand in it can't disagree.
 
@@ -275,7 +277,7 @@ with the same reason the offer gives. `cost` is negative for a refund.
 | Purchase | What happens | Money |
 |---|---|---|
 | `{ kind: 'build', mode, tier, fit? }` | A new terminal opens after its build days. An upgrade is built alongside (`pending`): the old terminal keeps working until the new one opens, and nothing else can be ordered in that mode meanwhile. | tier + fit, less half the current terminal (none for a built-in one) |
-| `{ kind: 'refit', mode, fit }` | New handling kit, fitted in a third of the build time. On an upgrade under way, it changes the kit ordered. | the kit's share of the tier's cost |
+| `{ kind: 'refit', mode, fit }` | New handling kit, fitted in a third of the build time. On work under way it changes the kit ordered, and switching an unfinished refit back to the kit already fitted is a cancel. | the kit's share of the tier's cost; changing unfinished work to dearer kit costs the difference, and to cheaper kit gives back half of it, as cancelling would |
 | `{ kind: 'cancel', mode }` | Stops unfinished work. A new terminal goes altogether. An upgrade or refit is dropped, and the old terminal stays. | half of what was paid comes back |
 | `{ kind: 'remove', mode }` | Demolished. An upgrade under way is cancelled with it. At the docks, a terminal built on the quay goes back to the quay, which can't itself be removed. | 25% of the list price back, plus half of any unfinished work |
 | `{ kind: 'reopen', mode }` | A mothballed terminal back in use. | 10% of its price |
@@ -291,7 +293,12 @@ remove makes money. The review tests try all of them.
 - it adds up upkeep (none while building, a fifth while mothballed);
 - it ages terminals no vehicle called at.
 
-Work under way doesn't age, so an upgrade the player paid for is never cut back before it opens.
+A tick of several days charges and ages only the days a terminal was open. Sidings that open on
+day 8 of a 30-day tick pay 22 days' upkeep and are 22 days idle, and an old terminal pays its own
+upkeep until its upgrade takes over. An upgrade under way freezes the old terminal's idle clock,
+so an upgrade the player paid for is never cut back before it opens. New kit on the same
+terminal doesn't: finishing a refit keeps the idle days and the warning, so ordering kit can't
+keep an unused terminal from being mothballed.
 
 | Days without traffic | What happens |
 |---|---|
@@ -301,8 +308,11 @@ Work under way doesn't age, so an upgrade the player paid for is never cut back 
 
 A cut-back terminal stays mothballed, and its clock restarts at 90 days. An abandoned marshalling
 yard becomes a rail freight terminal, then private sidings, then nothing, over about three
-years. Grade is never lost. A served terminal's idle days reset. The docks' own quay is only ever
-mothballed, and a bigger terminal built on it is cut back to the quay and no further.
+years. Grade is never lost. A served terminal's idle days reset.
+
+The docks' own quay is the docks' to run. It costs the player nothing, never ages and never sends
+idle news, so untouched docks on the map don't bill anyone. A bigger terminal the player builds
+there is theirs: it pays upkeep and ages, and left idle it's cut back to the quay and no further.
 
 ### Several terminals at one site
 
@@ -353,14 +363,25 @@ outside the plot (null inside the plot).
    ─────────────────────────── road ─────────────────────────────────────────────────
 ```
 
-- Starter tiers use the site's anchors: the loading bay goes where the recipe put its lorry bays,
-  private sidings on its siding line (up to two tracks). A site with no siding line gets a 12 m
+- Starter tiers use the site's anchors. The loading bay's stands go on the recipe's own lorry
+  anchors. When the recipe had only one, the second stand, the cabin and the floodlight go on the
+  first clear ground beside it, checked against what stands up on the site's own mesh, so nothing
+  is drawn inside a barn, a silo or a rolling mill. Private sidings go on the site's siding line
+  (up to two tracks). A site with no siding line gets a 12 m
   strip behind it instead, so "no siding space inside" becomes a land question.
-- Road rank 2 and 3 go beside the site on the side of its bays, fronting the road.
+- Road rank 2 and 3 go beside the site on the side of its bays, fronting the road. On a
+  waterside plot they stay between the road and the water: a yard is laid out longer and
+  shallower (the same area), down to 34 m deep for a lorry depot and 44 m for a road freight
+  terminal. Anything shallower is refused by `roomCheck`.
 - Rail rank 2 and 3 go behind the works, parallel to the back fence, at least as long as the site
-  is wide. When the back is water they go off the far side from the road, continuing the sidings.
-- Water tiers are built out into the water from the bank just behind the back fence. For the
-  docks, that's beyond the old basin.
+  is wide. When the back is water they go off the far side from the road, in line with the sidings
+  but kept between the water and the road. A yard too deep for that strip (a marshalling yard at a
+  small waterside sawmill) is refused by `roomCheck` with "No room between the road and the
+  water".
+- Water tiers are built out into the water from the bank just behind the back fence. At the
+  docks, the bulk or container terminal is built on from their quay instead: beside the basin's
+  mouth, from the docks' quay line out to sea. It joins the docks and leaves the basin, and the
+  docks' own berth, open to ships.
 - Placement order is water, rail, road, and an annex that would overlap one already placed is
   pushed further out.
 
@@ -532,7 +553,7 @@ step 3 is in:
 | 5 land, reach, models | 3 | shots of a colliery before and after a lorry depot, with `?anchors=1` |
 
 `docs/reports/terminals/anchors-*.png` shows the demo doing step 5's models today. Tiers are
-bought, then some demolished, on seven sites, with the site anchors in magenta.
+bought, then some demolished, on eight sites, with the site anchors in magenta.
 
 ## Viewing
 
@@ -572,10 +593,11 @@ Each site is shown with its tiers bought, then again after some are demolished:
 |---|---|---|
 | Colliery | lorry depot (conveyor), rail freight terminal (rapid loader) | the rail terminal |
 | Steelworks, waterside | road freight terminal, marshalling yard (gantry), quay (grab cranes) | the quay and the road terminal |
-| Docks, 1985 | container terminal on the quay, rail freight terminal (tank farm) | the container terminal, which leaves the docks' own quay |
+| Docks, 1985 | container terminal beside the basin, rail freight terminal (tank farm) | the container terminal, which leaves the docks' own quay |
 | Refinery, waterside | lorry depot, rail freight terminal and jetty, all with tank farms | the depot and the jetty |
 | Quarry | loading bay, private sidings (conveyor) | the sidings |
 | Power station, waterside | rail freight terminal (rapid loader), quay (grab cranes) | the rail terminal |
+| Farm | loading bay (on the farm's own lorry stand), private sidings | the sidings |
 | Sawmill | road freight terminal, private sidings | the road terminal |
 
 The files are `anchors-<site>-bought.png` and `anchors-<site>-removed.png`, plus `panel.png` for
