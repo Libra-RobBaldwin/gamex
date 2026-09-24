@@ -76,6 +76,8 @@ button:focus-visible { outline: 2px solid var(--mode-hi); outline-offset: -2px; 
 .act.primary, .act.danger { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
 .act.primary { background: var(--mode); color: var(--mode-ink); }
 .act.danger { background: var(--danger); color: #fff; }
+/* (a Build that can't be pressed yet must look it, not just fade) */
+.act.primary:disabled, .act.danger:disabled { background: rgba(23, 74, 49, 0.45); color: var(--muted); box-shadow: inset 0 0 0 1px var(--faint); }
 /* section labels: small capitals on an accent tab with a slanted end */
 .tab { display: inline-block; align-self: flex-start; background: var(--mode); color: var(--mode-ink); font: 700 10.5px/1 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 13px 3px 7px; clip-path: polygon(0 0, 100% 0, calc(100% - 7px) 100%, 0 100%); white-space: nowrap; }
 .cost { color: var(--money); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -120,6 +122,14 @@ body.paused #st-rush { color: var(--gold); }
 #needle .needle { width: 26px; height: 26px; }
 #firstrun { position: absolute; top: calc(var(--tap) + 10px); left: 0; right: calc(var(--tap) + 8px); margin: 0 auto; width: fit-content; max-width: calc(100% - var(--tap) - 8px); display: flex; align-items: center; gap: 8px; padding: 9px 13px 9px 10px; background: var(--panel); box-shadow: inset 3px 0 0 var(--lime); font-size: 13px; line-height: 1.3; pointer-events: none; }
 #firstrun .ic { width: 18px; height: 18px; color: var(--lime); }
+/* the next step, under the status strip on the left: one line, tap to do it */
+#goal { position: absolute; top: calc(var(--tap) + 10px); left: 0; max-width: calc(100% - var(--tap) - 16px); min-height: var(--tap); display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 9px; background: var(--panel); box-shadow: inset 3px 0 0 var(--gold), 0 1px 3px rgba(0, 0, 0, 0.3); color: var(--paper); font-size: 13px; line-height: 1.25; text-align: left; }
+#goal > .ic { flex: none; width: 20px; height: 20px; color: var(--gold); }
+#goal span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+#goal small { font: 700 10px/1.1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold-text); }
+#goal .go { width: 16px; height: 16px; color: var(--muted); transform: rotate(-90deg); }
+#firstrun:not([hidden]) ~ #goal { top: calc(var(--tap) + 62px); }
+body.tooling #goal, #drawer:not([hidden]) ~ #goal { display: none; }
 
 /* ---------------- hint: a line of help over the map ---------------- */
 #hint { position: absolute; left: 50%; bottom: calc(var(--chrome-b) + 8px); transform: translateX(-50%); width: max-content; display: flex; align-items: flex-start; gap: 7px; padding: 7px 13px 7px 10px; background: var(--panel); box-shadow: inset 3px 0 0 var(--mode); font-size: 12.5px; line-height: 1.35; pointer-events: none;
@@ -184,6 +194,10 @@ body.paused #st-rush { color: var(--gold); }
 .facts { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 0; font-variant-numeric: tabular-nums; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; text-align: right; font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; }
+.tiles > div { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; background: rgba(0, 0, 0, 0.22); min-width: 0; }
+.tiles b { font: 700 18px/1 var(--font-display); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tiles span { font-size: 11.5px; color: var(--muted); }
 .meter { height: 6px; background: var(--panel-2); }
 .meter i { display: block; height: 100%; background: var(--mode); }
 .lrow { display: grid; grid-template-columns: 34px 1fr; gap: 2px 10px; align-items: center; width: 100%; padding: 8px 4px; text-align: left; font-weight: 400; border-bottom: 1px solid var(--faint); }
@@ -266,7 +280,17 @@ body.paused #st-rush { color: var(--gold); }
 #tool .acts .act { padding: 0 10px; }
 #tool #t-undo, #tool #t-cancel { padding: 0; width: var(--tap); }
 #t-prim { display: contents; }
-#tool .opts { grid-area: opts; display: flex; align-items: stretch; gap: 1px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+#tool .opts { grid-area: opts; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+#tool .opts .orow { display: flex; align-items: stretch; gap: 1px; overflow-x: auto; scrollbar-width: none; min-width: 0; min-height: var(--tap); }
+#tool .opts .orow::-webkit-scrollbar { display: none; }
+#tool .opts[hidden] { display: none; }
+/* the tool's name opens the drawer: a plain button, with a chevron that flips when it's open */
+#tool button.what { min-height: var(--tap); padding: 0; background: none; color: inherit; text-align: left; justify-content: flex-start; }
+#tool .tw b { display: flex; align-items: center; gap: 4px; }
+#tool .tw b .ic { flex: none; width: 15px; height: 15px; color: var(--muted); transition: transform 0.15s; }
+#tool.open .tw b .ic { transform: rotate(180deg); }
+#tool #t-opts { padding: 0; width: var(--tap); }
+#tool #t-opts[aria-pressed='true'] { background: var(--mode-soft); color: var(--mode-hi); box-shadow: inset 0 -3px 0 var(--mode); }
 #tool .opts:empty { display: none; }
 #tool .opts::-webkit-scrollbar { display: none; }
 /* option buttons: an icon over a small label, like the bar's */
@@ -337,3 +361,14 @@ body.paused #st-rush { color: var(--gold); }
 .spark path { fill: none; stroke: var(--lime); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .spark .area { fill: var(--mode-soft); stroke: none; }
 .spark-cap { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+
+/* a choice of two (or three) ways to build, each with its price: the bus stop's kerbside or lay-by */
+#tpanel .choice { display: flex; gap: 8px; }
+#tpanel .choice button { flex: 1 1 0; min-height: 54px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 8px 12px; background: rgba(0, 0, 0, 0.22); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); color: var(--paper); text-align: left; }
+#tpanel .choice button b { font: 700 13px/1 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; }
+#tpanel .choice button span { font-weight: 600; color: var(--money); font-variant-numeric: tabular-nums; }
+#tpanel .choice button.on { background: var(--mode); color: var(--mode-ink); box-shadow: none; }
+#tpanel .choice button.on span { color: var(--mode-ink); }
+#tpanel .choice button:disabled { background: transparent; color: var(--muted); }
+#tpanel .choice button:disabled span { color: var(--muted); }
+#tpanel .why { margin: 0; font-size: 12px; line-height: 1.35; color: var(--muted); }
