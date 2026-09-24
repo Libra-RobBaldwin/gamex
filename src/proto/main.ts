@@ -28,7 +28,7 @@ import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/line
 import { TownEconomy, TOWN_NAME } from './game/econ';
 import { Purse, PRICE_SHARE } from './game/money';
 import { starterStops } from './game/crowdsites';
-import { buildStreets, centrality, centreDistance, inCentre, mapById, plotCentre, settlementAt, zoneOf } from './region'; // maps as data (docs/region.md)
+import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf } from './region'; // maps as data (docs/region.md)
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
@@ -40,8 +40,9 @@ const short = (need: number) => `Not enough money · ${money(need)} needed, ${mo
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // ---------------- world ----------------
-// The map is data (region/mapspec.ts): ?map= picks it, the invented town by default.
-const MAP = mapById(new URLSearchParams(location.search).get('map'));
+// The map is data (region/mapspec.ts): ?map= picks it (a region with its options), the invented town by default.
+const MAP = mapFromQuery(new URLSearchParams(location.search));
+const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
 const BOUND = MAP.bound;
 // the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
 const gameWater = new GameWater(BOUND * (BOUND > 520 ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
@@ -60,7 +61,7 @@ renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#a9cbe3');
+scene.background = new THREE.Color(LOOK.sky);
 
 scene.add(new THREE.HemisphereLight('#e8f3ff', '#5d7040', 1.25));
 const sun = new THREE.DirectionalLight('#fff3dc', 2.3);
@@ -98,6 +99,7 @@ window.addEventListener('resize', resize);
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
 const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, SCALE > 1 ? 4 : undefined, SCALE === 1); // (no 3D hedgerows on a big map until it streams: docs/region.md R4)
+gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
@@ -125,13 +127,13 @@ for (let i = 0; i < MAP.trees.count; i++) {
   // woods on the outskirts, a few in town
   if (inCentre(MAP, p) && rand() < 0.85) continue;
   if (isWater(p) || gameWater.near(p, 10)) continue;
-  trees.push({ ...p, s: 0.8 + rand() * 0.7, kind: rand() < 0.3 ? 1 : 0 });
+  trees.push({ ...p, s: 0.8 + rand() * 0.7, kind: rand() < LOOK.trees.pines ? 1 : 0 });
 }
 const crownGeo = new THREE.IcosahedronGeometry(3.4, 1);
 const pineGeo = new THREE.ConeGeometry(3, 9, 7);
 const trunkGeo = new THREE.CylinderGeometry(0.35, 0.5, 3.5, 6);
-const crownMat = new THREE.MeshLambertMaterial({ color: '#4f8a36', flatShading: true });
-const pineMat = new THREE.MeshLambertMaterial({ color: '#2f6b35', flatShading: true });
+const crownMat = new THREE.MeshLambertMaterial({ color: LOOK.trees.crown, flatShading: true });
+const pineMat = new THREE.MeshLambertMaterial({ color: LOOK.trees.pine, flatShading: true });
 const trunkMat = new THREE.MeshLambertMaterial({ color: '#6b4a2f' });
 const MAXT = Math.max(1600, MAP.trees.count + 200);
 const crowns = new THREE.InstancedMesh(crownGeo, crownMat, MAXT);

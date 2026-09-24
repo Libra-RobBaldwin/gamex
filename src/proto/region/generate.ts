@@ -12,6 +12,7 @@
 // Network and buildgen once the streets are built (docs/region.md, R1).
 import { rng, mix, range, pick, type Rand } from './random';
 import { placeName } from './names';
+import { regionOptions, type RegionOptions } from './options';
 import { MapWater, type LakeSpec, type RiverSpec, type WaterSpec, type XZ } from './water';
 
 export type Kind = 'city' | 'town' | 'village';
@@ -35,6 +36,7 @@ export interface ZoneRule { kind: 'industrial'; poly?: XZ[]; box?: { x0: number;
 export interface Link { a: number; b: number; length: number; road: 'A' | 'B'; water: boolean }
 export interface Region {
   seed: number;
+  options: RegionOptions; // what it was made from: the same options always make the same region
   bound: number; // half the map's width
   water: WaterSpec;
   settlements: Settlement[];
@@ -55,42 +57,58 @@ export const KINDS: Record<Kind, KindSpec> = {
 };
 const INDUSTRIAL_ROAD = 'arterial-1-40-0-0-0';
 
-export function generateRegion(seed: number, bound = REGION_BOUND): Region {
-  const water = makeWater(rng(mix(seed, 2)), bound);
+// (a seed alone is the default options with that seed: docs/regiongen.md)
+export function generateRegion(opts: number | Partial<RegionOptions>, bound = REGION_BOUND): Region {
+  const o = regionOptions(typeof opts === 'number' ? { seed: opts } : opts), seed = o.seed;
+  const water = makeWater(rng(mix(seed, 2)), bound, o);
   const mw = new MapWater(water);
-  const settlements = placeSettlements(rng(mix(seed, 3)), seed, bound, mw);
+  const settlements = placeSettlements(rng(mix(seed, 3)), seed, bound, mw, o);
   const streets: StreetCall[] = [], zones: ZoneRule[] = [];
   for (const s of settlements) {
     const out = layStreets(s, mw, bound);
     streets.push(...out.streets);
     if (out.zone) zones.push(out.zone);
   }
-  return { seed, bound, water, settlements, streets, zones, links: suggestLinks(settlements, mw) };
+  return { seed, options: o, bound, water, settlements, streets, zones, links: suggestLinks(settlements, mw) };
 }
 
 // ---------------- water ----------------
-// A river right across the map (it runs off both edges, past the ground's edge at 1.5× the bound),
-// meandering on two slow waves, and one or two lakes clear of it.
-function makeWater(r: Rand, B: number): WaterSpec {
-  const eastWest = r() < 0.5;
-  const base = range(r, -0.55, 0.55) * B, a1 = range(r, 150, 320), w1 = range(r, 1300, 2000), p1 = range(r, 0, 6.28);
-  const a2 = range(r, 50, 120), w2 = range(r, 500, 800), p2 = range(r, 0, 6.28), drift = range(r, -0.12, 0.12);
-  const path: XZ[] = [];
-  for (let t = -1.65 * B; t <= 1.65 * B + 1e-6; t += 20) {
-    const off = base + drift * t + a1 * Math.sin((t / w1) * 2 * Math.PI + p1) + a2 * Math.sin((t / w2) * 2 * Math.PI + p2);
-    path.push(eastWest ? { x: t, z: off } : { x: off, z: t });
+// Rivers right across the map (they run off both edges, past the ground's edge at 1.5× the bound),
+// meandering on two slow waves, and lakes clear of them. More than one river run the same way,
+// each in its own band of the map, never crossing another.
+function makeWater(r: Rand, B: number, o: RegionOptions): WaterSpec {
+  const eastWest = r() < 0.5, n = o.rivers, rivers: RiverSpec[] = [];
+  const band = (1.2 * B) / Math.max(1, n);
+  let drift = 0;
+  for (let k = 0; k < n; k++) {
+    let base = range(r, -0.55, 0.55) * B, a1 = range(r, 150, 320);
+    const w1 = range(r, 1300, 2000), p1 = range(r, 0, 6.28);
+    let a2 = range(r, 50, 120);
+    const w2 = range(r, 500, 800), p2 = range(r, 0, 6.28), d = range(r, -0.12, 0.12);
+    if (k === 0) drift = d;
+    if (n > 1) {
+      // (its own band, with a little play, and meanders small enough to stay in it; all drift alike)
+      base = -0.6 * B + band * (k + 0.5) + (base / (0.55 * B)) * band * 0.08;
+      const room = band / 2 - 150 - band * 0.08, f = Math.min(1, room / (a1 + a2));
+      a1 *= f; a2 *= f;
+    }
+    const path: XZ[] = [];
+    for (let t = -1.65 * B; t <= 1.65 * B + 1e-6; t += 20) {
+      const off = base + drift * t + a1 * Math.sin((t / w1) * 2 * Math.PI + p1) + a2 * Math.sin((t / w2) * 2 * Math.PI + p2);
+      path.push(eastWest ? { x: t, z: off } : { x: off, z: t });
+    }
+    rivers.push({ path, width: Math.round(range(r, 16, 22)) });
   }
-  const river: RiverSpec = { path, width: Math.round(range(r, 16, 22)) };
-  const riverOnly = new MapWater({ lakes: [], rivers: [river] });
+  const riverOnly = new MapWater({ lakes: [], rivers });
   const lakes: LakeSpec[] = [];
-  const want = r() < 0.5 ? 1 : 2;
-  for (let tries = 0; tries < 400 && lakes.length < want; tries++) {
+  const want = o.lakes === -1 ? (r() < 0.5 ? 1 : 2) : o.lakes;
+  for (let tries = 0; tries < 800 && lakes.length < want; tries++) {
     const L: LakeSpec = { x: range(r, -B + 450, B - 450), z: range(r, -B + 450, B - 450), r: Math.round(range(r, 110, 170)), waves: [range(r, 0, 6.28), range(r, 0, 6.28), range(r, 0, 6.28)] };
     if (riverOnly.edgeDistance(L) < L.r * 1.35 + 350) continue;
-    if (lakes.some((o) => Math.hypot(o.x - L.x, o.z - L.z) < (o.r + L.r) * 1.35 + 900)) continue;
+    if (lakes.some((q) => Math.hypot(q.x - L.x, q.z - L.z) < (q.r + L.r) * 1.35 + (want > 2 ? 500 : 900))) continue;
     lakes.push(L);
   }
-  return { lakes, rivers: [river] };
+  return { lakes, rivers };
 }
 
 // ---------------- settlements ----------------
@@ -100,9 +118,9 @@ const reach = (kind: Kind, r: number) => r + (KINDS[kind].industrial ? KINDS[kin
 // Poisson-disc sampling (dart throwing): each new place lands at random, and is kept only if it's
 // far enough from every place already there (by both their sizes) and from the water. The city
 // goes first, near the middle; then the towns; then the villages in the gaps.
-function placeSettlements(r: Rand, seed: number, B: number, mw: MapWater): Settlement[] {
-  const nVillages = 6 + Math.floor(r() * 3);
-  const kinds: Kind[] = ['city', 'town', 'town', 'town', ...Array<Kind>(nVillages).fill('village')];
+function placeSettlements(r: Rand, seed: number, B: number, mw: MapWater, o: RegionOptions): Settlement[] {
+  const nVillages = o.villages === -1 ? 6 + Math.floor(r() * 3) : o.villages;
+  const kinds: Kind[] = [...(o.city ? ['city' as const] : []), ...Array<Kind>(o.towns).fill('town'), ...Array<Kind>(nVillages).fill('village')];
   const out: Settlement[] = [];
   const taken = new Set<string>();
   const names = rng(mix(seed, 4)); // (a stream of their own: a change to the names never moves a place)

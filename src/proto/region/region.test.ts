@@ -3,7 +3,8 @@ import { generateRegion, KINDS, REGION_BOUND, type Region } from './generate';
 import { buildStreets } from './apply';
 import { MapWater, TOWN_LAKE, lakeGroundOf, lakeRadiusOf } from './water';
 import { isRealPlace, REAL_PLACES } from './names';
-import { centrality, mapById, mapOfRegion, plotCentre, regionMap, TOWN_MAP, zoneOf } from './index';
+import { centrality, mapById, mapFromQuery, mapOfRegion, optionsFromQuery, optionsQuery, plotCentre, regionMap, regionOptions, STYLE_LOOKS, STYLES, TOWN_MAP, zoneOf } from './index';
+import { CROP_NAMES, PALETTE } from '../ground/covers';
 import { Network, DEFAULT_OPTS, ROADS, halfOf, bezier } from '../roads';
 
 const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -229,5 +230,60 @@ describe('maps as data', () => {
     // the camera starts over the city, and the starter line is on its high street
     expect(Math.hypot(m.view.x - city.x, m.view.z - city.z)).toBeLessThan(50);
     expect(m.line.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('options: a seed and a few settings make the map, repeatably', () => {
+  const opts = [
+    { seed: 3, rivers: 0, lakes: 4, style: 'desert' as const },
+    { seed: 3, rivers: 3, lakes: 2, towns: 5, villages: 10, style: 'arctic' as const },
+    { seed: 11, rivers: 2, lakes: 0, city: false, towns: 2, villages: 4 },
+  ];
+  test('the same options always make the same map; any change makes another', () => {
+    for (const o of opts) expect(JSON.stringify(generateRegion(o))).toBe(JSON.stringify(generateRegion(o)));
+    expect(JSON.stringify(generateRegion(opts[0]).settlements)).not.toBe(JSON.stringify(generateRegion({ ...opts[0], rivers: 1 }).settlements));
+    // a seed alone is the default options
+    expect(JSON.stringify(generateRegion(7))).toBe(JSON.stringify(generateRegion({ seed: 7 })));
+  });
+  test('as many rivers, lakes, towns and villages as asked for', () => {
+    for (const o of opts) {
+      const g = generateRegion(o), n = (k: string) => g.settlements.filter((s) => s.kind === k).length;
+      expect(g.water.rivers).toHaveLength(o.rivers);
+      expect(g.water.lakes).toHaveLength(o.lakes);
+      expect(n('city')).toBe(o.city === false ? 0 : 1);
+      expect(n('town')).toBe(o.towns ?? 3);
+      if (o.villages !== undefined) expect(n('village')).toBe(o.villages);
+    }
+  });
+  test('rivers never cross or crowd each other, and no street is in any water', () => {
+    for (const o of opts) {
+      const g = generateRegion(o), mw = new MapWater(g.water);
+      const rs = g.water.rivers.map((r) => new MapWater({ lakes: [], rivers: [r] }));
+      for (let i = 0; i < rs.length; i++) for (const p of g.water.rivers[i].path.filter((_, k) => k % 10 === 0)) for (let j = 0; j < rs.length; j++) if (j !== i) expect(rs[j].edgeDistance(p, 400)).toBeGreaterThan(250);
+      for (const st of g.streets) for (const t of [0, 0.25, 0.5, 0.75, 1]) expect(mw.ground(st.a.x + (st.b.x - st.a.x) * t, st.a.z + (st.b.z - st.a.z) * t)).toBe(0);
+    }
+  });
+  test('options travel in the URL and come back the same', () => {
+    for (const o of opts) {
+      const full = regionOptions(o), q = new URLSearchParams(optionsQuery(full));
+      expect(q.get('map')).toBe('region');
+      expect(optionsFromQuery(q)).toEqual(full);
+      expect(mapFromQuery(q).options).toEqual(full);
+    }
+    expect(optionsFromQuery(new URLSearchParams('map=region&rivers=9&style=lava&towns=-2'))).toMatchObject({ rivers: 3, style: 'temperate', towns: 0 });
+    expect(regionOptions({ city: false, towns: 0, villages: 0 }).villages).toBe(1); // (never an empty map)
+    expect(mapFromQuery(new URLSearchParams(''))).toBe(TOWN_MAP);
+  });
+  test('every style names real palette entries and crops, and temperate changes nothing', () => {
+    for (const s of STYLES) {
+      const L = STYLE_LOOKS[s];
+      for (const k of Object.keys(L.palette)) expect(Object.keys(PALETTE)).toContain(k);
+      for (const k of Object.keys(L.crops)) expect(CROP_NAMES).toContain(k);
+      for (const hex of [...Object.values(L.palette), L.sky, L.trees.crown, L.trees.pine]) expect(hex).toMatch(/^#[0-9a-f]{6}$/);
+    }
+    expect(STYLE_LOOKS.temperate.palette).toEqual({});
+    expect(STYLE_LOOKS.temperate.trees).toMatchObject({ density: 1, pines: 0.3, crown: '#4f8a36', pine: '#2f6b35' });
+    expect(STYLE_LOOKS.temperate.sky).toBe('#a9cbe3');
+    expect(regionMap({ seed: 7, style: 'desert' }).trees.count).toBeLessThan(regionMap(7).trees.count);
   });
 });

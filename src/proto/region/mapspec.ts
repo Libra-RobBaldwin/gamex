@@ -4,6 +4,7 @@
 // plot belongs to (plots are queued nearest a settlement's centre first). Pure: no three.js.
 import type { Kind, Link, StreetCall, ZoneRule } from './generate';
 import type { WaterSpec, XZ } from './water';
+import type { RegionOptions, Relief, Style } from './options';
 
 export interface SettlementInfo { id: number; name: string; kind: Kind; x: number; z: number; r: number }
 // A street as the map describes it: the region's calls, plus the few options the town's
@@ -30,6 +31,9 @@ export interface MapSpec {
   line: XZ[]; // the starter bus line: the stops nearest these, in order
   industries: boolean; // library industrial sites on the town's estate (game/industry.ts townWishes)
   trees: { count: number; clear?: number }; // woodland trees scattered, and the radius mostly kept clear round each centre (else 55% of its radius)
+  style: Style; // how it looks (region/styles.ts): temperate, desert, arctic
+  relief: Relief; // how hilly (not drawn yet: docs/regiongen.md, "Hills")
+  options?: RegionOptions; // a generated map's options: they make it again
 }
 
 const inPoly = (p: XZ, poly: XZ[]) => {

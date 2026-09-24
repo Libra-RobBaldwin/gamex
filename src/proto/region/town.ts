@@ -61,6 +61,8 @@ export const TOWN_MAP: MapSpec = {
   settlements: [{ id: 0, name: 'Town', kind: 'town', x: 0, z: 0, r: 250 }],
   streets: townStreets(),
   generated: false,
+  style: 'temperate',
+  relief: 'flat',
   links: [],
   view: { x: 0, z: 20, h: 300 },
   // the high street either side of the centre, the road north, and the industrial estate

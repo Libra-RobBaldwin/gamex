@@ -1,7 +1,52 @@
 # The region generator, and maps as data
 
 `src/proto/region/` covers steps R1 and R0 of `docs/region.md`. It's pure (no three.js, no DOM) and tested in
-`region.test.ts`. Play it at `/?map=region` (seed 7), or `/?map=region-<seed>` for another seed.
+`region.test.ts`. Play it at `/?map=region` (seed 7).
+
+## A seed and a few settings (`options.ts`, `styles.ts`)
+
+Like Transport Fever 2's new-game screen, a generated map is its options. The same options always make the same
+map, in about 30 ms, and the URL carries them all:
+
+    /?map=region&seed=12&rivers=2&lakes=3&towns=4&villages=9&city=1&style=desert&relief=rolling
+
+| Option | Values | Default |
+|---|---|---|
+| `seed` | any whole number | 7 |
+| `rivers` | 0–3, each right across the map, in its own band (they never cross) | 1 |
+| `lakes` | 0–4 | one or two (the seed decides) |
+| `city` | 1 or 0 | 1 |
+| `towns` | 0–6 | 3 |
+| `villages` | 0–12 | six to eight (the seed decides) |
+| `style` | `temperate`, `desert`, `arctic`: the ground's palette and crops, the woods (how many, how many conifers, their colour) and the sky | temperate |
+| `relief` | `flat`, `lowland`, `rolling`, `upland`, `mountain` (the terrain library's presets) | flat. It's recorded now; see "Hills" |
+
+`optionsQuery(options)` gives the URL back, which is what a new-game screen (the front-menu session's `maps.ts`)
+would build. Names, positions and water each draw from their own seeded stream, so changing one setting doesn't
+reshuffle the rest more than it has to.
+
+## Next: hills, and real places, on the same pipeline
+
+The generator's steps are the same whether the map is invented or real. Only where each input comes from changes:
+
+| Step | Invented (seed + options) | Real (a postcode or place) |
+|---|---|---|
+| Ground | `ProceduralTerrain` from `relief` and the seed | `TerrariumHeight` (AWS terrain tiles, world-wide) or OS Terrain 50 (UK), both already in `src/proto/terrain/` |
+| Water | rivers and lakes from the options (later: down the terrain's valleys) | OpenStreetMap water |
+| Settlements | Poisson-disc sites on gentle, dry ground | OSM places (city, town, village) and their built-up areas |
+| Streets | the lattice in `layStreets` | OSM roads (`src/proto/osm/`, as the Real Town Plans page and the parked Horley work do) |
+| Look | `style` | picked from latitude and land cover |
+
+So the next step for "hillier" is the terrain integration plan in `docs/terrain.md` (8 steps). Steps 1–3 change
+nothing on screen. Steps 4–5 replace the grade solver in `roads.ts` and the cutting drawing in `roaddraw.ts`, which
+the motorway session is editing now, so the steps clash unless they're sequenced. Recommended order:
+
+1. Once motorways (R2) merges: terrain steps 1–3, plus the generator placing settlements on gentle ground and
+   running rivers down valleys (a "rolling" region).
+2. Terrain steps 4–7: roads, rail, plots and water on real slopes, first on the region with `relief=rolling`, then
+   the town.
+3. Real places: a postcode gives a centre, and step 8 (real elevation), OSM water, places and roads fill the same
+   `MapSpec`.
 
 ## Maps as data (`mapspec.ts`, `town.ts`, `index.ts`)
 

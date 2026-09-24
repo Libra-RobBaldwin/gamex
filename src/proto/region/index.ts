@@ -9,6 +9,8 @@
 import { generateRegion, KINDS, REGION_BOUND, type Region } from './generate';
 import type { MapSpec } from './mapspec';
 import { TOWN_MAP } from './town';
+import { optionsFromQuery, type RegionOptions } from './options';
+import { STYLE_LOOKS } from './styles';
 
 export * from './generate';
 export * from './mapspec';
@@ -16,13 +18,15 @@ export { buildStreets, type StreetNet } from './apply';
 export { MapWater, TOWN_WATER, type WaterSpec, type LakeSpec, type RiverSpec } from './water';
 export { isRealPlace, placeName, REAL_PLACES } from './names';
 export { TOWN_MAP };
+export * from './options';
+export { STYLE_LOOKS, type StyleLook } from './styles';
 
 export const REGION_SEED = 7;
 
 // A generated region as a map. The camera starts over the city, whose high street gets the first
 // bus stops and the starter line.
-export function regionMap(seed = REGION_SEED): MapSpec {
-  return mapOfRegion(generateRegion(seed, REGION_BOUND));
+export function regionMap(opts: number | Partial<RegionOptions> = REGION_SEED): MapSpec {
+  return mapOfRegion(generateRegion(opts, REGION_BOUND));
 }
 export function mapOfRegion(g: Region): MapSpec {
   const city = g.settlements.find((s) => s.kind === 'city') ?? g.settlements[0];
@@ -44,11 +48,21 @@ export function mapOfRegion(g: Region): MapSpec {
     stops: [...line, at(0, 1.5 * S)],
     line,
     industries: false,
-    // woods over the whole map (a fifth of the town's density: it's 33 times the area, and the ground paints woods too)
-    trees: { count: Math.round(1400 * (g.bound / 520) ** 2 * 0.07) },
+    // woods over the whole map (a fifth of the town's density: it's 33 times the area, and the
+    // ground paints woods too), fewer in a desert
+    trees: { count: Math.round(1400 * (g.bound / 520) ** 2 * 0.07 * STYLE_LOOKS[g.options.style].trees.density) },
+    style: g.options.style,
+    relief: g.options.relief,
+    options: g.options,
   };
 }
 
+// The map a URL asks for: ?map=region with its options (?seed=7&rivers=2&style=desert…: options.ts),
+// or the town when there's no map or it isn't known.
+export function mapFromQuery(q: URLSearchParams): MapSpec {
+  if (q.get('map') === 'region') return regionMap(optionsFromQuery(q));
+  return mapById(q.get('map'));
+}
 // the maps the game can open, by ?map= id (the town when there's none, or it isn't known)
 export function mapById(id: string | null | undefined): MapSpec {
   if (id === 'region') return regionMap();

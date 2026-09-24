@@ -4,6 +4,7 @@ import { ROADS } from '../catalog';
 import { circlePoly } from '../land';
 import type { Lot, Network } from '../roads';
 import { Ground, type GroundInput, type XZ } from './index';
+import { CROP_NAMES, PALETTE, type CropName } from './covers';
 
 export interface GameWorld {
   net: Network;
@@ -28,6 +29,12 @@ export class GameGround {
     const size = Math.ceil((bound * 2 + 160) / 10) * 10;
     this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed: 11, texel, hedges });
     this.reach = Math.max(600, Math.ceil((bound * 1.15) / 40) * 40);
+  }
+  // A map's style: its palette and crops over the British ones (region/styles.ts). Nothing given, nothing changes.
+  setStyle(s: { palette: Partial<Record<keyof typeof PALETTE, string>>; crops: Partial<Record<CropName, { a: string; b: string }>> }) {
+    const u = this.ground.uniforms, keys = Object.keys(PALETTE) as (keyof typeof PALETTE)[];
+    for (const [k, hex] of Object.entries(s.palette)) { const i = keys.indexOf(k as keyof typeof PALETTE); if (i >= 0 && hex) u.uPal.value[i].set(hex); }
+    for (const [k, c] of Object.entries(s.crops)) { const i = CROP_NAMES.indexOf(k as CropName); if (i >= 0 && c) { u.uCropA.value[i].set(c.a); u.uCropB.value[i].set(c.b); } }
   }
   // what only changes with the roads or the landscaping (kept between plots going up)
   private fixed: Pick<GroundInput, 'blocked' | 'lanes' | 'parks' | 'industrial' | 'water'> | null = null;
