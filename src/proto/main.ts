@@ -30,6 +30,10 @@ import { Purse, PRICE_SHARE } from './game/money';
 import { Stations, STATION_LIST_PRICE } from './game/rail';
 import type { TrainDef } from './catalog';
 import { starterStops } from './game/crowdsites';
+import { Railway } from './rail/railway'; // stations, signalling and rail lines (docs/rail.md)
+import { RailDraw } from './rail/draw';
+import { RailGame } from './rail/game';
+import { layRegionRail, planRegionRail } from './rail/region';
 import { Loading } from './loading';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
 
@@ -59,6 +63,7 @@ const BOUND = MAP.bound;
 const gameWater = new GameWater(BOUND * (BOUND > 520 ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
 const isWater = (p: P) => gameWater.isWater(p);
 const net = new Network(isWater, BOUND, 11);
+const railway = new Railway(net); // (rebuilt with the roads: commitRoads)
 gameWater.claim(net.land); // the water's land ('water', 3 m past the waterline): plots and parks keep off it
 // the map's industrial estates (the town's is south of the centre)
 const INDUSTRIAL = (p: P) => zoneOf(MAP, p) === 'industrial';
@@ -237,6 +242,7 @@ function commitRoads(made: number[] = []) {
   claimJunctions();
   evictFromWorks();
   bridgeLayer.sync(net); // lays out the bridges and stores their types on the segments, which drawRoads reads
+  railway.rebuild(); // (its stations tell drawRoads where they lay their own track)
   lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
@@ -417,6 +423,15 @@ function queuePlots(segs: number[]) {
 
 // ---------------- the map's roads and towns ----------------
 async function seedTown() {
+  // a generated region's railway first: a main line through the city and two towns, a branch to a
+  // village, stations and a line on each (rail/region.ts); the streets then cross it on the level
+  // or bridge it, and keep out of its stations
+  if (MAP.generated) {
+    await loading.stage('Laying the railway', 0.03);
+    const plan = planRegionRail(MAP.settlements, { bound: BOUND, isWater });
+    const made = plan ? layRegionRail(railway, plan) : null;
+    if (made?.problems.length) console.info('railway:', made.problems.join(' · '));
+  }
   // the map's streets (region/: the town's hand-drawn roads, or each of a generated region's settlements in turn)
   if (MAP.generated) {
     for (const [i, st] of MAP.settlements.entries()) {
@@ -430,6 +445,7 @@ async function seedTown() {
   // junctions are designed (and take their land) before any plot is laid out
   await loading.stage('Designing the junctions', 0.05);
   commitRoads([...net.segs.keys()]);
+
   // industry: library sites on the estate and out of town claim their land before any plot is
   // built; the estate's plots are theirs, so its buildgen sheds are dropped (game/industry.ts)
   if (MAP.industries) {
@@ -734,7 +750,7 @@ for (const id of RAIL_PRESETS) shell.addBuildItem('rail', { id, label: ROADS[id]
 shell.addBuildCategory({ id: 'stops', label: 'Stops', icon: 'busStop' });
 shell.addBuildItem('stops', { id: 'bus-stop', label: 'Bus stop', spec: 'On any road; a lay-by where there is room', short: 'On any road', icon: 'busStop', tone: 'stop', onPick: () => startStopTool() });
 shell.addBuildItem('stops', { id: 'bus-station', label: 'Bus station', spec: 'Several bays, for busy routes', icon: 'bus', locked: 'Not in the game yet' });
-shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight run of track', icon: 'train', tone: 'rail', onPick: () => startStationTool() });
+shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight, level run of track', short: 'On straight track', icon: 'train', tone: 'rail', onPick: () => { endTool(); railGame.startStationTool(); } });
 shell.addBuildItem('stops', { id: 'depot', label: 'Lorry depot', spec: 'Where your lorries start and are kept', icon: 'warehouse', locked: 'Not in the game yet' });
 shell.addBuildCategory({ id: 'freight', label: 'Freight', icon: 'warehouse', note: 'Terminals are bought for an industry; better ones unlock as it grows.' });
 shell.addBuildItem('freight', { id: 'terminals', label: 'Freight terminals', name: 'Terminals', spec: 'Loading bays, sidings and jetties for industries', icon: 'warehouse', locked: 'Come with the terminals update' });
@@ -942,11 +958,7 @@ shell.addTransportTab({
     }));
     el.querySelectorAll<HTMLButtonElement>('[data-set]').forEach((b) => b.addEventListener('click', () => {
       const o = trains.find((x) => x.id === b.dataset.set)!, t = fleet.defFor(o);
-      trainChoice = t;
-      const l = [...lines.list].reverse().find((x) => x.mode === 'rail');
-      if (!l) { hint(`New rail lines will run the ${o.name}`, trainIcon(trainKind(o))); return; }
-      l.train = t;
-      buyBus(l);
+      railGame.buyTrain(t, o.name); // (on a rail line: rail/game.ts)
     }));
     el.querySelectorAll<HTMLButtonElement>('[data-lvl]').forEach((b) => b.addEventListener('click', () => { level = +b.dataset.lvl!; shell.refreshTransport(); }));
   },
@@ -1466,9 +1478,11 @@ function tapMap(sx: number, sy: number): Mode {
   }
   if (mode === 'stop') { stopTap(g); return mode; }
   if (mode === 'line') { lineTap(sx, sy); return mode; }
-  if (mode === 'station') { stationTap(g); return mode; }
+  if (railGame.tap(sx, sy, g)) return 'stop'; // (a railway tool: rail/game.ts)
+  if (mode === 'station') { stationTap(g); return mode; } // (the interim stations, game/rail.ts: not offered while rail/ is)
   const bus = traffic.busNear(g);
   if (bus !== null) { showBusInfo(bus); return 'look'; }
+  if (railGame.inspect(g)) return 'look'; // a train or a station
   const train = traffic.trainNear(g);
   if (train !== null) { showTrainInfo(train); return 'look'; }
   const sta = stations.near(g, 60);
@@ -1630,7 +1644,6 @@ scene.add(markers.group);
   const ids = MAP.line.map(near).filter((x): x is number => x !== undefined);
   if (ids.length >= 2) lines.add(ids, false, 3);
 }
-for (const t of ['intercity', 'dmu']) traffic.addTrain(t);
 const dbSize = new THREE.Vector2();
 let clock = 7 * 60; // minutes since midnight: a day passes in six minutes
 let places: Places | null = null;
@@ -1678,10 +1691,22 @@ let lastH = view.h;
 // the town's people: on the footways, at the stops, in the parks (see game/crowds.ts)
 const people = new TownCrowds({ scene, net, junctions, traffic, regions: () => infill }, GAME_MIN_PER_S);
 (window as unknown as { people: TownCrowds }).people = people;
+// the railway: its trains drawn with the traffic, held by the level crossings' barriers, and the
+// starter town's line between two stations on the main line (rail/, docs/rail.md)
+const railDraw = new RailDraw(railway, traffic.fleet);
+railway.useRoads(traffic);
+traffic.onDraw = (dt) => railDraw.drawTrains(dt);
+const railGame = new RailGame({
+  net, shell, railway, draw: railDraw, people, scene, toScreen, focusOn, rebuildRoads, hint, purse,
+  clear: (lots) => { for (const l of lots) { const b = buildings.find((x) => x.lot === l); if (b && !b.dying) demolish(b); } placesDirty = true; },
+});
+if (!MAP.generated) railGame.starter(); // (a generated region lays its own: seedTown)
+rebuildRoads();
+shell.addTransportTab({ id: 'rail', label: 'Railway', icon: 'train', sub: 'Your rail lines and stations', render: (el) => railGame.renderTab(el) });
 // the economy runs the town from here on (game/econ.ts): it decides what gets built, and how
 // many wait at the stops
 const town = new TownEconomy({
-  net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, stations,
+  net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, rail: railGame.econ(),
   standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
   free: () => queue,
   build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); },
@@ -1777,10 +1802,12 @@ function frame(now: number) {
       simNow += step * 1000;
       traffic.generate(getPlaces(), hour, LEVELS[level][1], simNow);
       traffic.generate(getPlaces(), hour, LEVELS[level][1], simNow);
+      railway.update(step);
       traffic.update(step, simNow);
     }
   } else traffic.redraw();
   for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, simNow) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
+  railGame.frame(dt, cam, canvas.clientHeight);
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   markers.frame(cam, canvas.clientHeight);
   if (routeShown) routeShown.material.resolution.set(canvas.width, canvas.height);
@@ -1795,7 +1822,7 @@ function frame(now: number) {
     $('#st-rush').title = rush;
     $('#st-cars').textContent = count(traffic.live);
     $('#st-buses').textContent = String(traffic.buses);
-    $('#st-trains').textContent = String(traffic.trains.length);
+    $('#st-trains').textContent = String(railway.trains.length);
     $('#st-pop').textContent = count(pop);
     shell.setMoney(money(purse.balance));
   }
@@ -1827,6 +1854,7 @@ requestAnimationFrame(frame);
 
 (window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
+Object.assign((window as unknown as { proto: object }).proto, { railway, railDraw, railGame }); // (rail/)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
 Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading }); // (the map being played, and how long its loading took, stage by stage)
