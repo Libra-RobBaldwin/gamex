@@ -6,9 +6,10 @@ and `roaddraw.ts`.
 
 ## Try it
 
-- `/proto.html?junction=dumbbell`, `?junction=gsr`, `?junction=diamond`: one junction on its own.
-  Add `&slips=parallel` for slip roads with a long parallel lane.
-- `/proto.html?junction=blank`: a north–south dual carriageway on an empty map. Build a motorway
+- `/proto.html?map=town&junction=dumbbell`, `…=gsr`, `…=diamond`, `…=trumpet`: one junction on its own.
+  - Add `&size=tight` for the town-sized version (see **Size** below).
+  - Add `&slips=parallel` for slip roads with a long parallel lane.
+- `/proto.html?map=town&junction=blank`: a north–south dual carriageway on an empty map. Build a motorway
   across it (Build › Roads › Motorway) and the blueprint card offers **Junction here**.
 - The starter town (`/proto.html?map=town`): its motorway along the south edge is now a pair of
   carriageways (`pairUpMotorways`, run after the town's streets are built).
@@ -89,6 +90,31 @@ Lengths come from `standards.ts`, following DMRB CD 122:
   the plan is marked `wrong`: it isn't entered, and holds nobody up, until the car has changed down
   into the nearside lane. Without this a car in lane 1 took a long curve across lane 0.
 
+## Slip roads the player draws (`interchange/plan.ts` `planSlip`)
+
+- **A drag that starts on a motorway carriageway draws a slip road,** whatever road type is picked.
+  - Drag ahead and out to the left to leave the motorway (a diverge).
+  - Drag back and out to the left to join it (a merge).
+- **One lane or two.** Two lanes are one lane where the road meets the motorway, widening 30 m past
+  the nose.
+- **It leaves the lane as a slip road does:** at the node where the lanes part, along the taper's
+  line to its nose, then round to wherever it was dragged.
+- **The card says why it can't be built,** if it can't:
+  - it's on the offside;
+  - there's no room for the taper before the carriageway ends or reaches another junction;
+  - the carriageway is on a bridge or in a cutting there;
+  - the curve is too tight for 50 mph.
+- **Motorways the player draws are built as pairs of carriageways,** so slip roads can be dragged off
+  them. If one end is drawn to a junction, the pair splays into it.
+
+### How every slip road meets the carriageway
+
+- **The slip road leaves at the taper's angle.** From the nose it carries straight on along the
+  taper's line before curving away, rather than running parallel and then swinging out.
+- **The lane across the nose follows the same straight line** (`slips.ts`).
+- **Where the two meet,** the slip road's own end is capped to the junction's pieces, and the thin
+  wedge of ground beyond the nose, between the two verges, is grassed.
+
 ## Chevrons and ghost islands (TSRGD diagram 1042)
 
 - Where a motorway's two carriageways splay into a roundabout, the gap between them is a **ghost
@@ -136,9 +162,14 @@ People cross there when nothing is coming.
 ## Give-way markings
 
 - **The give-way line** (diagram 1003) at a priority junction is right against the major road, on
-  its kerb line, not back at the end of the corner radius (`Shape.giveWay`). A road meeting at an
-  angle has it square to the major road. Traffic waits there, so a driver can see along the major road.
+  its kerb line, not back at the end of the corner radius (`Shape.giveWay`).
+  - A road meeting at an angle has it square to the major road.
+  - It runs right across the flared mouth, out to the corner kerb.
+  - Traffic waits there, so a driver can see along the major road.
 - **The triangle** (diagram 1023) is an outline, with its point towards the approaching driver.
+- **No lane arrows at roundabout entries.** Every entry is a left turn onto the ring. Elsewhere,
+  arrows are only drawn for movements that exist, never towards a road that only leads in.
+- An interchange's junctions take the form it built them for, without slip lanes of their own.
 
 ## Grade-separated junctions (`interchange/build.ts`)
 
@@ -147,6 +178,7 @@ People cross there when nothing is coming.
 | **Dumbbell** | A roundabout either side of the motorway, and the local road on a bridge over both carriageways between them. |
 | **Grade-separated roundabout** | A one-way ring (`gsr-ring`, 2 lanes, 40 mph) about the junction, over the motorway on two bridges. The local road and the slip roads meet it at give-way junctions, the slip roads at 40° to it from outside. |
 | **Diamond** | A dumbbell with give-way junctions instead of roundabouts. |
+| **Trumpet** | A T: the road meets the motorway from one side only (its other side stops short). It ends at a roundabout, from which a pair of one-lane links runs to the motorway and over it. The two right turns go by a 270° loop and by a semi-direct ramp wrapped round the outside of the loop; the two left turns go by direct ramps. Every join is a merge or a diverge. |
 
 - Each has four slip roads. The off-slips diverge before the junction and the on-slips merge after
   it. They curve round to the local road at radii no tighter than the slip road's minimum.
@@ -166,6 +198,25 @@ People cross there when nothing is coming.
   dumbbell takes about 430 m across, and the grade-separated roundabout's ring is about 140 m in
   radius.
 
+### Size: Tight or Open
+
+Every form comes in two sizes (`IxSize`, `SIZE` in `build.ts`).
+
+| | Tight (for a town) | Open (the country) |
+|---|---|---|
+| The motorway under it | Dips into a cutting, as deep as fits (2–4 m) | At ground level |
+| The local road, or ring | Climbs at up to 8%, 1 m allowed for the bridge deck | 6%, 2 m |
+| Slip roads | 40 mph (`slip-40`, 40 m radius at least) | 50 mph (`slip`, 80 m) |
+| Level either side of a roundabout, or ring | 6 m, 12 m | 16 m, 22 m |
+| A trumpet's loop, and its other ramps | 48 m, 55 m | 90 m, 95 m |
+
+- **How it scales.** A tight dumbbell's roundabouts sit about 140 m either side of the motorway,
+  against about 210 m for an open one. A tight grade-separated roundabout's ring is about 220 m
+  across.
+- **The cutting** (`cutting()`) is only as deep as leaves every slip road clear of its grass slopes.
+  The slip roads stay at ground level, and the motorway only dips once they're far enough off it.
+- A trumpet is always at ground level: its links climb over the motorway.
+
 ### In the game
 
 - **Junction here:** a motorway blueprint that crosses a road shows the forms, and taper or long
@@ -175,6 +226,7 @@ People cross there when nothing is coming.
   - why it can't be built, if it can't.
 
   The ghost shows every piece. Build builds it.
+- The card also offers **Tight** or **Open**. Tight is the default.
 - **Tapping any part of a junction** opens one panel for the whole thing. It shows the busiest lane
   in any of its junctions, the lengths of its slip roads, and buttons to edit its roundabouts or
   give-ways in the junction designer.
@@ -217,6 +269,12 @@ the region session, since this stream doesn't touch `src/proto/region/`.
 | `game/pedx.test.ts` | Zebras and pelicans: the right kind for each road, clear of junctions and stops, people at both kerbs; a pelican's cycle (green, amber, red with the green man, flashing amber), with traffic held at the stop line. |
 
 ## Known limits
+
+- **No cloverleaf yet.** A cloverleaf's loops join and leave each carriageway about 150 m apart. DMRB
+  tapers need 300 m or more between a merge and the next diverge, so it needs collector–distributor
+  roads alongside (as UK ones have), or a weaving section. That's the next set piece.
+- **The cutting is only for junctions built with a new motorway** ("Junction here"), not ones added
+  to a motorway that's already there.
 
 - **Slip roads are one lane.** The clip's slip road opens out to two lanes; that's a follow-up.
 - **The grade-separated roundabout's ring can queue back** at the local road's give-ways when the
