@@ -209,9 +209,29 @@ function samples(s0: number, s1: number, step: number) {
   for (let i = 0; i <= n; i++) out.push(s0 + ((s1 - s0) * i) / n);
   return out;
 }
-const frame = (path: P[], s: number) => { const p = pointOn(path, s); return { x: p.x, z: p.z, ux: p.ux, uz: p.uz, nx: -p.uz, nz: p.ux }; };
+// Distances along a path of its corners.
+function corners(path: P[]) {
+  const out: number[] = [];
+  let d = 0;
+  for (let i = 1; i < path.length - 1; i++) { d += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z); out.push(d); }
+  return out;
+}
+// Point and sideways direction at s. At a corner of the path the sideways direction is the mitre
+// (half-way between the two sides) and widths scale up to match, so swept sections meet cleanly
+// instead of overlapping on the inside of the bend.
+const frame = (path: P[], s: number, mitre = false) => {
+  const p = pointOn(path, s);
+  const f = { x: p.x, z: p.z, ux: p.ux, uz: p.uz, nx: -p.uz, nz: p.ux, k: 1 };
+  if (!mitre) return f;
+  const q = pointOn(path, s + 1e-4);
+  if (Math.abs(q.ux - p.ux) + Math.abs(q.uz - p.uz) < 1e-9) return f;
+  const bx = p.ux + q.ux, bz = p.uz + q.uz, bl = Math.hypot(bx, bz) || 1;
+  f.ux = bx / bl; f.uz = bz / bl; f.nx = -f.uz; f.nz = f.ux;
+  f.k = 1 / Math.max(0.5, f.ux * p.ux + f.uz * p.uz);
+  return f;
+};
 type F = ReturnType<typeof frame>;
-const at = (f: F, n: number, y: number) => [f.x + f.nx * n, y, f.z + f.nz * n];
+const at = (f: F, n: number, y: number) => [f.x + f.nx * n * f.k, y, f.z + f.nz * n * f.k];
 
 export interface Track {
   group: THREE.Group; // add this to the scene
@@ -240,7 +260,10 @@ export class TrackBuilder {
     // chunks are counted along each path, so a run's pieces and its neighbours share them
     const chunkOf = (r: TrackRun, s: number) => this.runs.indexOf(this.runs.find((o) => o.path === r.path)!) * 100000 + Math.floor(s / CHUNK);
     for (const r of this.runs) {
-      const ss = samples(r.s0, r.s1, r.step ?? 3), fr = ss.map((s) => frame(r.path, s)), lv = ss.map((s) => r.level(s));
+      // samples along the run, and at every corner of its path (mitred there)
+      const cs0 = corners(r.path).filter((d) => d > r.s0 + 1e-3 && d < r.s1 - 1e-3);
+      const ss = [...new Set([...samples(r.s0, r.s1, r.step ?? 3), ...cs0])].sort((a, b) => a - b).filter((s, i, a) => i === 0 || s - a[i - 1] > 1e-3);
+      const fr = ss.map((s) => frame(r.path, s, cs0.some((d) => Math.abs(d - s) < 1e-3))), lv = ss.map((s) => r.level(s));
       const cs = trackCentres(r.tracks), c0 = cs[0], w = bedWidth(r.tracks);
       const kind: SleeperKind = r.form === 'open' ? 'timber' : sleeperKind(r.year);
       const U = (n: number) => (n - c0) / U_M, V = (s: number) => s / V_M;

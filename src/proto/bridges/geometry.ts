@@ -409,7 +409,11 @@ function support(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number,
   const water = q.inWater && q.level !== undefined;
   // footings: a pale plinth, or in water a pile cap standing proud of the surface
   const foot = (along: number, across: number) => {
-    const y1 = water ? q.level! + 0.6 : base + 0.4;
+    // its top stands clear of the ground all round it, which may slope (a flat top grazing a
+    // gentle bank would flicker)
+    let high = -Infinity;
+    for (const a of [-1, -0.5, 0, 0.5, 1]) high = Math.max(high, groundAt(c, q.s + a * (along + 0.7)));
+    const y1 = Math.max(water ? q.level! + 0.6 : base + 0.4, high + 0.15);
     g.box('footing', f.x, f.z, f.ux, f.uz, along + 0.7, across + 0.7, base - 0.5, y1);
   };
   switch (q.kind) {

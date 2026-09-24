@@ -87,6 +87,11 @@ export function scenario(o: ScenarioOpts, need: { raise: number; grade?: number 
   });
   const k = total / o.length; // obstacles were given against the straight length
   if (k !== 1) for (const ob of obstacles) { ob.s0 *= k; ob.s1 *= k; if (ob.kind === 'water' && ob.channel) { ob.channel.s0 *= k; ob.channel.s1 *= k; } }
+  // (and so were the water and the roads underneath, which are measured along the route too)
+  if (k !== 1) {
+    for (const w of water) { w.s0 *= k; w.s1 *= k; }
+    for (const u of under) for (const f of ['s0', 's1', 'bench0', 'bench1', 'toe0', 'toe1'] as const) if (u[f] !== undefined) u[f]! *= k;
+  }
   const crossing: Crossing = { path, ground: (s) => ground(s / k), obstacles, road: o.road, year: o.year, heavy: o.heavy };
   crossing.resolve = (n) => { const r = scenario(o, n); return r.ok ? r.crossing : undefined; };
   return { crossing, water, under, ok: prof.ok, reason: prof.reason };
