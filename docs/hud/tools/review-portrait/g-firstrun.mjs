@@ -1,0 +1,25 @@
+// First-run pill: shown once, doesn't collide with the stats drawer, gone after reload
+import { open, box, vis } from './lib.mjs';
+const [w, h] = (process.argv[2] || '412x915').split('x').map(Number);
+const { browser, page, errs, shot } = await open(w, h, { firstRunSeen: false, wait: 9000 });
+const log = (...a) => console.log(...a);
+let fails = 0; const check = (ok, msg) => { log(`${ok ? 'PASS' : 'FAIL'} ${msg}`); if (!ok) fails++; };
+log('pill visible', await vis(page, '#firstrun'), await page.textContent('#firstrun'), JSON.stringify(await box(page, '#firstrun')));
+await shot('firstrun');
+await page.tap('#clockbtn'); await page.waitForTimeout(300);
+const d = await box(page, '#drawer'), p = await box(page, '#firstrun');
+const pv = await vis(page, '#firstrun');
+check(!(pv && p.top < d.bottom && p.bottom > d.top), `pill does not sit on top of the opened stats drawer (pill ${JSON.stringify(p)}, drawer ${JSON.stringify(d)})`);
+await shot('firstrun-drawer');
+await page.tap('#clockbtn');
+await page.tap('#sp-pause'); await page.waitForTimeout(200);
+log('pill after pause tap', await vis(page, '#firstrun'));
+await page.tap('#sp-pause');
+await page.touchscreen.tap(w / 2, h * 0.3); await page.waitForTimeout(400);
+check(!(await vis(page, '#firstrun')), 'pill gone after a map tap');
+log('stored', await page.evaluate(() => localStorage.getItem('untitled.hint.inspect')));
+await page.reload(); await page.waitForTimeout(9000);
+check(!(await vis(page, '#firstrun')), 'pill not shown after reload');
+log('errors', JSON.stringify(errs));
+log(fails ? `FAIL ${fails}` : 'PASS');
+await browser.close();
