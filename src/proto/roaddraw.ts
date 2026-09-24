@@ -741,17 +741,23 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       // (nothing arrives along a one-way road leading away: no line across it, no arrows)
       if (!leg.into) continue;
       // at a roundabout the give-way line follows the edge of the ring
-      const lineAtB = (b: number) => (ring ? ringA(n, fl, b, sh.R) + 0.3 : sh.line[leg.seg.id] ?? 0);
+      const gw = sh.giveWay?.[leg.seg.id], lineAtB = (b: number) => (ring ? ringA(n, fl, b, sh.R) + 0.3 : gw ? gw[0] + gw[1] * b : sh.line[leg.seg.id] ?? 0);
       const lineAt = lineAtB((lb + kIn) / 2);
       const approaches = !(j.form === 'priority' && j.major.includes(leg.seg.id));
       // give-way mk (double broken) or a solid stop line across the incoming half
       if (j.form === 'signals') rect(mk, lineAt, lineAt + 0.3, lb + 0.2, kIn - 0.1, 0.36);
       else if (approaches) for (const off of [0, 0.6]) for (let b = Math.max(lb, sh.splitter[leg.seg.id] ? STD.splitter.width / 2 : -Infinity) + 0.3; b < kIn - 0.2; b += 0.9) { const la = lineAtB(b + 0.3); rect(mk, la + off, la + off + 0.3, b, Math.min(kIn - 0.2, b + 0.6), 0.36); }
-      // the give-way triangle, pointing at the line
+      // the give-way triangle (TSRGD diagram 1023): an outline, its point towards the driver coming up
+      // to the line and its base across the lane just behind the line
       if (approaches && j.form !== 'signals') for (let i = 0; i < d.lanes; i++) {
-        const c = laneCentre(net, leg.seg, i), la = lineAtB(c);
-        triW(mk, [[la + 5, c - 0.7], [la + 5, c + 0.7], [la + 3, c]], 0.36);
-        triW(mka, [[la + 4.85, c - 0.45], [la + 4.85, c + 0.45], [la + 3.45, c]], 0.37);
+        const c = laneCentre(net, leg.seg, i), la = lineAtB(c), [len, base, w] = d.mph > 40 ? [3.75, 1.25, 0.15] : [2.8, 0.95, 0.12];
+        const T: [number, number][] = [[la + 2.4, c - base / 2], [la + 2.4 + len, c], [la + 2.4, c + base / 2]];
+        // (the inner edge: the outline pulled in towards its incentre by the stroke's width)
+        const e = [0, 1, 2].map((k) => Math.hypot(T[(k + 1) % 3][0] - T[(k + 2) % 3][0], T[(k + 1) % 3][1] - T[(k + 2) % 3][1])), P = e[0] + e[1] + e[2];
+        const ic: [number, number] = [(e[0] * T[0][0] + e[1] * T[1][0] + e[2] * T[2][0]) / P, (e[0] * T[0][1] + e[1] * T[1][1] + e[2] * T[2][1]) / P];
+        const r = (len * base) / P, f = Math.max(0, (r - w) / r);
+        const I = T.map(([a, b]): [number, number] => [ic[0] + (a - ic[0]) * f, ic[1] + (b - ic[1]) * f]);
+        for (let k = 0; k < 3; k++) { const m = (k + 1) % 3; triW(mk, [T[k], T[m], I[m]], 0.36); triW(mk, [T[k], I[m], I[k]], 0.36); }
       }
       // where people cross the arm (jshape.crossingAt, the crossing game/crowdsites.ts walks them to):
       // tactile paving on both footways at the dropped kerbs, buff for an uncontrolled crossing, red

@@ -3,7 +3,7 @@
 // the slip road, where each road's own markings stop, and where its stop or give-way line is.
 // Drawing, traffic and the land registry all read the same shape, so they can't disagree.
 import { circlePoly, bandPolys, type XZ } from './land';
-import { kerbOf, halfOf, type RoadDef } from './catalog';
+import { kerbOf, halfOf, laneBase, type RoadDef } from './catalog';
 import { STD } from './standards';
 
 // `path`, if given, is the leg's centreline from the node outwards as it's drawn (see approachPath):
@@ -38,6 +38,9 @@ export interface Shape {
   island: number; // roundabout: radius of the central island
   claims: XZ[][]; // the land it takes
   marks?: SlipMarks; // a merge or diverge's own markings
+  // priority: where a side road's give-way line runs, on the major road's kerb line: `a` at b = 0, and
+  // how it changes across (a = a0 + k b), so a road meeting at an angle has it square to the major road
+  giveWay?: Record<number, [number, number]>;
   // where two roads meet a roundabout close together with no footway between: the V between them
   // is carriageway, painted with chevrons (a ghost island) rather than left as a sliver of grass
   ghost?: { polys: XZ[][]; chevrons: XZ[][] };
@@ -464,6 +467,21 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     const tm = prev.isSlip && slip ? Math.hypot(slip.path[slip.path.length - 1].x - n.x, slip.path[slip.path.length - 1].z - n.z) : Math.max(prev.back.tj, prev.kerb.tj);
     paveTrim[l.id] = [Math.max(0, tp), Math.max(0, tm)];
   });
+  // a side road's give-way line (TSRGD diagram 1003) is right against the major road, along its kerb
+  // line, so a driver waiting there can see along it: where each point across the arriving half first
+  // leaves the major road's carriageway
+  const giveWay: Record<number, [number, number]> = {};
+  if (form === 'priority') for (const l of legs) {
+    if (major.includes(l.id)) continue;
+    const majors = legs.filter((o) => o !== l && major.includes(o.id));
+    const on = (p: XZ) => majors.some((o) => { const f = legFrameOf(n, o, p); return f.a >= 0 && Math.abs(f.b) < K(o); });
+    const clearAt = (b: number) => { let a = 0; while (a < mouth[l.id] && on(legAt(n, l, a, b))) a += 0.1; return Math.min(a, mouth[l.id]); };
+    const b0 = l.def.oneway ? -K(l) + 0.3 : laneBase(l.def) + 0.3, b1 = K(l) - 0.3, a0 = clearAt(b0), a1 = clearAt(b1);
+    const k = (a1 - a0) / (b1 - b0), at0 = a0 - k * b0;
+    giveWay[l.id] = [at0 + 0.1, k];
+    // (traffic waits there: at its furthest point across the arriving half)
+    line[l.id] = Math.max(a0, a1) + 0.1;
+  }
   const apron: XZ[] = [], pave: XZ[] = [];
   // as pieces: the middle, where every road's kerbs leave the node; each road out to its mouth; each
   // corner's rounding (or, round the outside of a bend, the bit behind the node)
@@ -500,7 +518,7 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     islands.push(slip.island);
     claims.push(...bandPolys(slip.path, STD.slipWidth / 2 + 0.5, STD.slipWidth / 2 + STD.slipFootway + 0.5), slip.island);
   }
-  return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter: {}, slip, R: 0, island: 0, claims, paveLeg };
+  return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter: {}, slip, R: 0, island: 0, claims, paveLeg, giveWay };
 }
 
 // Ghost islands: between each pair of neighbouring arms whose facing edges (a kerb, or the back of a
