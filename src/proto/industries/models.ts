@@ -20,9 +20,12 @@ export interface IndustryModel {
   anchors: Anchors; // gate, bays, sidings and quays, site-local
   tris: number;
   height: number;
+  bare: boolean; // built without its own bays and sidings, for terminals to supply
 }
 
-export interface BuildOpts { seed: number; variant?: string; year?: number }
+// `bare` leaves out the lorry bays, rail sidings and loading canopies, keeping their anchors, so
+// terminals bought as add-ons (src/proto/terminals) can be drawn in their place.
+export interface BuildOpts { seed: number; variant?: string; year?: number; bare?: boolean }
 
 const hash = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
 const CONTAINERS = ['#b0463a', '#2f6f9e', '#d69a2d', '#3f7a4a', '#8a8f94', '#5a3f7a', '#c9c3b6'];
@@ -402,7 +405,7 @@ const refinery: Recipe = (s, v) => {
   s.notes.push('flare stack');
   s.entrance(W * 0.3, [[W * 0.3, front - 10], [-W * 0.2, front - 10]]);
   s.bays(-W * 0.3, front - 12, 4); // road tanker gantry
-  s.k.box(-W * 0.3, 5, front - 12, 20, 0.6, 18, '#d8d6cf');
+  if (!s.bare) s.k.box(-W * 0.3, 5, front - 12, 20, 0.6, 18, '#d8d6cf');
   s.office(W * 0.4, front - 8, 12, 7, 2, '#d8d2c4');
   for (const [x, z] of [[-W * 0.45, 0], [W * 0.45, -D * 0.1], [0, back + 12], [W * 0.1, front - 22]]) s.floodlight(x, z, 14);
   s.decay(20);
@@ -575,8 +578,10 @@ const warehouse: Recipe = (s, v) => {
   if (v === 'cold_store') { for (let i = 0; i < 4; i++) s.k.box(-bw / 2 + 8 + i * 8, 16, bz, 5, 1.6, 4, '#b8bcbf'); s.notes.push('refrigeration plant'); }
   if (v === 'railhead') {
     s.siding(back + 5, -W / 2 + 3, W / 2 - 3, 2, 4);
-    s.k.box(0, 6, back + 7, bw, 0.5, 12, '#8a969e'); // canopy over the rail dock
-    for (let x = -bw / 2; x <= bw / 2; x += 10) s.k.box(x, 0, back + 12.5, 0.4, 6, 0.4, '#5d6166');
+    if (!s.bare) {
+      s.k.box(0, 6, back + 7, bw, 0.5, 12, '#8a969e'); // canopy over the rail dock
+      for (let x = -bw / 2; x <= bw / 2; x += 10) s.k.box(x, 0, back + 12.5, 0.4, 6, 0.4, '#5d6166');
+    }
   } else if (W > 80) s.siding(back + 4, -W / 2 + 3, W * 0.1, 1, 2);
   // pallet stacks inside the yard fence: goods, food and beer waiting to go
   s.stack(-(bw / 2 + W / 2) / 2, bz, bd * 0.8, 6, 'goods', 'in', 5, 3, 1.2, undefined, Math.PI / 2);
@@ -600,12 +605,13 @@ export function buildIndustry(id: IndustryId, plot: Plot, opts: BuildOpts): Indu
   const variant = type.variants.find((v) => v.id === opts.variant) ?? variantFor(type, year, opts.seed);
   const frame = fitPlot(plot);
   const s = new Site(frame, rng(hash(`${id}|${variant.id}|${opts.seed}`)), year);
+  s.bare = !!opts.bare;
   RECIPES[id](s, variant.id);
   const group = s.k.build();
   group.position.set(frame.cx, 0, frame.cz);
   group.rotation.y = -frame.rot;
   group.userData.industry = { type: id, variant: variant.id, seed: opts.seed };
-  return { type: id, variant, name: variant.name, detail: [...new Set(s.notes)].join(' · '), group, frame, dyn: s.dyn, anchors: s.anchors, tris: s.k.tris, height: s.k.top };
+  return { type: id, variant, name: variant.name, detail: [...new Set(s.notes)].join(' · '), group, frame, dyn: s.dyn, anchors: s.anchors, tris: s.k.tris, height: s.k.top, bare: s.bare };
 }
 
 // A plot of the type's preferred size (or a variant's), centred at a point, facing +z.
