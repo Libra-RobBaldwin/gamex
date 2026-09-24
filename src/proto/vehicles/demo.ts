@@ -296,7 +296,7 @@ interface Mover {
   chain: Model[]; look: Look; cols: THREE.Color[]; lane: number; s: number; v: number; poses: (Pose | undefined)[]; rail: boolean; odo: number; brake: number; ind: number; emergency: boolean; lit: boolean; lake?: boolean;
   vmax: number; len: number;
   // stopping: trains at the station, buses at the stop ('in' pulling in, 'dwell' standing, 'out' pulling out)
-  st: 'run' | 'in' | 'dwell' | 'out'; t: number; lat?: number; outS?: number; served?: boolean; bus?: boolean; stopping?: boolean;
+  st: 'run' | 'in' | 'dwell' | 'out' | 'held'; t: number; lat?: number; outS?: number; served?: boolean; bus?: boolean; stopping?: boolean;
 }
 let movers: Mover[] = [];
 let laneMovers: Mover[][] = [];
@@ -620,19 +620,21 @@ const lodOf = (m: Model): Lod => (S.lod === 'auto' ? lodFor(m.dims.length, canva
 const turn = (a: number) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
 const ahead = (from: number, to: number) => (((to - from) % P0) + P0) % P0; // distance forward along the loop
 // Trains: brake for the station at 0.7 m/s², stand with the doors open, then pull away at 0.5 m/s².
-// Every train on a track stops the same way, so they keep their spacing.
+// Freight trains are held the same time at a signal short of the platform instead, so every
+// train on a track loses the same time and they keep their spacing.
+const trainHalt = (mv: Mover) => (mv.chain.some((m) => doorsOf(m).length > 0) ? STATION.stop : STATION.s0 - 60);
 function trainStop(mv: Mover, dt: number) {
   mv.stopping = false;
-  if (mv.st === 'dwell') {
+  if (mv.st === 'dwell' || mv.st === 'held') {
     mv.v = 0; mv.t += dt;
     if (mv.t > STATION.dwell) { mv.st = 'run'; mv.s += 0.02; }
     return;
   }
-  const d = ahead(mv.s, STATION.stop);
+  const d = ahead(mv.s, trainHalt(mv));
   const vb = Math.sqrt(2 * 0.7 * d);
   mv.stopping = vb < mv.v;
   mv.v = Math.min(mv.vmax, vb, mv.v + 0.5 * dt);
-  if (d < 0.05 || (mv.v < 0.05 && d < 0.6)) { mv.s += d; mv.v = 0; mv.st = 'dwell'; mv.t = 0; }
+  if (d < 0.05 || (mv.v < 0.05 && d < 0.6)) { mv.s += d; mv.v = 0; mv.st = trainHalt(mv) === STATION.stop ? 'dwell' : 'held'; mv.t = 0; }
 }
 // A bus's offset from the road's middle line, at mover position sm (in and out of the lay-by
 // along a smooth S over 35 m in and 25 m out).
@@ -756,7 +758,7 @@ function frame(now: number) {
         if (S.night && i === 0 && !mv.lake) beams.add(x + Math.cos(h) * m.dims.length * 0.5, mv.rail ? 0.34 : 0.07, z + Math.sin(h) * m.dims.length * 0.5, h, mv.rail ? 40 : 22, mv.rail ? 5 : m.dims.width * 2.4);
         // doors: open on the platform (or kerb) side while standing, a little later on each car
         let dl = 0, dr = 0;
-        if (mv.st === 'dwell') {
+        if (mv.st === 'dwell' && doorsOf(m).length) {
           const open = dwellDoors(mv.t, mv.rail ? STATION.dwell : BUS_STOP.dwell, m, i);
           if (open > 0) {
             const side = mv.rail ? platformSide({ x, z, heading: hh }, oval((mv.s - o[i]), STATION.platforms[mv.lane][mv.lane === 0 ? 0 : 1])) : 'left';

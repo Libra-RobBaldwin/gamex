@@ -121,7 +121,8 @@ function bogie(k: Kit, x: number, hw: number, r: number, axles = 2, spacing = 2.
   });
 }
 function buffers(k: Kit, x: number, dir: 1 | -1, hw: number, y: number, beam: Style = C.trim) {
-  k.box(dir > 0 ? x - 0.2 : x, dir > 0 ? x : x + 0.2, y - 0.3, y + 0.25, -hw + 0.05, hw - 0.05, beam);
+  // the beam stands a centimetre proud of the end, so its face never shares a plane with it
+  k.box(dir > 0 ? x - 0.19 : x - 0.01, dir > 0 ? x + 0.01 : x + 0.19, y - 0.3, y + 0.25, -hw + 0.05, hw - 0.05, beam);
   if (k.lod === 0) for (const s of [1, -1]) k.cylX(x, x + dir * 0.45, y, s * 0.87, 0.17, 0.17, 6, C.buffer, null, C.buffer);
 }
 function coupler(k: Kit, x: number, dir: 1 | -1, y: number) {

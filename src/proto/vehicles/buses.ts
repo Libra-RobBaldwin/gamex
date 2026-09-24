@@ -96,7 +96,8 @@ export function buildBus(k: Kit, m: Model) {
       if (lod === 0) k.edgeDecal(P, hw, iFace, 0.35, 0.75, s * 0.94, s * 1.0, s < 0 ? C.indL : C.indR, 0.016);
     }
     plateF(k, xN, 0.3);
-    mirrors(k, xN - rake - 0.2, H - (decker ? 2.35 : 0.9), hw, C.trim, true);
+    // the mirrors stand just ahead of the front door, clear of its leaves
+    mirrors(k, (lay.doorFront ? lay.doorFront[1] : xN - rake - 0.2) + 0.16, H - (decker ? 2.35 : 0.9), hw, C.trim, true);
   }
   // ---- rear ----
   if (!frontHalf) {

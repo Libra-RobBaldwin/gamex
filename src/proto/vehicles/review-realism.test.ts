@@ -41,13 +41,14 @@ const buses = MODELS.filter((m) => m.category === 'bus' && m.style !== 'bus-bend
 
 describe('review: bus and coach doors', () => {
   test('open plug-door leaves stay alongside the body: never out past the windscreen or off the front of the bus', () => {
+    // (widened after the fix: every kind of moving leaf, since bus doors are now gliders)
     const bad: string[] = [];
     for (const m of buses) {
-      if (!doorsOf(m).some((d) => d.kind === 'plug')) continue;
+      if (!doorsOf(m).some((d) => d.kind !== 'open')) continue;
       const b = busLayout(m);
       let worst = -Infinity, off = -Infinity;
       for (const v of verts(buildKit(m, 0))) {
-        if (v.tag[0] !== MOTION.plug) continue;
+        if (!DOOR_KINDS.has(v.tag[0])) continue;
         const q = open(v.p, v.tag);
         worst = Math.max(worst, q[0] - busFrontX(m, q[1]));
         off = Math.max(off, q[0] - b.xN);

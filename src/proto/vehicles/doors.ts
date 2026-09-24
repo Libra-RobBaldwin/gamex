@@ -10,7 +10,8 @@
 // Kinds follow the stock: hinged slam doors on old carriages and units (many of them, one per
 // compartment on non-corridor stock); pocket doors that slide into the body on 1980s–90s units
 // and metro cars (bi-parting, three a side on a metro car); plug doors that step out then slide
-// on modern units, trams and buses; folding (jack-knife) doors on older buses; and open platforms
+// on modern units and trams; gliders (leaves that swing out on their arms) on modern buses and
+// coaches; folding (jack-knife) doors on older buses; and open platforms
 // with no door at all on half-cab buses and balcony trams.
 import { Kit, C, paint, fixed, type Style } from './kit';
 import type { Model } from './types';
@@ -76,10 +77,10 @@ export function busLayout(m: Model) {
   const x0 = bodyX0 + (rearHalf ? 0.1 : 0.4), x1 = rearHalf ? bodyX1 - 0.1 : xN - rake - 0.35;
   const sill = coach ? 1.55 : style === 'bus-single' || frontHalf || rearHalf ? (lowFloor ? 1.05 : 1.2) : 1.05;
   const y0 = coach ? 0.42 : lowFloor ? 0.3 : 0.38;
-  const y1 = decker ? 2.3 : coach ? Math.min(H - 0.4, 2.45) : Math.min(H - 0.45, 2.6);
+  const y1 = decker ? 2.3 : coach ? Math.min(H - 0.4, 2.3) : Math.min(H - 0.45, 2.6);
   // the front door stands between the front wheel's arch and the windscreen pillar
   const arch = d.axles[0] + d.wheelR * 1.1 + 0.08;
-  const doorFront: [number, number] | null = rearHalf ? null : coach ? [Math.max(arch, xN - 1.5), xN - 0.5] : [Math.max(arch, xN - rake - 1.35), xN - rake - 0.2];
+  const doorFront: [number, number] | null = rearHalf ? null : coach ? [Math.max(arch, xN - 1.75), xN - 0.75] : [Math.max(arch, xN - rake - 1.35), xN - rake - 0.2];
   const year = yearOf(m);
   const midDoor = (style === 'bus-single' && L > 11) || rearHalf || frontHalf || (decker && year >= 1968 && L >= 9.6 && m.seed % 2 === 0);
   const mid = (x0 + x1) / 2 - (frontHalf ? 0.4 : 0);
@@ -110,10 +111,10 @@ function compute(m: Model): Door[] {
       return [{ x: x1 - 0.4, width: 0.8, y0: 0.5, y1: 2.35, leaves: 1, kind: 'fold', sides: ['left'], dir: 1 }];
     }
     const b = busLayout(m);
-    const kind: DoorKind = year < 1990 ? 'fold' : 'plug';
+    const kind: DoorKind = year < 1990 ? 'fold' : 'glider';
     const out: Door[] = [];
     const add = (span: [number, number], leaves: 1 | 2, k: DoorKind = kind) => out.push({ x: (span[0] + span[1]) / 2, width: span[1] - span[0], y0: b.y0, y1: b.y1, leaves, kind: k, sides: ['left'], dir: -1 });
-    if (b.doorFront) add(b.doorFront, b.coach ? 1 : 2, b.coach ? (year < 1980 ? 'fold' : 'plug') : kind);
+    if (b.doorFront) add(b.doorFront, b.coach ? 1 : 2, b.coach ? (year < 1980 ? 'fold' : 'glider') : kind);
     if (b.doorMid) add(b.doorMid, 2);
     return out;
   }
@@ -133,7 +134,7 @@ function compute(m: Model): Door[] {
     out.push({ x, width, y0: sill, y1: kind === 'slam' ? Math.min(top, r.wy1 + 0.12) : top, leaves, kind, sides: both, dir });
   const span = r.bx1 - r.bx0;
   // high-speed coaches of the 1970s–80s kept slam doors (the plug doors came with the next generation)
-  const slam = m.design.slam === true || (style === 'hs-coach' && year < 1990);
+  const slam = m.design.slam === true || ((style === 'hs-coach' || style === 'coach-stock') && year < 1990);
   if (style === 'hs-power') { add(r.bx0 + 1.2, 0.9, 1, 'plug', -1); return out; }
   if (slam) {
     const compartment = (style === 'coach-stock' && m.design.panelled === true) || style === 'emu-car';
@@ -153,7 +154,8 @@ function compute(m: Model): Door[] {
   }
   switch (style) {
     case 'metro-car': for (let i = 0; i < 3; i++) add(r.bx0 + span * (i + 0.5) / 3, 1.6, 2, 'pocket'); break;
-    case 'tram': for (const f of [0.28, 0.72]) add(r.x0 + m.dims.length * f, 1.3, 2, 'plug'); break;
+    // tram doors stay clear of the cab: the leaves slide over the straight side, not the cab window
+    case 'tram': for (const f of [0.25, 0.75]) add(r.bx0 + span * f, 1.3, 2, 'plug'); break;
     case 'rack-car': for (const f of [0.25, 0.75]) add(r.bx0 + span * f, 1.2, 2, 'pocket'); break;
     case 'emu-car': for (const f of [1 / 3, 2 / 3]) add(r.bx0 + span * f, 1.3, 2, year < 2000 ? 'pocket' : 'plug'); break;
     default:
@@ -224,6 +226,7 @@ export function drawDoors(k: Kit, m: Model, hw: number) {
     const h = d.y1 - d.y0;
     switch (d.kind) {
       case 'fold': foldLeaves(k, d, s, hw, st); break;
+      case 'glider': gliderLeaves(k, d, s, hw, st); break;
       default: {
         // sliding leaves: plug doors step out then slide over the body; pocket doors slide into it
         const n = d.leaves;
@@ -286,7 +289,25 @@ function slamLeaf(k: Kit, m: Model, d: Door, s: 1 | -1, hw: number, st: Style) {
   });
 }
 
-// A folding door: each leaf is two glazed panels that fold inward towards its jamb.
+// A glider door: each leaf hangs from an arm at its jamb and swings out to stand square to the
+// side (a single leaf hangs at the front jamb). Glazed nearly to the floor, in a painted frame.
+function gliderLeaves(k: Kit, d: Door, s: 1 | -1, hw: number, st: Style) {
+  const xa = d.x - d.width / 2, xb = d.x + d.width / 2;
+  const leaves = d.leaves === 2 ? [{ jamb: xa, far: d.x - 0.005 }, { jamb: xb, far: d.x + 0.005 }] : [{ jamb: xb, far: xa + 0.01 }];
+  const zb = s * (hw + LEAF);
+  for (const { jamb, far } of leaves) {
+    const swing = s * Math.sign(far - jamb) * 1.4;
+    k.moving([MOTION.hinge, jamb, zb, swing], () => {
+      const lo = Math.min(jamb, far), hi = Math.max(jamb, far);
+      slab(k, lo, hi, d.y0 + 0.02, d.y1 - 0.02, zb - s * 0.035, zb, st);
+      k.sideRect(lo + 0.06, hi - 0.06, d.y0 + 0.28, d.y1 - 0.1, hw, C.glass, s, LEAF + 0.004);
+      // the rubber on the leading edge
+      k.sideRect(Math.min(far, far - Math.sign(far - jamb) * 0.04), Math.max(far, far - Math.sign(far - jamb) * 0.04), d.y0 + 0.02, d.y1 - 0.02, hw, seal, s, LEAF + 0.004);
+    });
+  }
+}
+
+// A folding door: each leaf is two glazed panels that fold outward towards its jamb.
 function foldLeaves(k: Kit, d: Door, s: 1 | -1, hw: number, st: Style) {
   const xa = d.x - d.width / 2, xb = d.x + d.width / 2;
   // two leaves fold to either jamb; a single leaf folds to the back jamb

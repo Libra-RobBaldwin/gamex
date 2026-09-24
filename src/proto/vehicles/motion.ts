@@ -15,7 +15,8 @@ export const MOTION = {
   pocket: 2,
   // a leaf on hinges (a, b = hinge x, z; c = swing at full open, signed radians)
   hinge: 3,
-  // the two panels of a folding door (a, b = jamb x, z; c = panel width, signed, from the jamb)
+  // the two panels of a folding door (a, b = jamb x, z; c = panel width, signed, from the jamb).
+  // They fold outward: the body is solid behind a doorway, so panels folded in would vanish.
   foldA: 4,
   foldB: 5,
   // a bogie that swivels under the body (a = pivot x)
@@ -31,7 +32,8 @@ export const MOTION = {
 export type Tag = readonly [number, number, number, number];
 
 // Seconds for each kind of door to open fully (closing takes the same time).
-export const DOOR_SECONDS = { slam: 1.4, pocket: 2.4, plug: 3.2, fold: 1.8 } as const;
+// A glider is a leaf that swings out on its arm, as on most buses and coaches since 1990.
+export const DOOR_SECONDS = { slam: 1.4, pocket: 2.4, plug: 3.2, fold: 1.8, glider: 2.2 } as const;
 export type DoorKind = keyof typeof DOOR_SECONDS;
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -82,6 +84,7 @@ export function moveVertex(p: readonly [number, number, number], tag: Tag, s: Mo
   const open = p[2] > 0 ? s.doorR : s.doorL;
   const side = p[2] > 0 ? 1 : -1;
   const yaw = (px: number, pz: number, phi: number) => {
+    if (phi === 0) return;
     const dx = x - px, dz = z - pz, co = Math.cos(phi), si = Math.sin(phi);
     x = px + co * dx - si * dz; z = pz + si * dx + co * dz;
   };
@@ -96,9 +99,9 @@ export function moveVertex(p: readonly [number, number, number], tag: Tag, s: Mo
     }
     case MOTION.hinge: yaw(a, b, c * ease(open)); break;
     case MOTION.foldA: case MOTION.foldB: {
-      // both panels turn inward by phi; the second is hinged to the first's far edge and turns
+      // both panels turn outward by phi; the second is hinged to the first's far edge and turns
       // back the other way, so its far edge runs along the door line towards the jamb
-      const phi = -side * Math.sign(c) * FOLD_MAX * ease(open);
+      const phi = side * Math.sign(c) * FOLD_MAX * ease(open);
       if (kind === MOTION.foldA) yaw(a, b, phi);
       else {
         yaw(a + c, b, -phi);
@@ -134,7 +137,7 @@ vec2 mvD = mvDoors(iData.z);
 float mvOpen = position.z > 0.0 ? mvD.y : mvD.x;
 float mvSide = position.z > 0.0 ? 1.0 : -1.0;
 float mvPhi = 0.0;
-float mvFold = -mvSide * sign(vd.w) * ${FOLD_MAX.toFixed(3)} * mvEase(mvOpen);
+float mvFold = mvSide * sign(vd.w) * ${FOLD_MAX.toFixed(3)} * mvEase(mvOpen);
 if (mvKind == ${MOTION.hinge}) mvPhi = vd.w * mvEase(mvOpen);
 else if (mvKind == ${MOTION.foldA}) mvPhi = mvFold;
 else if (mvKind == ${MOTION.foldB}) mvPhi = -mvFold;

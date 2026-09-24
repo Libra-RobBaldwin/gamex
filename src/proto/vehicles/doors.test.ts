@@ -73,7 +73,7 @@ describe('door layouts', () => {
     const h = byStyle('tram-heritage', 1930);
     expect(doorsOf(h).every((d) => d.kind === 'open')).toBe(true);
   });
-  test('buses: doors on the kerb side only, the front door ahead of the front axle, folding before 1990', () => {
+  test('buses: doors on the kerb side only, the front door ahead of the front axle, folding before 1990, gliders after', () => {
     for (const m of MODELS.filter((x) => x.category === 'bus')) {
       const ds = doorsOf(m);
       if (m.style === 'bus-halfcab') { expect(ds.map((d) => d.kind)).toEqual(['open']); continue; }
@@ -85,8 +85,8 @@ describe('door layouts', () => {
       }
       const year = m.design.year as number;
       const moving = ds.filter((d) => d.kind !== 'open');
-      if (m.style === 'coach') expect(moving.map((d) => d.kind), m.id).toEqual([year < 1980 ? 'fold' : 'plug']);
-      else if (m.style !== 'bus-heritage') for (const d of moving) expect(d.kind, m.id).toBe(year < 1990 ? 'fold' : 'plug');
+      if (m.style === 'coach') expect(moving.map((d) => d.kind), m.id).toEqual([year < 1980 ? 'fold' : 'glider']);
+      else if (m.style !== 'bus-heritage') for (const d of moving) expect(d.kind, m.id).toBe(year < 1990 ? 'fold' : 'glider');
     }
     expect(doorsOf(byStyle('bus-bendy', 2015)).length).toBe(2);
     expect(doorsOf(byStyle('bus-bendy-rear', 2015)).length).toBe(1);
@@ -173,16 +173,17 @@ describe('door geometry and motion', () => {
           // opening the other side leaves this one alone
           expect(other[i], `${m.id} other side moved`).toEqual(out[i].p);
         }
-        if (d.kind === 'slam') {
+        if (d.kind === 'slam' || d.kind === 'glider') {
           // the free edge swings out from the side, well clear of the body
           const zs = idx.map((i) => open[i][2] * s);
-          expect(Math.max(...zs) - hw, m.id).toBeGreaterThan(d.width * 0.8);
+          expect(Math.max(...zs) - hw, m.id).toBeGreaterThan((d.width / d.leaves) * 0.8);
           expect(Math.min(...zs), m.id).toBeGreaterThan(hw - 0.05);
         }
         if (d.kind === 'fold') {
-          // folded inward against the jambs
+          // folded outward against the jambs (the body is solid behind the doorway, so inward they'd vanish)
           const zs = idx.map((i) => open[i][2] * s);
-          expect(Math.max(...zs), m.id).toBeLessThan(hw + 0.06);
+          expect(Math.max(...zs), m.id).toBeGreaterThan(hw + d.width / 8);
+          expect(Math.min(...zs), m.id).toBeGreaterThan(hw - 0.05);
           for (const i of idx) { const x = open[i][0]; expect(Math.min(Math.abs(x - (d.x - d.width / 2)), Math.abs(x - (d.x + d.width / 2))), m.id).toBeLessThan(d.width / 4 + 0.1); }
         }
         if (d.kind === 'plug') {
