@@ -3,7 +3,8 @@
 
 import { ROADS, halfOf, kerbOf, type Cls } from './catalog';
 export { ROADS, halfOf, kerbOf, type RoadDef } from './catalog';
-import { Land, bandPolys, type Claim } from './land';
+import { Land, type Claim } from './land';
+import { courseOf, normals, sectionAt, taperOf } from './xsection';
 export type RoadType = string;
 export const HALF = halfOf(ROADS.street);
 export const ROAD_W = kerbOf(ROADS.street) * 2;
@@ -245,16 +246,23 @@ export class Network {
   // widest road meeting at a node: how big the junction is
   nodeHalf(n: number) { return Math.max(HALF, ...this.segsAt(n).map((s) => this.half(s))); }
 
-  // The land a road takes: its full width, wider where it runs in a cutting; none where it's deep
-  // underground (the surface above a bored tunnel is free).
+  // The land a road takes: its width as drawn (see xsection.courseOf), narrowing through a taper,
+  // round the curve where it runs on into another road, and its turning head at a cul-de-sac; wider
+  // where it runs in a cutting; none where it's deep underground (the surface above a bored tunnel
+  // is free).
   claimSeg(s: RSeg) {
-    const path = this.path(s), half = this.half(s), polys: P[][] = [];
+    const C = courseOf(this, s), path = C.path, nl = normals(path, C.dirs), polys: P[][] = [];
+    const out = (i: number, side: 1 | -1) => {
+      const y = path[i].y ?? 0, w = C.sec(C.rho[i]).back + (y < 0 ? 0.7 * -y : 0), l = C.limit(C.rho[i]);
+      return l && l.side === side ? Math.min(w, l.r) : w; // (nothing reaches past the middle of a bend)
+    };
+    const at = (i: number, o: number) => ({ x: path[i].x + nl[i].x * o, z: path[i].z + nl[i].z * o });
     for (let i = 1; i < path.length; i++) {
-      const y = Math.min(path[i - 1].y ?? 0, path[i].y ?? 0);
-      if (y < -9) continue;
-      const w = half + (y < 0 ? 0.7 * -y : 0);
-      polys.push(...bandPolys([path[i - 1], path[i]], w, w));
+      if (Math.min(path[i - 1].y ?? 0, path[i].y ?? 0) < -9) continue;
+      polys.push([at(i - 1, out(i - 1, 1)), at(i, out(i, 1)), at(i, -out(i, -1)), at(i - 1, -out(i - 1, -1))]);
     }
+    for (const f of C.fills) if (f) polys.push(f);
+    for (const h of C.heads) if (h) polys.push(...h.claims);
     this.land.claim(`road:${s.id}`, 'road', polys);
   }
   // Is this polygon clear of every road, junction and island (bar the ones `skip` excuses)?
@@ -267,6 +275,8 @@ export class Network {
     const s: RSeg = { id: this.nextId++, a, b, mid, type, stops };
     this.segs.set(s.id, s);
     this.claimSeg(s);
+    // the roads already at its ends now join it (or taper into it) rather than stopping there
+    for (const o of this.segsAt(a).concat(this.segsAt(b))) if (o !== s) this.claimSeg(o);
     return s.id;
   }
 
@@ -573,14 +583,16 @@ export class Network {
     const L = pathLength(path);
     const out: Lot[] = [];
     if (!this.def(s).frontage) return out;
-    const HALF = this.half(s);
+    const HALF = this.half(s), ends = taperOf(this, s);
+    // (plots front onto the back of the footway, which comes in where the road tapers)
+    const back = (t: number) => sectionAt(this, s, Math.max(0, Math.min(L, t)), ends).back;
     for (const side of [1, -1]) {
       const row = (segId * 7919 + (side > 0 ? 1 : 0) * 104729) % 1000003;
       let t = HALF + 2;
       while (t < L - HALF - 2) {
         const { kind, w, d, gap, front, h } = this.lotSpec(pointAt(path, t), centre);
         if (t + w > L - HALF - 2) break;
-        const off = HALF + front + d / 2;
+        const off = back(t + w / 2) + front + d / 2;
         // the building's front faces the road, square to it at the middle of the plot
         const c = pointAt(path, t + w / 2);
         // nothing fronts onto a bridge or a ramp

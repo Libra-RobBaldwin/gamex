@@ -26,6 +26,20 @@ export const STD = {
   // where a road changes to a narrower one (a dual carriageway ending, say), how long the
   // change takes: the reservation closes into hatching, then the offside lane tapers away
   taperLength(mph: number) { return mph <= 30 ? 45 : mph <= 40 ? 70 : mph <= 50 ? 100 : 130; },
+  // where a lane is about to end, bent "lane ends" arrows (TSRGD diagram 1014) in it: their length
+  // and spacing, and how many
+  deflectionArrow(mph: number) { return mph <= 40 ? { length: 6, gap: 9, count: 3 } : { length: 9, gap: 15, count: 3 }; },
+  // hatched areas (a ghost island): diagonal stripes, further apart on faster roads, inside a solid edge line
+  hatch(mph: number) { return { spacing: mph <= 30 ? 1.5 : mph <= 40 ? 2 : 3, stripe: mph <= 40 ? 0.15 : 0.2 }; },
+  // the turning head at the end of a cul-de-sac: a turning circle (kerb radius) big enough for a
+  // refuse lorry to turn round in a three-point turn, flared in from the street
+  turningHead: { R: 8, entry: 6 },
+  // a road ending within this distance of the map's edge, heading out, runs on off the map
+  mapEdge: 30,
 };
 
-export const fastest = (...ds: RoadDef[]) => Math.max(...ds.map((d) => d.mph));
+// The ground runs this far past the buildable map on every side (main.ts sizes it BOUND × 2.6), so
+// roads that run off the map are drawn out to where the ground ends.
+export const GROUND = 1.3;
+
+export const fastest =(...ds: RoadDef[]) => Math.max(...ds.map((d) => d.mph));
