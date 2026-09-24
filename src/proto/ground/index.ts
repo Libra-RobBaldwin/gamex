@@ -115,7 +115,7 @@ export class Ground {
       const gateBoxes: Box[] = [];
       let moved = false;
       for (const b of plan) {
-        for (const g of planHedges(this.layout, b, occ)) {
+        for (const g of planHedges(this.layout, b, occ, true, this.clip())) {
           const was = this.groups.get(g.key);
           this.groups.set(g.key, g);
           if (was && same(was.pieces, g.pieces) && same(was.trees, g.trees) && same(was.gates, g.gates)) continue;
@@ -138,9 +138,11 @@ export class Ground {
     this.stats.change = performance.now() - t0;
   }
 
+  // the painted map, less a few metres: hedges stay on it
+  private clip() { const R = this.cover!.region, m = 5; return { x0: R.x0 + m, z0: R.z0 + m, x1: R.x0 + R.size - m, z1: R.z0 + R.size - m }; }
   private replan(box: Box, occ = new Occupancy(this.layout.input), plant = true) {
     const t0 = performance.now();
-    for (const g of planHedges(this.layout, box, occ)) this.groups.set(g.key, g);
+    for (const g of planHedges(this.layout, box, occ, true, this.clip())) this.groups.set(g.key, g);
     if (plant) this.plantAll();
     this.stats.hedges = performance.now() - t0;
   }

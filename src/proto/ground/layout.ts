@@ -38,42 +38,99 @@ export interface GroundInput {
 }
 
 // ---- the parcel grid ----
-const ANGLE = 0.33; // the grid's rotation: fields don't line up with the map
-const SX = 240, SZ = 165; // seed spacing in metres: cells of ~4 ha, 2 ha when split, 8 when merged
+// Fields are the cells of a grid whose corners are jittered a little and whose lines bend gently
+// over a kilometre or two (a smooth displacement of every corner), so they're four-sided with
+// near-square corners, as enclosure fields are, but face every which way across the map.
+const ANGLE = 0.33; // the grid's mean rotation
+const SX = 240, SZ = 165; // cell size in metres: ~4 ha, 2 ha when split, 8 when merged
 export const GRID = { angle: ANGLE, sx: SX, sz: SZ };
-const JIT = 0.3; // seeds stay within ±0.3 of their cell's middle, so the 3x3 cells round a point hold its nearest seed
+const JIT = 0.12; // corner jitter, in cells
+const BEND = 120, BEND_L = 1500; // how far (m) the grid lines wander, and over what distance
 const CA = Math.cos(ANGLE), SA = Math.sin(ANGLE);
-// world -> grid coordinates (cells are unit squares)
+// world -> the undisplaced grid (cells are unit squares), and back
 export const toGrid = (x: number, z: number): [number, number] => [(x * CA + z * SA) / SX, (-x * SA + z * CA) / SZ];
 export const gridU = (x: number, z: number) => (x * CA + z * SA) / SX; // (the same, one at a time, for hot loops)
 export const gridV = (x: number, z: number) => (-x * SA + z * CA) / SZ;
 export const fromGrid = (u: number, v: number): XZ => ({ x: u * SX * CA - v * SZ * SA, z: u * SX * SA + v * SZ * CA });
 
 export interface Cell {
-  i: number; j: number; u: number; v: number; // seed in grid space
+  i: number; j: number;
+  u: number; v: number; // its middle, in (undisplaced) grid coordinates
+  pts: XZ[]; // its corners in world metres, anticlockwise from (i, j)
   merge: boolean; // merged with its +i neighbour into one field
-  split: null | { nu: number; nv: number; c: number }; // a hedge across it: side = sign(nu·u + nv·v − c)
+  split: null | { nu: number; nv: number; c: number }; // a hedge across it: side = sign(nu·u + nv·v − c), in grid coordinates
+}
+
+// How far the grid is moved at a point: a gentle wander, plus swirls about 900 m apart that
+// turn the grid by up to about 50 degrees round their middles (and not at all far from them), so
+// one farm's fields face a different way from the next. Turning falls off smoothly enough that
+// cells never fold over.
+const SWIRL = 900, SWIRL_R = 600, SWIRL_MAX = 0.9;
+export function bend(x: number, z: number, seed: number): XZ {
+  let dx = (worldNoise(x, z, BEND_L, seed + 111) - 0.5) * 2 * BEND, dz = (worldNoise(x, z, BEND_L, seed + 112) - 0.5) * 2 * BEND;
+  const ci = Math.floor(x / SWIRL), cj = Math.floor(z / SWIRL);
+  for (let i = ci - 1; i <= ci + 1; i++) for (let j = cj - 1; j <= cj + 1; j++) {
+    const qx = (i + 0.2 + hash2(i, j, seed + 121) * 0.6) * SWIRL, qz = (j + 0.2 + hash2(i, j, seed + 122) * 0.6) * SWIRL;
+    const rx = x - qx, rz = z - qz, r2 = rx * rx + rz * rz;
+    if (r2 > 9 * SWIRL_R * SWIRL_R) continue;
+    const a = (hash2(i, j, seed + 123) * 2 - 1) * SWIRL_MAX * Math.exp(-r2 / (SWIRL_R * SWIRL_R)), c = Math.cos(a), sn = Math.sin(a);
+    dx += rx * c - rz * sn - rx; dz += rx * sn + rz * c - rz;
+  }
+  return { x: dx, z: dz };
+}
+// the world position of grid corner (i, j)
+function corner(i: number, j: number, seed: number): XZ {
+  const b = fromGrid(i + (hash2(i, j, seed + 101) - 0.5) * 2 * JIT, j + (hash2(i, j, seed + 102) - 0.5) * 2 * JIT), d = bend(b.x, b.z, seed);
+  return { x: b.x + d.x, z: b.z + d.z };
 }
 
 export function cellAt(i: number, j: number, seed: number): Cell {
-  const u = i + 0.5 + (hash2(i, j, seed + 101) - 0.5) * 2 * JIT, v = j + 0.5 + (hash2(i, j, seed + 102) - 0.5) * 2 * JIT;
+  const pts = [corner(i, j, seed), corner(i + 1, j, seed), corner(i + 1, j + 1, seed), corner(i, j + 1, seed)];
+  const m = centroid(pts), [u, v] = toGrid(m.x, m.z);
   const split = hash2(i, j, seed + 103) < 0.3;
   // a merged pair is two unsplit cells side by side, the left one not itself merged into its left
   const merge = !split && hash2(i, j, seed + 104) < 0.22 && hash2(i + 1, j, seed + 103) >= 0.3 && !(hash2(i - 1, j, seed + 104) < 0.22 && hash2(i - 1, j, seed + 103) >= 0.3);
   let sp: Cell['split'] = null;
   if (split) {
-    // mostly across the long way, so the halves are roughly square; in world metres the grid is
-    // anisotropic, so pick the angle there and bring the normal back into grid space
-    const a = (hash2(i, j, seed + 105) - 0.5) * 1.1 + (hash2(i, j, seed + 106) < 0.75 ? 0 : Math.PI / 2);
-    const nu = Math.cos(a) * SX, nv = Math.sin(a) * SZ, l = Math.hypot(nu, nv);
-    const off = (hash2(i, j, seed + 107) - 0.5) * 0.3;
-    sp = { nu: nu / l, nv: nv / l, c: (nu / l) * (u + off) + (nv / l) * v };
+    // across the long way (from the bottom edge to the top), so the halves are near square
+    const t0 = 0.35 + hash2(i, j, seed + 105) * 0.3, t1 = t0 + (hash2(i, j, seed + 106) - 0.5) * 0.12;
+    const A = toGrid(pts[0].x + (pts[1].x - pts[0].x) * t0, pts[0].z + (pts[1].z - pts[0].z) * t0);
+    const B = toGrid(pts[3].x + (pts[2].x - pts[3].x) * t1, pts[3].z + (pts[2].z - pts[3].z) * t1);
+    let nu = B[1] - A[1], nv = A[0] - B[0];
+    const l = Math.hypot(nu, nv) || 1;
+    nu /= l; nv /= l;
+    sp = { nu, nv, c: nu * A[0] + nv * A[1] };
   }
-  return { i, j, u, v, merge, split: sp };
+  return { i, j, u, v, pts, merge, split: sp };
 }
 
 // A parcel's id: its cell, and which side of a split. Merged cells share their left cell's id.
 export const parcelId = (i: number, j: number, side: number) => ((i + 32768) * 65536 + (j + 32768)) * 2 + side;
+
+// inside the (convex, anticlockwise) quad?
+function inQuad(x: number, z: number, q: XZ[]) {
+  for (let k = 0; k < 4; k++) {
+    const a = q[k], b = q[(k + 1) & 3];
+    if ((b.x - a.x) * (z - a.z) - (b.z - a.z) * (x - a.x) < 0) return false;
+  }
+  return true;
+}
+// does a quad's outline cross a box's edges (or the box sit inside it)?
+function quadCrosses(q: XZ[], b: { x0: number; z0: number; x1: number; z1: number }) {
+  const bc = [{ x: b.x0, z: b.z0 }, { x: b.x1, z: b.z0 }, { x: b.x1, z: b.z1 }, { x: b.x0, z: b.z1 }];
+  if (bc.some((p) => inQuad(p.x, p.z, q))) return true;
+  const cross = (a: XZ, c: XZ, d: XZ, e: XZ) => {
+    const o = (p: XZ, r: XZ, t: XZ) => (r.x - p.x) * (t.z - p.z) - (r.z - p.z) * (t.x - p.x);
+    return o(a, c, d) * o(a, c, e) < 0 && o(d, e, a) * o(d, e, c) < 0;
+  };
+  for (let k = 0; k < 4; k++) for (let m = 0; m < 4; m++) if (cross(q[k], q[(k + 1) & 3], bc[m], bc[(m + 1) & 3])) return true;
+  return false;
+}
+function segDist(x: number, z: number, a: XZ, b: XZ) {
+  const ex = b.x - a.x, ez = b.z - a.z, L = ex * ex + ez * ez;
+  const t = L > 0 ? Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / L)) : 0;
+  return Math.hypot(a.x + ex * t - x, a.z + ez * t - z);
+}
 
 // Which parcel a point is in, and how far (in metres) it is from that parcel's edge.
 export interface Hit { id: number; cell: Cell; edge: number }
@@ -92,50 +149,78 @@ export class Parcels {
     const left = this.cell(c.i - 1, c.j);
     return left.merge ? parcelId(left.i, left.j, 0) : parcelId(c.i, c.j, 0);
   }
-  // The nearest seed in grid space decides the cell; the distance to the edge is measured in
-  // metres to the nearest bisector with a cell of a different parcel (or to the split line).
-  hit(x: number, z: number, out: Hit = { id: 0, cell: null as unknown as Cell, edge: 0 }): Hit {
-    const [gu, gv] = toGrid(x, z), ci = Math.floor(gu), cj = Math.floor(gv);
-    let best: Cell | null = null, bd = Infinity;
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      const c = this.cell(ci + di, cj + dj), d = (c.u - gu) ** 2 + (c.v - gv) ** 2;
+  // The cell a point is in: undo the grid's bend there (it changes slowly, so that lands within a
+  // cell of the right one), then look at that cell and its neighbours.
+  cellOf(x: number, z: number): Cell {
+    const d = this.unbend(x, z), [gu, gv] = toGrid(x - d.x, z - d.z), ci = Math.floor(gu), cj = Math.floor(gv);
+    let best = this.cell(ci, cj), bd = Infinity;
+    for (let r = 0; r <= 2; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+      if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+      const c = this.cell(ci + di, cj + dj);
+      if (inQuad(x, z, c.pts)) return c;
+      const m = fromGrid(c.u, c.v), d = (m.x - x) ** 2 + (m.z - z) ** 2;
       if (d < bd) { bd = d; best = c; }
     }
-    const c = best!;
-    const side = c.split ? (c.split.nu * gu + c.split.nv * gv - c.split.c > 0 ? 1 : 0) : 0;
-    const id = this.owner(c, side);
+    return best;
+  }
+  // The bend at a point, undone in two steps (it changes slowly, so that lands on or next to the
+  // right cell), remembered on a 25 m grid: near enough to start the search from.
+  private bends = new Map<number, XZ>();
+  private unbend(x: number, z: number) {
+    const i = Math.floor(x / 25), j = Math.floor(z / 25), k = (i + 32768) * 65536 + (j + 32768);
+    let d = this.bends.get(k);
+    if (!d) {
+      const cx = (i + 0.5) * 25, cz = (j + 0.5) * 25;
+      d = bend(cx, cz, this.seed);
+      d = bend(cx - d.x, cz - d.z, this.seed);
+      this.bends.set(k, d);
+      if (this.bends.size > 50000) this.bends.clear();
+    }
+    return d;
+  }
+  // every cell whose outline comes within the box
+  cellsNear(b: { x0: number; z0: number; x1: number; z1: number }) {
+    const cs = [toGrid(b.x0, b.z0), toGrid(b.x1, b.z0), toGrid(b.x0, b.z1), toGrid(b.x1, b.z1)], out: Cell[] = [];
+    const i0 = Math.floor(Math.min(...cs.map((c) => c[0]))) - 3, i1 = Math.floor(Math.max(...cs.map((c) => c[0]))) + 3;
+    const j0 = Math.floor(Math.min(...cs.map((c) => c[1]))) - 3, j1 = Math.floor(Math.max(...cs.map((c) => c[1]))) + 3;
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const c = this.cell(i, j);
+      if (c.pts.some((p) => p.x >= b.x0 && p.x <= b.x1 && p.z >= b.z0 && p.z <= b.z1) || inQuad((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, c.pts) || quadCrosses(c.pts, b)) out.push(c);
+    }
+    return out;
+  }
+  // The parcel at a point, and its distance (m) to the parcel's edge: a side of its cell that
+  // isn't shared with the other half of a merged pair, or the split line.
+  hit(x: number, z: number, out: Hit = { id: 0, cell: null as unknown as Cell, edge: 0 }): Hit {
+    const c = this.cellOf(x, z);
+    const side = c.split ? (c.split.nu * gridU(x, z) + c.split.nv * gridV(x, z) - c.split.c > 0 ? 1 : 0) : 0;
+    const id = this.owner(c, side), { pts, across } = this.polygon(c);
     let edge = Infinity;
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      const o = this.cell(ci + di, cj + dj);
-      if (o === c) continue;
+    for (let k = 0; k < 4; k++) {
+      const o = across[k]!;
       if (!o.split && !c.split && this.owner(o, 0) === id) continue; // the other half of a merged field
-      // bisector: points g with (g − m)·d = 0; in world metres the distance is f / |Aᵀd|
-      const du = o.u - c.u, dv = o.v - c.v, mu = (o.u + c.u) / 2, mv = (o.v + c.v) / 2;
-      const f = (mu - gu) * du + (mv - gv) * dv; // ≥ 0 on c's side
-      // Aᵀd, A being world -> grid: rows (CA/SX, SA/SX) and (−SA/SZ, CA/SZ)
-      const wx = (du * CA) / SX - (dv * SA) / SZ, wz = (du * SA) / SX + (dv * CA) / SZ;
-      edge = Math.min(edge, f / Math.hypot(wx, wz));
+      edge = Math.min(edge, segDist(x, z, pts[k], pts[(k + 1) & 3]));
     }
-    if (c.split) {
-      const s = c.split, f = Math.abs(s.nu * gu + s.nv * gv - s.c);
-      const wx = (s.nu * CA) / SX - (s.nv * SA) / SZ, wz = (s.nu * SA) / SX + (s.nv * CA) / SZ;
-      edge = Math.min(edge, f / Math.hypot(wx, wz));
-    }
+    const sl = this.splitLine(c);
+    if (sl) edge = Math.min(edge, segDist(x, z, sl[0], sl[1]));
     out.id = id; out.cell = c; out.edge = edge;
     return out;
   }
-  // The cell's Voronoi polygon in world metres (the square round its seed, clipped by the
-  // bisectors with its eight neighbours), with the neighbour across each edge.
+  // The cell's outline in world metres, with the neighbour across each edge.
   private polys = new Map<Cell, { pts: XZ[]; across: (Cell | null)[] }>();
   polygon(c: Cell): { pts: XZ[]; across: (Cell | null)[] } {
     let got = this.polys.get(c);
-    if (!got) { got = this.clipCell(c); this.polys.set(c, got); if (this.polys.size > 5000) this.polys.clear(); }
+    if (!got) {
+      got = { pts: c.pts, across: [this.cell(c.i, c.j - 1), this.cell(c.i + 1, c.j), this.cell(c.i, c.j + 1), this.cell(c.i - 1, c.j)] };
+      this.polys.set(c, got);
+      if (this.polys.size > 5000) this.polys.clear();
+    }
     return got;
   }
-  // A split cell's hedge line, clipped to the cell (grid-space bisection is exact enough: 1 cm).
+  // A split cell's hedge line, clipped to the cell.
   splitLine(c: Cell): [XZ, XZ] | null {
     if (!c.split) return null;
-    const s = c.split, { pts } = this.polygon(c), tu = s.nv, tv = -s.nu;
+    const s = c.split, pts = c.pts, tu = s.nv, tv = -s.nu;
     const f = s.nu * c.u + s.nv * c.v - s.c, mu = c.u - s.nu * f, mv = c.v - s.nv * f;
     const g = pts.map((p) => toGrid(p.x, p.z));
     // the line's parameter range inside the convex polygon
@@ -152,32 +237,6 @@ export class Parcels {
     if (!(hi > lo)) return null;
     return [fromGrid(mu + tu * lo, mv + tv * lo), fromGrid(mu + tu * hi, mv + tv * hi)];
   }
-  private clipCell(c: Cell): { pts: XZ[]; across: (Cell | null)[] } {
-    let poly: { u: number; v: number; n: Cell | null }[] = [
-      { u: c.i - 1, v: c.j - 1, n: null }, { u: c.i + 2, v: c.j - 1, n: null }, { u: c.i + 2, v: c.j + 2, n: null }, { u: c.i - 1, v: c.j + 2, n: null },
-    ];
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      if (!di && !dj) continue;
-      const o = this.cell(c.i + di, c.j + dj), du = o.u - c.u, dv = o.v - c.v, k = ((o.u + c.u) / 2) * du + ((o.v + c.v) / 2) * dv;
-      poly = clip(poly, du, dv, k, o);
-    }
-    return { pts: poly.map((p) => fromGrid(p.u, p.v)), across: poly.map((p) => p.n) };
-  }
-}
-// keep the part of a polygon where u·a + v·b ≤ k; edge i runs from point i to i+1 and remembers
-// what's across it (new edges along the cut face `n`)
-function clip(poly: { u: number; v: number; n: Cell | null }[], a: number, b: number, k: number, n: Cell) {
-  const out: typeof poly = [];
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i], q = poly[(i + 1) % poly.length], fp = p.u * a + p.v * b - k, fq = q.u * a + q.v * b - k;
-    if (fp <= 0) out.push(p);
-    if ((fp <= 0) !== (fq <= 0)) {
-      const t = fp / (fp - fq);
-      // the crossing point starts an edge: along the old edge if we're leaving, along the cut if entering
-      out.push({ u: p.u + (q.u - p.u) * t, v: p.v + (q.v - p.v) * t, n: fp <= 0 ? n : p.n });
-    }
-  }
-  return out;
 }
 
 // ---- what each parcel is ----
@@ -265,7 +324,7 @@ export class Layout {
     if (!near) return changed;
     // every parcel with ground within 40 m of the box (a plot marks the town 30 m round it)
     const ids = new Set<number>(), h = { id: 0, cell: this.parcels.cell(0, 0), edge: 0 };
-    for (const b of near) for (let x = b.x0 - 40; x <= b.x1 + 40; x += 10) for (let z = b.z0 - 40; z <= b.z1 + 40; z += 10) ids.add(this.parcels.hit(x, z, h).id);
+    for (const b of near) for (const c of this.parcels.cellsNear({ x0: b.x0 - 40, z0: b.z0 - 40, x1: b.x1 + 40, z1: b.z1 + 40 })) { ids.add(this.parcels.owner(c, 0)); ids.add(this.parcels.owner(c, 1)); }
     for (const id of ids) {
       const was = this.info.get(id);
       this.info.delete(id);
@@ -327,12 +386,16 @@ export class Layout {
       const q = r(4);
       crop = q < 0.3 ? CROP.wheat : q < 0.5 ? CROP.barley : q < 0.68 ? CROP.plough : q < 0.8 ? CROP.ley : q < 0.9 ? CROP.stubble : CROP.rape;
     }
-    // rows run along the parcel's longest edge, as a farmer drills a field
-    let best = 0, dir = 0;
+    // rows run parallel to one of the field's sides, as a farmer drills it: mostly the longest,
+    // often the side next to it (each farm has its habits)
+    let best = 0, bi = 0;
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i], q = pts[(i + 1) % pts.length], L = Math.hypot(q.x - p.x, q.z - p.z);
-      if (L > best) { best = L; dir = Math.atan2(q.z - p.z, q.x - p.x); }
+      if (L > best) { best = L; bi = i; }
     }
+    if (r(6) < 0.45) bi = (bi + 1) % pts.length;
+    const p0 = pts[bi], p1 = pts[(bi + 1) % pts.length];
+    let dir = Math.atan2(p1.z - p0.z, p1.x - p0.x);
     if (c.split) { const s = c.split, w = fromGrid(s.nv, -s.nu), a = Math.atan2(w.z, w.x); if (r(5) < 0.6) dir = a; }
     dir = ((dir % Math.PI) + Math.PI) % Math.PI;
     inf = { kind, crop, dir };

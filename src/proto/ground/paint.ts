@@ -132,8 +132,9 @@ export class CoverMap {
     // to it, so field margins and wood edges follow the hedges to the centimetre
     const P = layout.parcels;
     const corners = [toGrid(x0, z0), toGrid(x1, z0), toGrid(x0, z1), toGrid(x1, z1)];
-    const gi0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 1, gi1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 1;
-    const gj0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 1, gj1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 1;
+    // (the grid bends up to a cell and a half from where it would be)
+    const gi0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 3, gi1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 3;
+    const gj0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 3, gj1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 3;
     const cellOf: Cell[] = [], own: number[] = [];
     const CA = Math.cos(GRID.angle), SA = Math.sin(GRID.angle), SX = GRID.sx, SZ = GRID.sz;
     edge.fill(1e9);

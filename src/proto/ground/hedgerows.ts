@@ -2,7 +2,7 @@
 // sides of country roads and railways, never on a road, a plot, a park or in water, with a gap
 // for a gateway in most of them and the odd hedgerow tree (oak, ash) standing out of the line.
 // Plain numbers, no three.js (hedges.ts turns this into instanced meshes).
-import { hash2 } from './noise';
+import { hash2, worldNoise } from './noise';
 import { bbox, gridU, gridV, Layout, toGrid, type Cell, type GroundInput, type XZ } from './layout';
 import type { Spot } from './paint';
 
@@ -69,7 +69,9 @@ export class Occupancy {
 
 // Walk a line laying hedge pieces wherever `want` says and the ground is free; a gateway gap
 // somewhere along it if it's long enough; a hedgerow tree now and then.
-function walk(g: HedgeGroup, a: XZ, b: XZ, seed: number, occ: Occupancy, want: (x: number, z: number) => boolean, gate: boolean) {
+type Box = { x0: number; z0: number; x1: number; z1: number };
+function walk(g: HedgeGroup, a: XZ, b: XZ, seed: number, occ: Occupancy, want: (x: number, z: number) => boolean, gate: boolean, clip: Box | null, hs: number) {
+  const inClip = (x: number, z: number) => !clip || (x >= clip.x0 && x <= clip.x1 && z >= clip.z0 && z <= clip.z1);
   const L = Math.hypot(b.x - a.x, b.z - a.z);
   if (L < STEP) return;
   const n = Math.floor(L / STEP), ux = (b.x - a.x) / L, uz = (b.z - a.z) / L, ang = Math.atan2(uz, ux);
@@ -79,7 +81,8 @@ function walk(g: HedgeGroup, a: XZ, b: XZ, seed: number, occ: Occupancy, want: (
   for (let k = 0; k < n; k++) {
     const x = a.x + ux * step * (k + 0.5), z = a.z + uz * step * (k + 0.5);
     // (a piece's ends reach half a step either way, so they must be clear too)
-    const h = (step + 0.8) / 2, ok = want(x, z) && occ.free(x, z) && occ.free(x - ux * h, z - uz * h, 1) && occ.free(x + ux * h, z + uz * h, 1);
+    const h = (step + 0.8) / 2, ex = ux * h, ez = uz * h;
+    const ok = inClip(x - ex, z - ez) && inClip(x + ex, z + ez) && want(x, z) && occ.free(x, z) && occ.free(x - ex, z - ez, 1) && occ.free(x + ex, z + ez, 1);
     if (k === gap) {
       // worn earth where the stock and the tractors go through, on both sides
       if (ok) g.gates.push({ x: x - uz * 3, z: z + ux * 3, r: 5, v: 0.75 }, { x: x + uz * 3, z: z - ux * 3, r: 5, v: 0.75 });
@@ -87,19 +90,23 @@ function walk(g: HedgeGroup, a: XZ, b: XZ, seed: number, occ: Occupancy, want: (
     }
     if (!ok) continue;
     const r1 = hash2(k, seed, 73), r2 = hash2(k, seed, 74);
-    // each piece a little longer than its step, so the line reads as continuous
-    g.pieces.push({ x, z, a: ang + (r1 - 0.5) * 0.03, len: step + 0.8, h: 1.5 + r2 * 0.6, w: 1.4 + r1 * 0.5 });
-    if (hash2(k, seed, 75) < 0.11 && occ.free(x, z, CLEAR + 2)) g.trees.push({ x: x + (r2 - 0.5) * 1.2, z: z + (r1 - 0.5) * 1.2, s: 0.95 + r2 * 0.5, kind: r1 < 0.15 ? 1 : 0 });
+    // each piece a little longer than its step, so the line reads as continuous; its height and
+    // width wander slowly along the hedge (as a trimmed hedge does), not piece by piece
+    g.pieces.push({ x, z, a: ang + (r1 - 0.5) * 0.03, len: step + 0.8, h: 1.45 + worldNoise(x, z, 60, hs) * 0.65, w: 1.35 + worldNoise(x, z, 70, hs + 1) * 0.55 });
+    if (hash2(k, seed, 75) < 0.11 && occ.free(x, z, CLEAR + 2) && inClip(x - 4, z - 4) && inClip(x + 4, z + 4)) g.trees.push({ x: x + (r2 - 0.5) * 1.2, z: z + (r1 - 0.5) * 1.2, s: 0.95 + r2 * 0.5, kind: r1 < 0.15 ? 1 : 0 });
   }
 }
 
 // Every hedge group touching the box: one per pair of neighbouring parcels (keyed by the two
 // cells), one per split line, one per side of each country lane.
-export function planHedges(layout: Layout, box: { x0: number; z0: number; x1: number; z1: number }, occ: Occupancy, lanes = true): HedgeGroup[] {
+// Nothing is planted outside `clip` (the painted map: past it there may be no ground at all).
+export function planHedges(layout: Layout, box: Box, occ: Occupancy, lanes = true, clip: Box | null = null): HedgeGroup[] {
+  const hs = layout.seed + 931;
   const out: HedgeGroup[] = [], P = layout.parcels;
   const corners = [toGrid(box.x0, box.z0), toGrid(box.x1, box.z0), toGrid(box.x0, box.z1), toGrid(box.x1, box.z1)];
-  const i0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 1, i1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 1;
-  const j0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 1, j1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 1;
+  // (the grid bends up to a cell and a half from where it would be)
+  const i0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 3, i1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 3;
+  const j0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 3, j1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 3;
   const hit = { id: 0, cell: P.cell(0, 0), edge: 0 };
   const kindAt = (x: number, z: number) => { P.hit(x, z, hit); return { id: hit.id, kind: layout.about(hit).kind }; };
   // The parcel of cell c at a point (which side of its split, if it has one), and what it is.
@@ -126,7 +133,7 @@ export function planHedges(layout: Layout, box: { x0: number; z0: number; x1: nu
       if (!touches(a, b)) continue;
       const L = Math.hypot(b.x - a.x, b.z - a.z) || 1, nx = -(b.z - a.z) / L, nz = (b.x - a.x) / L;
       const g: HedgeGroup = { key: `e${c.i},${c.j}|${o.i},${o.j}`, pieces: [], trees: [], gates: [] };
-      walk(g, a, b, (c.i * 7919 + c.j * 104729 + o.i * 31 + o.j + layout.seed * 613) | 0, occ, (x, z) => boundary(c, o, x, z, nx, nz), true);
+      walk(g, a, b, (c.i * 7919 + c.j * 104729 + o.i * 31 + o.j + layout.seed * 613) | 0, occ, (x, z) => boundary(c, o, x, z, nx, nz), true, clip, hs);
       out.push(g);
     }
     if (c.split) {
@@ -136,7 +143,7 @@ export function planHedges(layout: Layout, box: { x0: number; z0: number; x1: nu
       if (!touches(a, b)) continue;
       const L = Math.hypot(b.x - a.x, b.z - a.z) || 1, nx = -(b.z - a.z) / L, nz = (b.x - a.x) / L;
       const g: HedgeGroup = { key: `s${c.i},${c.j}`, pieces: [], trees: [], gates: [] };
-      walk(g, a, b, (c.i * 5 + c.j * 1009 + 17 + layout.seed * 613) | 0, occ, (x, z) => boundary(c, c, x, z, nx, nz), true);
+      walk(g, a, b, (c.i * 5 + c.j * 1009 + 17 + layout.seed * 613) | 0, occ, (x, z) => boundary(c, c, x, z, nx, nz), true, clip, hs);
       out.push(g);
     }
   }
@@ -151,7 +158,7 @@ export function planHedges(layout: Layout, box: { x0: number; z0: number; x1: nu
         const p = ln.path[s - 1], q = ln.path[s], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, nx = (-(q.z - p.z) / L) * side, nz = ((q.x - p.x) / L) * side;
         const off = ln.half + CLEAR + 0.3;
         const a = { x: p.x + nx * off, z: p.z + nz * off }, b = { x: q.x + nx * off, z: q.z + nz * off };
-        walk(g, a, b, (li * 131 + s * 7 + side) | 0, occ, (x, z) => kindAt(x + nx * 2, z + nz * 2).kind !== 'town', false);
+        walk(g, a, b, (li * 131 + s * 7 + side) | 0, occ, (x, z) => kindAt(x + nx * 2, z + nz * 2).kind !== 'town', false, clip, hs);
       }
       out.push(g);
     }
