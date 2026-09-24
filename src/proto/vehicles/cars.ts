@@ -6,7 +6,7 @@
 // cars share this one builder.
 import { Kit, C, paint, fixed, clip, type P2, type Style } from './kit';
 import type { Model } from './types';
-import { num, str, flag, wheels, axleBlock, mirrors, lightBar, beacon, type Hub } from './parts';
+import { num, str, flag, wheels, axleBlock, mirrors, lightBar, beacon, type Hub, steerOf } from './parts';
 import type { Grille } from './brands';
 import type { LampShape, BumperKind } from './era';
 
@@ -83,7 +83,7 @@ export function buildCar(k: Kit, m: Model) {
   // ---- wheels ----
   const tw = num(g, 'tyreW', 0.2);
   for (const x of d.axles) {
-    if (lod === 0) wheels(k, x, r, hw - 0.025, tw, hub);
+    if (lod === 0) wheels(k, x, r, hw - 0.025, tw, hub, false, steerOf(d.axles, x));
     else if (lod === 1) axleBlock(k, x, r, hw - 0.02, 2);
   }
   if (lod === 1) {
@@ -273,7 +273,7 @@ function classic(k: Kit, m: Model) {
   if (lod === 0) for (const s of [1, -1]) k.box(bx0, bx1, r - 0.02, r + 0.05, s > 0 ? hwB : -hwW + 0.02, s > 0 ? hwW - 0.02 : -hwB, wing);
   // wheels: tall and thin
   for (const x of d.axles) {
-    if (lod === 0) wheels(k, x, r, zc + 0.06, 0.12, 'spoke');
+    if (lod === 0) wheels(k, x, r, zc + 0.06, 0.12, 'spoke', false, steerOf(d.axles, x));
     else if (lod === 1) axleBlock(k, x, r, zc + 0.05, 1.6);
   }
   // headlamp drums, tail lamp, spare wheel, bumpers

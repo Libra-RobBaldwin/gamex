@@ -19,7 +19,7 @@ export type BodyStyle =
   | 'bus-single' | 'bus-double' | 'bus-bendy' | 'bus-bendy-rear' | 'coach' | 'bus-heritage' | 'bus-halfcab'
   // rail
   | 'steam-tank' | 'steam-tender' | 'tender' | 'shunter' | 'diesel-loco' | 'electric-loco'
-  | 'dmu-car' | 'emu-car' | 'hs-power' | 'hs-coach' | 'tram' | 'tram-heritage' | 'rack-car'
+  | 'dmu-car' | 'emu-car' | 'metro-car' | 'hs-power' | 'hs-coach' | 'tram' | 'tram-heritage' | 'rack-car'
   | 'coach-stock' | 'wagon-hopper' | 'wagon-box' | 'wagon-tank' | 'wagon-flat' | 'wagon-car' | 'wagon-timber' | 'brake-van'
   // water and air
   | 'narrowboat' | 'barge' | 'coaster' | 'container-ship' | 'ferry'
@@ -47,10 +47,15 @@ export type Zone = 0 | 1 | 2 | 3 | 4;
 // Light codes baked into the geometry. Which ones glow is chosen per instance with FLAGS.
 export const LIGHT = {
   none: 0, head: 1, tail: 2, brake: 3, indL: 4, indR: 5, interior: 6, beaconBlue: 7, beaconAmber: 8, sign: 9,
+  // lit by the doors rather than the flags: amber lamps over train doors that are open, and the
+  // passengers' open buttons, green once the doors on that side are released
+  doorOpen: 10, doorButton: 11,
 } as const;
 // Per-instance flags (bit mask) that switch the baked lights on.
 export const FLAGS = {
   lights: 1, brake: 2, indL: 4, indR: 8, interior: 16, beacons: 32, sign: 64,
+  // pantographs folded down (electric stock running on diesel, or stabled)
+  pantoDown: 128,
   hazard: 4 | 8,
 } as const;
 

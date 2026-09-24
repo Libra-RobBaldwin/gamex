@@ -3,6 +3,7 @@
 import { Kit, C, asWheel, fixed, paint, type Style } from './kit';
 import type { Design, Model } from './types';
 import { LIGHT } from './types';
+import { MOTION } from './motion';
 
 export const num = (g: Design, k: string, d: number) => (typeof g[k] === 'number' ? (g[k] as number) : d);
 export const str = <T extends string = string>(g: Design, k: string, d: NoInfer<T>): T => (typeof g[k] === 'string' ? (g[k] as T) : d);
@@ -15,19 +16,29 @@ const HUB: Record<Hub, Style> = {
 };
 
 // A pair of wheels on one axle. zOut is the outer face of the tyre; the tyre runs inward by tw.
-// Near: an octagon with a hub; mid: a hexagon; far: nothing (the far box covers it).
-export function wheels(k: Kit, x: number, r: number, zOut: number, tw: number, hub: Hub, twin = false) {
+// Near: an octagon with a hub; mid: a hexagon; far: nothing (the far box covers it). steer is
+// the wheelbase for a steered axle (the shader turns the wheels by the path's curvature), 0 if not.
+export function wheels(k: Kit, x: number, r: number, zOut: number, tw: number, hub: Hub, twin = false, steer = 0) {
   if (k.lod === 2) return;
   const sides = k.lod === 0 ? 8 : 6;
   const tyre = asWheel(C.tyre, x, r);
   const hs = asWheel(HUB[hub], x, r);
   for (const s of [1, -1]) {
     const z0 = s * zOut, z1 = s * (zOut - tw * (twin ? 2.1 : 1));
-    k.cylZ(x, r, r, z0, z1, sides, tyre, k.lod === 0 && hub !== 'plain' ? tyre : hs, null);
-    if (k.lod === 0 && hub !== 'plain') {
-      k.disc([x, r, z0 + s * 0.008], 'z', s as 1 | -1, r * (hub === 'truck' || hub === 'rail' ? 0.6 : hub === 'spoke' ? 0.78 : 0.66), hub === 'alloy' || hub === 'spoke' ? 8 : 6, hs, Math.PI / 8);
-    }
+    const draw = () => {
+      k.cylZ(x, r, r, z0, z1, sides, tyre, k.lod === 0 && hub !== 'plain' ? tyre : hs, null);
+      if (k.lod === 0 && hub !== 'plain') {
+        k.disc([x, r, z0 + s * 0.008], 'z', s as 1 | -1, r * (hub === 'truck' || hub === 'rail' ? 0.6 : hub === 'spoke' ? 0.78 : 0.66), hub === 'alloy' || hub === 'spoke' ? 8 : 6, hs, Math.PI / 8);
+      }
+    };
+    if (steer > 0) k.moving([MOTION.steer, x, (z0 + z1) / 2, steer], draw); else draw();
   }
+}
+// The wheelbase to steer the axle at x by: the front axle steers about the middle of the rest.
+export function steerOf(axles: readonly number[], x: number) {
+  if (axles.length < 2 || x !== axles[0]) return 0;
+  const rear = axles.slice(1);
+  return x - rear.reduce((a, b) => a + b, 0) / rear.length;
 }
 // The mid level's stand-in for a pair of wheels: one dark block through the body, poking out
 // either side, so it reads as wheels without costing any.
@@ -75,5 +86,21 @@ export function endLamps(k: Kit, x: number, dir: 1 | -1, hw: number, y: number, 
 }
 export const plateF = (k: Kit, x: number, y: number) => { if (k.lod === 0) k.end(x, 1, -0.26, 0.26, y, y + 0.11, C.plateF); };
 export const plateR = (k: Kit, x: number, y: number) => { if (k.lod === 0) k.end(x, -1, -0.26, 0.26, y, y + 0.11, C.plateR); };
+
+// Half of the flexible connection between two cars: a gangway on coaches and units, the full-size
+// bellows between tram sections and bendy-bus halves. Each car carries the half on its own end, out to the middle of
+// the gap, closed with a dark diaphragm so a curve never shows daylight through the joint.
+export function bellowsHalf(k: Kit, x: number, dir: 1 | -1, len: number, hwB: number, y0: number, y1: number) {
+  const xa = dir > 0 ? x : x - len, xb = dir > 0 ? x + len : x;
+  k.box(xa, xb, y0, y1, -hwB, hwB, C.rubber, dir > 0 ? { nx: null } : { px: null });
+  if (k.lod !== 0) return;
+  // the pleats: darker folds across the sides and the top
+  const n = Math.max(2, Math.round(len / 0.16));
+  for (let i = 0; i < n; i++) {
+    const f = xa + ((i + 0.5) / n) * (xb - xa);
+    k.sideRect(f - 0.025, f + 0.025, y0 + 0.02, y1 - 0.02, hwB, fixed('#161618'), 0, 0.008);
+    k.top(f - 0.025, f + 0.025, -hwB + 0.02, hwB - 0.02, y1, fixed('#161618'), 0.008);
+  }
+}
 
 export { LIGHT };

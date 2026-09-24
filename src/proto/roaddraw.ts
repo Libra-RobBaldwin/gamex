@@ -118,9 +118,18 @@ export class Solid {
   }
 }
 const DECK = 1.2;
-export function structures(path: P[], body: Solid, rails: Solid | null, HALF: number) {
-  const n = path.length;
+// `bridged`: stretches (by distance along the path) the bridges library draws instead
+// (game/bridges.ts). With it, the ramps either side get retaining walls down to the ground and no piers.
+export function structures(path: P[], body: Solid, rails: Solid | null, HALF: number, bridged?: [number, number][]) {
   if (!path.some((p) => (p.y ?? 0) > 0.05)) return;
+  // cut the path exactly where each bridge starts and ends, so the walls meet its abutments
+  if (bridged?.length) {
+    const A = arcs(path), cuts = bridged.flat().filter((t) => t > 0.05 && t < A[A.length - 1] - 0.05);
+    path = [...path.map((p, i) => ({ p, t: A[i] })), ...cuts.map((t) => { const q = pointAt(path, t); return { p: { x: q.x, z: q.z, y: q.y }, t }; })].sort((a, b) => a.t - b.t).map((x) => x.p);
+  }
+  const n = path.length;
+  const at = bridged ? arcs(path) : [];
+  const inBridge = (i: number) => !!bridged?.some(([a, b]) => (at[i - 1] + at[i]) / 2 > a && (at[i - 1] + at[i]) / 2 < b);
   const side = path.map((_, i) => {
     const a = path[Math.max(0, i - 1)], b = path[Math.min(n - 1, i + 1)], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
     return { x: -(b.z - a.z) / L, z: (b.x - a.x) / L };
@@ -128,8 +137,9 @@ export function structures(path: P[], body: Solid, rails: Solid | null, HALF: nu
   const Y = (i: number) => path[i].y ?? 0;
   for (let i = 1; i < n; i++) {
     if (Y(i - 1) < 0.05 && Y(i) < 0.05) continue;
+    if (inBridge(i)) continue;
     const p = path[i - 1], q = path[i], s0 = side[i - 1], s1 = side[i];
-    const t0 = Y(i - 1) + 0.15, t1 = Y(i) + 0.15, b0 = Math.max(0, Y(i - 1) - DECK), b1 = Math.max(0, Y(i) - DECK);
+    const t0 = Y(i - 1) + 0.15, t1 = Y(i) + 0.15, b0 = bridged ? 0 : Math.max(0, Y(i - 1) - DECK), b1 = bridged ? 0 : Math.max(0, Y(i) - DECK);
     for (const k of [1, -1]) {
       const e0 = [p.x + s0.x * HALF * k, p.z + s0.z * HALF * k], e1 = [q.x + s1.x * HALF * k, q.z + s1.z * HALF * k];
       body.quad([e0[0], b0, e0[1]], [e1[0], b1, e1[1]], [e1[0], t1, e1[1]], [e0[0], t0, e0[1]]);
@@ -141,7 +151,7 @@ export function structures(path: P[], body: Solid, rails: Solid | null, HALF: nu
       body.quad([l0[0], b0, l0[1]], [l1[0], b1, l1[1]], [r1[0], b1, r1[1]], [r0[0], b0, r0[1]]);
     }
   }
-  if (!rails) return;
+  if (!rails || bridged) return;
   // piers every 24 m where the deck is high enough to need them
   const L = pathLength(path);
   for (let t = 12; t < L; t += 24) {
@@ -281,7 +291,12 @@ function shelter(solid: { glass: Solid; frame: Solid; red: Solid }, path: P[], t
   for (const e of [-2, 2]) { const p0 = at(e, back), p1 = at(e, front + sx * 0.4); solid.glass.quad([p0[0], y + 0.1, p0[1]], [p1[0], y + 0.1, p1[1]], [p1[0], y + 2.3, p1[1]], [p0[0], y + 2.3, p0[1]]); }
   solid.frame.box((at(0, (back + front) / 2))[0], (at(0, (back + front) / 2))[1], q.ux, q.uz, 2.15, 0.8, y + 2.3, y + 2.45);
   for (const e of [-2, 2]) { const p = at(e, back); solid.frame.box(p[0], p[1], q.ux, q.uz, 0.05, 0.05, y, y + 2.3); }
-  const f = at(3.2, front - sx * 0.2);
+  // a bench along the back, where the first people to arrive sit (game/crowdsites.ts)
+  const bn = at(0, back - sx * 0.3);
+  solid.frame.box(bn[0], bn[1], q.ux, q.uz, 1.5, 0.17, y + 0.53, y + 0.61); // (seat height above the pavement, which is 0.15 up)
+  // the flag stands ahead of the shelter in the direction the buses come (on the right-hand side
+  // of the road that's back along it), where the front door stops
+  const f = at(3.2 * sx, front - sx * 0.2);
   solid.frame.box(f[0], f[1], q.ux, q.uz, 0.05, 0.05, y, y + 3);
   solid.red.box(f[0], f[1], q.ux, q.uz, 0.03, 0.35, y + 2.4, y + 2.95);
 }
@@ -335,7 +350,8 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     const d = net.def(s), path = finePath(net, s), A = arcs(path), L = A[A.length - 1];
 
     const half = net.half(s);
-    structures(path, body, rails, half);
+    // (a raised stretch the library couldn't bridge keeps the old deck on piers, not walls to the ground)
+    structures(path, body, rails, half, s.bridges ? s.bridges.map((b) => [b.s0, b.s1] as [number, number]) : path.every((p) => (p.y ?? 0) <= 6) ? [] : undefined); // bridges: game/bridges.ts
     // ---- cuttings and tunnels: open to the sky while shallow, covered once deep ----
     const Y = (i: number) => path[i].y ?? 0;
     const DEEP = -9;

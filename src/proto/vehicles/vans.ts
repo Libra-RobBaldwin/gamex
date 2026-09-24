@@ -3,7 +3,7 @@
 // chassis (Luton vans and ambulances, which get their box a little wider than the cab).
 import { Kit, C, paint, fixed, clip, type P2, type Style } from './kit';
 import type { Model } from './types';
-import { num, flag, str, wheels, axleBlock, mirrors, beacon, lightBar, endLamps, plateR, type Hub } from './parts';
+import { num, flag, str, wheels, axleBlock, mirrors, beacon, lightBar, endLamps, plateR, type Hub, steerOf } from './parts';
 
 export function buildVan(k: Kit, m: Model) {
   const g = m.design, d = m.dims, lod = k.lod, style = m.style;
@@ -119,6 +119,6 @@ export function buildVan(k: Kit, m: Model) {
   k.end(L / 2 + 0.06, 1, -0.26, 0.26, c + 0.12, c + 0.25, C.plateF, 0.006);
   void iLow;
   mirrors(k, xWs - 0.05, beltY, hw, C.trim, !small);
-  for (const x of d.axles) wheels(k, x, r, hw - 0.03, 0.21, str<Hub>(g, 'wheel', 'steel'));
+  for (const x of d.axles) wheels(k, x, r, hw - 0.03, 0.21, str<Hub>(g, 'wheel', 'steel'), false, steerOf(d.axles, x));
   if (style === 'minibus' && lod === 0) k.side(clip(P, -L, L, winTop + 0.02, Hc - 0.02), hw, 0, roofSt, 0.01);
 }

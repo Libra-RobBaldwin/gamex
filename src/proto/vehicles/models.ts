@@ -15,7 +15,7 @@ set('van', ['van-small', 'van-panel', 'van-luton', 'minibus', 'ice-cream', 'ambu
 set('lorry', ['rigid-box', 'rigid-curtain', 'rigid-tipper', 'rigid-flatbed', 'rigid-tanker', 'refuse', 'gritter', 'mixer', 'recovery', 'tractor']);
 set('trailer', ['trailer-box', 'trailer-curtain', 'trailer-tanker', 'trailer-tipper', 'trailer-flatbed', 'trailer-container', 'trailer-car', 'trailer-logging', 'trailer-livestock']);
 set('bus', ['bus-single', 'bus-double', 'bus-bendy', 'bus-bendy-rear', 'coach', 'bus-heritage', 'bus-halfcab']);
-set('rail', ['steam-tank', 'steam-tender', 'tender', 'shunter', 'diesel-loco', 'electric-loco', 'dmu-car', 'emu-car', 'hs-power', 'hs-coach', 'tram', 'tram-heritage', 'rack-car', 'coach-stock', 'wagon-hopper', 'wagon-box', 'wagon-tank', 'wagon-flat', 'wagon-car', 'wagon-timber', 'brake-van']);
+set('rail', ['steam-tank', 'steam-tender', 'tender', 'shunter', 'diesel-loco', 'electric-loco', 'dmu-car', 'emu-car', 'metro-car', 'hs-power', 'hs-coach', 'tram', 'tram-heritage', 'rack-car', 'coach-stock', 'wagon-hopper', 'wagon-box', 'wagon-tank', 'wagon-flat', 'wagon-car', 'wagon-timber', 'brake-van']);
 set('boat', ['narrowboat', 'barge', 'coaster', 'container-ship', 'ferry']);
 set('air', ['light-aircraft', 'turboprop', 'airliner', 'widebody']);
 
@@ -28,7 +28,7 @@ export const STYLE_LABEL: Record<BodyStyle, string> = {
   'trailer-container': 'Container skeletal', 'trailer-car': 'Car transporter', 'trailer-logging': 'Timber trailer', 'trailer-livestock': 'Livestock trailer',
   'bus-single': 'Single-decker', 'bus-double': 'Double-decker', 'bus-bendy': 'Bendy bus', 'bus-bendy-rear': 'Bendy bus (rear)', coach: 'Coach', 'bus-heritage': 'Vintage bus', 'bus-halfcab': 'Half-cab decker',
   'steam-tank': 'Tank engine', 'steam-tender': 'Tender engine', tender: 'Tender', shunter: 'Shunter', 'diesel-loco': 'Diesel locomotive', 'electric-loco': 'Electric locomotive',
-  'dmu-car': 'Diesel unit car', 'emu-car': 'Electric unit car', 'hs-power': 'High-speed power car', 'hs-coach': 'High-speed coach', tram: 'Tram section', 'tram-heritage': 'Heritage tram', 'rack-car': 'Rack railcar',
+  'dmu-car': 'Diesel unit car', 'emu-car': 'Electric unit car', 'metro-car': 'Metro car', 'hs-power': 'High-speed power car', 'hs-coach': 'High-speed coach', tram: 'Tram section', 'tram-heritage': 'Heritage tram', 'rack-car': 'Rack railcar',
   'coach-stock': 'Coach', 'wagon-hopper': 'Hopper wagon', 'wagon-box': 'Van wagon', 'wagon-tank': 'Tank wagon', 'wagon-flat': 'Container flat', 'wagon-car': 'Car carrier', 'wagon-timber': 'Timber wagon', 'brake-van': 'Brake van',
   narrowboat: 'Narrowboat', barge: 'Barge', coaster: 'Coaster', 'container-ship': 'Container ship', ferry: 'Car ferry',
   'light-aircraft': 'Light aircraft', turboprop: 'Turboprop', airliner: 'Airliner', widebody: 'Wide-body jet',
@@ -77,7 +77,7 @@ export function buildCatalogue(): Model[] {
         if (style === 'classic' && from >= 1935) continue;
         if (style !== 'classic' && line.styles.includes('classic') && from < 1935) continue;
         if (style === 'hs-coach' || style === 'hs-power') continue; // added below as a set
-        if (style === 'dmu-car' || style === 'emu-car' || style === 'tram') {
+        if (style === 'dmu-car' || style === 'emu-car' || style === 'metro-car' || style === 'tram') {
           // multiple units and trams: a driving (or end) car and an intermediate one
           const a = make(brand, line, style, from, to, g, gens, {}, '-cab');
           const b = make(brand, line, style, from, to, g, gens, {}, '-mid');

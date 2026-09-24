@@ -11,6 +11,7 @@ import { layoutBridge, type BridgeLayout } from './layout';
 import { bridgeMaterials, type Mat } from './materials';
 import { scenario, type Scenario, type ScenarioOpts } from './scenario';
 import { GALLERY, RIVER_CROSSING } from './gallery';
+import { NavRig, mountNavControls } from '../kit/camera';
 
 const $ = <T extends HTMLElement>(q: string) => document.querySelector(q) as T;
 const params = new URLSearchParams(location.search);
@@ -30,39 +31,42 @@ sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
 
-// the game's camera: high isometric by default; top-down and a low angle for comparison
+// the game's camera, from the shared kit (kit/camera.ts): high isometric by default; top-down and
+// a low angle for comparison
 const VIEWS = { iso: { el: 0.6 }, top: { el: 1.5 }, low: { el: 0.32 } } as const;
-const view = { az: Math.PI / 4, el: VIEWS.iso.el as number, zoom: 1, cx: 0, cz: 0, h: 300 };
 let viewName: keyof typeof VIEWS = (params.get('view') as keyof typeof VIEWS) in VIEWS ? (params.get('view') as keyof typeof VIEWS) : 'iso';
-view.el = VIEWS[viewName].el;
-// what to frame: the bridge's box, and (when zoomed in) the part worth a closer look
-let fit = { cx: 0, cy: 0, cz: 0, box: new THREE.Box3(), focus: null as THREE.Vector3 | null };
+const nav = new NavRig(cam, canvas, {
+  view: { x: 0, z: 0, h: 300, az: Math.PI / 4, el: VIEWS[viewName].el },
+  limits: { hMin: 4, hMax: 4000, elMin: 0.2, elMax: 1.55 },
+  distance: 6000,
+});
+mountNavControls(nav, { below: $('#top') });
+// what to frame: the bridge's box, and (with ?zoom=) the part worth a closer look
+let fit = { box: new THREE.Box3(), focus: null as THREE.Vector3 | null };
+let zoom = 1;
 
-function place() {
-  const w = canvas.clientWidth, h = canvas.clientHeight, aspect = w / h;
-  const d = 6000, dir = new THREE.Vector3(Math.sin(view.az) * Math.cos(view.el), Math.sin(view.el), Math.cos(view.az) * Math.cos(view.el));
-  cam.position.set(fit.cx + dir.x * d, fit.cy + dir.y * d, fit.cz + dir.z * d);
-  cam.lookAt(fit.cx, fit.cy, fit.cz);
-  cam.updateMatrixWorld();
-  // fit the bridge's bounding box to the screen, whatever the angle
-  const inv = cam.matrixWorldInverse, b = fit.box;
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
-    const p = new THREE.Vector3(x, y, z).applyMatrix4(inv);
-    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+// Frame the bridge's box on the screen, clear of the panel at the top and the buttons (or the
+// chooser's list) below, at the current angle.
+function frame(ms = 0) {
+  const H = canvas.clientHeight;
+  const pad = { top: H * 0.17, bottom: H * (mode === 'chooser' ? 0.46 : 0.09) };
+  const b = fit.box, v = nav.fitting({ min: b.min, max: b.max }, pad);
+  let to = v;
+  // zoomed in: the key part in the middle of the clear space
+  if (zoom !== 1 && fit.focus) {
+    const cx = canvas.clientWidth / 2, cy = pad.top + (H - pad.top - pad.bottom) / 2;
+    const w = { x: fit.focus.x, y: 0, z: fit.focus.z };
+    to = { ...v, h: v.h / zoom };
+    to = nav.framing(w, cx, cy, to);
   }
-  // leave room for the panels top and bottom
-  // keep the bridge clear of the panel at the top and the buttons (or the chooser's list) below
-  const top = 0.17, bottom = mode === 'chooser' ? 0.46 : 0.09, free = 1 - top - bottom;
-  const H = (Math.max((y1 - y0) / free, (x1 - x0) / aspect) * 1.1) / view.zoom;
-  let ox = (x0 + x1) / 2, oy = (y0 + y1) / 2;
-  if (fit.focus) { const f = fit.focus.clone().applyMatrix4(inv); ox += (f.x - ox) * Math.min(1, view.zoom - 1); oy += (f.y - oy) * Math.min(1, view.zoom - 1); }
-  cam.left = ox - (H * aspect) / 2; cam.right = ox + (H * aspect) / 2;
-  cam.bottom = oy - H * (bottom + free / 2); cam.top = cam.bottom + H;
-  cam.updateProjectionMatrix();
+  if (ms > 0) nav.animateTo(to, ms); else nav.setView(to);
+}
+// the sun lights the whole scene from the game's direction
+function light() {
+  const b = fit.box, c = b.getCenter(new THREE.Vector3());
   const r = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) * 0.75 + 50;
-  sun.position.set(fit.cx - 160 * r / 100, fit.cy + 260 * r / 100, fit.cz + 110 * r / 100);
-  sun.target.position.set(fit.cx, fit.cy, fit.cz);
+  sun.position.set(c.x - 160 * r / 100, c.y * 0.5 + 260 * r / 100, c.z + 110 * r / 100);
+  sun.target.position.set(c.x, c.y * 0.5, c.z);
   const sc = sun.shadow.camera as THREE.OrthographicCamera;
   sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 1; sc.far = r * 8;
   sc.updateProjectionMatrix();
@@ -237,11 +241,10 @@ function show(sc: Scenario, c: Crossing, lay: BridgeLayout) {
   }
   root.add(world(sc, c, lay));
   scene.add(root);
-  const ctr = fit.box.getCenter(new THREE.Vector3());
   // zooming in heads for the most telling part: a tower, pylon, lifting pier or the tallest pier
   const key = lay.supports.find((q) => q.kind === 'tower' || q.kind === 'pylon' || q.kind === 'leaf-pier' || q.kind === 'springing') ?? [...lay.supports].sort((p, q) => q.top - q.base - (p.top - p.base))[0];
   const fp = key ? frameAt(c, key.s) : null;
-  fit = { ...fit, cx: ctr.x, cy: ctr.y * 0.5, cz: ctr.z, focus: fp ? new THREE.Vector3(fp.x, fp.y, fp.z) : null };
+  fit = { ...fit, focus: fp ? new THREE.Vector3(fp.x, fp.y, fp.z) : null };
   liftNow = liftGoal = +(params.get('open') ?? 0);
   lifter?.(liftNow);
   $('#lift').style.display = lifter ? '' : 'none';
@@ -250,7 +253,8 @@ function show(sc: Scenario, c: Crossing, lay: BridgeLayout) {
   $('#facts').innerHTML = lay.ok
     ? `${Math.round(lay.s1 - lay.s0)} m long · ${lay.spans.length} span${lay.spans.length > 1 ? 's' : ''}, longest ${Math.round(main.len)} m · ${money(lay.cost)} (${realMoney(lay.real.total)} real) · upkeep ${money(lay.maint)}/yr<br>${f.era.from}${f.era.to ? `–${f.era.to}` : '+'} · road ${f.roadTonnes} t · rail ${f.railAxle ? `${f.railAxle} t axles` : 'no'} · carrying ${c.road.label}, ${c.year}`
     : `<span style="color:var(--bad)">${lay.reason}</span>`;
-  place();
+  light();
+  frame();
 }
 
 function gallery() {
@@ -287,48 +291,25 @@ function chooser() {
 
 function render() { if (mode === 'gallery') gallery(); else chooser(); $('#gallery').classList.toggle('on', mode === 'gallery'); $('#chooser').classList.toggle('on', mode === 'chooser'); $('#prev').style.visibility = $('#next').style.visibility = mode === 'gallery' ? '' : 'hidden'; }
 
-$('#prev').onclick = () => { index = (index + BRIDGE_IDS.length - 1) % BRIDGE_IDS.length; view.zoom = 1; render(); };
-$('#next').onclick = () => { index = (index + 1) % BRIDGE_IDS.length; view.zoom = 1; render(); };
+$('#prev').onclick = () => { index = (index + BRIDGE_IDS.length - 1) % BRIDGE_IDS.length; zoom = 1; render(); };
+$('#next').onclick = () => { index = (index + 1) % BRIDGE_IDS.length; zoom = 1; render(); };
 $('#gallery').onclick = () => { mode = 'gallery'; render(); };
 $('#chooser').onclick = () => { mode = 'chooser'; render(); };
-$('#view').onclick = () => { viewName = viewName === 'iso' ? 'top' : viewName === 'top' ? 'low' : 'iso'; view.el = VIEWS[viewName].el; $('#view').textContent = viewName === 'iso' ? 'Top' : viewName === 'top' ? 'Low' : 'Iso'; place(); };
+$('#view').onclick = () => { viewName = viewName === 'iso' ? 'top' : viewName === 'top' ? 'low' : 'iso'; $('#view').textContent = viewName === 'iso' ? 'Top' : viewName === 'top' ? 'Low' : 'Iso'; nav.tiltTo(VIEWS[viewName].el); };
 $('#lift').onclick = () => { liftGoal = liftGoal > 0.5 ? 0 : 1; };
 $('#view').textContent = viewName === 'iso' ? 'Top' : viewName === 'top' ? 'Low' : 'Iso';
 
-// drag to turn and tilt, wheel or pinch to zoom
-const touches = new Map<number, { x: number; y: number }>();
-let pinch = 0;
-canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
-canvas.addEventListener('pointermove', (e) => {
-  const t = touches.get(e.pointerId);
-  if (!t) return;
-  if (touches.size === 2) {
-    const [a, b] = [...touches.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
-    t.x = e.clientX; t.y = e.clientY;
-    const d2 = Math.hypot(...(() => { const [p, q] = [...touches.values()]; return [p.x - q.x, p.y - q.y] as [number, number]; })());
-    if (pinch) view.zoom = Math.max(0.5, Math.min(12, view.zoom * (d2 / d)));
-    pinch = d2;
-  } else {
-    view.az -= (e.clientX - t.x) * 0.008;
-    view.el = Math.max(0.2, Math.min(1.55, view.el + (e.clientY - t.y) * 0.005));
-    t.x = e.clientX; t.y = e.clientY;
-  }
-  place();
-});
-const up = (e: PointerEvent) => { touches.delete(e.pointerId); pinch = 0; };
-canvas.addEventListener('pointerup', up);
-canvas.addEventListener('pointercancel', up);
-canvas.addEventListener('wheel', (e) => { view.zoom = Math.max(0.5, Math.min(12, view.zoom * Math.exp(-e.deltaY * 0.001))); place(); }, { passive: true });
-
-function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); place(); }
+function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); nav.apply(); }
 window.addEventListener('resize', resize);
 let last = performance.now();
 renderer.setAnimationLoop((now) => {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (lifter && Math.abs(liftGoal - liftNow) > 1e-3) { liftNow += Math.sign(liftGoal - liftNow) * Math.min(Math.abs(liftGoal - liftNow), dt / 3); lifter(liftNow); }
+  nav.update(dt, now);
   renderer.render(scene, cam);
 });
-if (params.get('zoom')) view.zoom = +params.get('zoom')!;
+if (params.get('zoom')) zoom = +params.get('zoom')!;
 render();
 resize();
-(window as unknown as { demoReady: boolean }).demoReady = true;
+(window as unknown as { demoReady: boolean; nav: NavRig }).demoReady = true;
+(window as unknown as { nav: NavRig }).nav = nav;

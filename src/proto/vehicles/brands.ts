@@ -298,13 +298,14 @@ export const BRANDS: Brand[] = [
   {
     id: 'brackwell', name: 'Brackwell Traction', country: 'GB', flavour: 'Diesel and electric', from: 1950, to: 2030, makes: ['rail'],
     grille: 'bar', colours: ['#2f5a3a', '#1f3f6a'], accent: '#f2c21a', sporty: 0,
-    blurb: 'Diesel shunters, main-line diesels and electrics, railcars, suburban electrics, high-speed power cars and modern freight wagons.',
+    blurb: 'Diesel shunters, main-line diesels and electrics, railcars, suburban electrics, metro cars, high-speed power cars and modern freight wagons.',
     lines: [
       { family: 'Yardman', styles: ['shunter'], from: 1953, to: 1995, gen: 21 },
       { family: 'Haulmaster', styles: ['diesel-loco'], from: 1958, to: 2030, gen: 12 },
       { family: 'Voltmaster', styles: ['electric-loco'], from: 1960, to: 2030, gen: 14 },
       { family: 'Branchliner', styles: ['dmu-car'], from: 1955, to: 2030, gen: 15 },
       { family: 'Stopper', styles: ['emu-car'], from: 1955, to: 2012, gen: 19 },
+      { family: 'Deepline', styles: ['metro-car'], from: 1960, to: 2030, gen: 20 },
       { family: 'Expressliner', styles: ['hs-power', 'hs-coach'], from: 1976, to: 2012, gen: 18 },
       { family: 'Standard coach', styles: ['coach-stock'], from: 1951, to: 2030, gen: 15 },
       { family: 'Bogie hopper', styles: ['wagon-hopper'], from: 1965, to: 2030, gen: 22 },

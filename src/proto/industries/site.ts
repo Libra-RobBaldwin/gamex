@@ -123,6 +123,9 @@ export class Site {
   dyn: Dynamics = emptyDynamics();
   anchors: Anchors = { gate: { x: 0, z: 0 }, lorry: [], rail: [], quay: [] };
   notes: string[] = [];
+  // Leave out the lorry bays and rail sidings, recording only their anchors, for a site whose
+  // loading facilities are bought as terminals (src/proto/terminals) and drawn by them.
+  bare = false;
   readonly W: number;
   readonly D: number;
   readonly front: number; // z of the frontage
@@ -172,6 +175,7 @@ export class Site {
   // Rail sidings along x at z, with buffer stops. Each track is ballast and two rails.
   siding(z: number, x0: number, x1: number, tracks = 1, wagons = 0, wagonCol = '#5a4a3a') {
     const k = this.k;
+    if (this.bare) { for (let t = 0; t < tracks; t++) this.anchors.rail.push({ x0, x1, z: z + t * 4.5 }); return; }
     for (let t = 0; t < tracks; t++) {
       const zz = z + t * 4.5;
       k.flat(rect((x0 + x1) / 2, zz, x1 - x0, 3.4), 0.06, PAL.ballast);
@@ -186,11 +190,15 @@ export class Site {
   // Lorry bays: painted stands on a hard standing, with the lorry berth the economy can fill.
   bays(x: number, z: number, n: number, rot = 0, spacing = 4.5) {
     const k = this.k;
+    const c = Math.cos(rot), s = Math.sin(rot);
+    if (this.bare) {
+      for (let i = 0; i < n; i++) { const lx = -(n * spacing) / 2 + (i + 0.5) * spacing; this.anchors.lorry.push({ x: x + lx * c, z: z - lx * s, rot }); }
+      return;
+    }
     k.at(x, z, rot, () => {
       k.flat(rect(0, 0, n * spacing + 1, 18), 0.06, PAL.tarmac);
       for (let i = 0; i <= n; i++) k.flat(rect(-(n * spacing) / 2 + i * spacing, 0, 0.15, 16), 0.08, PAL.line);
     });
-    const c = Math.cos(rot), s = Math.sin(rot);
     for (let i = 0; i < n; i++) {
       const lx = -(n * spacing) / 2 + (i + 0.5) * spacing;
       const bx = x + lx * c, bz = z - lx * s;
