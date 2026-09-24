@@ -211,11 +211,18 @@ start are. Demand is smoothed, then set against capacity:
 
 - After two months above capacity it builds. It restores abandoned buildings first, then
   uses a free plot in the zone where demand is keenest, or densifies (house → terrace →
-  flats → tower) where people most want to be and there's nowhere left to spread.
+  flats → tower) where people most want to be and there's nowhere left to spread. The uses
+  share a zone's free plots: each goes to whichever use wants more most keenly just then, not
+  to whichever is looked at first, so how soon the game answers changes when things go up,
+  not what.
 - After three months well below capacity, people leave the emptiest, worst-placed
   buildings. Those are abandoned, and cleared six months later. A cleared plot is kept for
-  the use it was cleared of, as planning would, so a town doesn't empty its homes, fill their
-  land with offices and then want the homes back.
+  the use it was cleared of while that use is wanted, as planning would, so a town doesn't
+  empty its homes, fill their land with offices and then want the homes back. Once it's wanted
+  no more than it stands, other uses may build there, so wanted offices don't wait for ever
+  beside empty housing land. And a use with nowhere to build may redevelop the emptiest
+  buildings of a use that is about to give some up (offices where homes are emptying), rather
+  than let the homes empty for want of the jobs.
 - Buildings come in lumps, so it never builds what it couldn't fill, or abandons what it
   would want back: no oscillation. When what's left is too lumpy to give up any more, it has
   settled.
@@ -251,7 +258,7 @@ settled isn't stalling.
 
 1. *World.* Towns from the town centres. Zones are blocks of lots (the lots along one street
    `row`, or ~150 m cells), with the free plots the queue still holds (not the lots the
-   economy cleared: it keeps those for their old use). Re-sending a zone doesn't lift the rest
+   economy cleared: it keeps track of those itself). Re-sending a zone doesn't lift the rest
    after a declined request unless its free plots go up. Buildings are `Lot`s,
    with capacity from `USE`. Stops come from `seg.stops`, lines from a line editor, industries
    from the map.

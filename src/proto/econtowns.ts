@@ -8,9 +8,10 @@
 //    (a town finds some of what it needs for itself, a share of what it started with, and some
 //    people live there whatever they can reach, so an unserved town shrinks towards a floor)
 //  - demand is smoothed, and set against capacity with hysteresis: only months of demand above
-//    capacity build (a free plot, or a denser building where people most want to be), and only
-//    months well below it abandon the emptiest buildings, which are cleared later still, their
-//    plots kept for the same use;
+//    capacity build (a free plot, or a denser building where people most want to be), the uses
+//    that want land most keenly first, and only months well below it abandon the emptiest
+//    buildings, which are cleared later still, their plots kept for the same use while it's
+//    wanted (a use short of land may redevelop the buildings of one giving some up);
 //  - occupancy drifts towards demand, faster in than out.
 // Everything that happens is explained in plain words for the town panel.
 import { BUILDINGS, ENTRY, GROWN, USES, USE_NAME, type BuildingKind, type Reason, type TownReport, type TownStatus, type Tune, type Use, type UseReport } from './econdefs';
@@ -32,7 +33,8 @@ export interface ZState extends ZoneGeo {
   idx: number; town: TState; plots: number; reserved: number; blocked: number; allow: Set<BuildingKind> | null;
   // Plots cleared of abandoned buildings, kept for the use they were cleared from (as planning
   // would: a cleared housing site is rebuilt as housing), so a town doesn't empty its homes only
-  // to fill their land with offices and then want the homes back.
+  // to fill their land with offices and then want the homes back. Once that use is wanted no
+  // more than it stands, other uses may build on them (see decide).
   cleared: PerUse;
   buildings: BState[]; indJobs: number;
   cov: number; // share of the zone (by capacity) near a served bus or rail stop
@@ -98,7 +100,8 @@ export interface TownCtx {
   work: Reach; shop: Reach; leisure: Reach;
   workSupply: Float64Array; shopSupply: Float64Array;
   pendingCap(t: TState, use: Use): number;
-  add(z: ZState, kind: BuildingKind, cleared: boolean): void;
+  // `cleared`: the use whose cleared plot this takes, or null for a free plot
+  add(z: ZState, kind: BuildingKind, cleared: Use | null): void;
   densify(b: BState, kind: BuildingKind): void;
   abandon(b: BState): void; restore(b: BState): void; demolish(b: BState): void; vacate(b: BState, fraction: number): void;
   service(t: TState): { stops: number; lines: number };
@@ -205,7 +208,7 @@ export function reviewTown(t: TState, c: TownCtx) {
     if (c.assess && C[u] === 0) us.demand = 0;
   }
   if (!c.assess) {
-    for (const u of GROWN) decide(t, u, C[u], c);
+    decide(t, C, c);
     // clear what has stood empty long enough (filtering each zone once, however many go)
     for (const z of t.zones) {
       const gone = new Set<BState>();
@@ -275,38 +278,89 @@ function tally(t: TState) {
   return abandoned;
 }
 
-// Grow, hold or shrink one use of one town.
-function decide(t: TState, u: Exclude<Use, 'civic'>, cap: number, c: TownCtx) {
-  const T = c.tune, us = t.use[u];
-  const have = cap + c.pendingCap(t, u);
-  const r = have > 0 ? us.demand / have : us.demand >= BUILDINGS[ENTRY[u]].cap * 0.7 ? T.growAt : 0;
-  if (r >= T.growAt) us.up++; else if (r < T.stopGrowBelow) us.up = 0;
-  if (r <= T.declineAt && have > 0) us.down++; else if (r >= T.recoverAt) us.down = 0;
-  // settled until demand recovers or falls on further
-  if (us.settled && (r >= T.recoverAt || us.demand < us.settled * 0.95)) us.settled = 0;
-  us.stuck = false;
-  if (us.up >= T.growAfter) {
-    let budget = Math.min(us.demand - have, Math.max(T.growMax * have, BUILDINGS[ENTRY[u]].cap));
-    let actions = 0, total = have;
-    // Buildings come in lumps. Only add one if demand would still fill it well enough not to
-    // tip the town straight into decline, or a town could build, empty and rebuild for ever.
-    const fits = (gain: number) => us.demand / (total + gain) >= T.recoverAt && (gain <= budget * 1.5 || (actions === 0 && gain <= budget * 2));
+// Grow, hold or shrink each use of one town.
+function decide(t: TState, C: PerUse, c: TownCtx) {
+  const T = c.tune;
+  const growers: Grower[] = [], wants = perUse(), yields = perUse();
+  for (const u of GROWN) {
+    const us = t.use[u], cap = C[u];
+    const have = cap + c.pendingCap(t, u);
+    const r = have > 0 ? us.demand / have : us.demand >= BUILDINGS[ENTRY[u]].cap * 0.7 ? T.growAt : 0;
+    if (r >= T.growAt) us.up++; else if (r < T.stopGrowBelow) us.up = 0;
+    if (r <= T.declineAt && have > 0) us.down++; else if (r >= T.recoverAt) us.down = 0;
+    // settled until demand recovers or falls on further
+    if (us.settled && (r >= T.recoverAt || us.demand < us.settled * 0.95)) us.settled = 0;
+    us.stuck = false;
+    // a use wanted no more than it stands lets other uses build on plots cleared of it
+    wants[u] = r >= T.stopGrowBelow ? 1 : 0;
+    // and one about to give buildings up can give them over to a use that has no land
+    yields[u] = us.down >= T.declineAfter && !us.settled ? 1 : 0;
+    if (us.up < T.growAfter) continue;
+    const g: Grower = { u, budget: Math.min(us.demand - have, Math.max(T.growMax * have, BUILDINGS[ENTRY[u]].cap)), actions: 0, total: have, empty: 0, cands: [], next: 0 };
     // bring abandoned buildings back first: they're standing already
     const empty = t.zones.flatMap((z) => z.buildings.filter((b) => b.abandoned && b.use === u)).sort((a, b) => b.site - a.site || a.id - b.id);
+    g.empty = empty.length;
     for (const b of empty) {
-      if (budget <= 0 || actions >= T.maxActions) break;
-      if (!fits(b.cap)) continue;
-      c.restore(b); budget -= b.cap; total += b.cap; actions++;
+      if (g.budget <= 0 || g.actions >= T.maxActions) break;
+      if (!fits(t, g, b.cap, T)) continue;
+      c.restore(b); g.budget -= b.cap; g.total += b.cap; g.actions++;
     }
-    const cands = candidates(t, u, c);
-    for (const cand of cands) {
-      if (budget <= 0 || actions >= T.maxActions) break;
-      if (!fits(cand.gain)) continue;
-      if (cand.b) c.densify(cand.b, cand.kind); else c.add(cand.z, cand.kind, !!cand.cleared);
-      budget -= cand.gain; total += cand.gain; actions++;
-    }
-    if (actions) { us.grew = c.month; us.up = T.growAfter - 1; } else us.stuck = !empty.length && !cands.length;
+    growers.push(g);
   }
+  for (const g of growers) g.cands = candidates(t, g.u, c, wants, yields);
+  // what stands of each use as buildings are redeveloped for another
+  const stands = perUse();
+  for (const z of t.zones) for (const b of z.buildings) if (!b.abandoned) stands[b.use] += b.cap;
+  // The uses share the free plots: each new building goes to the use that wants more most
+  // keenly just then (demand over what it has, counting what it's building), not to whichever
+  // is looked at first, so how soon the game answers changes when things go up, not what.
+  for (;;) {
+    let best: Grower | null = null, keen = 0;
+    for (const g of growers) {
+      if (g.budget <= 0 || g.actions >= T.maxActions || g.next >= g.cands.length) continue;
+      const k = t.use[g.u].demand / Math.max(1, g.total);
+      if (!best || k > keen) { best = g; keen = k; }
+    }
+    if (!best) break;
+    const g = best, cand = g.cands[g.next++];
+    if (!fits(t, g, cand.gain, T)) continue;
+    if (cand.b) c.densify(cand.b, cand.kind);
+    else if (cand.from) {
+      // Redevelop a building of a use that isn't wanted (the emptiest first) for one that is and
+      // has no land, rather than let the first empty for want of the second: only while what's
+      // left of the old use is still no less than it's wanted.
+      const b = cand.from, w = b.use as Exclude<Use, 'civic'>;
+      if (b.abandoned || b.densify || !yields[w] || t.use[w].demand > (stands[w] - b.cap) * T.stopGrowBelow) continue;
+      const movers = b.cap * b.occ;
+      stands[w] -= b.cap;
+      t.done.lost += b.cap;
+      c.demolish(b);
+      b.zone.buildings = b.zone.buildings.filter((x) => x !== b);
+      rehouse(b.zone.town.zones.flatMap((z) => z.buildings.filter((x) => !x.abandoned && x.use === w)), movers);
+      c.add(cand.z, cand.kind, w);
+    } else {
+      // a plot cleared of this use, else a free one, else one cleared of a use not wanted
+      const src = cand.z.cleared[g.u] > 0 ? g.u : cand.z.plots - cand.z.reserved > 0 ? null : GROWN.find((w) => w !== g.u && !wants[w] && cand.z.cleared[w] > 0);
+      if (src === undefined) continue;
+      c.add(cand.z, cand.kind, src);
+    }
+    g.budget -= cand.gain; g.total += cand.gain; g.actions++;
+  }
+  for (const g of growers) {
+    const us = t.use[g.u];
+    if (g.actions) { us.grew = c.month; us.up = T.growAfter - 1; } else us.stuck = !g.empty && !g.cands.length;
+  }
+  for (const u of GROWN) shrink(t, u, Math.min(C[u], stands[u]), c);
+}
+
+interface Grower { u: Exclude<Use, 'civic'>; budget: number; actions: number; total: number; empty: number; cands: Cand[]; next: number }
+// Buildings come in lumps. Only add one if demand would still fill it well enough not to tip the
+// town straight into decline, or a town could build, empty and rebuild for ever.
+const fits = (t: TState, g: Grower, gain: number, T: Tune) =>
+  t.use[g.u].demand / (g.total + gain) >= T.recoverAt && (gain <= g.budget * 1.5 || (g.actions === 0 && gain <= g.budget * 2));
+
+function shrink(t: TState, u: Exclude<Use, 'civic'>, cap: number, c: TownCtx) {
+  const T = c.tune, us = t.use[u];
   if (us.down >= T.declineAfter && !us.settled) {
     // people leave the emptiest, worst-placed buildings first; those left move to vacancies
     const live = t.zones.flatMap((z) => z.buildings.filter((b) => !b.abandoned && b.use === u && !b.densify))
@@ -342,20 +396,27 @@ function rehouse(into: BState[], movers: number) {
   for (const b of into) b.occ += (1 - b.occ) * f;
 }
 
-interface Cand { z: ZState; b?: BState; kind: BuildingKind; gain: number; score: number; cleared?: boolean }
-// Where to build: a free plot (or one cleared of this use) where demand is keenest, or a denser
-// building where people most want to be (near a station, with nowhere left to spread), like
-// land values rising.
-function candidates(t: TState, u: Exclude<Use, 'civic'>, c: TownCtx): Cand[] {
+interface Cand { z: ZState; b?: BState; from?: BState; kind: BuildingKind; gain: number; score: number }
+// Where to build: a free plot (or one cleared of this use, or of a use not wanted) where demand
+// is keenest, or a denser building where people most want to be (near a station, with nowhere
+// left to spread), like land values rising.
+function candidates(t: TState, u: Exclude<Use, 'civic'>, c: TownCtx, wants: PerUse, yields: PerUse): Cand[] {
   const out: Cand[] = [];
   const T = c.tune;
   for (const z of t.zones) {
     const f = factorOf(t, z, u, T);
-    const free = z.plots - z.reserved, cleared = z.cleared[u];
+    const free = Math.max(0, z.plots - z.reserved);
+    let land = free + z.cleared[u];
+    for (const w of GROWN) if (w !== u && !wants[w]) land += z.cleared[w];
     const kind = ENTRY[u];
-    if (free + cleared > 0 && z.blocked <= 0 && allowed(z, kind))
-      for (let n = 0; n < Math.min(free + cleared, T.maxActions); n++)
-        out.push({ z, kind, gain: BUILDINGS[kind].cap, score: f + (u === 'office' ? 0.2 : 0.1) * z.cov + 0.05 * z.centre - 0.01 * n, cleared: n < cleared });
+    if (land > 0 && z.blocked <= 0 && allowed(z, kind))
+      for (let n = 0; n < Math.min(land, T.maxActions); n++)
+        out.push({ z, kind, gain: BUILDINGS[kind].cap, score: f + (u === 'office' ? 0.2 : 0.1) * z.cov + 0.05 * z.centre - 0.01 * n });
+    // failing all else, a building of a use about to give some up, to redevelop (see decide)
+    if (z.blocked <= 0 && allowed(z, kind))
+      for (const b of z.buildings)
+        if (!b.abandoned && !b.densify && b.use !== u && yields[b.use] && b.cap < BUILDINGS[kind].cap)
+          out.push({ z, from: b, kind, gain: BUILDINGS[kind].cap, score: f - 2 - b.occ - 0.1 * b.site });
     // densify only where people want more than there is
     if (f * t.bias[u] < 1) continue;
     for (const b of z.buildings) {

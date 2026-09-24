@@ -60,8 +60,8 @@ interface IState {
   last: { produced: number; moved: number; received: number };
   out: SState[][]; // by cargo: stops that will take it away
 }
-// `cleared`: an add on a plot cleared of the same use (taken from the zone's `cleared` at once)
-interface Pending { req: number; t: 'add' | 'densify'; zone: ZState; kind: BuildingKind; use: Use; gain: number; month: number; building?: BState; cleared?: boolean }
+// `cleared`: an add on a plot cleared of that use (taken from the zone's `cleared` at once)
+interface Pending { req: number; t: 'add' | 'densify'; zone: ZState; kind: BuildingKind; use: Use; gain: number; month: number; building?: BState; cleared?: Use }
 
 class Rand {
   constructor(public s: number) {}
@@ -278,7 +278,7 @@ export class Economy {
     this.pending.delete(req);
     const rest = this.tune.restMonths;
     if (p.t === 'add') {
-      if (p.cleared) p.zone.cleared[p.use]++; else p.zone.reserved = Math.max(0, p.zone.reserved - 1);
+      if (p.cleared) p.zone.cleared[p.cleared]++; else p.zone.reserved = Math.max(0, p.zone.reserved - 1);
       p.zone.blocked = rest;
     }
     if (p.building) { p.building.densify = 0; p.building.rest = this.month + rest; }
@@ -898,10 +898,11 @@ export class Economy {
       this.emit({ t: 'news', text: `${t.name}: ${r.headline.charAt(0).toLowerCase()}${r.headline.slice(1)}.`, x: t.x, z: t.z, town: t.id });
   }
 
-  private requestAdd(z: ZState, kind: BuildingKind, cleared = false) {
+  private requestAdd(z: ZState, kind: BuildingKind, from: Use | null = null) {
+    const cleared = from ?? undefined;
     const req = this.reqNo++, use = BUILDINGS[kind].use;
     this.pending.set(req, { req, t: 'add', zone: z, kind, use, gain: BUILDINGS[kind].cap, month: this.month, cleared });
-    if (cleared) z.cleared[use]--; else z.reserved++;
+    if (cleared) z.cleared[cleared]--; else z.reserved++;
     this.actions.push({ t: 'add', req, zone: z.id, kind });
     if (this.opts.autoBuild) {
       // somewhere in the zone, away from its middle a little each time
@@ -1012,7 +1013,7 @@ export class Economy {
       industries: [...this.indMap.values()].map((i) => ({ id: i.id, rate: i.rate, stock: arr(i.stock), input: arr(i.input), produced: i.produced, moved: i.moved, received: i.received, converted: i.converted, last: { ...i.last } })),
       stops: [...this.stopMap.values()].map((s) => ({ id: s.id, pool: arr(s.pool), relayed: arr(s.relayed), fare: s.fare, month: { ...s.month }, last: { ...s.last } })),
       lines: this.lineList.map((L) => ({ id: L.id, ...L.save() })),
-      pending: [...this.pending.values()].map((p) => ({ req: p.req, t: p.t, zone: p.zone.id, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building?.id, cleared: !!p.cleared })),
+      pending: [...this.pending.values()].map((p) => ({ req: p.req, t: p.t, zone: p.zone.id, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building?.id, cleared: p.cleared ?? null })),
     };
   }
 
@@ -1045,7 +1046,7 @@ export class Economy {
     for (const l of s.lines) e.lineMap.get(l.id)?.restore(l);
     for (const p of s.pending) {
       const zone = e.zoneMap.get(p.zone);
-      if (zone) e.pending.set(p.req, { req: p.req, t: p.t as Pending['t'], zone, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building !== undefined ? e.buildingMap.get(p.building) : undefined, cleared: p.cleared });
+      if (zone) e.pending.set(p.req, { req: p.req, t: p.t as Pending['t'], zone, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building !== undefined ? e.buildingMap.get(p.building) : undefined, cleared: p.cleared ?? undefined });
     }
     e.dirty.times = e.dirty.service = true;
     return e;
