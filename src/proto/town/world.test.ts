@@ -44,6 +44,9 @@ function contract(w: World) {
   for (const t of w.trees) expect(Math.abs(t.x) <= w.bound + 1 && Math.abs(t.z) <= w.bound + 1).toBe(true);
   expect(w.trees.length).toBeLessThanOrEqual(1600); // the instanced tree meshes' size
   expect(w.real ? w.attribution : null).toBe(w.real ? '© OpenStreetMap contributors' : null);
+  expect(w.stops.length).toBeGreaterThanOrEqual(3);
+  for (const p of w.stops) expect(Math.max(Math.abs(p.x), Math.abs(p.z))).toBeLessThan(w.bound);
+  expect(w.industry.length).toBeGreaterThanOrEqual(3);
 }
 
 // A dead end that stops within a couple of metres of another road it doesn't meet is a join the

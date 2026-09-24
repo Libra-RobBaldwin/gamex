@@ -4,7 +4,7 @@
 // wheel; trailers hang off their kingpin and carry every load the haulage trade knows.
 import { Kit, C, paint, fixed, type P2, type Style } from './kit';
 import type { Model } from './types';
-import { num, str, flag, wheels, axleBlock, mirrors, beacon, endLamps, plateR } from './parts';
+import { num, str, flag, wheels, axleBlock, mirrors, beacon, endLamps, plateR, steerOf } from './parts';
 import { rng, pick } from './util';
 
 type CabKind = 'bonneted' | 'flat' | 'sleeper' | 'high';
@@ -230,7 +230,7 @@ export function buildLorry(k: Kit, m: Model) {
   chassis(k, -L / 2 + 0.2, x0, hw, lod);
   const rear = d.axles.slice(1);
   for (const [i, x] of d.axles.entries()) {
-    if (lod === 0) wheels(k, x, r, hw - 0.02, 0.3, 'truck', i > 0 && (i === d.axles.length - 1 || style !== 'mixer'));
+    if (lod === 0) wheels(k, x, r, hw - 0.02, 0.3, 'truck', i > 0 && (i === d.axles.length - 1 || style !== 'mixer'), steerOf(d.axles, x));
     else axleBlock(k, x, r, hw - 0.02, 2);
   }
   if (lod === 0) for (const x of rear) for (const s of [1, -1]) k.box(x - r - 0.15, x + r + 0.15, r * 2 + 0.05, r * 2 + 0.12, s > 0 ? hw - 0.6 : -hw, s > 0 ? hw : -hw + 0.6, C.trim);

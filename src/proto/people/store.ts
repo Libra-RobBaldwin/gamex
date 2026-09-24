@@ -111,8 +111,17 @@ export interface GroupSpec {
   count: number; // figures to show now (the first `count` by index); may be fractional
   build(b: Bufs): void; // fill the records, deterministically
   expires?: number; // drop the group after this time (transient crowds: boarders, alighters)
+  // shown at full strength as soon as it's built, rather than faded in: people taking over from
+  // others who were standing in the same places (the front of a queue walking to the bus)
+  instant?: boolean;
 }
-interface Group { spec: GroupSpec; bufs: Bufs | null; shown: number; target: number; lod: number; keep: number; builtAt: number }
+interface Group {
+  spec: GroupSpec; bufs: Bufs | null; shown: number; target: number; lod: number; keep: number; builtAt: number;
+  dead: boolean; // removed from the store (its entries fade out as they're met)
+  wasOn: boolean; cameOn: boolean; // on screen last frame; came on screen this frame
+  keepE: number; // `keep`, eased, so figures over the far budget fade away rather than vanish
+  slots: (Entry | undefined)[]; // its entry in each mesh, by mesh and category (see slotOf)
+}
 
 // Detail levels by how tall a person stands on screen, in CSS pixels, and how many figures each
 // level may draw. Tie these to the game's adaptive quality tiers (see docs/people.md).
@@ -126,7 +135,9 @@ export const BUDGETS: Budget[] = [
 ];
 
 interface Entry { g: Group; cat: Cat; shown: number; hidden: number; version: number; n: number }
-const needed = (e: Entry) => e.g.bufs![e.cat].upTo(Math.ceil(Math.min(Math.max(e.g.shown, e.g.target), e.g.keep)));
+const KINDS: Kind[] = ['person', 'personMid', 'card', 'animal', 'animalMid', 'bird', 'bike', 'pushchair', 'wheelchair'];
+const slotOf = (kind: Kind, cat: Cat) => KINDS.indexOf(kind) * CATS.length + CATS.indexOf(cat);
+const needed = (e: Entry) => e.g.bufs![e.cat].upTo(Math.ceil(Math.min(Math.max(e.g.shown, e.g.target), Math.max(e.g.keep, e.g.keepE))));
 class Batch {
   mesh: THREE.Mesh;
   geo: THREE.InstancedBufferGeometry;
@@ -182,7 +193,7 @@ class Batch {
     const d = this.dyn.array as Float32Array;
     let o = 0;
     for (const e of this.entries) {
-      const rb = e.g.bufs![e.cat], c = Math.min(e.g.shown, e.g.keep);
+      const rb = e.g.bufs![e.cat], c = Math.min(e.g.shown, e.g.keepE);
       for (let i = 0; i < e.n; i++, o++) { d[o * 4] = c; d[o * 4 + 1] = rb.idx[i]; d[o * 4 + 2] = e.shown; d[o * 4 + 3] = e.hidden; }
     }
     this.dyn.needsUpdate = true;
@@ -226,6 +237,10 @@ export class PeopleStore {
   private batches = new Map<Kind, Batch>();
   budget: Budget = BUDGETS[0];
   time = 0; // seconds of simulated time, as the shaders see it
+  // Seconds of real time for fades and count easing. The game stops `time` while it's paused, but
+  // zooming or panning still changes detail levels and brings new groups on screen, and those
+  // fades have to finish or the new level would never show.
+  fade = 0;
   forceLod?: number; // draw everything at one level of detail (for measuring)
   stats: StoreStats = { groups: 0, built: 0, visible: 0, instances: 0, triangles: 0, drawCalls: 0, updateMs: 0, byLod: [0, 0, 0] };
   private v = new THREE.Vector3();
@@ -252,7 +267,7 @@ export class PeopleStore {
   add(spec: GroupSpec) {
     const old = this.groups.get(spec.id);
     if (old) { old.spec = spec; old.target = spec.count; if (old.bufs) { this.fill(old); } return; }
-    this.groups.set(spec.id, { spec, bufs: null, shown: spec.count, target: spec.count, lod: 3, keep: Infinity, builtAt: 0 });
+    this.groups.set(spec.id, { spec, bufs: null, shown: spec.count, target: spec.count, lod: 3, keep: Infinity, builtAt: 0, dead: false, wasOn: false, cameOn: false, keepE: 1e6, slots: new Array(KINDS.length * CATS.length) });
   }
   has(id: string) { return this.groups.has(id); }
   spec(id: string) { return this.groups.get(id)?.spec; }
@@ -260,7 +275,9 @@ export class PeopleStore {
     const g = this.groups.get(id);
     if (!g) return;
     this.groups.delete(id);
-    for (const b of this.batches.values()) { const n = b.entries.length; b.entries = b.entries.filter((e) => e.g !== g); if (b.entries.length !== n) b.dirty = true; }
+    g.dead = true;
+    // its entries fade out over the next frames (see update), so a rebuilt footway cross-fades
+    g.lod = 3;
   }
   // How many of a group to show. Changes ease in (a figure fades over about half a second)
   // unless `instant` (used when a queue re-forms after boarding).
@@ -275,7 +292,7 @@ export class PeopleStore {
   private fill(g: Group) {
     for (const c of CATS) g.bufs![c].clear();
     g.spec.build(g.bufs!);
-    g.builtAt = this.time;
+    g.builtAt = this.fade;
   }
   ids() { return [...this.groups.keys()]; }
 
@@ -295,26 +312,37 @@ export class PeopleStore {
         rb.version++;
       }
     }
-    for (const b of this.batches.values()) for (const e of b.entries) { e.shown -= T; if (e.hidden) e.hidden -= T; }
     this.time -= T;
     this.onRebase?.(T);
   }
   onRebase?: (T: number) => void;
+  // the same for the fade clock
+  private rebaseFade(T: number) {
+    for (const b of this.batches.values()) for (const e of b.entries) { e.shown -= T; if (e.hidden > 0) e.hidden -= T; }
+    for (const g of this.groups.values()) g.builtAt -= T;
+    this.fade -= T;
+  }
 
-  // Once a frame: advance time, choose detail and budget, update instance buffers.
-  update(camera: THREE.Camera, cssH: number, dt: number) {
+  // Once a frame: advance time, choose detail and budget, update instance buffers. `dt` moves
+  // everyone on (0 while the game is paused); `fadeDt`, real time, runs the fades and eases counts.
+  update(camera: THREE.Camera, cssH: number, dt: number, fadeDt = dt) {
     const t0 = performance.now();
     this.time += dt;
+    this.fade += fadeDt;
     if (this.time > 8192) this.rebase(4096);
-    const now = this.time;
+    if (this.fade > 8192) this.rebaseFade(4096);
+    const now = this.time, fnow = this.fade;
     this.uniforms.uTime.value = now;
+    this.uniforms.uFade.value = fnow;
     camera.updateMatrixWorld();
     this.m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     const B = this.budget;
     // 1. what's on screen, and how big a person there looks
-    const vis: { g: Group; ph: number; pri: number }[] = [];
-    for (const [id, g] of this.groups) {
-      if (g.spec.expires !== undefined && now > g.spec.expires) { this.remove(id); continue; }
+    // (this runs every frame, so it reuses its working objects rather than leaving garbage behind)
+    const vis = this.vis;
+    let nv = 0;
+    for (const g of this.groups.values()) {
+      if (g.spec.expires !== undefined && now > g.spec.expires) { this.remove(g.spec.id); continue; }
       const c = g.spec.centre, y = g.spec.y ?? 0;
       this.v.set(c.x, y, c.z).applyMatrix4(this.m);
       const nx = this.v.x, ny = this.v.y, nz = this.v.z;
@@ -326,17 +354,24 @@ export class PeopleStore {
       this.v.set(c.x, y, c.z + g.spec.radius).applyMatrix4(this.m);
       const r = Math.max(rx, Math.hypot(this.v.x - nx, this.v.y - ny)) + 0.08;
       const on = nz > -1 && nz < 1 && nx > -1 - r && nx < 1 + r && ny > -1 - r && ny < 1 + r;
-      if (!on || g.target <= 0.001) { g.lod = 3; continue; }
-      vis.push({ g, ph, pri: nx * nx + ny * ny });
+      if (!on || Math.max(g.target, g.shown) <= 0.001) { g.lod = 3; g.wasOn = on; continue; }
+      g.cameOn = !g.wasOn; g.wasOn = true;
+      let v = vis[nv];
+      if (!v) vis.push((v = { g, ph, pri: 0 }));
+      v.g = g; v.ph = ph; v.pri = nx * nx + ny * ny;
+      nv++;
     }
+    for (let i = nv; i < vis.length && vis[i].g; i++) vis[i].g = null; // (let go of groups since removed)
     // 2. detail by size (with a little hysteresis), then budgets from the middle of the view out
-    vis.sort((a, b) => a.pri - b.pri);
-    const used = [0, 0, 0], cap = [B.near, B.mid, B.far];
+    // (an insertion sort of the ones on screen: from one frame to the next their order hardly changes)
+    for (let i = 1; i < nv; i++) { const x = vis[i]; let j = i - 1; while (j >= 0 && vis[j].pri > x.pri) { vis[j + 1] = vis[j]; j--; } vis[j + 1] = x; }
+    const used = this.stats.byLod, cap = [B.near, B.mid, B.far];
+    used[0] = used[1] = used[2] = 0;
     let builds = 0;
-    for (const { g, ph } of vis) {
-      const was = g.lod, hy = (lvl: number) => (was <= lvl ? 0.9 : 1.1);
-      let lod = this.forceLod ?? (ph >= B.nearPx * hy(0) ? 0 : ph >= B.midPx * hy(1) ? 1 : ph >= B.farPx * hy(2) ? 2 : 3);
-      const n = Math.ceil(g.target);
+    for (let i = 0; i < nv; i++) {
+      const { ph } = vis[i], g = vis[i].g!, was = g.lod;
+      let lod = this.forceLod ?? (ph >= B.nearPx * (was <= 0 ? 0.9 : 1.1) ? 0 : ph >= B.midPx * (was <= 1 ? 0.9 : 1.1) ? 1 : ph >= B.farPx * (was <= 2 ? 0.9 : 1.1) ? 2 : 3);
+      const n = Math.ceil(Math.max(g.target, g.shown));
       while (lod < 2 && used[lod] + n > cap[lod]) lod++;
       g.keep = Infinity;
       if (lod === 2 && used[2] + n > cap[2]) { g.keep = Math.max(0, cap[2] - used[2]); if (g.keep === 0) lod = 3; }
@@ -348,46 +383,54 @@ export class PeopleStore {
     }
     // ease shown counts towards their targets
     for (const g of this.groups.values()) {
+      const k = Math.min(g.keep, 1e6), dk = k - g.keepE;
+      if (dk !== 0) { const step = Math.max(2, Math.abs(dk) * 1.5) * fadeDt; g.keepE = Math.abs(dk) <= step ? k : g.keepE + Math.sign(dk) * step; }
       const d = g.target - g.shown;
-      if (d !== 0) { const step = Math.max(2, Math.abs(d) * 1.5) * dt; g.shown = Math.abs(d) <= step ? g.target : g.shown + Math.sign(d) * step; }
+      if (d !== 0) { const step = Math.max(2, Math.abs(d) * 1.5) * fadeDt; g.shown = Math.abs(d) <= step ? g.target : g.shown + Math.sign(d) * step; }
     }
-    // 3. membership of each mesh; groups leaving a level fade out there as they fade in at the next
-    const want = new Map<Kind, Set<string>>();
-    for (const b of this.batches.keys()) want.set(b, new Set());
-    for (const g of this.groups.values()) {
-      if (g.lod > 2 || !g.bufs) continue;
-      for (const c of CATS) { const k = DRAW[c][g.lod]; if (k && g.bufs[c].n) want.get(k)!.add(`${g.spec.id}\u0000${c}`); }
-    }
-    let inst = 0, tris = 0, calls = 0;
-    for (const [kind, b] of this.batches) {
-      const w = want.get(kind)!;
-      const have = new Set<string>();
-      for (const e of b.entries) {
-        const key = `${e.g.spec.id}\u0000${e.cat}`;
-        const live = this.groups.get(e.g.spec.id) === e.g;
-        if (w.has(key) && live) {
-          if (e.hidden) { e.hidden = 0; e.shown = now - Math.max(0, 0.6 - (now - e.hidden)); }
-          have.add(key);
-          if (e.version !== e.g.bufs![e.cat].version) b.dirty = true;
+    // 3. membership of each mesh. A group is wanted in the mesh that draws each of its categories at
+    // its level; one leaving a level fades out there as it fades in at the next.
+    const wanted = (g: Group, cat: Cat, kind: Kind) => !g.dead && g.lod <= 2 && !!g.bufs && DRAW[cat][g.lod] === kind && g.bufs[cat].n > 0;
+    for (const b of this.batches.values()) {
+      const E = b.entries;
+      let w = 0;
+      for (let i = 0; i < E.length; i++) {
+        const e = E[i], g = e.g;
+        if (wanted(g, e.cat, b.kind)) {
+          // back before it had faded out: fade in from as far as it had got
+          if (e.hidden) { const h = e.hidden; e.hidden = 0; e.shown = fnow - (h > 0 ? Math.max(0, 0.6 - (fnow - h)) : 0); }
+          if (e.version !== g.bufs![e.cat].version) b.dirty = true;
           // more figures wanted than copied, or far fewer: copy again
           const want = needed(e);
           if (want > e.n || want < e.n - 8) b.dirty = true;
-        } else if (!e.hidden && live && e.g.lod < 3) { e.hidden = now; }
+        } else if (!e.hidden && (g.dead || g.wasOn)) { e.hidden = fnow; } // removed, too small or a new level: fade
         else if (!e.hidden) { e.hidden = -1; }
+        // off screen: drop at once; otherwise keep until faded out
+        if (e.hidden === 0 || (e.hidden > 0 && fnow - e.hidden < 0.65)) E[w++] = e;
+        else if (g.slots[slotOf(b.kind, e.cat)] === e) g.slots[slotOf(b.kind, e.cat)] = undefined;
       }
-      // off screen or gone: drop at once; changed level: keep until faded out
-      const before = b.entries.length;
-      b.entries = b.entries.filter((e) => e.hidden === 0 || (e.hidden > 0 && now - e.hidden < 0.65 && this.groups.get(e.g.spec.id) === e.g));
-      if (b.entries.length !== before) b.dirty = true;
-      for (const key of w) if (!have.has(key)) {
-        const [id, cat] = key.split('\u0000') as [string, Cat];
-        const g = this.groups.get(id)!;
+      if (w !== E.length) { E.length = w; b.dirty = true; }
+    }
+    for (let i = 0; i < nv; i++) {
+      const g = vis[i].g!;
+      if (g.lod > 2 || !g.bufs) continue;
+      for (const cat of CATS) {
+        const kind = DRAW[cat][g.lod];
+        if (!kind || !g.bufs[cat].n) continue;
+        const si = slotOf(kind, cat);
+        if (g.slots[si]) continue; // already there (perhaps fading back in)
         // groups that appear because they came on screen are already at full strength; those that
         // appear because the view zoomed or they were just built fade in
-        const fresh = g.builtAt === now;
-        b.entries.push({ g, cat, shown: fresh || this.shownElsewhere(g, kind) ? now : now - 1, hidden: 0, version: -1, n: 0 });
+        const fresh = (g.builtAt === fnow || !g.cameOn) && !g.spec.instant;
+        const e: Entry = { g, cat, shown: fresh || this.shownElsewhere(g, kind) ? fnow : fnow - 1, hidden: 0, version: -1, n: 0 };
+        const b = this.batches.get(kind)!;
+        b.entries.push(e);
+        g.slots[si] = e;
         b.dirty = true;
       }
+    }
+    let inst = 0, tris = 0, calls = 0;
+    for (const b of this.batches.values()) {
       if (b.dirty) b.assemble();
       if (b.entries.length) b.writeDynamic();
       b.mesh.visible = b.geo.instanceCount > 0;
@@ -395,11 +438,18 @@ export class PeopleStore {
       tris += b.geo.instanceCount * b.tris;
       if (b.mesh.visible) calls += b.mesh.castShadow ? 2 : 1;
     }
-    this.stats = { groups: this.groups.size, built: [...this.groups.values()].filter((g) => g.bufs).length, visible: vis.length, instances: inst, triangles: tris, drawCalls: calls, updateMs: performance.now() - t0, byLod: [used[0], used[1], used[2]] };
+    let built = 0;
+    for (const g of this.groups.values()) if (g.bufs) built++;
+    const st = this.stats;
+    st.groups = this.groups.size; st.built = built; st.visible = nv; st.instances = inst; st.triangles = tris; st.drawCalls = calls; st.updateMs = performance.now() - t0;
   }
+  private vis: { g: Group | null; ph: number; pri: number }[] = [];
   // is this group being drawn at another level right now (so a new level should fade in)?
   private shownElsewhere(g: Group, kind: Kind) {
-    for (const [k, b] of this.batches) if (k !== kind && b.entries.some((e) => e.g === g && e.hidden > 0)) return true;
+    for (let k = 0; k < KINDS.length; k++) {
+      if (KINDS[k] === kind) continue;
+      for (let c = 0; c < CATS.length; c++) { const e = g.slots[k * CATS.length + c]; if (e && e.hidden > 0) return true; }
+    }
     return false;
   }
   // Where every figure in a category is now, worked out on the CPU exactly as the vertex shader

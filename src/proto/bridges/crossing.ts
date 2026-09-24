@@ -73,7 +73,7 @@ export function headroomOf(o: Obstacle) {
 
 // Beyond this height above the ground an embankment costs more than a bridge (and takes more land).
 export const EMBANK_MAX = 6;
-const MARGIN = 2;
+const MARGIN = 6; // past each obstacle: room for its setback and the abutment's footing (game/bridges.ts)
 
 // Where along the route the bridges are: every obstacle must be spanned, and anywhere the deck is
 // higher than an embankment should go. Stretches closer than `join` metres become one bridge.

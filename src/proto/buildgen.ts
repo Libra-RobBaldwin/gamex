@@ -184,6 +184,7 @@ const mats = new Map<string, THREE.Material>();
 const M = (key: string, make: () => THREE.Material) => { let m = mats.get(key); if (!m) { m = make(); mats.set(key, m); } return m; };
 // Plain colours all share one vertex-coloured material, so they merge into a single draw call.
 const PLAIN = new THREE.MeshLambertMaterial({ vertexColors: true });
+export const PLAIN_MAT = PLAIN; // (industrial sites bake into the chunks with it: game/industry.ts)
 const plain = (c: string) => M(`p|${c}`, () => { const m = new THREE.MeshLambertMaterial({ color: c }); m.userData.tint = new THREE.Color(c); return m; });
 const facade = (win: Win, skin: Skin, wall: string, frame: string, fascia?: string) => M(`f|${win}|${skin}|${wall}|${frame}|${fascia}`, () => new THREE.MeshLambertMaterial({ map: facadeTex(win, skin, wall, frame, fascia) }));
 const roofM = (c: string) => M(`r|${c}`, () => new THREE.MeshLambertMaterial({ map: roofTex(c) }));

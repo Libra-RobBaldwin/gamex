@@ -4,6 +4,7 @@
 // (real.ts, an OSM snapshot). See docs/world-start.md for the hooks other systems should use.
 
 import type { Lot, Network, P } from '../roads';
+import type { SiteWish } from '../game/industry';
 
 export type TownId = 'real' | 'invented';
 
@@ -43,7 +44,11 @@ export interface World {
   zoneAt: (p: P) => ZoneKind | undefined;
   /** Industrial land: where factories go rather than houses (the network's zoneAt says the same). */
   industrial: (p: P) => boolean;
+  /** The industry sites the town starts with: where each would like to be (game/industry.ts places them). */
+  industry: SiteWish[];
   stations: WorldStation[];
+  /** Where the town's first bus stops go (game/crowdsites.ts puts a stop on the nearest road). */
+  stops: P[];
   /** Real road names and numbers ("High Street", "A361") by network segment, where the map has them. */
   names: Map<number, string>;
   /** Junction forms keyed by network node. */

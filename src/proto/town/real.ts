@@ -20,6 +20,8 @@ import { inArea } from '../osm/landuse';
 import type { OsmElement, OsmNode, OsmWay, OverpassJson } from '../osm/overpass';
 import banbury from '../osm/fixtures/banbury.json';
 import horley from '../osm/fixtures/horley.json';
+import type { IndustryId } from '../industries';
+import type { SiteWish } from '../game/industry';
 import type { Tree, World, WorldHint, WorldZone } from './world';
 
 export interface RealTown { name: string; data: OverpassJson; standIn?: string }
@@ -64,8 +66,9 @@ export function realWorld(town: RealTown = REAL_TOWN): World {
     id: 'real', name: town.name, real: true, attribution: ATTRIBUTION, attributionUrl: 'https://www.openstreetmap.org/copyright',
     net, bound, centre, view: { x: centre.x, z: centre.z + 20, h: 300 },
     water: { polys: water, isWater: imp.isWater, shores: [] },
-    zones, zoneAt: (p) => imp.zoneAt(p)?.kind, industrial,
+    zones, zoneAt: (p) => imp.zoneAt(p)?.kind, industrial, industry: wishesOf(imp, centre, bound),
     stations: imp.stations.map((s) => ({ name: s.name, at: s.at, seg: s.seg })),
+    stops: stopsOf(imp, centre),
     names: new Map([...imp.roads.values()].filter((r) => r.name || r.ref).map((r) => [r.seg, r.name ?? r.ref!])),
     hints, standing,
     growAlong: () => sparse(net, standing),
@@ -190,6 +193,45 @@ export function stitch(els: OsmElement[]) {
   // (from the back of each way, so earlier positions still hold)
   for (const { o, i, id } of inserts.sort((x, y) => y.i - x.i)) o.nodes.splice(i, 0, id);
   return joined;
+}
+
+// ---- industry: the library's sites on the town's own industrial estates, and farms, woods and a
+// quarry out on its fields ----
+
+function wishesOf(imp: OsmImport, centre: P, bound: number): SiteWish[] {
+  const mid = (z: { outer: P[][] }) => { const r = z.outer[0]; return { x: r.reduce((t, q) => t + q.x, 0) / r.length, z: r.reduce((t, q) => t + q.z, 0) / r.length }; };
+  const within = (p: P) => Math.abs(p.x) < bound - 60 && Math.abs(p.z) < bound - 60;
+  const estates = imp.zones.filter((z) => z.kind === 'industrial' && within(mid(z))).sort((a, b) => b.area - a.area);
+  // out of town: open land (farmland, or nothing mapped), well away from the centre
+  const open = (p: P) => { const k = imp.zoneAt(p)?.kind; return (!k || k === 'farmland') && !imp.isWater(p) && Math.hypot(p.x - centre.x, p.z - centre.z) > 400; };
+  // a real estate is usually full already: its sites may spill onto open land beside it
+  const industrial = (p: P) => imp.zoneAt(p)?.kind === 'industrial' || open(p);
+  const out: SiteWish[] = [];
+  const onEstates: [IndustryId, string?][] = [['warehouse', 'distribution'], ['goods_factory'], ['sawmill'], ['brewery'], ['food_plant'], ['warehouse', 'cold_store'], ['goods_factory', 'works']];
+  if (estates.length) onEstates.forEach(([type, variant], i) => {
+    const z = estates[i % estates.length];
+    out.push({ type, variant, near: mid(z), radius: Math.max(350, Math.sqrt(z.area)), ok: industrial });
+  });
+  const fields = imp.zones.filter((z) => z.kind === 'farmland' && within(mid(z))).sort((a, b) => b.area - a.area);
+  const woods = imp.zones.filter((z) => (z.tags.natural === 'wood' || z.tags.landuse === 'forest') && within(mid(z))).sort((a, b) => b.area - a.area);
+  // the corner of the map farthest from the centre, for whatever has nowhere better
+  const corner = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz]) => ({ x: sx * (bound - 200), z: sz * (bound - 200) })).sort((a, b) => Math.hypot(b.x - centre.x, b.z - centre.z) - Math.hypot(a.x - centre.x, a.z - centre.z))[0];
+  out.push({ type: 'farm', near: fields[0] ? mid(fields[0]) : corner, radius: 700, ok: open, fast: true });
+  out.push({ type: 'forest', near: woods[0] ? mid(woods[0]) : corner, radius: 700, ok: (p) => open(p) || imp.zoneAt(p)?.kind === 'park', fast: true });
+  out.push({ type: 'quarry', near: corner, radius: 700, ok: open, fast: true });
+  return out;
+}
+
+// ---- the first bus stops: the centre, the station, and along the main roads near the centre ----
+
+function stopsOf(imp: OsmImport, centre: P): P[] {
+  const out: P[] = [centre, ...imp.stations.filter((s) => Math.hypot(s.at.x - centre.x, s.at.z - centre.z) < 900).map((s) => s.at)];
+  const main = [...imp.roads.values()].filter((r) => r.cls === 'road' && r.name && /^(arterial|rural|dual)/.test(r.type))
+    .map((r) => { const p = imp.net.path(imp.net.segs.get(r.seg)!); return { r, at: p[Math.floor(p.length / 2)], L: imp.net.length(imp.net.segs.get(r.seg)!) }; })
+    .filter((m) => m.L > 120 && Math.hypot(m.at.x - centre.x, m.at.z - centre.z) < 700)
+    .sort((a, b) => b.L - a.L);
+  for (const m of main) if (out.length < 6 && out.every((q) => Math.hypot(q.x - m.at.x, q.z - m.at.z) > 250)) out.push({ x: m.at.x, z: m.at.z });
+  return out;
 }
 
 // ---- trees: woods and parks from the map, a few in gardens ----

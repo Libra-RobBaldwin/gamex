@@ -24,6 +24,8 @@ export interface QueueSite {
   depth?: [number, number]; // platform: how far back from the edge people stand
   shelter?: { at: XZ; along: number; seats: number }; // a shelter bench (the first to arrive sit)
   away?: XZ[][]; // footway lines people leave along after getting off
+  back?: number; // how far behind `at` (away from `facing`) the pavement ends: people getting off stay short of it
+  double?: 1 | -1; // which side a long queue doubles up on: +1 (the default) left of `along`, -1 right of it
 }
 export interface QueueFlow { kind: 'queue'; id: string; site: QueueSite; waiting: number; mix?: Mix }
 // A footway: the band between kerb and back of pavement, as its centre line and width.
@@ -33,7 +35,7 @@ export interface RideFlow { kind: 'ride'; id: string; line: XZ[]; count: number;
 // A scheduled stream (a shift change): `total` people set off along `path` between the
 // window's two times (minutes after midnight), each walking the whole way.
 export interface CommuteFlow { kind: 'commute'; id: string; path: XZ[]; total: number; window: [number, number]; mix?: Mix; width?: number; y?: number }
-export interface CrossFlow { kind: 'cross'; id: string; a: XZ; b: XZ; count: number; width?: number; mix?: Mix }
+export interface CrossFlow { kind: 'cross'; id: string; a: XZ; b: XZ; count: number; width?: number; mix?: Mix; y?: number }
 export type Venue = 'shop' | 'pub' | 'cafe' | 'gate' | 'square';
 // People standing about in front of a building: `at` is the middle of its frontage, `facing`
 // the heading from the pavement towards the building.
@@ -47,6 +49,7 @@ export interface ParkFlow {
 export interface SchoolFlow {
   kind: 'school'; id: string; gate: XZ; yard: XZ[]; approaches: XZ[][]; pupils: number;
   arrive: [number, number]; leave: [number, number]; school?: number; door?: XZ;
+  y?: number; // ground height along the approaches and at the gate (a pavement is raised a little)
 }
 export type AnimalKind = 'sheep' | 'cow' | 'pigeon' | 'duck' | 'cat';
 export interface AnimalFlow { kind: 'animals'; id: string; species: AnimalKind; count: number; area?: XZ[]; spots?: { at: XZ; facing: number; y: number }[]; lines?: { line: XZ[]; y: number }[]; y?: number }
@@ -146,6 +149,10 @@ export class Crowds {
   timeScale = 60;
   private flows = new Map<string, { key: string; flow: Flow; parts: Part[] }>();
   private queues = new Map<string, QueueState>();
+  // Shape keys of flow objects seen before. A caller that hands over the same object each time,
+  // changing only its counts, saves the key being worked out again (a flow whose shape changes
+  // must be a new object).
+  private keys = new WeakMap<Flow, string>();
   constructor(public store: PeopleStore) {
     store.onRebase = (T) => { for (const q of this.queues.values()) if (q.shuffle) q.shuffle.at -= T; };
   }
@@ -157,7 +164,8 @@ export class Crowds {
     const seen = new Set<string>();
     for (const given of flows) {
       seen.add(given.id);
-      const key = shapeKey(given, this.year);
+      let key = this.keys.get(given);
+      if (key === undefined || !key.startsWith(`${this.year}|`)) { key = shapeKey(given, this.year); this.keys.set(given, key); }
       let e = this.flows.get(given.id);
       if (e && e.key === key) {
         // same place, new numbers: the crowd's count closures read the stored copy, so refresh it
@@ -211,7 +219,7 @@ export class Crowds {
       }
       if (j < seats && s.shelter) return { p: along(s.shelter.at, s.shelter.along, (j - (seats - 1) / 2) * 0.6), h: s.facing, sit: true };
       const q = j - seats, rank = q >= 14 ? 1 : 0, d = 0.9 + (q - rank * 14) * 0.7 + a * 0.25;
-      return { p: along(s.at, s.along, d, (rank ? 0.7 : 0) + b * 0.35 - 0.2), h: s.facing + c * 1.3 + (q % 5 === 2 ? 0.9 : 0), sit: false };
+      return { p: along(s.at, s.along, d, (rank ? 0.7 * (s.double ?? 1) : 0) + b * 0.35 - 0.2), h: s.facing + c * 1.3 + (q % 5 === 2 ? 0.9 : 0), sit: false };
     };
     const st: QueueState = this.queues.get(f.id) ?? { base: 0, seq: 0, slots };
     st.slots = slots;
@@ -273,7 +281,7 @@ export class Crowds {
     const base = st.base;
     st.seq++;
     this.store.add({
-      id: `${siteId}#board${st.seq}`, centre: f.site.at, radius: 20, y, count: k, expires: until + 1,
+      id: `${siteId}#board${st.seq}`, centre: f.site.at, radius: 20, y, count: k, expires: until + 1, instant: true,
       build: (b) => {
         for (const w of walkers) {
           const { look, ph } = this.waiter(f, base + w.j, st.slots(w.j).sit);
@@ -301,7 +309,13 @@ export class Crowds {
       const di = j % doors.length, door = doors[di], t0 = now + 0.6 + Math.floor(j / doors.length) * 0.9;
       const away = f.site.away?.length ? pick(r0, f.site.away) : null;
       // step off towards the back of the pavement (or platform), then away along it
-      const off = along(door, f.site.facing + Math.PI, 1.6 + r0() * 1.4, (r0() - 0.5) * 2);
+      let step = 1.6 + r0() * 1.4;
+      if (f.site.back !== undefined) {
+        // (no further than 0.4 m short of the back of the pavement, measured from where the door is)
+        const bk = f.site.facing + Math.PI, behind = (door.x - f.site.at.x) * Math.cos(bk) + (door.z - f.site.at.z) * Math.sin(bk);
+        step = Math.max(0.5, Math.min(step, f.site.back - behind - 0.4));
+      }
+      const off = along(door, f.site.facing + Math.PI, step, (r0() - 0.5) * 2);
       const pts = [door, off];
       if (away) { const start = away.reduce((a, p) => (dist(p, off) < dist(a, off) ? p : a), away[0]); const i = away.indexOf(start); pts.push(...(r0() < 0.5 ? away.slice(i) : away.slice(0, i + 1).reverse()).slice(0, 12)); }
       else pts.push(along(off, f.site.along + (r0() < 0.5 ? 0 : Math.PI), 18 + r0() * 10));
@@ -351,7 +365,7 @@ export class Crowds {
           }
         },
       };
-      return { spec, count: () => f.count * share };
+      return { spec, count: () => piece(f.count * share, pi) };
     });
   }
   private ride(f: RideFlow): Part[] {
@@ -361,7 +375,7 @@ export class Crowds {
         id, centre: routeCentre(route), radius: routeRadius(route), y, count: 0, cap,
         build: (b) => { for (let k = 0; k < cap; k++) { const r = personRand(id, k), look = dress('cyclist', this.year, r); emitPerson(b, k, route, { mode: Mode.Loop, v: look.speed, s0: vdc(k) * route.length, lat: (r() - 0.5) * 0.4, t0: 0, tShow: 0, tHide: 0, y }, look, r()); } },
       };
-      return { spec, count: () => f.count * share };
+      return { spec, count: () => piece(f.count * share, pi) };
     });
   }
 
@@ -394,13 +408,13 @@ export class Crowds {
   private cross(f: CrossFlow): Part[] {
     const w = f.width ?? 2.4, fwd = straightRoute([f.a, f.b]), rev = reverseRoute(fwd), cap = capFor(f.count);
     const spec: GroupSpec & { cap: number } = {
-      id: f.id, centre: { x: (f.a.x + f.b.x) / 2, z: (f.a.z + f.b.z) / 2 }, radius: fwd.length / 2 + 3, count: 0, cap,
+      id: f.id, centre: { x: (f.a.x + f.b.x) / 2, z: (f.a.z + f.b.z) / 2 }, radius: fwd.length / 2 + 3, y: f.y, count: 0, cap,
       build: (b) => {
         for (let k = 0; k < cap; k++) {
           const r = personRand(f.id, k), look = dress(roleOf(r, f.mix ?? MIXES.street, this.year), this.year, r);
           if (look.prop === 1) look.prop = 0;
           const route = k % 2 ? rev : fwd;
-          emitPerson(b, k, route, { mode: Mode.Loop, v: look.speed * 1.1, s0: vdc(k >> 1) * route.length, lat: (r() - 0.5) * w * 0.8, t0: 0, tShow: 0, tHide: 0, y: 0 }, look, r());
+          emitPerson(b, k, route, { mode: Mode.Loop, v: look.speed * 1.1, s0: vdc(k >> 1) * route.length, lat: (r() - 0.5) * w * 0.8, t0: 0, tShow: 0, tHide: 0, y: f.y ?? 0 }, look, r());
         }
       },
     };
@@ -556,12 +570,12 @@ export class Crowds {
         const id = `${f.id}:${dir}:${i}`, span = Math.max(1, w1 - w0);
         const conc = Math.min(each, (each / span) * this.walkMinutes(route.length)), cap = capFor(conc);
         const spec: GroupSpec & { cap: number } = {
-          id, centre: routeCentre(route), radius: routeRadius(route), count: 0, cap,
+          id, centre: routeCentre(route), radius: routeRadius(route), y: f.y, count: 0, cap,
           build: (b) => {
             for (let k = 0; k < cap; k++) {
               const r = personRand(id, k), look = dress('pupil', this.year, r, { school: f.school });
               const young = look.height < 1.3, v = young ? 1.05 : Math.min(1.4, look.speed), lat = (r() - 0.5) * 1.2;
-              const m: Motion = { mode: Mode.Loop, v, s0: vdc(k) * route.length, lat, t0: 0, tShow: 0, tHide: 0, y: 0 };
+              const m: Motion = { mode: Mode.Loop, v, s0: vdc(k) * route.length, lat, t0: 0, tShow: 0, tHide: 0, y: f.y ?? 0 };
               emitPerson(b, k, route, m, look, r());
               if (young && r() < 0.6) {
                 // walked to school by a parent (who turns for home at the gate), keeping the child's pace
@@ -588,7 +602,7 @@ export class Crowds {
       return 0;
     };
     parts.push(yard);
-    const gate = this.loiter({ kind: 'loiter', id: `${f.id}:gate`, at: f.gate, facing: Math.atan2(polyCentre(f.yard).z - f.gate.z, polyCentre(f.yard).x - f.gate.x), width: 10, count: Math.ceil(f.pupils * 0.12), venue: 'gate' })[0];
+    const gate = this.loiter({ kind: 'loiter', id: `${f.id}:gate`, at: f.gate, facing: Math.atan2(polyCentre(f.yard).z - f.gate.z, polyCentre(f.yard).x - f.gate.x), width: 10, count: Math.ceil(f.pupils * 0.12), venue: 'gate', y: f.y })[0];
     const gBase = gate.count;
     gate.count = (c) => { const m = ((c % 1440) + 1440) % 1440; return (m >= l0 - 12 && m < l0 + 4) || (m >= a0 && m < a1 + 4) ? gBase(c) : 0; };
     parts.push(gate);
@@ -638,6 +652,11 @@ export class Crowds {
     return [{ spec, count: () => f.count }];
   }
 }
+
+// A whole number of people for one piece of a longer footway: a share like 3.4 would otherwise
+// show a fourth walker half faded in. Each piece rounds at its own point, so the pieces still add
+// up to about the whole, and a count creeping up adds walkers to the pieces one at a time.
+const piece = (n: number, i: number) => Math.floor(n + vdc(i));
 
 // 0 before a window opens, easing to 1 over its first tenth, back to 0 over the minutes after it
 // closes (the last to set off are still on their way).

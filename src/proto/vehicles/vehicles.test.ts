@@ -11,6 +11,7 @@ import { purchaseList } from './economy';
 import { REAL_NAMES } from './realnames';
 import { editDistance, norm, rng } from './util';
 import type { Lod, Model } from './types';
+import { LIGHT } from './types';
 
 const LODS: Lod[] = [0, 1, 2];
 
@@ -145,7 +146,7 @@ describe('geometry', () => {
       const a = buildKit(m, 0), b = buildKit(m, 0);
       if (a.pos.length !== b.pos.length || a.pos.some((v, i) => v !== b.pos[i]) || a.col.some((v, i) => v !== b.col[i])) bad.push(`${m.id} differs`);
       if (a.pos.some((v) => !Number.isFinite(v))) bad.push(`${m.id} NaN`);
-      for (let i = 0; i < a.key.length; i += 4) if (a.key[i] < 0 || a.key[i] > 4 || a.key[i + 1] < 0 || a.key[i + 1] > 9) { bad.push(`${m.id} key`); break; }
+      for (let i = 0; i < a.key.length; i += 4) if (a.key[i] < 0 || a.key[i] > 4 || a.key[i + 1] < 0 || a.key[i + 1] > Math.max(...Object.values(LIGHT))) { bad.push(`${m.id} key`); break; }
     }
     expect(bad).toEqual([]);
   });
