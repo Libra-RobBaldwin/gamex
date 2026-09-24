@@ -83,6 +83,28 @@ totalEmissiveRadiance += vEmit;`);
   return { material: mat, uniforms };
 }
 
+// The shadow pass's material: three's depth shader with the same wheel spin and motion, so an
+// open slam door, a swung-out bus door or a folded pantograph casts its shadow where it is.
+export function vehicleDepthMaterial() {
+  const mat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute vec4 vk;
+attribute vec4 iData;
+vec2 spin(vec2 p, vec2 c, float a) { vec2 d = p - c; float s = sin(a), co = cos(a); return c + vec2(co * d.x - s * d.y, s * d.x + co * d.y); }
+${MOTION_GLSL_COMMON}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vec3 objectNormal = vec3(0.0, 0.0, 1.0);
+float wheelA = vk.w > 0.0 ? -iData.y / vk.w : 0.0;
+if (vk.w > 0.0) transformed.xy = spin(transformed.xy, vk.zw, wheelA);
+${MOTION_GLSL_NORMAL}
+${MOTION_GLSL_VERTEX}`);
+  };
+  mat.customProgramCacheKey = () => 'vehicle-depth-v1';
+  return mat;
+}
+
 const tmpC = new THREE.Color();
 
 // One model at one level of detail: an InstancedMesh that grows as needed.
@@ -93,7 +115,7 @@ class Bucket {
   private c3: THREE.InstancedBufferAttribute;
   private c4: THREE.InstancedBufferAttribute;
   private data: THREE.InstancedBufferAttribute;
-  constructor(public model: Model, public lod: Lod, material: THREE.Material, public cap: number, shadows: boolean) {
+  constructor(public model: Model, public lod: Lod, material: THREE.Material, public cap: number, shadows: boolean, depth?: THREE.Material) {
     const src = geometry(model, lod);
     const g = new THREE.BufferGeometry();
     for (const k of ['position', 'normal', 'color', 'vk', 'vd']) g.setAttribute(k, src.getAttribute(k));
@@ -112,6 +134,7 @@ class Bucket {
     this.mesh.count = 0;
     this.mesh.frustumCulled = false; // positions change every frame; culling per vehicle happens in the caller
     this.mesh.castShadow = shadows && lod < 2;
+    if (depth) this.mesh.customDepthMaterial = depth;
     this.mesh.receiveShadow = false;
     this.mesh.name = `${model.id}#${lod}`;
   }
@@ -205,8 +228,11 @@ export class Glow {
 export class VehicleRenderer {
   readonly group = new THREE.Group();
   readonly material: THREE.MeshLambertMaterial;
+  readonly depthMaterial = vehicleDepthMaterial();
   readonly uniforms: { uTime: { value: number }; uNight: { value: number } };
   private buckets = new Map<string, Bucket>();
+  // the same buckets by model and level, so add() doesn't build a string key per vehicle per frame
+  private byModel = new Map<Model, (Bucket | undefined)[]>();
   shadows: boolean;
   constructor(opts: { shadows?: boolean } = {}) {
     const { material, uniforms } = vehicleMaterial();
@@ -217,12 +243,11 @@ export class VehicleRenderer {
   begin() { for (const b of this.buckets.values()) b.count = 0; }
   // One vehicle this frame. odo is metres travelled (wheels turn by it); doorsLeft and doorsRight
   // are how far open (0–1) the doors on the driver's left (−z, the kerb side in Britain) and right
-  // are, from a DoorStates or doorsAt; curve is the curvature of the path under the vehicle
+  // are, from a DoorStates or dwellDoors; curve is the curvature of the path under the vehicle
   // (1 / radius, positive turning right) for bogies and steered wheels.
   add(model: Model, lod: Lod, matrix: THREE.Matrix4, colours: readonly THREE.Color[], flags = 0, odo = 0, doorsLeft = 0, doorsRight = 0, curve = 0) {
-    const key = `${model.id}|${lod}`;
-    let b = this.buckets.get(key);
-    if (!b || b.count >= b.cap) b = this.grow(key, model, lod, b);
+    let b = this.byModel.get(model)?.[lod];
+    if (!b || b.count >= b.cap) b = this.grow(`${model.id}|${lod}`, model, lod, b);
     b.set(b.count++, matrix, colours, flags, odo, doorsLeft || doorsRight ? packDoors(doorsLeft, doorsRight) : 0, curve);
   }
   end(time = 0) {
@@ -240,7 +265,7 @@ export class VehicleRenderer {
   }
   private grow(key: string, model: Model, lod: Lod, old?: Bucket) {
     const cap = old ? old.cap * 2 : lod === 2 ? 64 : 16;
-    const b = new Bucket(model, lod, this.material, cap, this.shadows);
+    const b = new Bucket(model, lod, this.material, cap, this.shadows, this.depthMaterial);
     if (old) {
       // copy what's already been added this frame
       for (let i = 0; i < old.count; i++) {
@@ -252,8 +277,11 @@ export class VehicleRenderer {
       this.group.remove(old.mesh); old.dispose();
     }
     this.buckets.set(key, b);
+    let per = this.byModel.get(model);
+    if (!per) { per = []; this.byModel.set(model, per); }
+    per[lod] = b;
     this.group.add(b.mesh);
     return b;
   }
-  dispose() { for (const b of this.buckets.values()) { this.group.remove(b.mesh); b.dispose(); } this.buckets.clear(); this.material.dispose(); }
+  dispose() { for (const b of this.buckets.values()) { this.group.remove(b.mesh); b.dispose(); } this.buckets.clear(); this.byModel.clear(); this.material.dispose(); this.depthMaterial.dispose(); }
 }

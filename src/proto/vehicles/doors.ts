@@ -357,9 +357,12 @@ export class DoorStates {
     if (!s) { s = { l: 0, r: 0, tl: 0, tr: 0, secs: opts.model ? doorSeconds(opts.model) : DOOR_SECONDS.plug, wait: 0 }; this.map.set(id, s); }
     if (opts.model) s.secs = doorSeconds(opts.model);
     const v = Math.max(0, Math.min(1, open));
+    // saying the same thing again (as a system that states its wishes every frame does) changes
+    // nothing: the stagger only starts over when the target does
+    const changed = (side !== 'right' && s.tl !== v) || (side !== 'left' && s.tr !== v);
     if (side !== 'right') s.tl = v;
     if (side !== 'left') s.tr = v;
-    s.wait = opts.delay ?? 0;
+    if (changed) s.wait = opts.delay ?? 0;
   }
   update(dt: number) {
     for (const [id, s] of this.map) {

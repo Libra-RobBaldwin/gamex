@@ -96,8 +96,27 @@ function setNight(n: boolean) {
 // ---------------- the world: an oval road with a railway outside it ----------------
 const R = 110, SL = 380; // semicircle radius and half the straight
 const P0 = 4 * SL + 2 * Math.PI * R;
-// a point on an oval of the same shape, offset outward by `off`, at arc length s of the centre line
+// A point on an oval of the same shape, offset outward by `off`, at arc length s along that
+// offset line itself: a metre of s is a metre of track or lane, so speeds, wheel turns and
+// curvature come out true on the bends (1 / (rr + off) there). Each offset's loop is its own
+// length, loopOf(off).
 function oval(s: number, off: number, rr = R, sl = SL) {
+  const Rr = rr + off;
+  const p0 = 4 * sl + 2 * Math.PI * Rr;
+  s = ((s % p0) + p0) % p0;
+  if (s < 2 * sl) return { x: -sl + s, z: -Rr, h: 0 };
+  s -= 2 * sl;
+  if (s < Math.PI * Rr) { const a = -Math.PI / 2 + s / Rr; return { x: sl + Math.cos(a) * Rr, z: Math.sin(a) * Rr, h: a + Math.PI / 2 }; }
+  s -= Math.PI * Rr;
+  if (s < 2 * sl) return { x: sl - s, z: Rr, h: Math.PI };
+  s -= 2 * sl;
+  const a = Math.PI / 2 + s / Rr;
+  return { x: -sl + Math.cos(a) * Rr, z: Math.sin(a) * Rr, h: a + Math.PI / 2 };
+}
+const loopOf = (off: number, rr = R, sl = SL) => 4 * sl + 2 * Math.PI * (rr + off);
+// The same oval by the centre line's arc length u, for drawing: ribbons need both edges of a
+// strip at the same u so their quads stay square across the road.
+function ovalC(s: number, off: number, rr = R, sl = SL) {
   const p0 = 4 * sl + 2 * Math.PI * rr;
   s = ((s % p0) + p0) % p0;
   const Rr = rr + off;
@@ -119,7 +138,7 @@ function ribbon(off0: number, off1: number, y: number, m: THREE.Material, rr = R
   for (let i = 0; i < n; i++) {
     if (dash && i % 3 !== 0) continue;
     const s0 = (i / n) * p0, s1 = ((i + 1) / n) * p0;
-    const a = oval(s0, off0, rr, sl), b = oval(s0, off1, rr, sl), c = oval(s1, off1, rr, sl), d = oval(s1, off0, rr, sl);
+    const a = ovalC(s0, off0, rr, sl), b = ovalC(s0, off1, rr, sl), c = ovalC(s1, off1, rr, sl), d = ovalC(s1, off0, rr, sl);
     pos.push(a.x, y, a.z, b.x, y, b.z, c.x, y, c.z, a.x, y, a.z, c.x, y, c.z, d.x, y, d.z);
   }
   const g = new THREE.BufferGeometry();
@@ -159,7 +178,7 @@ function buildWorld(lake: boolean) {
     const n = Math.floor(P0 / 0.75);
     for (let k = 0; k < n; k++) {
       const s0 = (k / n) * P0, s1 = s0 + 0.26;
-      const a = oval(s0, t - 1.25), b = oval(s0, t + 1.25), c = oval(s1, t + 1.25), d = oval(s1, t - 1.25);
+      const a = ovalC(s0, t - 1.25), b = ovalC(s0, t + 1.25), c = ovalC(s1, t + 1.25), d = ovalC(s1, t - 1.25);
       sp.push(a.x, 0.16, a.z, b.x, 0.16, b.z, c.x, 0.16, c.z, a.x, 0.16, a.z, c.x, 0.16, c.z, d.x, 0.16, d.z);
     }
   }
@@ -173,7 +192,7 @@ function buildWorld(lake: boolean) {
   for (let s0 = 0; s0 < P0; s0 += 36) for (const side of [-1, 1]) {
     const sl = s0 + (side > 0 ? 18 : 0);
     if (side < 0 && sl > BUS_STOP.s0 - 16 && sl < BUS_STOP.s1 + 16) continue; // not in the bus lay-by
-    const p = oval(sl, side * (Math.abs(lanes[0]) + 3.4)); lamps.push({ x: p.x, z: p.z });
+    const p = ovalC(sl, side * (Math.abs(lanes[0]) + 3.4)); lamps.push({ x: p.x, z: p.z });
   }
   const post = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 8, 0.2).translate(0, 4, 0), mat('#6a6e72', '#3a3e44'), lamps.length);
   const head = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.25, 0.5).translate(0, 8, 0), new THREE.MeshBasicMaterial({ color: '#ffe0a8' }), lamps.length);
@@ -203,7 +222,7 @@ function strip(out: THREE.BufferGeometry[], s0: number, s1: number, off0: number
   const n = Math.max(1, Math.ceil((s1 - s0) / 4));
   const pos: number[] = [];
   const quad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z);
-  const P = (s: number, off: number, h: number) => { const p = oval(s, off); return new THREE.Vector3(p.x, h, p.z); };
+  const P = (s: number, off: number, h: number) => { const p = ovalC(s, off); return new THREE.Vector3(p.x, h, p.z); };
   for (let i = 0; i < n; i++) {
     const a = s0 + ((s1 - s0) * i) / n, b = s0 + ((s1 - s0) * (i + 1)) / n;
     const yt = y + top;
@@ -235,7 +254,7 @@ function strip(out: THREE.BufferGeometry[], s0: number, s1: number, off0: number
 }
 // A box at a point on the oval, turned to the track.
 function post(out: THREE.BufferGeometry[], s: number, off: number, y0: number, y1: number, w: number, d: number, colour: string) {
-  const p = oval(s, off);
+  const p = ovalC(s, off);
   const g = new THREE.BoxGeometry(w, y1 - y0, d).toNonIndexed();
   g.rotateY(-p.h); g.translate(p.x, (y0 + y1) / 2, p.z);
   const c = new THREE.Color(colour);
@@ -296,7 +315,11 @@ interface Mover {
   chain: Model[]; look: Look; cols: THREE.Color[]; lane: number; s: number; v: number; poses: (Pose | undefined)[]; rail: boolean; odo: number; brake: number; ind: number; emergency: boolean; lit: boolean; lake?: boolean;
   vmax: number; len: number;
   // stopping: trains at the station, buses at the stop ('in' pulling in, 'dwell' standing, 'out' pulling out)
-  st: 'run' | 'in' | 'dwell' | 'out' | 'held'; t: number; lat?: number; outS?: number; served?: boolean; bus?: boolean; stopping?: boolean;
+  st: 'run' | 'in' | 'dwell' | 'out' | 'held'; t: number; key?: number;
+  // the length of its loop (each track and lane is its own length) and whether it carries passengers
+  L: number; pax?: boolean;
+  o: number[]; // each vehicle's middle, back from the front of the chain
+  lat?: number; outS?: number; served?: boolean; bus?: boolean; stopping?: boolean; bay?: boolean;
 }
 let movers: Mover[] = [];
 let laneMovers: Mover[][] = [];
@@ -327,8 +350,8 @@ function spawnParade() {
   if ((road || lake) && pool.length) {
     const lanesUsed = lake ? [0, 1] : lanes.map((_, i) => i);
     const perLane = Math.ceil(S.count / lanesUsed.length);
-    const loopLen = lake ? 4 * (SL - 30) + 2 * Math.PI * (R - 60) : P0;
     for (const lane of lanesUsed) {
+      const loopLen = lake ? loopOf(lane * 18 - 9, R - 60, SL - 30) : loopOf(lanes[lane]);
       // choose the lane's vehicles first, then spread them evenly round the loop
       const picks: { chain: Model[]; lead: Model; len: number }[] = [];
       let total = 0;
@@ -348,7 +371,9 @@ function spawnParade() {
         movers.push({
           chain: p.chain, look, cols: liveryColours(look.livery), lane, s, v: lake ? 8 : laneSpeed(lanes[lane]), poses: [], rail: false, odo: r() * 100, brake: 0, ind: 0,
           emergency: st === 'police' || st === 'ambulance' || st === 'refuse' || st === 'gritter' || st === 'recovery', lit: p.lead.category === 'bus' || st === 'taxi' || st === 'ice-cream', lake,
-          vmax: lake ? 8 : laneSpeed(lanes[lane]), len: p.len - 0.9, st: 'run', t: 0,
+          vmax: lake ? 8 : laneSpeed(lanes[lane]), len: p.len - 0.9, st: 'run', t: 0, L: loopLen, o: offsetsOf(p.chain).o,
+          // every field set from the start, so the movers keep one shape
+          key: 0, lat: undefined, outS: 0, served: false, stopping: false, pax: false, bay: false,
           // buses in the kerb lane call at the stop
           bus: !lake && lane === 0 && p.lead.category === 'bus' && st !== 'coach' && doorsOf(p.lead).length > 0,
         });
@@ -366,7 +391,7 @@ function spawnParade() {
       bus = kerb[Math.floor(kerb.length / 2)];
       const p = pick(r, cand);
       const look = lookOf(p.lead, hash(`${S.seed}-bus`));
-      Object.assign(bus, { chain: p.chain, look, cols: liveryColours(look.livery), len: offsetsOf(p.chain).len - 0.9, bus: true, lit: true, emergency: false });
+      Object.assign(bus, { chain: p.chain, look, cols: liveryColours(look.livery), len: offsetsOf(p.chain).len - 0.9, o: offsetsOf(p.chain).o, bus: true, lit: true, emergency: false });
     }
     // the Station preset starts with the bus already standing at the stop
     const atStop = S.at === 'stop';
@@ -382,10 +407,11 @@ function spawnParade() {
       const tr = trains[t];
       // the first two trains start just short of the camera, so there's something to see at once
       const { len } = offsetsOf(tr.chain);
-      const s0 = t < 2 ? STATION.stop - 200 + t * 70 + Math.min(40, len * 0.2) : (t * P0) / trains.length;
+      const L = loopOf(RAIL[t % 2]);
+      const s0 = t < 2 ? STATION.stop - 200 + t * 70 + Math.min(40, len * 0.2) : (t * L) / trains.length;
       // the Station preset starts with the first train standing at the platform
       const standing = S.at === 'stop' && t === 0 && pax(tr.chain);
-      movers.push({ chain: tr.chain, look: tr.look, cols: liveryColours(tr.look.livery), lane: t % 2, s: standing ? STATION.stop : s0, v: standing ? 0 : t % 2 ? 14 : 18, poses: [], rail: true, odo: 0, brake: 0, ind: 0, emergency: false, lit: true, vmax: t % 2 ? 14 : 18, len: len - 0.9, st: standing ? 'dwell' : 'run', t: 0 });
+      movers.push({ chain: tr.chain, look: tr.look, cols: liveryColours(tr.look.livery), lane: t % 2, s: standing ? STATION.stop : s0, v: standing ? 0 : t % 2 ? 14 : 18, poses: [], rail: true, odo: 0, brake: 0, ind: 0, emergency: false, lit: true, vmax: t % 2 ? 14 : 18, len: len - 0.9, st: standing ? 'dwell' : 'run', t: 0, L, pax: pax(tr.chain), o: offsetsOf(tr.chain).o, key: 0, lat: undefined, outS: 0, served: false, stopping: false, bus: false, bay: false });
     }
   }
 }
@@ -618,11 +644,19 @@ const lodOf = (m: Model): Lod => (S.lod === 'auto' ? lodFor(m.dims.length, canva
 
 // ---------------- stopping ----------------
 const turn = (a: number) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
-const ahead = (from: number, to: number) => (((to - from) % P0) + P0) % P0; // distance forward along the loop
+// The curvature of the oval at arc length s along offset off (0 on the straights).
+function curveOf(s: number, off: number) {
+  const Rr = R + off, L = loopOf(off);
+  s = ((s % L) + L) % L;
+  const bend = (s >= 2 * SL && s < 2 * SL + Math.PI * Rr) || s >= 4 * SL + Math.PI * Rr;
+  return bend ? 1 / Rr : 0;
+}
+// distance forward from one point to another round a loop of length L
+const ahead = (from: number, to: number, L: number) => (((to - from) % L) + L) % L;
 // Trains: brake for the station at 0.7 m/s², stand with the doors open, then pull away at 0.5 m/s².
 // Freight trains are held the same time at a signal short of the platform instead, so every
 // train on a track loses the same time and they keep their spacing.
-const trainHalt = (mv: Mover) => (mv.chain.some((m) => doorsOf(m).length > 0) ? STATION.stop : STATION.s0 - 60);
+const trainHalt = (mv: Mover) => (mv.pax ? STATION.stop : STATION.s0 - 60);
 function trainStop(mv: Mover, dt: number) {
   mv.stopping = false;
   if (mv.st === 'dwell' || mv.st === 'held') {
@@ -630,46 +664,58 @@ function trainStop(mv: Mover, dt: number) {
     if (mv.t > STATION.dwell) { mv.st = 'run'; mv.s += 0.02; }
     return;
   }
-  const d = ahead(mv.s, trainHalt(mv));
+  const d = ahead(mv.s, trainHalt(mv), mv.L);
   const vb = Math.sqrt(2 * 0.7 * d);
   mv.stopping = vb < mv.v;
   mv.v = Math.min(mv.vmax, vb, mv.v + 0.5 * dt);
-  if (d < 0.05 || (mv.v < 0.05 && d < 0.6)) { mv.s += d; mv.v = 0; mv.st = trainHalt(mv) === STATION.stop ? 'dwell' : 'held'; mv.t = 0; }
+  if (d < 0.05 || (mv.v < 0.05 && d < 0.6)) { mv.s += d; mv.v = 0; mv.st = mv.pax ? 'dwell' : 'held'; mv.t = 0; }
 }
+const easeS = (u: number) => { u = u < 0 ? 0 : u > 1 ? 1 : u; return u * u * (3 - 2 * u); };
 // A bus's offset from the road's middle line, at mover position sm (in and out of the lay-by
 // along a smooth S over 35 m in and 25 m out).
 function latAt(mv: Mover, sm: number) {
   const lane = lanes[mv.lane], bay = bayOff();
-  const ease = (u: number) => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
-  if (mv.st === 'in') return lane + (bay - lane) * ease(1 - ahead(sm, -BUS_STOP.front) / 35);
+  if (mv.st === 'in') return lane + (bay - lane) * easeS(1 - ahead(sm, -BUS_STOP.front, mv.L) / 35);
   if (mv.st === 'dwell') return bay;
-  if (mv.st === 'out') return bay + (lane - bay) * ease((sm - (mv.outS ?? sm)) / 25);
+  if (mv.st === 'out') return bay + (lane - bay) * easeS((sm - (mv.outS ?? sm)) / 25);
   return lane;
 }
+// in the lay-by, where the lane's traffic passes it by
+const inBay = (m: Mover) => m.st === 'dwell' || (m.st === 'in' && ahead(m.s, -BUS_STOP.front, m.L) < 17) || (m.st === 'out' && m.s - (m.outS ?? m.s) < 12);
+// a bus that has shut its doors and wants to pull out: the traffic coming up behind it lets it
+const waiting = (m: Mover) => m.st === 'dwell' && m.t > BUS_STOP.dwell;
 // One lane of road traffic. Movers keep a gap to the one in front that grows with its speed;
-// buses in the kerb lane pull into the lay-by (the lane ignores them while they're in it) and
-// wait for a gap before pulling out.
+// buses in the kerb lane pull into the lay-by (the lane ignores them while they're in it) and,
+// once their doors are shut, the next car up holds back to let them out.
 function followLane(lane: Mover[], dt: number) {
   const n = lane.length;
   if (!n) return;
+  const L = lane[0].L;
   // keep the lane in order along the loop (it barely changes, so insertion sort)
-  const key = (m: Mover) => ((m.s % P0) + P0) % P0;
-  for (let i = 1; i < n; i++) { const m = lane[i], km = key(m); let j = i - 1; while (j >= 0 && key(lane[j]) > km) { lane[j + 1] = lane[j]; j--; } lane[j + 1] = m; }
-  const inBay = (m: Mover) => m.st === 'dwell' || (m.st === 'in' && ahead(m.s, -BUS_STOP.front) < 17) || (m.st === 'out' && m.s - (m.outS ?? m.s) < 12);
+  for (const m of lane) { m.key = ((m.s % L) + L) % L; m.bay = m.bus === true && inBay(m); }
+  for (let i = 1; i < n; i++) { const m = lane[i], km = m.key!; let j = i - 1; while (j >= 0 && lane[j].key! > km) { lane[j + 1] = lane[j]; j--; } lane[j + 1] = m; }
   for (let i = 0; i < n; i++) {
     const mv = lane[i];
     mv.stopping = false;
-    // the one in front, skipping buses in the lay-by
-    let lead: Mover | undefined;
-    for (let j = 1; j < n; j++) { const c = lane[(i + j) % n]; if (c !== mv && !inBay(c)) { lead = c; break; } }
-    let vDes = mv.vmax, gap = Infinity;
-    if (lead && !inBay(mv)) {
-      gap = ahead(mv.s, lead.s) - lead.len;
+    const bayed = mv.bay;
+    // the one in front: buses in the lay-by don't count, unless one is waiting to pull out and
+    // this is the first car wholly behind it
+    let lead: Mover | undefined, gap = Infinity;
+    if (!bayed) for (let j = 1; j < n; j++) {
+      const c = lane[(i + j) % n];
+      if (c.bay) {
+        const d = ahead(mv.s, c.s, L);
+        if (!(waiting(c) && d > c.len + 1 && d < c.len + 40)) continue;
+      }
+      lead = c; gap = ahead(mv.s, c.s, L) - c.len; break;
+    }
+    let vDes = mv.vmax;
+    if (lead) {
       vDes = Math.min(vDes, Math.max(0, lead.v + (gap - (3 + 0.3 * lead.v)) * 0.8));
       if (gap < 1.5) vDes = 0;
     }
     if (mv.bus) {
-      const d = ahead(mv.s, -BUS_STOP.front);
+      const d = ahead(mv.s, -BUS_STOP.front, L);
       if (mv.st === 'run' && d < 70 && d > 40 && !mv.served) { mv.st = 'in'; }
       if (mv.st === 'run' && d > 100) mv.served = false;
       if (mv.st === 'in') {
@@ -677,15 +723,20 @@ function followLane(lane: Mover[], dt: number) {
         if (d < 0.05 || (mv.v < 0.05 && d < 0.6)) { mv.s += d; mv.v = 0; vDes = 0; mv.st = 'dwell'; mv.t = 0; }
       } else if (mv.st === 'dwell') {
         mv.t += dt; vDes = 0;
-        // go once the doors are shut and nothing's coming up close behind
-        if (mv.t > BUS_STOP.dwell) {
+        // go once the doors are shut and the lane behind is clear, or the car behind has stopped for it
+        if (waiting(mv)) {
           let clear = true;
-          for (let j = 1; j < n; j++) { const c = lane[(i - j + n) % n]; if (c === mv || inBay(c)) continue; const g = ahead(c.s, mv.s) - mv.len; if (g < 25) clear = false; break; }
+          for (let j = 1; j < n; j++) {
+            const c = lane[(i - j + n) % n];
+            if (c === mv || c.bay) continue;
+            const g = ahead(c.s, mv.s, L) - mv.len;
+            if (g < 25 && !(g > 2 && c.v < 0.5)) clear = false;
+            break;
+          }
           if (clear) { mv.st = 'out'; mv.outS = mv.s; mv.served = true; }
         }
       } else if (mv.st === 'out' && mv.s - (mv.outS ?? mv.s) > 25) mv.st = 'run';
-      mv.lat = mv.st === 'run' ? undefined : latAt(mv, mv.s);
-      if (mv.st === 'dwell') mv.lat = bayOff();
+      mv.lat = mv.st === 'run' ? undefined : mv.st === 'dwell' ? bayOff() : latAt(mv, mv.s);
     }
     const acc = mv.bus ? 1.2 : 2.5;
     const v = Math.max(0, Math.min(vDes, mv.v + acc * dt, mv.vmax));
@@ -723,7 +774,7 @@ function frame(now: number) {
       if (mv.bus && (mv.st === 'in' || mv.st === 'out')) flags = (flags & ~FLAGS.indR) | FLAGS.indL * (mv.st === 'in' ? 1 : 0) | FLAGS.indR * (mv.st === 'out' ? 1 : 0);
       if (mv.emergency) flags |= FLAGS.beacons;
       if (mv.lit && S.night) flags |= FLAGS.interior | FLAGS.sign;
-      const { o } = offsetsOf(mv.chain);
+      const o = mv.o;
       for (let i = 0; i < mv.chain.length; i++) {
         const m = mv.chain[i];
         let x: number, z: number, h: number, k = 0;
@@ -742,7 +793,6 @@ function frame(now: number) {
             x = p.x; z = p.z; h = p.h + (dirSign < 0 ? Math.PI : 0);
             // pulling in or out of the stop: head along the path actually driven
             if (mv.lat !== undefined) { const q = oval(s - dirSign * 2, latAt(mv, mv.s - o[i] - 2)); h = Math.atan2(p.z - q.z, p.x - q.x); }
-            k = dirSign * turn(oval(s + 2, off).h - oval(s - 2, off).h) / 4;
           }
           mv.poses[i] = { x, z, heading: h };
         } else {
@@ -750,6 +800,8 @@ function frame(now: number) {
           mv.poses[i] = pose; x = pose.x; z = pose.z; h = pose.heading;
         }
         if (!onScreen(x, z, m.dims.length)) continue;
+        // road vehicles: the lane's curvature, for the steered wheels (only for what's drawn)
+        if (!mv.rail && !mv.lake) k = dirSign * curveOf((mv.s - o[i]) * dirSign, off);
         // trains: white lamps on the leading vehicle, red on the last
         let f = flags;
         if (mv.rail) f = (i === 0 ? FLAGS.lights : 0) | (i === mv.chain.length - 1 ? FLAGS.brake : 0) | (S.night ? FLAGS.interior : 0);
