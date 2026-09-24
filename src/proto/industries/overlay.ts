@@ -1,7 +1,7 @@
 // Supply-area overlays as plain data for the UI to draw: the catchment ring round a site, its
 // need and output icons with how full each stockyard is, and which stations fall inside.
 // Nothing here touches three.js, so a 2D map, a minimap or the 3D view can all draw it.
-import { CARGO, INDUSTRY_TYPES, TOWN_ACCEPTS, type CargoId, type IndustryId, type ServeKind } from './catalogue';
+import { CARGO, INDUSTRY_TYPES, TOWN_ACCEPTS, flowLive, type CargoId, type IndustryId, type ServeKind } from './catalogue';
 import type { IndustryModel } from './models';
 import { toWorld, type SiteFrame, type WXZ } from './site';
 import type { IndustryVisualState } from './state';
@@ -82,7 +82,9 @@ export function serves(ov: CatchmentOverlay, p: WXZ, stationRadius = 0, kind?: S
 export function catchmentOverlay(type: IndustryId, frame: SiteFrame, site: WXZ[], state?: IndustryVisualState): CatchmentOverlay {
   const t = INDUSTRY_TYPES[type];
   const icons: OverlayIcon[] = [];
-  const ins = t.inputs, outs = t.role === 'hub' ? [] : t.outputs; // a hub's outputs are its inputs; show them once
+  // only what the site trades in the state's year (the docks' trades change); a hub's outputs are
+  // its inputs, so show them once
+  const ins = t.inputs.filter((f) => flowLive(f, state?.year)), outs = t.role === 'hub' ? [] : t.outputs.filter((f) => flowLive(f, state?.year));
   const all = [...ins.map((f) => ({ f, role: 'in' as const })), ...outs.map((f) => ({ f, role: 'out' as const }))];
   // pin icons in a row just in front of the frontage: needs on the left, products on the right
   const gap = (frame.w * 0.8) / Math.max(1, all.length);
