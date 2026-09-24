@@ -198,7 +198,7 @@ export class Shell {
     }));
     // A tap on the map opens a sheet on pointerup; the click from that same tap must not then
     // press whatever the new sheet put under the finger (see guardTap).
-    root.addEventListener('click', (e) => { if (performance.now() < this.guardUntil) { e.preventDefault(); e.stopPropagation(); } }, true);
+    window.addEventListener('click', (e) => { if (performance.now() < this.guardUntil && root.contains(e.target as Node)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
     window.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (!this.$('#layers').hidden) this.closeLayers();
