@@ -82,6 +82,47 @@ function blur(a: Float32Array, W: number, H: number, tmp: Float32Array) {
 
 export interface Spot { x: number; z: number; r: number; v: number } // a dab: bare earth at gateways
 
+// The items of a long list whose boxes come near a window, in the list's order (later shapes paint
+// over earlier ones). A small repaint shouldn't walk every road, park and tree on the map, so each
+// list gets a coarse grid of its boxes, built the first time it's seen: the game keeps its roads,
+// parks, water and trees lists between repaints, so that's once (and again if one grows in place,
+// as the game's trees do). Short lists are just walked.
+type Box = { x0: number; z0: number; x1: number; z1: number };
+const IC = 64; // metres per index cell
+interface Index { cells: Map<number, number[]>; big: number[]; n: number }
+const indexes = new WeakMap<readonly unknown[], Index>();
+const ckey = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
+let stamp = new Uint32Array(0), stampNo = 0;
+function near<T>(list: readonly T[] | undefined, boxOfItem: (v: T) => Box, w: Box): readonly T[] {
+  if (!list) return [];
+  // (a short list, or a big window that would take most of it anyway, is just walked)
+  if (list.length < 64 || (w.x1 - w.x0) * (w.z1 - w.z0) > 256 * IC * IC) return list;
+  let ix = indexes.get(list);
+  if (!ix || ix.n !== list.length) {
+    ix = { cells: new Map(), big: [], n: list.length };
+    for (let n = 0; n < list.length; n++) {
+      const b = boxOfItem(list[n]);
+      const i0 = Math.floor(b.x0 / IC), i1 = Math.floor(b.x1 / IC), j0 = Math.floor(b.z0 / IC), j1 = Math.floor(b.z1 / IC);
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) > 64 || !Number.isFinite(i0 + i1 + j0 + j1)) { ix.big.push(n); continue; } // (huge ones are always checked)
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        const k = ckey(i, j), c = ix.cells.get(k);
+        if (c) c.push(n); else ix.cells.set(k, [n]);
+      }
+    }
+    indexes.set(list, ix);
+  }
+  if (stamp.length < list.length) stamp = new Uint32Array(list.length);
+  if (++stampNo === 0xffffffff) { stamp.fill(0); stampNo = 1; }
+  const hits: number[] = [...ix.big];
+  for (const n of ix.big) stamp[n] = stampNo;
+  for (let i = Math.floor(w.x0 / IC); i <= Math.floor(w.x1 / IC); i++) for (let j = Math.floor(w.z0 / IC); j <= Math.floor(w.z1 / IC); j++) {
+    const c = ix.cells.get(ckey(i, j));
+    if (c) for (const n of c) if (stamp[n] !== stampNo) { stamp[n] = stampNo; hits.push(n); }
+  }
+  hits.sort((a, b) => a - b);
+  return hits.map((n) => list[n]);
+}
+
 export class CoverMap {
   readonly a: Uint8Array; // (see packCover in covers.ts)
   readonly texel: number;
@@ -208,14 +249,15 @@ export class CoverMap {
       }
     }
     lap('parcels');
-    // 2. shapes
-    for (const p of inp.blocked ?? []) if (inWin(boxOf(p), 10)) fill(p, x0, z0, t, W, H, (a, b) => blocked.fill(1, a, b + 1));
-    for (const p of inp.water ?? []) if (inWin(boxOf(p), DT * t)) fill(p, x0, z0, t, W, H, (a, b) => water.fill(1, a, b + 1));
+    // 2. shapes (only those near the window: see `near`; each is still tested exactly as before)
+    const pad = Math.max(10, DT * t, 5.5), win = { x0: x0 - pad, z0: z0 - pad, x1: x1 + pad, z1: z1 + pad };
+    for (const p of near(inp.blocked, boxOf, win)) if (inWin(boxOf(p), 10)) fill(p, x0, z0, t, W, H, (a, b) => blocked.fill(1, a, b + 1));
+    for (const p of near(inp.water, boxOf, win)) if (inWin(boxOf(p), DT * t)) fill(p, x0, z0, t, W, H, (a, b) => water.fill(1, a, b + 1));
     for (const p of inp.plots ?? []) if (inWin(boxOf(p.poly))) {
       const [l, b, r] = p.kind === 'garden' ? [1, 0, 0] : p.kind === 'site' ? [0, 0.9, 0.1] : [0, 0.45, 0.55];
       fill(p.poly, x0, z0, t, W, H, (a, e) => { e++; field.fill(0, a, e); wood.fill(0, a, e); town.fill(1, a, e); lawn.fill(l, a, e); bare.fill(b, a, e); rough.fill(r, a, e); });
     }
-    for (const p of inp.parks ?? []) if (inWin(boxOf(p.poly))) {
+    for (const p of near(inp.parks, (q) => boxOf(q.poly), win)) if (inWin(boxOf(p.poly))) {
       const st = p.stripes !== undefined, a0 = st ? ((p.stripes! % Math.PI) + Math.PI) % Math.PI : 0;
       fill(p.poly, x0, z0, t, W, H, (a, e) => {
         e++; field.fill(0, a, e); wood.fill(0, a, e); bare.fill(0, a, e); rough.fill(0, a, e); lawn.fill(1, a, e); town.fill(1, a, e);
@@ -232,7 +274,7 @@ export class CoverMap {
         if (d2 < 1 && !town[k]) { const u = v * (1 - d2); if (u > layer[k]) layer[k] = u; }
       }
     };
-    for (const p of inp.trees ?? []) dab(wood, p.x, p.z, 5.5, 0.75);
+    for (const p of near(inp.trees, (q) => ({ x0: q.x - 5.5, z0: q.z - 5.5, x1: q.x + 5.5, z1: q.z + 5.5 }), win)) dab(wood, p.x, p.z, 5.5, 0.75);
     for (const s of spots) dab(bare, s.x, s.z, s.r, s.v);
 
     lap('shapes');
