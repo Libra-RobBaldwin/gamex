@@ -147,7 +147,9 @@ at its middle by car, and by your lines at its best stop, with the walk from the
 over the places near it, as for a zone. Zones near a stop are blocked with their own town
 only, so a railway to one town doesn't bring the jobs of the unserved town 3 km on within
 reach. The pairs grow with the number of zones, not its square, and the transit skim keeps
-each stop's list of the stops it has a route to and from, so pairing walks only those. A
+only the pairs of stops with a route between them, as each stop's list of the stops it has a
+route to and from, so pairing walks only those. Its search from each stop resets only the
+stops it touched, so towns far apart with their own buses cost in proportion to their stops. A
 review costs those pairs + the skim, plus one pass over the buildings. 50 towns, 500 stops,
 200 lines and 1,000 vehicles run a month in about 0.15 s in node on a quiet desktop (the first
 month after the lines are set, which builds the skim twice), and 144 towns of 2,300 zones in
@@ -202,8 +204,9 @@ settled isn't stalling.
 
 **Known limits.**
 
-- The skim holds every pair of passenger stops (16 bytes a pair: 4 MB for 500 stops, 64 MB
-  for 2,000). Maps with thousands of stops need it kept sparse, as its route lists already are.
+- The skim holds every pair of stops with a route between them (about 20 bytes a pair), so a
+  dense network where every stop reaches every other within the transit limit still costs the
+  square of its stops.
 - A review runs in one go: about 50 ms for the 50-town world in desktop node, so several
   times that on a phone. The live game should run it in a worker or spread it over frames.
 - A block is one town's part of a cell, reached by your lines at its best stop, so the parts

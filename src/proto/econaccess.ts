@@ -60,15 +60,18 @@ export class Skim {
   readonly S: number;
   readonly index = new Map<number, number>(); // stop id -> skim index
   readonly ids: number[];
-  // S x S, by the route people choose (on `gen`), Infinity where there's none with a ride in it
-  readonly time: Float32Array; // plain minutes
-  readonly gen: Float32Array; // minutes as it feels: waits and walks weigh more, changes are disliked
-  readonly room: Float32Array; // share of those setting off who find room on board all the way
   // The stops each stop has a route to (out) and from (in), as compressed rows: most pairs have
-  // none, so walking these instead of whole rows keeps the zone pairs cheap.
+  // none, so the skim keeps only the pairs with a route, and its cost grows with those rather
+  // than with the square of the stops. Out rows are in stop order; for each entry, by the route
+  // people choose (on `gen`):
   outOff = new Int32Array(1); outTo = new Int32Array(0);
-  inOff = new Int32Array(1); inFrom = new Int32Array(0);
-  private readonly pred: Int32Array; // S x S: the edge that reached it
+  time = new Float32Array(0); // plain minutes
+  gen = new Float32Array(0); // minutes as it feels: waits and walks weigh more, changes are disliked
+  room = new Float32Array(0); // share of those setting off who find room on board all the way
+  // in rows: the stop it's from, and where that pair's figures are in the out rows
+  inOff = new Int32Array(1); inFrom = new Int32Array(0); inAt = new Int32Array(0);
+  // every stop each origin's search settled, in stop order, with the edge that reached it
+  private pOff = new Int32Array(1); private pNode = new Int32Array(0); private pEdge = new Int32Array(0);
   private eFrom: Int32Array = new Int32Array(0);
   private eHop: Int32Array = new Int32Array(0); // -1 for a walk
   private hops: Hop[] = [];
@@ -78,10 +81,7 @@ export class Skim {
     const S = (this.S = stops.length);
     this.ids = stops.map((s) => s.id);
     stops.forEach((s, i) => this.index.set(s.id, i));
-    this.time = new Float32Array(S * S).fill(Infinity);
-    this.gen = new Float32Array(S * S).fill(Infinity);
-    this.room = new Float32Array(S * S);
-    this.pred = new Int32Array(S * S).fill(-1);
+    this.outOff = new Int32Array(S + 1); this.inOff = new Int32Array(S + 1); this.pOff = new Int32Array(S + 1);
     if (!S) return;
     // the quickest ride on each line between each pair of stops it calls at
     const byPair = new Map<number, { L: LineState; i: number; j: number; ride: number }[]>();
@@ -147,23 +147,26 @@ export class Skim {
     this.eFrom = Int32Array.from(from);
     this.eHop = Int32Array.from(hop);
     const eTo = Int32Array.from(to), eTime = Float64Array.from(time), eGen = Float64Array.from(gen), eRoom = Float64Array.from(room);
-    const dist = new Float64Array(S), tm = new Float64Array(S), rm = new Float64Array(S), rode = new Uint8Array(S), done = new Uint8Array(S);
-    const outOff = new Int32Array(S + 1), outTo: number[] = [], inCount = new Int32Array(S + 1);
+    // A search from every stop. Only the stops a search touches are reset for the next, so stops
+    // in networks that never meet (towns far apart, each with its own buses) cost nothing to
+    // each other.
+    const dist = new Float64Array(S).fill(Infinity), tm = new Float64Array(S), rm = new Float64Array(S), rode = new Uint8Array(S), done = new Uint8Array(S);
+    const pred = new Int32Array(S).fill(-1), touched: number[] = [], settled: number[] = [], reached: number[] = [];
+    const outOff = this.outOff, pOff = this.pOff, inCount = this.inOff;
+    const outTo: number[] = [], oTime: number[] = [], oGen: number[] = [], oRoom: number[] = [], pNode: number[] = [], pEdge: number[] = [];
+    const byIndex = (x: number, y: number) => x - y;
     for (let o = 0; o < S; o++) {
-      dist.fill(Infinity); rode.fill(0); done.fill(0);
       dist[o] = 0; tm[o] = 0; rm[o] = 1;
+      touched.push(o);
       const heap = new Heap();
       heap.push(0, o);
-      const row = o * S;
       while (heap.size) {
         const [d, u] = heap.pop();
         if (done[u]) continue;
         if (d > tune.maxTransitMin) break;
         done[u] = 1;
-        if (rode[u]) {
-          this.time[row + u] = tm[u]; this.gen[row + u] = d; this.room[row + u] = rm[u];
-          outTo.push(u); inCount[u + 1]++;
-        }
+        settled.push(u);
+        if (rode[u]) reached.push(u);
         for (let n = off[u]; n < off[u + 1]; n++) {
           const e = order[n], v = eTo[e];
           if (done[v]) continue;
@@ -171,40 +174,60 @@ export class Skim {
           // walking from the start isn't a change; boarding after a ride is
           const nd = d + eGen[e] + (ride && rode[u] ? tune.transferMin : 0);
           if (nd < dist[v]) {
+            if (dist[v] === Infinity) touched.push(v);
             dist[v] = nd;
             tm[v] = tm[u] + eTime[e];
             rm[v] = rm[u] * eRoom[e];
             rode[v] = ride ? 1 : rode[u];
-            this.pred[row + v] = e;
+            pred[v] = e;
             heap.push(nd, v);
           }
           this.work++;
         }
       }
+      reached.sort(byIndex);
+      for (const u of reached) { outTo.push(u); oTime.push(tm[u]); oGen.push(dist[u]); oRoom.push(rm[u]); inCount[u + 1]++; }
       outOff[o + 1] = outTo.length;
+      settled.sort(byIndex);
+      for (const u of settled) { pNode.push(u); pEdge.push(pred[u]); }
+      pOff[o + 1] = pNode.length;
+      for (const u of touched) { dist[u] = Infinity; rode[u] = 0; done[u] = 0; pred[u] = -1; }
+      touched.length = 0; settled.length = 0; reached.length = 0;
     }
+    this.outTo = Int32Array.from(outTo);
+    this.time = Float32Array.from(oTime); this.gen = Float32Array.from(oGen); this.room = Float32Array.from(oRoom);
+    this.pNode = Int32Array.from(pNode); this.pEdge = Int32Array.from(pEdge);
     // and the same the other way round
     for (let s = 0; s < S; s++) inCount[s + 1] += inCount[s];
-    const inFrom = new Int32Array(outTo.length), at = inCount.slice(0, S);
-    for (let o = 0; o < S; o++) for (let q = outOff[o]; q < outOff[o + 1]; q++) inFrom[at[outTo[q]]++] = o;
-    this.outOff = outOff; this.outTo = Int32Array.from(outTo);
-    this.inOff = inCount; this.inFrom = inFrom;
+    const inFrom = new Int32Array(outTo.length), inAt = new Int32Array(outTo.length), at = inCount.slice(0, S);
+    for (let o = 0; o < S; o++) for (let q = outOff[o]; q < outOff[o + 1]; q++) { const k = at[outTo[q]]++; inFrom[k] = o; inAt[k] = q; }
+    this.inFrom = inFrom; this.inAt = inAt;
   }
 
   // the hops from stop index a to stop index b, in order
   path(a: number, b: number): Hop[] {
-    const out: Hop[] = [];
-    const row = a * this.S;
-    let e = this.pred[row + b], guard = 0;
+    const out: Hop[] = [], p0 = this.pOff[a], p1 = this.pOff[a + 1];
+    const predOf = (v: number) => { const q = find(this.pNode, p0, p1, v); return q < 0 ? -1 : this.pEdge[q]; };
+    let e = predOf(b), guard = 0;
     while (e >= 0 && guard++ < 64) {
       const h = this.eHop[e];
       if (h >= 0) out.push(this.hops[h]);
       const u = this.eFrom[e];
       if (u === a) break;
-      e = this.pred[row + u];
+      e = predOf(u);
     }
     return out.reverse();
   }
+}
+
+// the position of v in the sorted run a[lo .. hi-1], or -1
+function find(a: Int32Array, lo: number, hi: number, v: number): number {
+  while (lo < hi) {
+    const m = (lo + hi) >> 1, x = a[m];
+    if (x === v) return m;
+    if (x < v) lo = m + 1; else hi = m;
+  }
+  return -1;
 }
 
 // ---------------- pairs ----------------
@@ -348,13 +371,13 @@ export class Pairs {
       if (S) {
         toGen.fill(Infinity); backGen.fill(Infinity);
         for (const x of a.acc) {
-          const r = x.s * S, w = WW * x.walk;
+          const w = WW * x.walk;
           for (let q = skim.outOff[x.s], q1 = skim.outOff[x.s + 1]; q < q1; q++) {
-            const s = skim.outTo[q], t = w + skim.gen[r + s];
-            if (t < toGen[s]) { toGen[s] = t; toTime[s] = x.walk + skim.time[r + s]; toRoom[s] = skim.room[r + s]; via[s] = x.s; }
+            const s = skim.outTo[q], t = w + skim.gen[q];
+            if (t < toGen[s]) { toGen[s] = t; toTime[s] = x.walk + skim.time[q]; toRoom[s] = skim.room[q]; via[s] = x.s; }
           }
           for (let q = skim.inOff[x.s], q1 = skim.inOff[x.s + 1]; q < q1; q++) {
-            const s = skim.inFrom[q], h = skim.gen[s * S + x.s] + w;
+            const s = skim.inFrom[q], h = skim.gen[skim.inAt[q]] + w;
             if (h < backGen[s]) { backGen[s] = h; back[s] = x.s; }
           }
         }
