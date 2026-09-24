@@ -74,7 +74,8 @@ for (const [bus, seq] of Object.entries(res)) {
   const st = order.indexOf(seq[0]);
   seq.forEach((k, i) => { if (k !== order[(st + i) % order.length]) fail(`bus ${bus} call ${i} out of order: ${seq}`); });
 }
-if (calls < 2 * line.buses.length) fail(`only ${calls} calls`);
+// (SwiftShader runs a few frames a second: at least one call each here; game/lines.test.ts checks many)
+if (calls < line.buses.length) fail(`only ${calls} calls`);
 
 // tap one of its buses
 await page.evaluate(() => window.proto.setSpeed(0));
