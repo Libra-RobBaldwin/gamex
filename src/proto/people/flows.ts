@@ -7,7 +7,7 @@
 // rather than reshuffling the lot.
 import { PeopleStore, emitAnimal, emitBird, emitPerson, NO_FADE_IN, type AnimalLook, type BirdLook, type GroupSpec } from './store';
 import { circleRoute, fitRoute, legPoint, reverseRoute, routePoint, straightRoute, Mode, type Motion, type Route } from './track';
-import { clamp, dist, hashStr, hex, inPoly, mix, offsetLine, pick, pickW, pointIn, polyBounds, polyCentre, polyLength, range, rng, vdc, type Rand, type XZ } from './util';
+import { clamp, dist, edgeDist, hashStr, hex, inPoly, mix, offsetLine, pick, pickW, pointIn, polyBounds, polyCentre, polyLength, range, rng, vdc, type Rand, type XZ } from './util';
 import { DOGS, SPECIES } from './shaders';
 import { Idle, MIXES, dress, roleOf, type Mix, type Role } from './wardrobe';
 
@@ -42,6 +42,7 @@ export interface Bench { at: XZ; facing: number }
 export interface ParkFlow {
   kind: 'park'; id: string; area: XZ[]; paths?: XZ[][]; benches?: Bench[];
   walkers: number; dogWalkers: number; looseDogs?: number; joggers?: number; sitters?: number; kids?: number; play?: XZ;
+  avoid?: XZ[][]; // ponds, flower beds, the bandstand: nobody stands or runs about in these
 }
 export interface SchoolFlow {
   kind: 'school'; id: string; gate: XZ; yard: XZ[]; approaches: XZ[][]; pupils: number;
@@ -69,6 +70,10 @@ function dogLook(r: Rand): AnimalLook {
   const coat = hex(pick(r, coats[name]));
   const pattern = name === 'collie' ? 2 : name === 'spaniel' || (name === 'terrier' && r() < 0.4) ? 1 : 0;
   return { species, size: range(r, 0.9, 1.1), idle: pick(r, [0, 1, 1, 2]), coat, second: hex(name === 'spaniel' ? '#e8e0d0' : '#f2f0ea'), pattern, dark: hex('#1c1a18') };
+}
+// does a ring of radius R round p touch any of the areas to avoid?
+function clash(p: XZ, R: number, avoid?: XZ[][]) {
+  return !!avoid?.some((a) => inPoly(p, a) || edgeDist(p, a) < R);
 }
 // Chaikin rounding of a closed outline, so paths round corners rather than turning on the spot.
 function roundClosed(p: XZ[], passes = 3) {
@@ -469,13 +474,16 @@ export class Crowds {
         id: `${f.id}:loose`, centre: c, radius: R, count: 0, cap: capL,
         build: (b) => {
           for (let k = 0; k < capL; k++) {
-            const r = personRand(`${f.id}:loose`, k), o = pointIn(r, f.area, 5), h = r() * TAU;
+            const r = personRand(`${f.id}:loose`, k), h = r() * TAU;
+            // somewhere a dog can run a ring round its owner without going through the pond
+            let o = pointIn(r, f.area, 5), rad = range(r, 2.5, 5);
+            for (let i = 0; i < 12 && clash(o, rad + 1.5, f.avoid); i++) { o = pointIn(r, f.area, 5); rad = range(r, 2.5, 5); }
             const look = dress('dogwalker', this.year, r);
             look.idle = pick(r, [Idle.Stand, Idle.Phone, Idle.Wait]);
             emitPerson(b, k, spot(o, h), still(), look, r());
             const d = dogLook(r);
             if (r() < 0.6) {
-              const rad = range(r, 2.5, 5), route = circleRoute(o, rad, r() * TAU, r() < 0.5);
+              const route = circleRoute(o, rad, r() * TAU, r() < 0.5);
               d.idle = 0;
               emitAnimal(b, k, route, { mode: Mode.Closed, v: range(r, 2.6, 3.6), s0: 0, lat: 0, t0: 0, tShow: 0, tHide: 0, y: 0 }, d, r());
             } else {

@@ -27,17 +27,26 @@ export class RecBuf {
   idx = new Float32Array(8);
   n = 0;
   version = 0;
+  sorted = true; // records in figure order (so the first c figures are a prefix)
   private grow() {
     const d = new Float32Array(this.data.length * 2); d.set(this.data); this.data = d;
     const i = new Float32Array(this.idx.length * 2); i.set(this.idx); this.idx = i;
   }
   push(k: number, f: ArrayLike<number>) {
     if (this.n >= this.idx.length) this.grow();
+    if (this.n && k < this.idx[this.n - 1]) this.sorted = false;
     this.data.set(f, this.n * STRIDE);
     this.idx[this.n++] = k;
     this.version++;
   }
-  clear() { this.n = 0; this.version++; }
+  clear() { this.n = 0; this.version++; this.sorted = true; }
+  // how many records belong to figures numbered below c
+  upTo(c: number) {
+    if (!this.sorted) return this.n;
+    let lo = 0, hi = this.n;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (this.idx[m] < c) lo = m + 1; else hi = m; }
+    return lo;
+  }
 }
 export type Bufs = Record<Cat, RecBuf>;
 const newBufs = (): Bufs => Object.fromEntries(CATS.map((c) => [c, new RecBuf()])) as Bufs;
@@ -116,7 +125,8 @@ export const BUDGETS: Budget[] = [
   { name: 'Fastest', nearPx: 44, midPx: 13, farPx: 3.5, near: 250, mid: 800, far: 2000, shadows: false, buildsPerFrame: 8 },
 ];
 
-interface Entry { g: Group; cat: Cat; shown: number; hidden: number; version: number }
+interface Entry { g: Group; cat: Cat; shown: number; hidden: number; version: number; n: number }
+const needed = (e: Entry) => e.g.bufs![e.cat].upTo(Math.ceil(Math.min(Math.max(e.g.shown, e.g.target), e.g.keep)));
 class Batch {
   mesh: THREE.Mesh;
   geo: THREE.InstancedBufferGeometry;
@@ -151,15 +161,16 @@ class Batch {
   }
   // copy every entry's records into the instance buffer
   assemble() {
+    // only the figures the group's count can show: the rest would cost a draw each for nothing
     let n = 0;
-    for (const e of this.entries) n += e.g.bufs![e.cat].n;
+    for (const e of this.entries) { e.n = needed(e); n += e.n; }
     if (n > this.cap) { let c = this.cap; while (c < n) c *= 2; this.alloc(c); }
     const d = this.stat.array as Float32Array;
     let o = 0;
     for (const e of this.entries) {
       const rb = e.g.bufs![e.cat];
-      d.set(rb.data.subarray(0, rb.n * STRIDE), o * STRIDE);
-      o += rb.n;
+      d.set(rb.data.subarray(0, e.n * STRIDE), o * STRIDE);
+      o += e.n;
       e.version = rb.version;
     }
     this.stat.needsUpdate = true;
@@ -172,7 +183,7 @@ class Batch {
     let o = 0;
     for (const e of this.entries) {
       const rb = e.g.bufs![e.cat], c = Math.min(e.g.shown, e.g.keep);
-      for (let i = 0; i < rb.n; i++, o++) { d[o * 4] = c; d[o * 4 + 1] = rb.idx[i]; d[o * 4 + 2] = e.shown; d[o * 4 + 3] = e.hidden; }
+      for (let i = 0; i < e.n; i++, o++) { d[o * 4] = c; d[o * 4 + 1] = rb.idx[i]; d[o * 4 + 2] = e.shown; d[o * 4 + 3] = e.hidden; }
     }
     this.dyn.needsUpdate = true;
   }
@@ -215,6 +226,7 @@ export class PeopleStore {
   private batches = new Map<Kind, Batch>();
   budget: Budget = BUDGETS[0];
   time = 0; // seconds of simulated time, as the shaders see it
+  forceLod?: number; // draw everything at one level of detail (for measuring)
   stats: StoreStats = { groups: 0, built: 0, visible: 0, instances: 0, triangles: 0, drawCalls: 0, updateMs: 0, byLod: [0, 0, 0] };
   private v = new THREE.Vector3();
   private m = new THREE.Matrix4();
@@ -323,7 +335,7 @@ export class PeopleStore {
     let builds = 0;
     for (const { g, ph } of vis) {
       const was = g.lod, hy = (lvl: number) => (was <= lvl ? 0.9 : 1.1);
-      let lod = ph >= B.nearPx * hy(0) ? 0 : ph >= B.midPx * hy(1) ? 1 : ph >= B.farPx * hy(2) ? 2 : 3;
+      let lod = this.forceLod ?? (ph >= B.nearPx * hy(0) ? 0 : ph >= B.midPx * hy(1) ? 1 : ph >= B.farPx * hy(2) ? 2 : 3);
       const n = Math.ceil(g.target);
       while (lod < 2 && used[lod] + n > cap[lod]) lod++;
       g.keep = Infinity;
@@ -357,6 +369,9 @@ export class PeopleStore {
           if (e.hidden) { e.hidden = 0; e.shown = now - Math.max(0, 0.6 - (now - e.hidden)); }
           have.add(key);
           if (e.version !== e.g.bufs![e.cat].version) b.dirty = true;
+          // more figures wanted than copied, or far fewer: copy again
+          const want = needed(e);
+          if (want > e.n || want < e.n - 8) b.dirty = true;
         } else if (!e.hidden && live && e.g.lod < 3) { e.hidden = now; }
         else if (!e.hidden) { e.hidden = -1; }
       }
@@ -370,7 +385,7 @@ export class PeopleStore {
         // groups that appear because they came on screen are already at full strength; those that
         // appear because the view zoomed or they were just built fade in
         const fresh = g.builtAt === now;
-        b.entries.push({ g, cat, shown: fresh || b.entries.some((e) => e.g === g) || this.shownElsewhere(g, kind) ? now : now - 1, hidden: 0, version: -1 });
+        b.entries.push({ g, cat, shown: fresh || this.shownElsewhere(g, kind) ? now : now - 1, hidden: 0, version: -1, n: 0 });
         b.dirty = true;
       }
       if (b.dirty) b.assemble();
