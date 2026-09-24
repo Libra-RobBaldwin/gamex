@@ -24,6 +24,7 @@ export interface QueueSite {
   depth?: [number, number]; // platform: how far back from the edge people stand
   shelter?: { at: XZ; along: number; seats: number }; // a shelter bench (the first to arrive sit)
   away?: XZ[][]; // footway lines people leave along after getting off
+  back?: number; // how far behind `at` (away from `facing`) the pavement ends: people getting off stay short of it
   double?: 1 | -1; // which side a long queue doubles up on: +1 (the default) left of `along`, -1 right of it
 }
 export interface QueueFlow { kind: 'queue'; id: string; site: QueueSite; waiting: number; mix?: Mix }
@@ -308,7 +309,13 @@ export class Crowds {
       const di = j % doors.length, door = doors[di], t0 = now + 0.6 + Math.floor(j / doors.length) * 0.9;
       const away = f.site.away?.length ? pick(r0, f.site.away) : null;
       // step off towards the back of the pavement (or platform), then away along it
-      const off = along(door, f.site.facing + Math.PI, 1.6 + r0() * 1.4, (r0() - 0.5) * 2);
+      let step = 1.6 + r0() * 1.4;
+      if (f.site.back !== undefined) {
+        // (no further than 0.4 m short of the back of the pavement, measured from where the door is)
+        const bk = f.site.facing + Math.PI, behind = (door.x - f.site.at.x) * Math.cos(bk) + (door.z - f.site.at.z) * Math.sin(bk);
+        step = Math.max(0.5, Math.min(step, f.site.back - behind - 0.4));
+      }
+      const off = along(door, f.site.facing + Math.PI, step, (r0() - 0.5) * 2);
       const pts = [door, off];
       if (away) { const start = away.reduce((a, p) => (dist(p, off) < dist(a, off) ? p : a), away[0]); const i = away.indexOf(start); pts.push(...(r0() < 0.5 ? away.slice(i) : away.slice(0, i + 1).reverse()).slice(0, 12)); }
       else pts.push(along(off, f.site.along + (r0() < 0.5 ? 0 : Math.PI), 18 + r0() * 10));

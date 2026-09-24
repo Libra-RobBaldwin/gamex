@@ -120,7 +120,8 @@ export function roadSites(net: Network, junctions: Map<number, Junction>): Sites
       const W = (a: number, b: number): XZ => ({ x: n.x + u.x * a - u.z * b, z: n.z + u.z * a + u.x * b });
       const across = Math.atan2(u.x, -u.z); // heading of +b
       const kerbSite = (sgn: 1 | -1, id: string): QueueSite => ({
-        id, kind: 'stop', at: W(t, sgn * (K + 0.55)),
+        // (a metre back from the kerb where there's room: a bus turning the corner overhangs it)
+        id, kind: 'stop', at: W(t + 1.5, sgn * (K + Math.max(0.55, Math.min(1.1, d.pave - 0.9)))),
         // a short line along the kerb, stepping back from it (see flows.ts queue slots)
         along: sgn === 1 ? Math.atan2(u.z, u.x) : Math.atan2(-u.z, -u.x),
         facing: sgn === 1 ? across + Math.PI : across, y,
@@ -149,7 +150,7 @@ function stopSite(net: Network, s: RSeg, st: Stop, C: Course, footways: FootwayS
     at: W(3.4, kerb + (roomy ? 2.3 : 0.5)),
     along: Math.atan2(-u.z, -u.x), facing: Math.atan2(-n.z, -n.x), y,
     shelter: { at: W(0, kerb + 1.2), along: Math.atan2(-u.z, -u.x), seats: 3 },
-    double: roomy ? -1 : 1,
+    double: roomy ? -1 : 1, back: width - (roomy ? 2.3 : 0.5),
     away: footways.filter((f) => f.seg === s.id && f.side === k).map((f) => f.line),
   };
   return { id: site.id, seg: s.id, stop: st.id, site, door: W(4.4, kerb - 0.35), exit: W(-3, kerb - 0.35), roomy, residents: 0, jobs: 0 };

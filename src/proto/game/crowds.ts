@@ -18,6 +18,8 @@ import { MIXES } from '../people/wardrobe';
 import { demand, type Traffic } from '../traffic';
 import type { Network, RSeg, Stop } from '../roads';
 import type { Junction } from '../junction';
+import { DIMS } from '../footprint';
+import type { XZ } from '../land';
 import type { Region } from '../infill';
 import { gameYear, onYearChange } from './era';
 import { frontage, lotSites, roadSites, PAVE_Y, type FootwaySite, type LotSites, type ParkSite, type SchoolSite, type Sites, type StopSite, type VenueSite, type WorksSite } from './crowdsites';
@@ -251,24 +253,44 @@ export class TownCrowds {
     for (const v of this.venues) v.flow.count = Math.max(0, N.venue(v.site, clock));
     this.crowds.set(this.list, clock);
     if (dMin > 0) this.cross();
+    else this.holdTraffic();
   }
 
-  // People at a kerb cross when nothing is coming. (Traffic doesn't yet stop for them, so they
-  // wait for a clear road rather than step out in front of it.)
+  // People at a kerb cross when nothing is coming. Traffic doesn't stop for them yet, so they wait
+  // until nothing can reach the crossing before the last of them is over: every vehicle is further
+  // off than it would go in that time (at least at 4 m/s, for one about to pull away), plus a margin.
   private cross() {
-    const poses = this.t.traffic.poses(), R = 32;
+    const cars = this.t.traffic.cars;
     for (const c of this.roads!.crossings) {
-      if (!c.kerbs.some((k) => (this.queues.get(k.id)?.waiting ?? 0) >= 1)) continue;
+      const n = c.kerbs.map((k) => Math.min(4, Math.floor(this.queues.get(k.id)?.waiting ?? 0)));
+      if (!n.some((k) => k >= 1)) continue;
+      const w = Math.hypot(c.to[0].x - c.to[1].x, c.to[0].z - c.to[1].z);
+      const T = (Math.max(...n) - 1) * 1.1 + w / 1.3 + 0.3 + 2; // (as Crowds.board spaces them: 1.1 s apart, at 1.3 m/s)
       let clear = true;
-      for (const p of poses) if (Math.abs(p.x - c.mid.x) < R && Math.abs(p.z - c.mid.z) < R && Math.hypot(p.x - c.mid.x, p.z - c.mid.z) < R) { clear = false; break; }
+      for (const v of cars) {
+        if (!v.pose || v.gone !== undefined) continue;
+        const R = 14 + Math.max(4, v.v) * T;
+        if (Math.abs(v.pose.x - c.mid.x) < R && Math.abs(v.pose.z - c.mid.z) < R && Math.hypot(v.pose.x - c.mid.x, v.pose.z - c.mid.z) < R) { clear = false; break; }
+      }
       if (!clear) continue;
+      let until = 0;
       c.kerbs.forEach((k, i) => {
-        const q = this.queues.get(k.id)!;
-        if (q.waiting < 1) return;
-        const { n } = this.crowds.board(k.id, [c.to[i]], Math.min(4, q.waiting));
-        this.took(k.id, n);
+        if (n[i] < 1) return;
+        const b = this.crowds.board(k.id, [c.to[i]], n[i]);
+        this.took(k.id, b.n);
+        until = Math.max(until, b.until);
       });
+      // and the traffic stops for them until they're over
+      if (until > 0) this.onCrossing.push({ seg: c.seg, at: c.mid, until });
     }
+    this.holdTraffic();
+  }
+  private onCrossing: { seg: number; at: XZ; until: number }[] = [];
+  private holdTraffic() {
+    const now = this.store.time, m = this.t.traffic.crossing;
+    this.onCrossing = this.onCrossing.filter((x) => x.until > now);
+    m.clear();
+    for (const x of this.onCrossing) { let l = m.get(x.seg); if (!l) m.set(x.seg, (l = [])); l.push(x.at); }
   }
   private took(id: string, n: number) {
     const q = this.queues.get(id)!;
@@ -283,6 +305,7 @@ export class TownCrowds {
     const id = `stop:${seg.id}:${st.id}`, s = this.roads?.stops.find((x) => x.id === id), q = this.queues.get(id);
     if (!s || !q) return 7;
     const now = this.store.time;
+    this.doorsOf(s, bus);
     let load = this.loads.get(bus) ?? 6 + (bus % 9); // already some aboard when it's first seen
     const off = Math.min(load, this.numbers.alighting(s, load, this.clock));
     const a = off > 0 ? this.crowds.alight(id, [s.exit], off) : { until: now };
@@ -295,6 +318,16 @@ export class TownCrowds {
     u.boarded += b.n; u.alighted += off;
     // (as long as the last of them takes to reach the door, then a moment to close up and pull away)
     return Math.max(7, Math.min(30, Math.max(a.until, b.until) - now + 1.5));
+  }
+  // The doors where this bus actually stands: the front one by its front, the rear one behind its
+  // middle, just outside its kerb side. (Until the vehicle library's doors land in the game; see
+  // docs/people.md.) Without a pose, the site's doors at the kerb stand.
+  private doorsOf(s: StopSite, bus: number) {
+    const r = this.t.traffic.cars.find((c) => c.id === bus)?.pose?.parts[0];
+    if (!r) return;
+    const at = (al: number, lat: number): XZ => ({ x: r.x + r.hx * al + r.hz * lat, z: r.z + r.hz * al - r.hx * lat });
+    s.door = at(DIMS.bus.front - 0.9, DIMS.bus.hw + 0.15);
+    s.exit = at(-1, DIMS.bus.hw + 0.15);
   }
   private usageOf(id: string) {
     const day = Math.floor(this.clock / 1440);

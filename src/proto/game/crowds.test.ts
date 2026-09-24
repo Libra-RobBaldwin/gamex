@@ -84,8 +84,10 @@ describe('where the crowds can be', () => {
     expect(sites.crossings.length).toBe(7);
     for (const c of sites.crossings) {
       const [a, b] = c.kerbs, w = Math.hypot(a.at.x - b.at.x, a.at.z - b.at.z);
-      const K = kerbOf(net.def(net.segs.get(c.seg)!));
-      expect(w).toBeCloseTo(2 * (K + 0.55), 1);
+      const d = net.def(net.segs.get(c.seg)!), K = kerbOf(d);
+      // each on its pavement: back from the kerb, short of the back of it
+      expect(w / 2).toBeGreaterThanOrEqual(K + 0.5);
+      expect(w / 2).toBeLessThanOrEqual(K + d.pave - 0.5);
       expect(net.sideOf(net.segs.get(c.seg)!, a.at)).not.toBe(net.sideOf(net.segs.get(c.seg)!, b.at));
     }
   });

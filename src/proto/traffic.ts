@@ -11,6 +11,7 @@
 // when a vehicle commits to a junction: the road with priority, the ring, the green light, or a gap
 // big enough that nobody has to brake for you. Nobody goes in unless there's room beyond.
 import * as THREE from 'three';
+import { section } from './roaddraw'; // (people: where a bus stands at a stop)
 import { BAY, bayWeight, closestOnPath, HALF, pathLength, pointAt, type Lot, type Network, type P, type RSeg, type Stop } from './roads';
 import { legsAt, moveOf, type Junction, type Leg, type Move } from './junction';
 import { TRAINS, trainSpeed, type TrainDef } from './catalog';
@@ -121,6 +122,9 @@ export class Traffic {
   // How long a bus stands at a stop (seconds). Without it, 7; the crowds (game/crowds.ts) make it
   // wait while the people at the stop walk to its door. `bus` is the bus's id.
   onBusStop?: (seg: RSeg, st: Stop, bus: number) => number;
+  // People on a crossing now (game/crowds.ts), as points on each road, by the road's id. Vehicles
+  // that haven't reached one stop short of it.
+  crossing = new Map<number, P[]>();
   stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0 };
   // how many junction conflict tables have been worked out, and how long they took (ms)
   readonly conflictStats = tableStats;
@@ -1048,6 +1052,11 @@ export class Traffic {
         by = Math.min(by, c.s + Math.min(this.roomIn(c, c.lane), this.roomIn(c, want)) - 6);
       }
     }
+    // (people: a bus with a stop ahead gets into the nearside lane for it, so it pulls up at the kerb)
+    if (c.bus && c.lane > 0) {
+      const ns = this.nextStop(c), sn = this.span(c.seg, c.from, c.lane - 1);
+      if (ns && ns.at - c.s < 250 && sn[0] <= c.s - c.back - 1 && sn[1] >= ns.at + c.front + 1) { want = c.lane - 1; by = ns.at - 30; }
+    }
     if (want !== undefined) {
       if (c.s < by && this.canChange(c, want, true)) { this.change(c, want, now); return; }
       // ask to be let in; too late to get across for a turn: go the way this lane goes
@@ -1160,6 +1169,8 @@ export class Traffic {
       if (c.oldLane !== undefined) { const o = this.leader(keyOf(c.seg, c.from, c.oldLane), c.s, c); if (o) ob(o.pos - o.c.back - c.s - c.front, o.c.v); }
       if (c.bus) { const o = this.leader(keyOf(c.seg, c.from, BAYLANE), c.s, c); if (o && o.pos - c.s < 40) ob(o.pos - o.c.back - c.s - c.front, o.c.v); }
       this.squeezed(c, ob);
+      const xs = this.crossing.get(c.seg.id); // (people crossing)
+      if (xs) for (const p of xs) { const x = closestOnPath(p, this.pathOf(c.seg, c.from)).s; if (x > c.s + c.front) ob(Math.max(0.1, x - 2 - c.s - c.front), 0, 0.3); }
       // and beyond the end of it
       if (!e || e.pos - c.s > this.horizon(c)) {
         if (pl) { if (admitted) this.onward(c, pl.next, pl.node, pl.path.exitLane, pl.path.outS, pl.path.lineS - c.s + (pl.path.ext1 - pl.path.ext0), 1, ob); }
@@ -1242,6 +1253,25 @@ export class Traffic {
     if (togo < 60) ob(togo, 0, 0.2);
     if (togo < 0.8 && c.v < 0.6) c.dwell = this.onBusStop?.(c.seg, ns.st, c.id) ?? 7;
     return false;
+  }
+  // The stop a bus is pulling in to (or standing at), if any: a lay-by it's using on this road, or
+  // the next stop along it on its side.
+  private pullIn(c: Car): Stop | undefined {
+    const side = c.from === c.seg.a ? 1 : -1;
+    if (c.bay && c.bay.side === side && c.seg.stops.includes(c.bay) && (c.inBay || c.served !== c.bay.id)) return c.bay;
+    const ns = this.nextStop(c);
+    return ns && ns.at - c.s < BAY.entry + BAY.stand ? ns.st : undefined;
+  }
+  // How far out from the road's middle a bus stands at a stop: its side 0.3 m in from the kerb
+  // (the lay-by's kerb, or the kerb beyond any parking or cycle lane), worked out once per stop.
+  private stands = new WeakMap<Stop, { seg: RSeg; def: unknown; off: number }>();
+  standOff(seg: RSeg, st: Stop) {
+    const had = this.stands.get(st), def = this.net.def(seg);
+    if (had && had.seg === seg && had.def === def) return had.off;
+    const C = courseOf(this.net, seg), sd = section(this.net, seg, C, C.rhoOf(st.s)), side = st.side === 1 ? sd.L : sd.R;
+    const off = side.kerb - DIMS.bus.hw - 0.3;
+    this.stands.set(st, { seg, def, off });
+    return off;
   }
   // nothing in the lane right alongside a bus waiting to pull out of a lay-by
   private clearOfLane(c: Car) {
@@ -1423,7 +1453,10 @@ export class Traffic {
         const L = this.len(c.seg), path = this.pathOf(c.seg, c.from), q = pointAt(path, Math.min(c.s, L));
         // lane position, easing across on lane changes; buses swing into lay-bys
         let want = this.laneOff(c.seg, c.from, c.s, this.laneIdx(c));
-        if (c.bus && c.bay && (c.inBay || c.served !== c.bay.id)) want += BAY.depth * bayWeight(c.bay, c.from === c.seg.a ? c.s : L - c.s);
+        // (people: to the stop's own kerb, so its doors open where the people are; only for a stop on
+        // this road and this side, which the last lay-by it used is not once it has moved on)
+        const st = c.bus ? this.pullIn(c) : undefined;
+        if (st) want = Math.max(want, want + (this.standOff(c.seg, st) - want) * bayWeight(st, c.from === c.seg.a ? c.s : L - c.s));
         c.off += (want - c.off) * Math.min(1, dt * 3);
         x = q.x + q.uz * c.off; z = q.z - q.ux * c.off; y = q.y; grade = q.grade;
         const off = c.off, s = c.s;
