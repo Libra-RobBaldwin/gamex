@@ -1,4 +1,54 @@
-# Handover: where everything stands (24 Sep 2026, ~10:15 UTC)
+# Handover: where everything stands
+
+## Latest: the second account's wrap-up (24 Sep 2026, ~14:00 UTC)
+
+The account running the coordinating session (https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ)
+ran low on credit, so the next session carries on from here. **Read "Focus" below first:
+the user's current priority is the core game loop.**
+
+- **Branch:** `claude/cloud-session-history-rvqkm1`, with PR #9 into
+  `claude/runescape-transport-puzzle-game-q1uhy8`. Everything that merged is in it.
+- **Checks:** tsc is clean. vitest passes everything except
+  `src/proto/bridges/perf.review.test.ts`. Its 150 ms budget fails on slower machines (210–330 ms on a
+  4-CPU cloud box) and on its own branch too. The fix is to scale timing budgets by a measured machine
+  factor, not to loosen them; a session was started for it but never pushed.
+- **Play it:**
+  - **Vercel** (the user connected it; it rebuilds on every push to this branch): the game is at
+    https://gamex-nu.vercel.app/proto, the Real Town Plans page at https://gamex-nu.vercel.app/places, and
+    the old 2D game at `/`.
+  - **Artifact:** https://claude.ai/artifact/Baau34269e5GgVfKquSesJ (v8). It's owned by the second
+    account, so the next account should use Vercel.
+- **Merged today:**
+  - HUD, camera kit, vehicle moving parts;
+  - industries, bridges (types, track, earthworks), people, library vehicles and water in the game;
+  - terminals and supply chains;
+  - junctions that line up (PR #24);
+  - the economy library, reviewed twice (`src/proto/economy*.ts`, `econ*.ts`). It is **not yet wired into the game**;
+  - the Real Town Plans page (`places.html`, `src/places`, `docs/places.md`).
+- **Every cloud session is archived.** Their branches and PRs keep all their work.
+- **Open PRs, and what to do with them:**
+  1. **#17 traffic** (lane-drop zip merging, fewer congestion give-ups). It conflicts in
+     `src/proto/traffic.ts` with the library-vehicles merge (#18). **Resolve and merge it first**:
+     it's core.
+  2. **#25 terminals follow-up:** 1 commit (the opencast ironstone pit kept clear of the mine's
+     siding, and CI for typecheck). It's unreviewed, so check it and merge it if it's sound.
+  3. **#21 ground** (fields, hedgerows, lawn texture; 12 commits). It conflicts with the water and
+     bridge-track merges in `main.ts`, `ground/game.ts`, `ground/demo.ts` and `bridges/demo.ts`. It's
+     scenery, so merge it when convenient.
+  4. **#22 real town (Horley):** parked by the user. The PR comment explains what's needed:
+     world water through `GameWater`, and the invented town as the default.
+  5. **#1–#8,** the original library PRs: everything in them is already in #9. Close them with a
+     note once the user agrees (they asked the Vercel bot to comment on all of them).
+- **The game loop plan:** `docs/loop.md`, if present, was written by a design workflow: three
+  designs (player-first, architecture-first, risk-first) judged into one plan. Start there.
+- **Backlog from the finished streams:** the section below, if present, lists every "still to do"
+  the archived sessions reported, sorted against the focus.
+- **GitHub quirk:** the combined commit-status API returns 403 to the Claude GitHub app, so it
+  can't read commit statuses. Use the Vercel bot's PR comment, or `curl` the deployed URL.
+- **Estimating time:** use the measured throughput under "Estimating time" below, not
+  human-developer estimates. The user asked for this explicitly.
+
+## Earlier: where everything stood (24 Sep 2026, ~10:15 UTC)
 
 The previous session ran on the org account and hit its usage limit mid-flight. Every
 background build stopped at once. Nothing was lost: every piece of work, finished or not,
