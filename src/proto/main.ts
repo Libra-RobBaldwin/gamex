@@ -717,9 +717,9 @@ function hint(text?: string, ic?: Icon) {
     if (!tool) return shell.hint(null);
     if (mode === 'stop') t = stopPreview ? '' : 'Tap a road, on the side you want the stop'; // (with a blueprint down, the card says it all)
     else if (mode === 'station') t = 'Tap a straight, level stretch of railway · platforms go either side';
-    else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : lineDraft.length === 1 ? 'Tap the next stop' : 'Tap more stops, or the first again for a circular line · then Create';
+    else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : ''; // (then the card says what next)
     else if (draft && slipPlan) t = 'A slip road: drag ahead and out to leave the motorway, back and out to join it · then Build';
-    else if (draft) t = 'Drag the white handles to adjust, then Build';
+    else if (draft) t = ''; // (the blueprint's card says what to do)
     else if (roadKind === 'straight') t = mode === 'rail' ? 'Drag to lay track · tap a junction to see how it works' : 'Drag to draw a road · tap a junction to redesign it';
     else if (roadKind === 'smooth') t = 'Drag from a road: the new one curves smoothly out of it';
     else t = ['Drag along the curve you want · or tap start, bend, end', '2/3 · Tap the bend point: the curve pulls towards it', '3/3 · Tap where the curve ends'][picks.length];
@@ -740,14 +740,22 @@ function endTool() {
 }
 function startRoadTool(t: RoadType) {
   const rail = ROADS[t].cls === 'rail';
+  // (one row: the type, and a drawer with the other types, the shape and the finer settings)
   tool = shell.startTool({
-    name: ROADS[t].label, spec: typeSpec(t), icon: roadIcon(ROADS[t]), tone: rail ? 'rail' : 'road',
-    options: roadOptions(), bind: bindRoadOptions, onUndo: undoStep, onDone: endTool, onCancel: endTool,
+    name: cardName(t), spec: cardSpec(t), icon: roadIcon(ROADS[t]), tone: rail ? 'rail' : 'road',
+    options: roadOptions(), optionsLabel: rail ? 'Track type and options' : 'Road type and options', bind: bindRoadOptions, onUndo: undoStep, onDone: endTool, onCancel: endTool,
   });
   setMode(rail ? 'rail' : 'road');
   setType(t);
   lastType[cls()] = t;
   hint();
+}
+// another type from the drawer, keeping whatever's being drawn
+function switchType(t: RoadType) {
+  setType(t);
+  lastType[cls()] = t;
+  tool?.set({ name: cardName(t), spec: cardSpec(t), icon: roadIcon(ROADS[t]) });
+  tool?.setOpen(false);
 }
 function startStopTool() {
   tool = shell.startTool({ name: 'Bus stop', spec: 'Tap the side of a road', icon: 'busStop', tone: 'stop', onDone: endTool, onCancel: endTool });
@@ -802,9 +810,16 @@ const draftRail = () => lineDraft.length > 0 && lines.isStation(lineDraft[0]);
 function draftCost() { return draftRail() ? trainPrice(defaultTrain()) * NEW_LINE_TRAINS : busPrice(busOffer) * NEW_LINE_BUSES; }
 function startLineTool() {
   lineDraft = []; lineLoop = false;
-  tool = shell.startTool({ name: 'New line', spec: 'Buses call only at the stops you tap', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
+  tool = shell.startTool({ name: 'New line', spec: 'Tap stops in order', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
   setMode('line');
   lineChanged();
+  // (every stop and station in view, so they can all be tapped without hunting for them)
+  const pts = [...markers.places(), ...markers.stationPlaces()].map((m) => m.p);
+  if (pts.length) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const q of pts) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z); }
+    focusOn({ x: (x0 + x1) / 2, z: (z0 + z1) / 2 }, Math.min(1400, Math.max(view.h, 160, (Math.max(x1 - x0, z1 - z0) + 120) * 1.1)));
+  }
 }
 function lineChanged() {
   const n = lineDraft.length;
@@ -812,7 +827,8 @@ function lineChanged() {
   tool?.setUndo(n > 0);
   const cost = draftCost();
   tool?.setPrimary({ label: n < 2 ? 'Create' : `Create · ${money(cost)}`, icon: 'check', kind: 'primary', disabled: n < 2 || !purse.can(cost), title: purse.can(cost) ? (draftRail() ? `${NEW_LINE_TRAINS} train` : `${NEW_LINE_BUSES} buses`) : short(cost), onClick: finishLine });
-  tool?.setPanel(n ? `<div class="what">${icon('transport')}<span>${lineDraft.map((id, i) => `<b>${i + 1}</b> ${esc(lines.name(id))}`).join(' · ')}${lineLoop ? ' · <b>back to 1</b>' : n > 2 ? ' · and back' : ''}</span></div>` : null);
+  const next = n === 1 ? 'Tap the next stop' : lineLoop ? 'Circular · tap stop 1 again to make it there and back' : `Tap more stops${n > 2 ? ', or stop 1 again to go round in a circle' : ''} · then Create`;
+  tool?.setPanel(n ? `<div class="what">${icon('transport')}<span>${lineDraft.map((id, i) => `<b>${i + 1}</b> ${esc(lines.name(id))}`).join(' · ')}${lineLoop ? ' · <b>back to 1</b>' : n > 2 ? ' · and back' : ''}</span></div><p class="why">${esc(next)}</p>` : null);
   hint();
 }
 function lineTap(sx: number, sy: number) {
@@ -838,6 +854,7 @@ function finishLine() {
   lineDraft = [];
   endTool();
   showLineInfo(l);
+  updateGoal();
   hint(`Line ${l.num} is running · ${k} ${rail ? (k === 1 ? 'train' : 'trains') : 'buses'} · ${money(each * k)}`, rail ? 'train' : 'bus');
 }
 // what a bus costs (the model the line runs, or the default one)
@@ -890,13 +907,20 @@ const pctTxt = (g: number) => { const v = g * 100; return `${Math.abs(v - Math.r
 function roadOptions() {
   const [, hl, hi] = HEIGHTS.find((h) => h[0] === opts.height)!;
   const on = (b: boolean) => `class="${b ? 'on' : ''}" aria-pressed="${b}"`;
-  return `<span class="og" role="group" aria-label="Shape">${KINDS.map(([k, label, ic]) => `<button data-k="${k}" ${on(roadKind === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span><span class="sep"></span>
+  const rail = ROADS[opts.type].cls === 'rail', presets = rail ? RAIL_PRESETS : PRESETS;
+  const types = [...presets, ...(presets.includes(opts.type) ? [] : [opts.type])];
+  return `<div class="orow" role="group" aria-label="${rail ? 'Track' : 'Road'} type">${types.map((id) => `<button data-type="${id}" ${on(opts.type === id)}>${icon(roadIcon(ROADS[id]))}<span>${esc(cardName(id))}</span></button>`).join('')}${rail ? '' : `<button data-type="more">${icon('adjustments')}<span>More</span></button>`}</div>
+    <div class="orow"><span class="og" role="group" aria-label="Shape">${KINDS.map(([k, label, ic]) => `<button data-k="${k}" ${on(roadKind === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span><span class="sep"></span>
     <button id="g-h" aria-label="Height: ${hl}">${icon(hi)}<span>${hl}</span></button>
     <button id="g-g" aria-label="Steepest gradient ${pctTxt(opts.grade)}">${icon('angle')}<span>${pctTxt(opts.grade)}</span></button><span class="sep"></span>
-    <span class="og" role="group" aria-label="Where it crosses something">${CROSS.map(([k, label, ic]) => `<button data-x="${k}" ${on(opts.cross === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span>`;
+    <span class="og" role="group" aria-label="Where it crosses something">${CROSS.map(([k, label, ic]) => `<button data-x="${k}" ${on(opts.cross === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span></div>`;
 }
 function refreshOptions() { if (mode === 'road' || mode === 'rail') tool?.set({ options: roadOptions() }); }
 function bindRoadOptions(el: HTMLElement) {
+  el.querySelectorAll<HTMLButtonElement>('[data-type]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.type === 'more') { tool?.setOpen(false); openRoadPicker(true); return; }
+    switchType(b.dataset.type!);
+  }));
   el.querySelectorAll<HTMLButtonElement>('[data-k]').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.k as RoadKind)));
   el.querySelectorAll<HTMLButtonElement>('[data-x]').forEach((b) => b.addEventListener('click', () => {
     opts.cross = b.dataset.x as RoadOpts['cross'];
@@ -1077,17 +1101,16 @@ function showLineInfo(l: Line) {
   const profit = books.lastFares - books.lastRunning, sell = Math.round(vehiclePrice(l) / 2), rail = l.mode === 'rail', veh = rail ? 'train' : 'bus';
   showLine(l.bus.seq, l.stops);
   shell.openInfo({
-    key: `line:${l.id}`, title: `Line ${l.num}`, sub: lines.title(l), icon: l.mode === 'rail' ? 'train' : 'transport', tone: l.mode === 'rail' ? 'rail' : 'stop',
-    facts: [
-      [rail ? 'Stations' : 'Stops', l.stops.map((id) => lines.name(id)).join(' · ')], ['Runs', l.loop ? 'Circular, round and round' : 'There and back'], [rail ? 'Trains' : 'Buses', `${n}`],
-      ['Passengers last month', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'],
-      ['Fares last month', money(books.lastFares)], ['Running costs', money(-books.lastRunning)], ['Profit', money(profit)],
-    ],
-    note: rail ? `Trains call at each station and turn round at the ends of the line. Each passenger pays £2. A day here is a month in the town's life.` : `Buses take the quickest way between stops, and call on whichever side of the road they come along. Each passenger pays £2. A day here is a month in the town's life.`,
+    // (the three numbers that matter as tiles, the stops in a line, and the actions in a row;
+    // a game day is the town's month, so "a day" is what the player sees)
+    key: `line:${l.id}`, title: `Line ${l.num}`, sub: `${lines.title(l)} · ${l.loop ? 'circular' : 'there and back'}`, icon: l.mode === 'rail' ? 'train' : 'transport', tone: l.mode === 'rail' ? 'rail' : 'stop',
+    stats: [[rail ? 'Trains' : 'Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
+    facts: [[rail ? 'Stations' : 'Stops', l.stops.map((id) => lines.name(id)).join(' · ')]],
+    note: `Each rider pays £2${books.lastRunning ? `; the ${veh}${rail ? 's' : 'es'} cost ${money(books.lastRunning)} a day to run` : `, and the ${veh}${rail ? 's' : 'es'} cost a little each day to run`}.`,
     actions: [
-      { label: `Add a ${veh} · ${money(vehiclePrice(l))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(vehiclePrice(l)), onClick: () => { buyBus(l); showLineInfo(l); } },
-      { label: `Sell a ${veh} · ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`${rail ? 'Train' : 'Bus'} sold for ${money(sell)}`, rail ? 'train' : 'bus'); setTimeout(() => showLineInfo(l), 50); } },
-      { label: 'Withdraw line', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} ${veh}${k === 1 ? '' : rail ? 's' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
+      { label: `${veh === 'bus' ? 'Bus' : 'Train'} · ${money(vehiclePrice(l))}`, title: `Add a ${veh} for ${money(vehiclePrice(l))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(vehiclePrice(l)), onClick: () => { buyBus(l); showLineInfo(l); } },
+      { label: 'Sell', title: `Sell a ${veh} for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`${rail ? 'Train' : 'Bus'} sold for ${money(sell)}`, rail ? 'train' : 'bus'); setTimeout(() => showLineInfo(l), 50); } },
+      { label: 'Withdraw', title: 'Withdraw the line and sell its vehicles', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} ${veh}${k === 1 ? '' : rail ? 's' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
     ],
     onClose: () => { if (mode !== 'line') showLine(null); },
   });
@@ -1363,7 +1386,8 @@ function renderBar() {
     ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(price(n * 6000))} compensation included</div></div>` : ''}
     ${lift}
     ${c.ok ? bridgeLines(c) : ''}
-    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`, bindIx);
+    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}
+    <p class="why">Drag the white handles to adjust${c.ok ? ', then Build' : ''}</p>`, bindIx);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
   tool.avoid(handles().map((h) => toScreen(h.p)));
   tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging && afford), onClick: buildDraft });
@@ -1772,6 +1796,7 @@ function stopTap(p: P) {
     tool?.setPanel(null);
     tool?.setPrimary(null);
     hint(`${WHAT[pl.kind][0]} stop built for ${money(cost)} · tap to place another, or Done`, 'check');
+    updateGoal();
   };
   show();
 }
@@ -2076,6 +2101,28 @@ const town = new TownEconomy({
 });
 townRef = town;
 people.numbers = town.numbers();
+// The game starts with nothing of the player's, so a card under the status strip says what to
+// do next, and tapping it gets on with it: stops, then a line through them, then the town panel
+// to watch it grow. It goes once the first line has run a couple of days (or the panel's opened).
+let goalDone = false, firstLineAt: number | null = null;
+function updateGoal() {
+  if (goalDone) return;
+  const nLines = lines.list.length + railway.lines.length;
+  if (!nLines) {
+    firstLineAt = null;
+    let stops = 0;
+    for (const sg of net.segs.values()) stops += sg.stops.length;
+    shell.goal(stops < 2
+      ? { step: `Step 1 of 3 · ${stops} of 2 stops`, text: 'Build bus stops where people live and work', icon: 'busStop', onClick: () => startStopTool() }
+      : { step: 'Step 2 of 3', text: 'Draw a bus line through your stops', icon: 'transport', onClick: () => startLineTool() });
+    return;
+  }
+  firstLineAt ??= clock;
+  const done = () => { goalDone = true; shell.goal(null); };
+  if (clock - firstLineAt > 2 * 1440) { done(); return; }
+  shell.goal({ step: 'Step 3 of 3', text: 'Buses running · watch the town grow', icon: 'building', onClick: () => { done(); showTown(); } });
+}
+let goalTick = 0;
 let syncAt = 2;
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
 // Phones differ enormously, so rather than guess, the game watches its own frame times: if
@@ -2191,6 +2238,7 @@ function frame(now: number) {
     $('#st-trains').textContent = String(railway.trains.length);
     $('#st-pop').textContent = count(pop);
     shell.setMoney(money(purse.balance));
+    if (++goalTick % 4 === 0) updateGoal();
   }
   regionView?.update(view, canvas.clientWidth / Math.max(1, canvas.clientHeight)); // (the tiles' levels, for where the camera is now)
   const t1 = performance.now();
