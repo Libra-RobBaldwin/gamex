@@ -8,6 +8,25 @@ carry on.
 Read this first, then `docs/ROADMAP.md` (direction), `docs/ENGINE.md` (architecture) and the
 per-library docs in `docs/`.
 
+## Focus (the user, 24 Sep ~13:20): the core game loop first
+
+The user said we'd lost sight of the goal, and agreed this plan. The goal is the game in
+`docs/ROADMAP.md`: build roads and bus and rail lines, good service makes towns grow, and the
+growth creates the next problem. Real places come last.
+
+1. **Land the core already in flight:** junctions, traffic, library vehicles in traffic and the economy
+   library. Water and ground are nearly done, so merge them, but start nothing new on scenery.
+2. **Then one stream only: the game loop** (`docs/loop.md`). You draw a bus route or rail
+   line between parts of town and people ride it. It earns fares, and the town grows or shrinks
+   with the service, shown on one town panel. The loop is built in the **invented town**, which
+   the user chose over Horley for now.
+3. **Parked. Noted here, not deleted, and not to be restarted without the user:**
+   - **Real Town Plans page:** it works; it's at `claude/work-places-page` once merged. It goes on Vercel when the user connects it (`docs/deploy.md`).
+   - **Polishing the plans page's progress bar:** a review was started and then stopped.
+   - **Horley as the game's town:** the real-town code merges with the invented town as the default.
+   - **Missing houses in real places:** OpenStreetMap hasn't mapped many of Horley's houses, for example around Kingsley Road, Wellington Way, Parkhurst Road and Southlands Avenue. There are two fixes: Ordnance Survey OpenMap Local building outlines (Open Government Licence, so credit OS), or procedural houses along unmapped residential streets.
+   - **Cyclists.**
+
 ## Second session (from 24 Sep, ~10:20 UTC): status
 
 A session on the user's other account picked this up:
