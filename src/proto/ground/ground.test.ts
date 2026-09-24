@@ -40,6 +40,8 @@ function town(seed = 1): GroundInput {
   return { seed, blocked, lanes, plots, parks, trees, water: [circlePoly({ x: 250, z: -190 }, 96, 48)], town: [{ x: 0, z: 0 }] };
 }
 const REGION = { x0: -600, z0: -600, size: 1200 };
+// how many bytes differ (vitest's deep equality is slow on million-byte arrays)
+const diffs = (a: Uint8Array, b: Uint8Array) => { let n = Math.abs(a.length - b.length); for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) n++; return n; };
 const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
 
 describe('generated textures', () => {
@@ -108,8 +110,8 @@ describe('painting', () => {
   it('is deterministic', () => {
     const g1 = new Ground({ region: REGION }), g2 = new Ground({ region: REGION });
     g1.paint(town()); g2.paint(town());
-    expect(Buffer.compare(g1.cover!.a, g2.cover!.a)).toBe(0);
-    expect(Buffer.compare(g1.cover!.b, g2.cover!.b)).toBe(0);
+    expect(diffs(g1.cover!.a, g2.cover!.a)).toBe(0);
+    expect(diffs(g1.cover!.b, g2.cover!.b)).toBe(0);
     expect(g1.hedgeList()).toEqual(g2.hedgeList());
   });
   it('an incremental repaint after a plot is built equals a full repaint', () => {
@@ -134,8 +136,8 @@ describe('painting', () => {
     inc.paint({ seed: 4 });
     inc.change(inp, [{ x0: 100000 + 280, z0: -250000, x1: 100000 + 320, z1: -250000 + 30 }]);
     full.paint(inp);
-    expect(Buffer.compare(inc.cover!.a, full.cover!.a)).toBe(0);
-    expect(Buffer.compare(inc.cover!.b, full.cover!.b)).toBe(0);
+    expect(diffs(inc.cover!.a, full.cover!.a)).toBe(0);
+    expect(diffs(inc.cover!.b, full.cover!.b)).toBe(0);
     // and the far-off map has fields and hedges of its own
     expect(full.hedgeList().pieces.length).toBeGreaterThan(20);
   });

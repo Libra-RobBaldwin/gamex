@@ -368,4 +368,32 @@ setQuality('high');
 setDusk(false);
 resize();
 requestAnimationFrame(frame);
-(window as unknown as { groundDemo: unknown }).groundDemo = { setScene, setQuality, setDusk, view, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };
+// Cost per pixel: the ground filling the whole screen with nothing else drawn, old grass against
+// the new ground at each quality (ms per frame, waiting for the GPU each time). Ratios carry over
+// to a phone better than the absolute times from a software renderer do.
+function pixelCost(frames = 20) {
+  const gl = renderer.getContext(), px = new Uint8Array(4), s2 = new THREE.Scene();
+  s2.add(hemi.clone(), sun.clone());
+  const g = new THREE.PlaneGeometry(8000, 8000).rotateX(-Math.PI / 2);
+  const uv = g.getAttribute('uv') as THREE.BufferAttribute, pos = g.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / 22.5, pos.getZ(i) / 22.5);
+  const m = new THREE.Mesh(g);
+  m.position.set(view.x, sceneY(), view.z);
+  s2.add(m);
+  const time = (mat: THREE.Material) => {
+    m.material = mat;
+    for (let i = 0; i < 3; i++) renderer.render(s2, cam);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const t = performance.now();
+    for (let i = 0; i < frames; i++) { renderer.render(s2, cam); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+    return (performance.now() - t) / frames;
+  };
+  const was = QS[qi], out: Record<string, number> = {};
+  out.old = time(oldMat);
+  for (const q of QS) { setGroundQuality(q); out[q] = time(cur!.ground.material); }
+  out.old2 = time(oldMat); // (again, to see the noise)
+  setGroundQuality(was);
+  g.dispose();
+  return out;
+}
+(window as unknown as { groundDemo: unknown }).groundDemo = { pixelCost, setScene, setQuality, setDusk, view, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };

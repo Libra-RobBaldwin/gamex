@@ -3,6 +3,7 @@
 // another to override it). Stand-alone: nothing here is used by the game.
 //   /bridges-demo.html?type=masonry&view=top|iso|low&mode=chooser&open=1  (for screenshots)
 import * as THREE from 'three';
+import { Ground } from '../ground';
 import { BRIDGES, BRIDGE_IDS, type BridgeId } from './catalogue';
 import { chooseBridge, override, type BridgeChoice } from './choose';
 import { deckAt, deckWidth, extents, groundAt, type Crossing } from './crossing';
@@ -71,7 +72,8 @@ function place() {
 // ---------- the world around a bridge ----------
 
 const lit = (c: string, o: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color: c, side: THREE.DoubleSide, flatShading: true, ...o });
-const grass = lit('#79a653'), bank = lit('#8d8a62'), waterMat = lit('#3f86b8', { transparent: true, opacity: 0.88 });
+// the shared ground (rock and scree come through on steep cuts by themselves)
+const grass = new Ground({ base: lit('#ffffff') }).material, bank = lit('#8d8a62'), waterMat = lit('#3f86b8', { transparent: true, opacity: 0.88 });
 // the cut face at the edge of the map: turf, topsoil, subsoil, then rock
 const turf = lit('#5f8a3e'), topsoil = lit('#5b4632'), subsoil = lit('#9b7a4c'), rock = lit('#7c7872'), waterCut = lit('#2f6f9e', { transparent: true, opacity: 0.8 });
 const asph = lit('#4a4e54', { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), mark = lit('#eeeeea', { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
@@ -130,7 +132,8 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout) {
   for (let x = x0; x < x1 - 1e-6; x += step) {
     const xb = Math.min(x1, x + step), ya = groundAt(c, sOf(x)), yb = groundAt(c, sOf(xb));
     const wet = sc.water.some((w) => sOf(x) > w.s0 - 1 && sOf(xb) < w.s1 + 1);
-    (wet ? bp : gp).push(x, ya, -W, xb, yb, -W, xb, yb, W, x, ya, -W, xb, yb, W, x, ya, W);
+    // (wound to face up: the ground shader reads slope from the normal)
+    (wet ? bp : gp).push(x, ya, -W, xb, yb, W, xb, yb, -W, x, ya, -W, x, ya, W, xb, yb, W);
   }
   out.add(mesh(strip(gp), grass, false), mesh(strip(bp), bank, false));
   out.add(earthEdges(c, sc, sOf, x0, x1, W, step));
