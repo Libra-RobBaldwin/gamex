@@ -51,19 +51,20 @@ const PHONE = { viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isM
 // Page Down scroll the list, as they always have, and leave the map where it is.
 if (want('keys')) {
   const { page } = await open({ viewport: { width: 1000, height: 800 } });
-  await page.evaluate(() => window.proto.setMode('road'));
+  // (the HUD's Build sheet, then "More road types": a long list in the sheet's scrolling body)
+  await page.evaluate(() => window.proto.shell.openBuild('roads'));
   await page.waitForTimeout(1500);
-  await page.evaluate(() => document.querySelector('#rtype [data-more]')?.click());
+  await page.evaluate(() => [...document.querySelectorAll('#sheet button')].find((b) => /More road types/.test(b.textContent ?? ''))?.click());
   await page.waitForTimeout(1500);
   const info = await page.evaluate(() => {
-    const p = document.querySelector('#panel');
-    p.querySelector('[data-pick]')?.focus();
-    return { open: !p.classList.contains('hidden'), scrollable: p.scrollHeight > p.clientHeight + 100, focused: document.activeElement?.tagName };
+    const p = document.querySelector('#sheet .sb');
+    (p.querySelector('[data-pick]') ?? p.querySelector('button'))?.focus();
+    return { open: !document.querySelector('#sheet').hidden, scrollable: p.scrollHeight > p.clientHeight + 100, focused: document.activeElement?.tagName };
   });
   const v0 = await page.evaluate(() => ({ ...window.proto.view }));
   for (const k of ['PageDown', 'ArrowDown', 'ArrowDown', 'ArrowDown']) { await page.keyboard.down(k); await page.waitForTimeout(400); await page.keyboard.up(k); }
   await page.waitForTimeout(2500);
-  const r = await page.evaluate(() => ({ scroll: document.querySelector('#panel').scrollTop, v: { ...window.proto.view } }));
+  const r = await page.evaluate(() => ({ scroll: document.querySelector('#sheet .sb').scrollTop, v: { ...window.proto.view } }));
   const moved = Math.hypot(r.v.x - v0.x, r.v.z - v0.z) + Math.abs(r.v.h - v0.h);
   check('keys in the side panel scroll it, not the map', info.open && info.scrollable && r.scroll > 100 && moved < 1e-6, { ...info, scrollTop: r.scroll, mapMoved: +moved.toFixed(2) });
   await page.close();
@@ -114,8 +115,10 @@ if (want('offset')) {
     await touch('touchEnd', [[spot.x, spot.y, 1]], 0.08);
     await page.evaluate(() => window.__thaw());
     await page.waitForTimeout(1500);
-    const card = await page.evaluate(() => { const c = document.querySelector('#card'); return c.classList.contains('hidden') ? null : c.querySelector('b')?.textContent ?? null; });
-    check('offset canvas: tap a building opens its card', card === spot.name, { tapped: spot.name, card });
+    // (the building's info sheet names it)
+    const card = await page.evaluate(() => { const c = document.querySelector('#sheet'); return c.hidden ? null : c.textContent ?? ''; });
+    const first = spot.name.split(' · ')[0];
+    check('offset canvas: tap a building opens its card', !!card && card.includes(first), { tapped: spot.name, card: card?.slice(0, 80) });
   }
   check('no page errors', errors.length === 0, { errors: errors.slice(0, 3) });
   await page.close();

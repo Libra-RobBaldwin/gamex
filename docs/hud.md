@@ -83,16 +83,78 @@ A small pop-over above the bar:
 
 ## One shell for everything
 
-Put the shell in `src/proto/ui/shell.ts`. Every system that needs UI registers with it instead
-of adding its own panel markup:
+The shell is built: `src/proto/ui/shell.ts`, styled by `src/proto/proto.css`. `main.ts` makes
+one (`const shell = new Shell($('#ui'), { onCompass, onPause, onRate, onPerf })`) and every piece
+of UI registers with it. Nothing else adds panel markup. `window.proto.shell` exposes it for
+scripts and tests.
 
-- `openSheet({ title, sub, body, actions })`
-- `closeSheet()`
-- `addBuildCategory` / `addBuildItem`
-- `startTool({ name, spec, options, onDone, onCancel })`
-- `addLayer`
-- `addMenuItem`
+### API
 
-This includes the industry info panel, the bridge editor and the vehicle purchase list that
-are being wired in now. The shell has to work at 412×915, at 360×780 and in landscape at
-915×412, with tap targets of at least 44 px.
+| Call | What it does |
+|---|---|
+| `openSheet({ key, title, sub?, icon?, tone?, tabs?, tab?, onTab?, body, actions?, back?, onClose?, fresh?, from? })` | Opens a bottom sheet (a panel down the right in landscape). Returns the body element, so wire it with `querySelectorAll`. Re-opening the same `key` re-renders in place and keeps the scroll position. `onClose` runs once, when the sheet closes or a sheet with another key replaces it. `back` shows a back arrow. `from` lights a bar button. `tone` is `'road' \| 'rail' \| 'stop' \| 'look'`. |
+| `closeSheet()` | Closes it (and runs its `onClose`). |
+| `openInfo({ key?, title, sub?, icon?, tone?, facts?, meter?, note?, html?, actions?, onClose? })` | The info sheet for something tapped: a title, `[label, value]` facts, an optional 0..1 meter, a note and action buttons. |
+| `addBuildCategory({ id, label, icon, disabled?, note? })` | A tab in the Build sheet. |
+| `addBuildItem(cat, { id, label, spec?, icon?, tone?, locked?, on?, onPick? })` | A card in that tab. `locked` shows it disabled with the reason. `on()` marks the current choice. `onPick` runs after the sheet closes (return `false` to keep it open, e.g. to show a picker in the sheet). |
+| `startTool({ name, spec?, icon?, tone?, options?, bind?, onUndo?, onDone?, onCancel? })` | Swaps the bar for the tool strip: name and spec, the options row (HTML, wired in `bind(el)`), Undo (shown if `onUndo` is given), Cancel and Done. Returns a handle: `set({ name, spec, icon, tone, options })`, `setUndo(on)`, `setPrimary(action \| null)` (e.g. Build while a blueprint waits), `setPanel(html \| null, bind?)` (the card above the strip) and `end()`. |
+| `endTool()` | Leaves the tool quietly. `toolActive` says whether one is in use. |
+| `addTransportTab({ id, label, icon, sub?, render(el) })` | A tab in the Transport sheet. `render` fills the body. `refreshTransport()` re-renders the tab that's showing. |
+| `addLayer({ id, label, icon, disabled?, on?, onToggle? })` | An overlay toggle in the Layers pop-over. |
+| `setViews({ options, current, pick })` | The 3D / Low / Plan picker. `syncView()` is cheap to call every frame. |
+| `addMenuItem({ id, label, icon, sub?, disabled?, onClick })` | A card in the Menu sheet. `sub` can be a function (e.g. the current quality). |
+| `hint(html \| null, ms?)` | A line of help over the clear map. With `ms` it clears itself. |
+| `firstRun(key, text)` | A pill shown once ever on this device (localStorage), until the first tap or 15 s. |
+| `setSpeed(paused, rate)`, `setPerf(on)`, `setMoney(text)`, `toggleDrawer(open?)` | The status strip. The game writes its readouts straight into `#st-clock`, `#st-rush`, `#st-pop`, `#st-cars`, `#st-buses`, `#st-trains` and `#perf-t`. |
+| `clearRect()` | The part of the screen the chrome leaves clear, for framing the camera (`focusOn` in main.ts uses it). |
+
+The shell does no work per frame. It measures layout only when something changes size.
+
+### Moving a panel into it
+
+A panel built on the old HUD's `#panel` styles moves over almost unchanged. The old side-panel
+content classes (`.grp`, `.tab`, `small`, `.plan`, `.fl`, `.rl`, `.row3`, `.score`, `.warn`,
+`.bad`, `.xs`) are styled inside a sheet's body. Use `.act`, `.act.primary` and `.act.danger` for
+buttons. For example, an industry info panel becomes:
+
+```ts
+function showIndustry(ind: Industry) {
+  const el = shell.openInfo({
+    key: `industry:${ind.id}`, title: ind.name, sub: ind.kind, icon: 'warehouse',
+    facts: [['Produces', `${ind.rate} t a month`], ['Stock', `${ind.stock} t`]],
+    actions: [{ label: 'Buy a terminal', icon: 'plus', kind: 'primary', onClick: () => openTerminals(ind) }],
+  });
+  // el is the sheet's body, if there's more to wire up
+}
+```
+
+Then add it to `tapMap()` in main.ts, where a tap with no tool in use is inspected. A bridge editor
+is an `openSheet` with `back` to the bridge's info sheet, like the junction editor. A vehicle
+purchase list is a `render` in the `buy` Transport tab.
+
+### In the game now
+
+- **At rest.** The status strip, the compass and the bar. They cover 11.8% of a 412×915 screen,
+  measured by sampling what's under every other pixel. They cover 13.9% at 360×780 and 9.0% in
+  landscape at 915×412.
+- **Build.** Roads (the four presets and "More road types", which opens the road picker and
+  filters in the sheet), Rail (the five presets) and Stops (a working bus stop; bus station,
+  railway station and lorry depot are locked with "Not in the game yet"). Freight, Bulldoze and
+  Landscape have a locked card each, with the reason.
+- **Tool strip.** The options are Straight, Curve and Smooth; Height; Gradient; Join, Over and
+  Under. A blueprint shows as a card above the strip: length, cost, demolition warning, lift
+  and the long section. The strip's Done button turns into Build, which goes red with a
+  bulldozer icon when the road would demolish buildings. Undo steps back through the blueprint
+  and the curve's taps. The old HUD had no way to undo a road once it was built, and the network
+  can't remove one yet, so Undo doesn't go further back than that.
+- **Inspect.** Tapping a stop, junction, building or open space opens its info sheet. A
+  junction's sheet has Edit junction, which opens the editor (lane arrows still work on the map).
+  Tapping empty map closes the sheet.
+- **Transport.** Lines lists every stop (tap one to see it) and has Add a bus stop. New line is
+  disabled until routes exist. Buy vehicles is the old vehicles panel: buses, trains and
+  background traffic.
+- **Layers.** The four overlays are disabled ("Not in the game yet"). View is 3D, Low or Plan.
+- **Menu.** Quality (Auto, or hold one tier), Performance (the readout, which shows in the
+  stats drawer), New town (confirm step), Save and Load (disabled).
+- **Speed.** Pause, and one button that cycles 1×, 2× and 4×. The old blinking clock is gone:
+  "paused" shows in gold instead.

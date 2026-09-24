@@ -19,15 +19,33 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   - the vitest fix (known bug 3);
   - all eight finished libraries (PRs #1–#8).
 - **Checks at cccd45c:** tsc is clean and 429 tests pass. Under heavy CPU load, `terrain/bench.test.ts` and one water test can time out; both pass on a re-run.
-- **Running:** three workflows finish the stopped streams. Each stream is finished, then reviewed by an adversary who writes failing tests, then fixed.
+- **The HUD redesign (approved by the user):** `docs/hud.md` and `docs/hud/mockup.html`.
+- **This session:** coordinates. It merges each cloud session's PR into the integration
+  branch once that session's own review is done, checks the result at phone size, and
+  republishes the game links.
+- **Cloud sessions:** each works on its own branch, pushes after every commit, and opens a PR into the integration branch.
 
-  | Workflow | Streams |
-  |---|---|
-  | wf_3a219236-759 | traffic, economy, terminals (terminals has chains merged in) |
-  | wf_1f90242b-267 | ui, kit-nav, bridges-track |
-  | wf_8ff5d1b7-f4b | ground, vehicles-moving (on the latest vehicles-lib) |
+  | Stream | Branch | Session |
+  |---|---|---|
+  | New HUD in the game | `claude/work-hud` | session_01LHmZZcerrUyGq1TSiFcnKZ |
+  | One camera kit in the game and every demo (PR #10) | `claude/work-kit-nav` | session_01DCEbMvXXTVSr8K2R3gAvY8 |
+  | Bridge earthworks and track detail (PR #11) | `claude/work-bridges-track` | session_017X98YbhdPPReFEcpyd4diZ |
+  | Ground with character, shared by every demo (merged early at 4fddbf8) | `claude/work-ground` | session_01Yc7nmze9XbVcixsU4xaTBj |
+  | Vehicle doors and moving parts | `claude/work-vehicles-moving` | session_012fqK9zWp7BH6mQXJMQ8S1Z |
+  | Library vehicles in the game | `claude/work-int-vehicles` | session_01RXnbKFLJQMD26MEQxZ1fy7 |
+  | People in the game | `claude/work-int-people` | session_015U21FuobTAx2YnV2ch42Z1 |
+  | Industries in the game | `claude/work-int-industries` | session_01CMd8cDqGDoUBeqWsmqkX6W |
+  | Bridge types in the game | `claude/work-int-bridges` | session_01PGN5VG2KUzJDurcUfdRkxB |
+  | Water in the game | `claude/work-int-water` | session_01S28Gtoj2KAb54E513p46YQ |
+  | Traffic lane-drop and give-up fixes | `claude/work-traffic` | session_01K6gzHHoJ3nPfxbCNeuPWtv |
+  | Economy review, and a wiring plan in docs/economy.md | `claude/work-economy` | session_01PTFxCsS6mT4JTYZEgkTgrZ |
+  | Freight terminals and supply chains | `claude/work-terminals` | session_01CE6XJ8Bv6zXW5sTZM9iCLw |
 
-  Their branches are local (`work/<stream>`, `-review`, `-2`) and land here once they pass. If this session stops before then, re-run the `claude/wip-*` streams from the briefs, as before.
+- **Next wave (not started):**
+  - wire the economy and terminals into the live game, from docs/economy.md and docs/terminals.md;
+  - then cyclists;
+  - then make the timing benchmarks robust under CPU load.
+- **Dropped:** the UI fix stream for the old dock; the new HUD supersedes it.
 - **New preview links (this account):**
 
   | What | Link |
@@ -38,6 +56,8 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   | People | https://claude.ai/artifact/9FaghH7bkVoAN7bfWR9MqJ |
   | Bridges | https://claude.ai/artifact/L72vN7hP41VjDp29fJnBLd |
   | Industries | https://claude.ai/artifact/6JyuqJ7Tdb5m2p4hYyhJzR |
+  | HUD mock-up | https://claude.ai/artifact/WGbq3v6p161GpesZehQ1gW |
+  | Early look (HUD and ground, before review) | https://claude.ai/artifact/7YPVNSXYBMSRNRTG41zGJY |
 
 ## The game and previews (published artifacts, owned by the org account)
 

@@ -186,6 +186,8 @@ export class NavCore {
   apply(): void { /* no camera here */ }
 
   get gesture(): Gesture { return this.mode; }
+  /** where the view is heading: an animation's end, or the view itself */
+  get goal(): View { return this.anim ? this.anim.to : this.view; }
   /** a finger is down, or the view is still moving on its own */
   get busy() { return this.ptrs.size > 0 || !!this.anim || !!(this.flingV.x || this.flingV.z) || this.keys.size > 0; }
   get pointers() { return this.ptrs.size; }

@@ -4,7 +4,7 @@
 //
 //   npx vite --port 4271 &                     (or set BASE to a running server)
 //   npm i --no-save playwright-core@1.56       (or put it anywhere on NODE_PATH)
-//   node e2e/nav.e2e.mjs [page ...]            pages: game water vehicles people bridges industries
+//   node e2e/nav.e2e.mjs [page ...]            pages: game water vehicles people bridges industries ground
 //
 // Each check moves the view and measures what matters: that the ground grabbed stays under the
 // finger (in screen pixels), that zoom, turn and tilt change the way they should, that taps fire
@@ -23,6 +23,7 @@ const PAGES = {
   people: { url: '/people-demo.html', rig: 'window.nav' },
   bridges: { url: '/bridges-demo.html', rig: 'window.nav' },
   industries: { url: '/industries-demo.html', rig: 'window.nav' },
+  ground: { url: '/ground-demo.html', rig: 'window.nav' },
 };
 const only = process.argv.slice(2);
 const names = only.length ? only : Object.keys(PAGES);
@@ -282,7 +283,8 @@ for (const name of names) {
     // a build-mode drag draws a road and never pans
     await reset({ el: 0.9, h: 200 });
     const n0 = await page.evaluate(() => window.proto.net.segs.size);
-    await page.evaluate(() => window.proto.setMode('road'));
+    // (the road tool, as the Build sheet starts it)
+    await page.evaluate(() => (window.proto.startRoadTool ? window.proto.startRoadTool('street') : window.proto.setMode('road')));
     await page.waitForTimeout(100);
     const v0 = await view();
     await touch('touchStart', [[...at(cx - 80, cy + 120), 1]]);
@@ -291,7 +293,7 @@ for (const name of names) {
     await page.waitForTimeout(500);
     const v1 = await view();
     // the drawn road waits in the blueprint bar: tap Build
-    const btn = await page.evaluate(() => { const b = document.querySelector('#bpb'); if (!b || b.disabled) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    const btn = await page.evaluate(() => { const b = document.querySelector('#t-prim button') ?? document.querySelector('#bpb'); if (!b || b.disabled) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
     if (btn) { await freeze(); await quick('touchStart', [[btn.x, btn.y, 1]]); await quick('touchEnd', [[btn.x, btn.y, 1]]); await thaw(); await page.waitForTimeout(800); }
     const n1 = await page.evaluate(() => window.proto.net.segs.size);
     check(name, 'build-mode drag draws, no pan', Math.abs(v1.x - v0.x) + Math.abs(v1.z - v0.z) < 1e-6 && n1 > n0, { segs: [n0, n1] });
@@ -304,7 +306,7 @@ for (const name of names) {
     const v2 = await view();
     const n2 = await page.evaluate(() => window.proto.net.segs.size);
     check(name, 'build-mode pinch zooms, draws nothing', v2.h < h0 * 0.8 && n2 === n1, { h0, h: v2.h, segs: n2 });
-    await page.evaluate(() => window.proto.setMode('look'));
+    await page.evaluate(() => (window.proto.endTool ? window.proto.endTool() : window.proto.setMode('look')));
 
     // a tap on a building opens its card
     await reset({ el: 1.1, h: 160 });
@@ -327,7 +329,10 @@ for (const name of names) {
       await quick('touchEnd', [[spot.x, spot.y, 1]]);
       await thaw();
       await page.waitForTimeout(400);
-      const shown = await page.evaluate(() => { const c = document.querySelector('#card'); const p = document.querySelector('#panel'); return (!!c && !c.classList.contains('hidden')) || (!!p && !p.classList.contains('hidden')); });
+      const shown = await page.evaluate(() => {
+        const open = (q) => { const e = document.querySelector(q); return !!e && !e.hidden && !e.classList.contains('hidden'); };
+        return open('#sheet') || open('#card') || open('#panel');
+      });
       check(name, 'tap a building opens its card', shown, { at: spot });
     }
   }

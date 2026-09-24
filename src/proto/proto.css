@@ -1,19 +1,19 @@
-/* The HUD's design system. Deep forest green panels with faceted (cut) corners, lime tabs and
-   bars, white type, a thin gold rule, and a colourway per mode: green for roads (and looking
-   around), blue for rail, orange for stops. Everything reads its colours from the --mode-*
-   tokens, which body[data-mode] and the .tone-* classes set. */
+/* The HUD's design system (docs/hud.md). Deep forest green panels with a faceted (cut) corner,
+   lime for what's selected, a thin gold rule, white type. Road work is green, rail blue and stops
+   orange: everything reads its accent from the --mode-* tokens, which body[data-mode] and the
+   .tone-* classes set. The layout is the shell's (ui/shell.ts): a status strip and compass at the
+   top, a bar at the bottom, and sheets, a tool strip and a layers pop-over that come and go. */
 :root {
-  --forest-950: #0a261a;
-  --forest-900: #0f3322;
-  --forest-700: #1f5e3f;
-  --forest-600: #2a7a50;
+  --forest: #1f5e3f;
+  --deep: #0f3322;
+  --panel: rgba(15, 51, 34, 0.95);
+  --panel-2: #174a31;
   --lime: #5cb83a;
+  --gold: #b8964e;
   --ink: #0a2414;
-  --gold: #c9a45c;
-  --gold-soft: rgba(201, 164, 92, 0.6);
-  --paper: #ffffff;
-  --muted: rgba(232, 242, 235, 0.74);
-  --line: rgba(255, 255, 255, 0.1);
+  --paper: #f2f5ef;
+  --muted: #b3cbbc;
+  --faint: rgba(242, 245, 239, 0.12);
   --fill: rgba(255, 255, 255, 0.07);
   --money: #f0cf72;
   --bad: #ff8a78;
@@ -25,276 +25,255 @@
   --tap: 44px;   /* the smallest thing a thumb is asked to hit */
   --edge: 8px;   /* gap between the HUD and the screen edge */
   --cut: 12px;   /* the faceted corner on panels */
-  --cut-s: 7px;  /* ... and on buttons */
+  --cut-s: 8px;  /* ... and on buttons */
+  --rail: 72px;  /* the bar's width when it stands up the side (landscape) */
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
   color-scheme: dark;
 }
-/* colourways: bright accent, text on the accent, panel fill (see-through and solid), a mid tone */
+/* colourways: bright accent, text on the accent, a mid tone, a soft wash */
 :root, .tone-road, .tone-look {
-  --mode: #5cb83a; --mode-hi: #8fd96a; --mode-ink: #0a2414; --mode-mid: #2a7a50;
-  --mode-deep: rgba(13, 46, 31, 0.94); --mode-solid: #0e3021; --mode-soft: rgba(92, 184, 58, 0.2);
+  --mode: #5cb83a; --mode-hi: #8fd96a; --mode-ink: #0a2414; --mode-mid: #2a7a50; --mode-soft: rgba(92, 184, 58, 0.2);
 }
 body[data-mode='rail'], .tone-rail {
-  --mode: #3fb0e0; --mode-hi: #86d3f5; --mode-ink: #03233a; --mode-mid: #1f5a92;
-  --mode-deep: rgba(12, 35, 64, 0.95); --mode-solid: #0c2340; --mode-soft: rgba(63, 176, 224, 0.2);
+  --mode: #3fb0e0; --mode-hi: #86d3f5; --mode-ink: #03233a; --mode-mid: #1f5a92; --mode-soft: rgba(63, 176, 224, 0.2);
 }
 body[data-mode='stop'], .tone-stop {
-  --mode: #f28c28; --mode-hi: #ffb466; --mode-ink: #361402; --mode-mid: #a8441a;
-  --mode-deep: rgba(58, 22, 9, 0.95); --mode-solid: #3a1609; --mode-soft: rgba(242, 140, 40, 0.22);
+  --mode: #f28c28; --mode-hi: #ffb466; --mode-ink: #361402; --mode-mid: #a8441a; --mode-soft: rgba(242, 140, 40, 0.22);
 }
+.tone-look { --mode: #5cb83a; --mode-hi: #8fd96a; --mode-ink: #0a2414; --mode-mid: #2a7a50; --mode-soft: rgba(92, 184, 58, 0.2); }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #a9cbe3; font: 400 13px/1.35 var(--font-ui); color: var(--paper); user-select: none; -webkit-user-select: none; overscroll-behavior: none; }
 #c { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; touch-action: none; }
-#ui { position: fixed; inset: 0; pointer-events: none; }
-.hidden { display: none !important; }
+#ui { position: fixed; inset: 0; pointer-events: none; --chrome-b: 62px; }
+#ui > *, #hud-top > * { pointer-events: auto; }
+[hidden], .hidden { display: none !important; }
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* icons take their size from the text around them */
 .ic { width: 1.3em; height: 1.3em; flex: none; stroke-width: 1.9; vertical-align: -0.28em; }
 
 button { font: inherit; font-weight: 600; color: inherit; background: none; border: 0; margin: 0; padding: 0 10px; cursor: pointer; min-width: var(--tap); min-height: var(--tap); display: inline-flex; align-items: center; justify-content: center; gap: 6px; touch-action: manipulation; }
-button:disabled { opacity: 0.45; cursor: default; }
+button:disabled, button[aria-disabled='true'] { cursor: default; }
+button:disabled { opacity: 0.45; }
 button:active:not(:disabled) { filter: brightness(1.18); }
 button:focus-visible { outline: 2px solid var(--mode-hi); outline-offset: -2px; }
-/* a button with one corner cut, the house shape */
-.facet, button.primary, button.danger, #bpc { clip-path: polygon(0 0, calc(100% - var(--cut-s)) 0, 100% var(--cut-s), 100% 100%, 0 100%); }
-button.primary, button.danger { font: 700 13px/1 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 14px 0; }
-button.primary { background: var(--mode); color: var(--mode-ink); }
-button.danger { background: var(--danger); color: #fff; }
-#bpc { background: var(--fill); }
+/* the brand's cut corner, top right */
+.facet { clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%); }
+.badge { flex: none; display: grid; place-items: center; width: 32px; height: 32px; background: var(--mode); color: var(--mode-ink); font-style: normal; clip-path: polygon(0 0, 100% 0, 100% 72%, 72% 100%, 0 100%); }
+.badge .ic { width: 20px; height: 20px; stroke-width: 2; }
 
-/* panels: see-through fill, two corners cut on the diagonal like a rock face */
-.panel { background: var(--mode-deep); color: var(--paper); pointer-events: auto; transition: background-color 0.25s;
-  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
+/* action buttons: plain, primary (the mode's colour) and danger */
+.act { min-height: var(--tap); padding: 0 12px; background: var(--panel-2); font: 700 12px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.act .ic { width: 20px; height: 20px; }
+.act span { padding-top: 1px; }
+.act.primary, .act.danger { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
+.act.primary { background: var(--mode); color: var(--mode-ink); }
+.act.danger { background: var(--danger); color: #fff; }
 /* section labels: small capitals on an accent tab with a slanted end */
 .tab { display: inline-block; align-self: flex-start; background: var(--mode); color: var(--mode-ink); font: 700 10.5px/1 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 13px 3px 7px; clip-path: polygon(0 0, 100% 0, calc(100% - 7px) 100%, 0 100%); white-space: nowrap; }
-/* the low-poly ridge behind headings, in the mode's colours */
-.ridge { position: absolute; right: 0; bottom: 0; width: 64%; height: 46px; max-height: 70%; pointer-events: none; }
-.ridge .r1 { fill: var(--mode); fill-opacity: 0.22; }
-.ridge .r2 { fill: var(--mode-mid); fill-opacity: 0.4; }
-.ridge .r3 { fill: var(--mode-mid); fill-opacity: 0.12; }
-
-/* ---------------- header: name, game speed, the town at a glance ---------------- */
-#topbar { position: absolute; top: calc(var(--edge) + var(--safe-t)); left: calc(var(--edge) + var(--safe-l)); right: calc(var(--edge) + var(--safe-r) + var(--tap) + 6px); display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-#info { position: relative; width: 100%; max-width: 400px; padding: 2px 6px 8px 8px; background: var(--mode-deep); border-top: 3px solid var(--mode); pointer-events: auto; overflow: hidden; transition: background-color 0.25s;
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%); }
-#info > :not(.ridge) { position: relative; }
-#info .bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.mark { width: 28px; height: 28px; flex: none; }
-.wm { font: 700 20px/1 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; padding-top: 4px; white-space: nowrap; }
-#speed { display: flex; gap: 1px; }
-#speed button { min-width: var(--tap); padding: 0; font: 700 14px/1 var(--font-ui); color: var(--muted); }
-#speed button .ic { width: 18px; height: 18px; }
-#speed button.on { background: var(--mode); color: var(--mode-ink); clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px)); }
-#speed button[data-sp='0'].on { background: var(--gold); color: var(--ink); }
-/* (it wraps rather than cut anything off, but the widths below keep it to one line down to 360 px) */
-#stats { width: 100%; min-height: 36px; justify-content: flex-start; flex-wrap: wrap; gap: 0 7px; padding: 0 2px; margin-top: 3px; border-top: 1px solid var(--gold-soft); font-weight: 400; font-size: 12.5px; font-variant-numeric: tabular-nums; }
-/* a thumb-sized target without making the header any taller */
-#stats::after { content: ''; position: absolute; left: 0; right: 0; top: 0; bottom: -8px; }
-.st { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.st .ic { width: 15px; height: 15px; color: var(--mode); }
-.st b { font-weight: 600; }
-.st em { font: 700 10px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mode-hi); padding: 3px 0 0 2px; }
-.st.pf { margin-left: auto; }
-.st.pf .ic { color: var(--muted); }
-#stats[aria-expanded='true'] .pf .ic { color: var(--mode); }
-body.paused #st-clock { animation: blink 1.4s steps(2, jump-none) infinite; }
-body.paused #st-rush { color: var(--gold); }
-@keyframes blink { 50% { opacity: 0.35; } }
-#perf { padding: 5px 2px 0; border-top: 1px solid var(--line); font-size: 11px; line-height: 1.45; color: var(--muted); font-variant-numeric: tabular-nums; }
-#perf .tab { margin-right: 6px; vertical-align: 1px; }
-/* Narrow phones. The top row has to hold the name and four 44 px speed buttons, and the stats
-   line six readouts. Below 400 px the wordmark and the gaps tighten and the performance icon goes
-   (the whole line is still the button); below 375 px the wordmark leaves the mark on its own
-   (screen readers still hear it) and the readouts close up a little more. */
-@media (max-width: 399px) {
-  .brand { gap: 6px; }
-  .wm { font-size: 16px; letter-spacing: 0.05em; }
-  #stats { gap: 0 6px; }
-  .st.pf { display: none; }
-}
-@media (max-width: 374px) {
-  .wm { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .st { gap: 3px; }
-  .st .ic { width: 13px; height: 13px; }
-}
-
-/* the card for whatever was tapped */
-#card { width: 100%; max-width: 400px; padding: 9px 14px 10px 12px; font-size: 12.5px; line-height: 1.4; box-shadow: inset 3px 0 0 var(--mode); }
-#card b { display: flex; align-items: center; gap: 6px; font: 700 15px/1.2 var(--font-display); letter-spacing: 0.01em; padding-top: 2px; }
-#card b .ic { color: var(--mode); }
-#card div { color: var(--muted); margin-top: 2px; }
-#card .use { color: var(--mode-hi); font-weight: 600; }
-
-/* ---------------- camera buttons ---------------- */
-#side { position: absolute; top: calc(var(--edge) + var(--safe-t)); right: calc(var(--edge) + var(--safe-r)); display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
-#side button { position: relative; width: var(--tap); height: var(--tap); padding: 0; background: var(--mode-deep); color: #fff; transition: background-color 0.25s;
-  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px)); }
-#side button .ic { width: 22px; height: 22px; }
-#side button.on { background: var(--mode); color: var(--mode-ink); }
-#compass::before { content: ''; position: absolute; inset: 7px; border: 1.5px solid rgba(255, 255, 255, 0.3); border-radius: 50%; }
-#needle { display: inline-flex; transition: transform 0.1s; }
-#needle .needle { width: 24px; height: 24px; }
-
-/* ---------------- the dock: hint, blueprint, build drawer, tools ---------------- */
-#dock { position: absolute; left: calc(var(--edge) + var(--safe-l)); right: calc(var(--edge) + var(--safe-r)); bottom: calc(var(--edge) + var(--safe-b)); display: flex; flex-direction: column; gap: 6px; }
-#hint { align-self: center; display: flex; align-items: flex-start; gap: 7px; max-width: 100%; padding: 6px 13px 6px 9px; background: var(--mode-deep); box-shadow: inset 3px 0 0 var(--mode); font-size: 12.5px; line-height: 1.35;
-  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
-#hint:empty { display: none; }
-#hint .ic { width: 16px; height: 16px; margin-top: 1px; color: var(--mode); }
-/* three lines is enough for the longest hint on a 360 px phone */
-#hint span { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-
-#bp { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; font-size: 13px; border-top: 3px solid var(--mode); }
-#bp .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-#bp .what { display: flex; align-items: center; gap: 6px; }
-#bp .what > .ic, #bp .lift > .ic { color: var(--mode); }
-#bp .btns { display: flex; gap: 6px; margin-left: auto; }
-#bp .demo { display: flex; gap: 8px; padding: 8px 10px; background: rgba(210, 63, 44, 0.24); box-shadow: inset 3px 0 0 #ff5a44; font-size: 12.5px; line-height: 1.4; }
-#bp .demo > .ic { width: 20px; height: 20px; color: #ff8a78; }
-#bp .demo b { color: #ffc0b4; }
-#bp .lift { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
-#bp .lift b { color: #fff; }
-#bp .prof { width: 100%; height: 62px; background: rgba(0, 0, 0, 0.25); }
 .cost { color: var(--money); font-weight: 700; font-variant-numeric: tabular-nums; }
 .bad { display: flex; align-items: flex-start; gap: 6px; color: var(--bad); font-size: 12.5px; }
 .bad .ic { width: 16px; height: 16px; margin-top: 1px; }
 
-/* the build drawer: shape, type and height/crossing rows, with the mode's tab up the side */
-#build { display: grid; grid-template-columns: 22px 1fr; }
-#build > .tab { align-self: stretch; writing-mode: vertical-rl; transform: rotate(180deg); clip-path: none; display: flex; align-items: center; justify-content: center; padding: 0 3px 0 2px; font-size: 10px; letter-spacing: 0.16em; }
-#build .rows { display: flex; flex-direction: column; padding: 2px 4px; min-width: 0; }
-#build .rows > div + div { border-top: 1px solid var(--line); }
-#grade, #kinds, #rtype, .seg { display: grid; gap: 2px; }
-#grade { grid-template-columns: auto auto 1fr; }
-#kinds { grid-template-columns: repeat(3, 1fr); }
-.seg { grid-template-columns: repeat(3, 1fr); }
-#build button { color: var(--muted); font-size: 12px; padding: 0 6px; gap: 5px; white-space: nowrap; }
-#build button .ic { width: 18px; height: 18px; }
-#grade > button { color: #fff; }
-#grade > button .ic { color: var(--mode); }
-#rtype button { flex-direction: column; gap: 3px; min-height: 50px; font-size: 11px; padding: 0 2px; }
-#build button.on { background: var(--mode-soft); color: #fff; box-shadow: inset 0 -3px 0 var(--mode); }
-#build button.on .ic { color: var(--mode-hi); }
+/* ---------------- top: status strip, stats drawer, compass ---------------- */
+#hud-top { position: absolute; top: calc(var(--edge) + var(--safe-t)); left: calc(var(--edge) + var(--safe-l)); right: calc(var(--edge) + var(--safe-r)); display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+#status { align-self: stretch; display: flex; align-items: stretch; height: var(--tap); background: var(--panel); border-bottom: 2px solid var(--gold); }
+#status .mk { flex: none; width: var(--tap); display: grid; place-items: center; background: var(--lime); }
+#status .mark { width: 30px; height: 30px; }
+#clockbtn { flex: 1; min-width: 0; justify-content: flex-start; gap: 9px; padding: 0 8px 0 10px; text-align: left; }
+#st-clock { font: 700 17px/1 var(--font-display); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; padding-top: 2px; }
+#st-rush { font: 700 10.5px/1 var(--font-display); font-style: normal; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lime); white-space: nowrap; padding-top: 2px; }
+body.paused #st-rush { color: var(--gold); }
+.money { margin-left: auto; font: 600 14px/1 var(--font-ui); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.money:empty { display: none; }
+#clockbtn .chev { margin-left: auto; color: var(--muted); display: inline-flex; transition: transform 0.18s; }
+.money:not(:empty) + .chev { margin-left: 0; }
+#clockbtn[aria-expanded='true'] .chev { transform: rotate(180deg); }
+#sp-pause, #sp-rate { flex: none; width: var(--tap); padding: 0; border-left: 1px solid var(--faint); font: 700 15px/1 var(--font-display); }
+#sp-pause .ic { width: 20px; height: 20px; }
+#sp-pause[aria-pressed='true'] { background: var(--gold); color: var(--ink); }
+#sp-rate { color: var(--muted); }
+#sp-rate.on { background: var(--lime); color: var(--ink); }
+#drawer { align-self: stretch; margin-top: -6px; padding: 8px 10px 8px 12px; background: var(--panel); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-variant-numeric: tabular-nums; }
+#drawer .sts { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.st { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--muted); }
+.st .ic { width: 17px; height: 17px; color: var(--mode); }
+.st b { color: var(--paper); font-weight: 600; }
+#perfbtn { padding: 0 8px; background: var(--panel-2); font: 700 11px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+#perfbtn.on { color: var(--paper); box-shadow: inset 0 -2px 0 var(--lime); }
+#perfbtn .ic { width: 17px; height: 17px; }
+#perf { flex: 0 0 100%; padding-top: 6px; border-top: 1px solid var(--faint); font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+#compass { position: relative; width: var(--tap); height: var(--tap); padding: 0; border-radius: 50%; background: var(--panel); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+#compass::before { content: ''; position: absolute; inset: 6px; border: 1.5px solid rgba(255, 255, 255, 0.28); border-radius: 50%; }
+#needle { display: inline-flex; }
+#needle .needle { width: 26px; height: 26px; }
+#firstrun { position: absolute; top: calc(var(--tap) + 10px); left: 0; right: calc(var(--tap) + 8px); margin: 0 auto; width: fit-content; max-width: calc(100% - var(--tap) - 8px); display: flex; align-items: center; gap: 8px; padding: 9px 13px 9px 10px; background: var(--panel); box-shadow: inset 3px 0 0 var(--lime); font-size: 13px; line-height: 1.3; pointer-events: none; }
+#firstrun .ic { width: 18px; height: 18px; color: var(--lime); }
 
-#tools { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; padding: 4px; background: var(--mode-deep); border-top: 3px solid var(--mode); pointer-events: auto; transition: background-color 0.25s;
-  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
-#tools button { flex-direction: column; gap: 4px; min-height: 52px; min-width: 0; padding: 2px 0 0; color: rgba(255, 255, 255, 0.8); font: 700 10.5px/1 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; }
-#tools button .ic { width: 23px; height: 23px; stroke-width: 1.8; }
-#tools button.on { background: var(--mode); color: var(--mode-ink);
-  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px)); }
-#tools button.on .ic { stroke-width: 2.1; }
+/* ---------------- hint: a line of help over the map ---------------- */
+#hint { position: absolute; left: 50%; bottom: calc(var(--chrome-b) + 8px); transform: translateX(-50%); width: max-content; display: flex; align-items: flex-start; gap: 7px; padding: 7px 13px 7px 10px; background: var(--panel); box-shadow: inset 3px 0 0 var(--mode); font-size: 12.5px; line-height: 1.35; pointer-events: none;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+#hint .ic { width: 16px; height: 16px; margin-top: 1px; color: var(--mode); }
+#hint span { min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
-/* ---------------- side panel: a column down the right, the map beside it stays visible ---------------- */
-#panel { position: absolute; right: calc(var(--edge) + var(--safe-r)); top: calc(var(--edge) + var(--safe-t)); bottom: calc(80px + var(--safe-b)); width: min(56vw, 320px); overflow: auto; overscroll-behavior: contain; padding: 0 10px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; z-index: 6; border-top: 3px solid var(--mode); scrollbar-width: thin; }
-#panel .ph { position: sticky; top: 0; z-index: 2; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 4px; margin: 0 -10px; padding: 0 0 0 10px; min-height: 52px; background: var(--mode-solid); border-bottom: 1px solid var(--gold); overflow: hidden; }
-#panel .ph > :not(.ridge) { position: relative; }
-#panel .pt { display: flex; align-items: center; gap: 8px; min-width: 0; font: 700 15px/1.1 var(--font-display); letter-spacing: 0.02em; padding-top: 2px; }
-#panel .badge { flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin-top: -2px; background: var(--mode); color: var(--mode-ink); font-style: normal; clip-path: polygon(0 0, 100% 0, 100% 72%, 72% 100%, 0 100%); }
-#panel .badge .ic { width: 19px; height: 19px; stroke-width: 2; }
-#px { flex: none; color: #fff; }
-#px .ic { width: 22px; height: 22px; }
-#panel .tab { margin-bottom: 1px; }
-#panel small { display: block; color: var(--muted); font-weight: 400; font-size: 11.5px; line-height: 1.35; }
-#panel .sub .ic { width: 14px; height: 14px; margin-right: 4px; color: var(--mode-hi); vertical-align: -2px; }
-#panel .grp { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
-#panel .ph + .grp { border-top: 0; padding-top: 2px; }
-/* list rows: a title line (with its icon) and a line of detail */
-#panel .grp > button:not(.primary):not(.danger), #panel > button, #panel .rl button { width: 100%; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 7px 10px; text-align: left; background: var(--fill); clip-path: polygon(0 0, calc(100% - var(--cut-s)) 0, 100% var(--cut-s), 100% 100%, 0 100%); }
-#panel button b { display: flex; align-items: center; gap: 6px; font-weight: 600; }
-#panel button b .ic { color: var(--mode-hi); }
-#panel button b .tick { width: 16px; height: 16px; margin-left: auto; color: var(--mode); }
-#panel button.on { background: var(--mode-soft); box-shadow: inset 3px 0 0 var(--mode); }
-#panel .grp > button.primary, #panel .grp > button.danger, .plan > button.primary { align-self: stretch; }
-#panel .score { display: flex; gap: 10px; align-items: center; }
-#panel .score b { font: 700 14px/1.2 var(--font-display); }
-#panel .bar { flex: 0 0 46px; height: 46px; border-radius: 50%; background: rgba(0, 0, 0, 0.3); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.14); position: relative; overflow: hidden; display: block; }
-#panel .bar i { position: absolute; left: 0; bottom: 0; height: 100%; display: block; opacity: 0.85; }
-#panel .warn { display: flex; align-items: flex-start; gap: 6px; color: var(--warn); font-size: 12px; }
-#panel .warn .ic { width: 16px; height: 16px; }
-#panel .plan { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: rgba(255, 255, 255, 0.05); clip-path: polygon(0 0, calc(100% - var(--cut-s)) 0, 100% var(--cut-s), 100% 100%, 0 100%); }
-#panel .plan .row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-#panel .plan.no { opacity: 0.75; }
-#panel ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
-#panel .xs { width: 100%; height: 88px; }
-#panel .xs text { fill: #dde7e0; font-size: 9px; }
-#panel .xs text.h { fill: #a3b6aa; font-size: 9.5px; }
-/* road picker filters */
-#panel .fl { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-#panel .lbl { flex: 0 0 100%; margin-top: 2px; color: var(--muted); font: 700 10px/1 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; }
-#panel .fl button { padding: 0 9px; font-size: 12.5px; background: var(--fill); clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%); }
-#panel .fl button.on { background: var(--mode); color: var(--mode-ink); box-shadow: none; }
-#panel .fl button.no { background: rgba(229, 72, 59, 0.34); }
-#panel .fl .ic { width: 18px; height: 18px; }
-/* the with/without mark sits in the chip's corner, so the chip keeps its width as it cycles */
-#panel .fl button[data-t3] { position: relative; }
-#panel .fl .tick { position: absolute; right: 3px; bottom: 3px; width: 13px; height: 13px; stroke-width: 2.6; }
-#panel .cnt { color: var(--mode-hi); font-size: 12px; font-weight: 600; }
-#panel .rl { display: flex; flex-direction: column; gap: 5px; }
-#panel .rl button { gap: 5px; }
-#panel .rs { display: block; }
-#panel .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
-#panel .row3 button { background: var(--fill); }
-#panel .row3 button.on { background: var(--mode); color: var(--mode-ink); box-shadow: none; }
+/* ---------------- bottom bar ---------------- */
+#bar { position: absolute; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px calc(8px + var(--safe-r)) calc(4px + var(--safe-b)) calc(8px + var(--safe-l)); background: var(--panel); border-top: 2px solid var(--gold); }
+#bar button { height: 52px; flex-direction: column; gap: 4px; padding: 0; font: 700 10.5px/1 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+#bar button .ic { width: 24px; height: 24px; }
+#bar button[aria-expanded='true'] { background: var(--lime); color: var(--ink); clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
 
-/* with a panel open, the HUD steps aside for it */
-body.paneled #build, body.paneled #bp, body.paneled #side, body.paneled #topbar { display: none !important; }
-body.paneled #hint { max-width: calc(100vw - min(56vw, 320px) - 24px); align-self: flex-start; font-size: 11.5px; }
-body.paneled #hint span { -webkit-line-clamp: 5; line-clamp: 5; }
+/* ---------------- sheets ---------------- */
+.sheet { position: absolute; left: 0; right: 0; bottom: var(--chrome-b); max-height: min(55dvh, calc(100dvh - var(--chrome-b) - var(--safe-t) - 64px)); display: flex; flex-direction: column; background: var(--panel); border-top: 3px solid var(--mode); --cut: 18px; }
+.sheet.enter, #tool.enter { animation: up 0.18s ease-out; }
+@keyframes up { from { transform: translateY(16px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .sheet.enter, #tool.enter { animation: none; } }
+.sheet header { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 4px 6px 14px; }
+.sheet header .back { margin-left: -10px; padding: 0; color: var(--muted); }
+.sheet .ttl { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.sheet h2 { margin: 0; font: 700 18px/1.05 var(--font-display); letter-spacing: 0.04em; text-transform: uppercase; overflow-wrap: anywhere; padding-top: 3px; }
+.sheet .sub { color: var(--muted); font-size: 12.5px; line-height: 1.3; }
+.sheet .close { flex: none; padding: 0; color: var(--muted); }
+.sheet .close .ic, .sheet .back .ic { width: 24px; height: 24px; }
+.stabs { flex: none; display: flex; gap: 6px; padding: 0 12px 10px 14px; overflow-x: auto; scrollbar-width: none; }
+.stabs::-webkit-scrollbar { display: none; }
+.stabs button { flex: none; gap: 6px; padding: 0 12px; background: var(--panel-2); font: 700 11.5px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+.stabs button .ic { width: 18px; height: 18px; }
+.stabs button span { padding-top: 1px; }
+.stabs button[aria-selected='true'] { background: var(--mode); color: var(--mode-ink); }
+.sb { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px 14px 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; scrollbar-width: thin; }
+.sb .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.card { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; min-height: 72px; padding: 10px 11px; text-align: left; background: var(--panel-2); border-left: 3px solid var(--forest); font-weight: 400; }
+.card b { display: flex; align-items: center; gap: 7px; font: 700 14px/1.15 var(--font-display); letter-spacing: 0.02em; }
+.card b .ic { width: 20px; height: 20px; color: var(--mode-hi); }
+.card b span { padding-top: 2px; }
+.card > span { color: var(--muted); font-size: 12px; line-height: 1.3; }
+.card.on { border-left-color: var(--mode); background: var(--mode-soft); }
+.card.locked { opacity: 0.6; border-left-color: var(--gold); }
+.card.locked b .ic { color: var(--muted); }
+.card .why { color: var(--gold) !important; }
+.note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.facts { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 0; font-variant-numeric: tabular-nums; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; text-align: right; font-weight: 600; }
+.meter { height: 6px; background: var(--panel-2); }
+.meter i { display: block; height: 100%; background: var(--mode); }
+.lrow { display: grid; grid-template-columns: 34px 1fr; gap: 2px 10px; align-items: center; width: 100%; padding: 8px 4px; text-align: left; font-weight: 400; border-bottom: 1px solid var(--faint); }
+.lrow .num { grid-row: span 2; width: 34px; height: 34px; display: grid; place-items: center; background: var(--mode); color: var(--mode-ink); }
+.lrow .num .ic { width: 20px; height: 20px; }
+.lrow b { font: 700 14px/1.2 var(--font-display); }
+.lrow span:not(.num) { color: var(--muted); font-size: 12px; }
+
+/* sheet content carried over from the old side panel: groups, list rows, filters, plans */
+.sb small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; line-height: 1.35; }
+.sb .sub .ic { width: 14px; height: 14px; margin-right: 4px; color: var(--mode-hi); vertical-align: -2px; }
+.sb .grp { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--faint); }
+.sb > .grp:first-child { border-top: 0; padding-top: 0; }
+.sb .grp > button:not(.act), .sb > button:not(.act):not(.lrow), .sb .rl button { width: 100%; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 7px 10px; text-align: left; background: var(--fill); clip-path: polygon(0 0, calc(100% - var(--cut-s)) 0, 100% var(--cut-s), 100% 100%, 0 100%); }
+.sb button b { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.sb button b .ic { color: var(--mode-hi); }
+.sb button b .tick { width: 16px; height: 16px; margin-left: auto; color: var(--mode); }
+.sb button.on:not(.card) { background: var(--mode-soft); box-shadow: inset 3px 0 0 var(--mode); }
+.sb .grp > .act { align-self: stretch; }
+.sb .score { display: flex; gap: 10px; align-items: center; }
+.sb .score b { font: 700 14px/1.2 var(--font-display); }
+.sb .bar { flex: 0 0 46px; height: 46px; border-radius: 50%; background: rgba(0, 0, 0, 0.3); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.14); position: relative; overflow: hidden; display: block; }
+.sb .bar i { position: absolute; left: 0; bottom: 0; height: 100%; display: block; opacity: 0.85; }
+.sb .warn { display: flex; align-items: flex-start; gap: 6px; color: var(--warn); font-size: 12px; }
+.sb .warn .ic { width: 16px; height: 16px; }
+.sb .plan { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: rgba(255, 255, 255, 0.05); clip-path: polygon(0 0, calc(100% - var(--cut-s)) 0, 100% var(--cut-s), 100% 100%, 0 100%); }
+.sb .plan .row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.sb .plan.no { opacity: 0.75; }
+.sb .plan > .act { align-self: stretch; }
+.sb ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.sb .xs { width: 100%; height: 88px; }
+.sb .xs text { fill: #dde7e0; font-size: 9px; }
+.sb .xs text.h { fill: #a3b6aa; font-size: 9.5px; }
+.sb .fl { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.sb .lbl { flex: 0 0 100%; margin-top: 2px; color: var(--gold); font: 700 10px/1 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; }
+.sb .fl button { padding: 0 10px; font-size: 12.5px; background: var(--fill); clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%); }
+.sb .fl button.on { background: var(--mode); color: var(--mode-ink); box-shadow: none; }
+.sb .fl button.no { background: rgba(229, 72, 59, 0.34); }
+.sb .fl .ic { width: 18px; height: 18px; }
+.sb .fl button[data-t3] { position: relative; }
+.sb .fl .tick { position: absolute; right: 3px; bottom: 3px; width: 13px; height: 13px; stroke-width: 2.6; }
+.sb .cnt { color: var(--mode-hi); font-size: 12px; font-weight: 600; }
+.sb .rl { display: flex; flex-direction: column; gap: 5px; }
+.sb .rl button { gap: 5px; }
+.sb .rs { display: block; max-width: 100%; }
+.sb .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.sb .row3 button { background: var(--fill); }
+.sb .row3 button.on { background: var(--mode); color: var(--mode-ink); box-shadow: none; }
+
+/* ---------------- layers pop-over ---------------- */
+#layers { position: absolute; right: calc(var(--edge) + var(--safe-r)); bottom: calc(var(--chrome-b) + 8px); width: min(290px, calc(100% - 2 * var(--edge))); max-height: calc(100dvh - var(--chrome-b) - var(--safe-t) - 70px); overflow-y: auto; padding: 8px; background: var(--panel); border-top: 3px solid var(--lime); --cut: 14px; }
+#layers h3 { margin: 6px 6px 6px; font: 700 12px/1 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); }
+.toggle { width: 100%; justify-content: flex-start; gap: 10px; padding: 4px 8px; text-align: left; font-weight: 600; }
+.toggle > .ic { width: 20px; height: 20px; color: var(--lime); }
+.toggle .tl { display: flex; flex-direction: column; gap: 1px; }
+.toggle small { color: var(--gold); font-weight: 400; font-size: 11.5px; }
+.toggle:disabled { opacity: 0.7; }
+.toggle:disabled > .ic { color: var(--muted); }
+.toggle .dot { flex: none; margin-left: auto; width: 34px; height: 20px; border-radius: 10px; background: var(--panel-2); position: relative; }
+.toggle .dot::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform 0.15s; }
+.toggle[aria-pressed='true'] .dot { background: var(--lime); }
+.toggle[aria-pressed='true'] .dot::after { transform: translateX(14px); background: var(--deep); }
+.seg { display: flex; background: var(--panel-2); }
+#layers .seg { margin: 4px 4px 4px; }
+#layers .seg button { flex: 1; font: 700 12px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+#layers .seg button[aria-pressed='true'] { background: var(--forest); color: var(--paper); box-shadow: inset 0 -3px 0 var(--lime); }
+
+/* ---------------- tool strip: replaces the bar while a tool is in use ---------------- */
+#tool { position: absolute; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'what acts' 'opts opts'; align-items: center; gap: 6px 8px; padding: 6px calc(8px + var(--safe-r)) calc(6px + var(--safe-b)) calc(8px + var(--safe-l)); background: var(--panel); border-top: 3px solid var(--mode); }
+#tool .what { grid-area: what; min-width: 0; display: flex; align-items: center; gap: 9px; }
+#tool .tw { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+#tool .tw b { font: 700 15px/1.1 var(--font-display); letter-spacing: 0.02em; padding-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tool .tw span { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tool .acts { grid-area: acts; display: flex; gap: 4px; }
+#tool .acts .act { padding: 0 10px; }
+#tool #t-undo, #tool #t-cancel { padding: 0; width: var(--tap); }
+#t-prim { display: contents; }
+#tool .opts { grid-area: opts; display: flex; align-items: stretch; gap: 1px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+#tool .opts:empty { display: none; }
+#tool .opts::-webkit-scrollbar { display: none; }
+/* option buttons: an icon over a small label, like the bar's */
+#tool .opts button { flex: 1 0 auto; min-width: var(--tap); flex-direction: column; gap: 3px; padding: 0 3px; background: var(--panel-2); color: var(--muted); font: 700 10px/1 var(--font-display); letter-spacing: 0.04em; text-transform: uppercase; }
+#tool .opts button .ic { width: 19px; height: 19px; }
+#tool .opts button.on { background: var(--mode-soft); color: var(--paper); box-shadow: inset 0 -3px 0 var(--mode); }
+#tool .opts button.on .ic { color: var(--mode-hi); }
+#tool .opts .sep { flex: none; width: 1px; margin: 6px 2px; background: var(--faint); }
+/* when the options run off the edge (a narrow phone), the edge fades to say there's more */
+#tool .opts.more { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+#tool .opts.more.end { -webkit-mask-image: none; mask-image: none; }
+
+/* the blueprint card above the tool strip: length, cost, what it knocks down, its long section */
+#tpanel { position: absolute; left: calc(var(--edge) + var(--safe-l)); right: calc(var(--edge) + var(--safe-r)); bottom: calc(var(--chrome-b) + 6px); max-height: min(44dvh, calc(100dvh - var(--chrome-b) - var(--safe-t) - 120px)); overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; background: var(--panel); border-top: 3px solid var(--mode); font-size: 13px; }
+#tpanel .what { display: flex; align-items: center; gap: 6px; }
+#tpanel .what > .ic, #tpanel .lift > .ic { color: var(--mode); }
+#tpanel .demo { display: flex; gap: 8px; padding: 8px 10px; background: rgba(210, 63, 44, 0.24); box-shadow: inset 3px 0 0 #ff5a44; font-size: 12.5px; line-height: 1.4; }
+#tpanel .demo > .ic { width: 20px; height: 20px; color: #ff8a78; }
+#tpanel .demo b { color: #ffc0b4; }
+#tpanel .lift { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+#tpanel .lift b { color: #fff; }
+#tpanel .prof { width: 100%; height: 56px; background: rgba(0, 0, 0, 0.25); }
 
 /* ---------------- landscape: a short, wide screen ----------------
-   Height is what runs out, so the HUD spreads sideways. The header is one row (name, stats,
-   speed); the build drawer puts its rows side by side and the tools sit icon beside label; and
-   the blueprint moves up beside the hint, right-aligned clear of the camera buttons, never taller
-   than the gap under the header (anything more scrolls inside it). The sums behind the numbers:
-   header 8 + 49 px, drawer 93 px, tools 51 + 8 px, 6 px gaps between. */
+   Height is what runs out, so the bar stands up the right-hand side as a short column, the status
+   strip keeps to the top left with the compass in the top right corner, sheets open as a panel
+   down the right beside the bar, and the tool strip is one row. */
 @media (max-height: 500px) and (min-width: 600px) {
-  #info { width: auto; max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; padding: 1px 4px 1px 8px;
-    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%); }
-  #info .bar { display: contents; }
-  #info .bar > * { position: relative; }
-  #stats { order: 1; width: auto; flex-wrap: nowrap; min-height: var(--tap); margin: 0; padding: 0 2px 0 10px; border-top: 0; border-left: 1px solid var(--gold-soft); }
-  #stats::after { bottom: 0; }
-  #speed { order: 2; }
-  #perf { order: 3; flex: 0 0 100%; margin-bottom: 4px; }
-  #side { gap: 4px; }
-
-  #dock { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, calc(480px + var(--tap) + 6px)); grid-template-areas: 'hint bp' 'build build' 'tools tools'; align-items: end; gap: 0 8px; }
-  /* (margins rather than row gaps, so a hidden drawer leaves no double gap) */
-  #dock > * { margin-bottom: 6px; }
-  #dock > #tools { margin-bottom: 0; }
-  /* beside the blueprint the hint is narrow, so it may run to five lines */
-  #hint { grid-area: hint; align-self: end; justify-self: start; }
-  #hint span { -webkit-line-clamp: 5; line-clamp: 5; }
-  /* with no blueprint the hint has the whole width, centred as in portrait (the :where keeps this
-     weaker than the panel rule below, which moves it out from under the side panel) */
-  :where(#dock:has(#bp.hidden)) #hint { grid-column: 1 / -1; justify-self: center; max-width: calc(100% - 2 * (var(--tap) + 6px)); }
-  #bp { grid-area: bp; margin-right: calc(var(--tap) + 6px); max-height: calc(100dvh - var(--safe-t) - var(--safe-b) - 230px); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-  #bp .prof { height: 48px; }
-  #build { grid-area: build; }
-  #build .rows { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
-  #build .rows > div + div { border-top: 0; }
-  #grade { grid-area: 1 / 1; }
-  #kinds { grid-area: 1 / 2; border-left: 1px solid var(--line); }
-  #rtype { grid-area: 2 / 1 / 3 / 3; border-top: 1px solid var(--line); }
-  #rtype button { flex-direction: row; gap: 5px; min-height: var(--tap); font-size: 12px; padding: 0 4px; }
-  #tools { grid-area: tools; padding: 2px 4px; }
-  #tools button { flex-direction: row; gap: 8px; min-height: var(--tap); padding: 0; }
-  #tools button .ic { width: 21px; height: 21px; }
-
-  /* the side panel runs down to the tools bar */
-  #panel { bottom: calc(66px + var(--safe-b)); }
-  body.paneled #hint { grid-column: 1 / -1; justify-self: start; }
-}
-/* a narrower landscape phone: the one-row header keeps the mark and drops the wordmark, and the
-   stats close up as they do on a narrow portrait phone */
-@media (max-height: 500px) and (min-width: 600px) and (max-width: 759px) {
-  .wm { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  #stats { gap: 0 6px; }
-  .st.pf { display: none; }
+  #status, #drawer { align-self: flex-start; width: min(400px, calc(100vw - var(--rail) - 460px)); min-width: 300px; }
+  #compass { position: absolute; top: 0; right: 0; }
+  #firstrun { left: 0; right: auto; margin: 0; top: calc(var(--tap) + 8px); }
+  #bar { left: auto; top: auto; right: calc(var(--edge) + var(--safe-r)); bottom: calc(var(--edge) + var(--safe-b)); width: var(--rail); grid-template-columns: 1fr; gap: 2px; padding: 4px; border-top: 0; border-left: 2px solid var(--gold); --cut: 10px; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
+  #bar button { height: 50px; }
+  .sheet { left: auto; top: calc(var(--edge) + var(--safe-t) + var(--tap) + 8px); right: calc(var(--edge) + var(--safe-r) + var(--rail) + 8px); bottom: calc(var(--edge) + var(--safe-b)); width: min(420px, 48vw); max-height: none; }
+  body.tooling .sheet { right: calc(var(--edge) + var(--safe-r)); bottom: calc(var(--chrome-b) + 6px); }
+  #layers { right: calc(var(--edge) + var(--safe-r) + var(--rail) + 8px); bottom: calc(var(--edge) + var(--safe-b)); max-height: calc(100dvh - var(--safe-t) - var(--safe-b) - 70px); }
+  #tool { grid-template-columns: minmax(150px, 0.8fr) minmax(0, 2fr) auto; grid-template-areas: 'what opts acts'; }
+  #tpanel { left: auto; width: min(440px, 50vw); max-height: calc(100dvh - var(--chrome-b) - var(--safe-t) - 70px); }
 }

@@ -40,7 +40,7 @@ const pages = Object.entries(HTML).filter(([f]) => !LEGACY.has(f.slice(1))).map(
 describe('one camera for the game and every demo (docs/kit.md)', () => {
   it('finds the game and the demos', () => {
     const names = pages.map((p) => p.html);
-    for (const want of ['proto.html', 'water-demo.html', 'vehicles-demo.html', 'people-demo.html', 'bridges-demo.html', 'industries-demo.html']) expect(names).toContain(want);
+    for (const want of ['proto.html', 'water-demo.html', 'vehicles-demo.html', 'people-demo.html', 'bridges-demo.html', 'industries-demo.html', 'ground-demo.html']) expect(names).toContain(want);
   });
 
   for (const p of pages) {
