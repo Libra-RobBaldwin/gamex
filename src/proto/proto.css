@@ -71,6 +71,8 @@ button:focus-visible { outline: 2px solid var(--mode-hi); outline-offset: -2px; 
 .act { min-height: var(--tap); padding: 0 12px; background: var(--panel-2); font: 700 12px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
 .act .ic { width: 20px; height: 20px; }
 .act span { padding-top: 1px; }
+/* disabled actions stay legible: muted type on no fill, rather than faded out */
+.act:disabled { opacity: 1; background: rgba(23, 74, 49, 0.45); color: var(--muted); box-shadow: inset 0 0 0 1px var(--faint); }
 .act.primary, .act.danger { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
 .act.primary { background: var(--mode); color: var(--mode-ink); }
 .act.danger { background: var(--danger); color: #fff; }
