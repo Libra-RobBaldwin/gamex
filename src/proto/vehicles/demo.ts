@@ -17,6 +17,7 @@ import { FLAGS, type Category, type Lod, type Model } from './types';
 import { rng, hash, pick } from './util';
 import { plateCanvas, eraOf } from './era';
 import { BUDGET, triangles } from './build';
+import { NavRig, SunFollow } from '../kit/camera';
 
 // ---------------- state ----------------
 const q = new URLSearchParams(location.search);
@@ -46,7 +47,6 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 6000);
-const view = { x: 0, z: -110, az: Math.PI / 4, el: 0.6, h: 90 };
 const hemi = new THREE.HemisphereLight('#dfe9f5', '#5a6a4a', 1.3);
 const sun = new THREE.DirectionalLight('#fff4e0', 2.2);
 sun.castShadow = true;
@@ -58,21 +58,22 @@ scene.add(vr.group);
 const beams = new Glow('beam', 4096, 0.55), pools = new Glow('pool', 1024, 0.5);
 scene.add(beams.mesh, pools.mesh);
 
-function place() {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  const aspect = w / h;
-  cam.left = (-view.h * aspect) / 2; cam.right = (view.h * aspect) / 2; cam.top = view.h / 2; cam.bottom = -view.h / 2;
-  cam.updateProjectionMatrix();
-  const d = 2000;
-  cam.position.set(view.x + Math.sin(view.az) * Math.cos(view.el) * d, Math.sin(view.el) * d, view.z + Math.cos(view.az) * Math.cos(view.el) * d);
-  cam.lookAt(view.x, 0, view.z);
-  cam.updateMatrixWorld();
-  const r = Math.max(60, view.h * 0.9);
-  sun.target.position.set(view.x, 0, view.z);
-  sun.position.set(view.x - 160, 260, view.z + 110);
-  const sc = sun.shadow.camera;
-  sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 10; sc.far = 900; sc.updateProjectionMatrix();
-}
+// the shared camera (kit/camera.ts); the sun's shadow follows the view in texel steps
+const nav = new NavRig(cam, canvas, {
+  view: { x: 0, z: -110, az: Math.PI / 4, el: 0.6, h: 90 },
+  limits: { hMin: 4, hMax: 3000 },
+  distance: 2000,
+  shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 }, radius: 60 }),
+  // on the turntable a one-finger drag turns the vehicle rather than the map
+  onDragStart: () => S.mode === 'turntable' && !!tt,
+  onClaimMove: (p) => { if (tt) tt.a += p.dx * 0.01; },
+  // a tap in the showroom opens that vehicle on the turntable
+  onTap: (p) => { if (S.mode === 'showroom') tapShowroom(p.sx, p.sy); },
+  // (a double tap zooms in as everywhere else)
+});
+const view = nav.view;
+// the view was set by hand (a new scene): stop any glide and show it
+const place = () => { nav.stop(); nav.apply(); };
 function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); place(); }
 addEventListener('resize', resize);
 
@@ -401,36 +402,7 @@ function rebuild() {
   place();
 }
 
-// ---------------- input: drag to pan (or turn the turntable), pinch or wheel to zoom ----------------
-const pts = new Map<number, { x: number; y: number }>();
-let pinch = 0, moved = 0;
-canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); moved = 0; });
-canvas.addEventListener('pointermove', (e) => {
-  const p = pts.get(e.pointerId);
-  if (!p) return;
-  const dx = e.clientX - p.x, dy = e.clientY - p.y;
-  p.x = e.clientX; p.y = e.clientY;
-  moved += Math.abs(dx) + Math.abs(dy);
-  if (pts.size === 2) {
-    const [a, b] = [...pts.values()];
-    const d = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinch) view.h = Math.max(4, Math.min(3000, view.h * (pinch / d)));
-    pinch = d;
-  } else if (S.mode === 'turntable' && tt) tt.a += dx * 0.01;
-  else {
-    const k = view.h / canvas.clientHeight;
-    const ca = Math.cos(view.az), sa = Math.sin(view.az);
-    const mx = -dx * k, my = -dy * k / Math.sin(view.el);
-    view.x += mx * ca + my * sa; view.z += -mx * sa + my * ca;
-  }
-  place();
-});
-const up = (e: PointerEvent) => {
-  pts.delete(e.pointerId); pinch = 0;
-  if (moved < 6 && S.mode === 'showroom') tapShowroom(e.clientX, e.clientY);
-};
-canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); view.h = Math.max(4, Math.min(3000, view.h * Math.exp(e.deltaY * 0.001))); place(); }, { passive: false });
+// ---------------- input: the shared camera above ----------------
 const v3 = new THREE.Vector3();
 function tapShowroom(x: number, y: number) {
   const rect = canvas.getBoundingClientRect();
@@ -438,7 +410,7 @@ function tapShowroom(x: number, y: number) {
   for (const p of parked) {
     v3.set(p.x, p.m.dims.height / 2, p.z).project(cam);
     const sx = ((v3.x + 1) / 2) * rect.width, sy = ((1 - v3.y) / 2) * rect.height;
-    const d = Math.hypot(sx - (x - rect.left), sy - (y - rect.top));
+    const d = Math.hypot(sx - x, sy - y);
     if (d < bd) { bd = d; best = p; }
   }
   if (best) { S.mode = 'turntable'; S.model = best.m.id; S.zoom = 0; rebuild(); }
@@ -501,11 +473,12 @@ function frame(now: number) {
   } else if (S.mode === 'showroom') {
     for (const p of parked) if (onScreen(p.x, p.z, p.m.dims.length)) vr.add(p.m, lodOf(p.m), matrix(p.x, 0, p.z, 0), p.cols, nightFlags | (S.night ? FLAGS.interior | FLAGS.sign | FLAGS.beacons : 0), 0);
   } else if (tt) {
-    if (S.spin && pts.size === 0) tt.a += dt * 0.35;
+    if (S.spin && nav.pointers === 0) tt.a += dt * 0.35;
     vr.add(tt.m, (S.lod === 'auto' ? 0 : +S.lod) as Lod, matrix(0, 0, 0, tt.a), tt.cols, tt.flags | (Math.floor(t / 4) % 3 === 1 ? FLAGS.brake : 0) | (Math.floor(t / 4) % 3 === 2 ? FLAGS.hazard : 0), t * 3);
   }
   vr.end(t); beams.end(); pools.end();
   const cpu = performance.now() - t0;
+  nav.update(dt, now);
   renderer.render(scene, cam);
   frames++; fpsT += dt; cpuSum += cpu;
   if (fpsT > 0.5) {
@@ -522,3 +495,4 @@ function frame(now: number) {
 resize();
 rebuild();
 requestAnimationFrame(frame);
+(window as unknown as { nav: NavRig }).nav = nav;

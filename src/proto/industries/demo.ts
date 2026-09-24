@@ -8,6 +8,7 @@ import { buildIndustry, type IndustryModel } from './models';
 import { overlayFor } from './overlay';
 import { plotRect, toWorld } from './site';
 import type { IndustryVisualState } from './state';
+import { NavRig, SunFollow, mountNavControls } from '../kit/camera';
 
 const q = new URLSearchParams(location.search);
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -75,49 +76,29 @@ INDUSTRY_IDS.forEach((id, i) => {
   sites.push(place(i, id, want ? vi : i % INDUSTRY_TYPES[id].variants.length, 1));
 });
 
-// ---------------- camera: isometric, pinch and drag ----------------
+// ---------------- camera: the shared kit (kit/camera.ts), the same gestures as the game ----------------
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, -2000, 4000);
-const view = { x: 0, z: 0, zoom: Number(q.get('zoom') ?? 0) || 0 };
+// the classic isometric: 45 degrees round, about 35 degrees down
+const ISO = { az: Math.PI / 4, el: Math.atan2(1.15, Math.SQRT2) };
+const nav = new NavRig(cam, canvas, {
+  view: { x: 0, z: 0, h: 1100, ...ISO },
+  limits: { hMin: 40, hMax: 2400, elMin: 0.35, elMax: 1.52 },
+  distance: 1000,
+  shadow: new SunFollow(sun, { dir: { x: -260, y: 420, z: 180 }, back: 525, far: 1500 }),
+});
+const view = nav.view;
+mountNavControls(nav, { top: 170 });
 let focus = Math.max(0, INDUSTRY_IDS.indexOf((q.get('focus') ?? '') as IndustryId));
 let gallery = !q.has('focus');
-function fitView() {
-  if (gallery) { view.x = 0; view.z = 0; view.zoom ||= 1100; }
-  else { const m = sites[focus].model; view.x = m.frame.cx; view.z = m.frame.cz; view.zoom = Number(q.get('zoom') ?? 0) || Math.max(m.frame.w, m.frame.d) * 1.45; }
+// Show the whole gallery, or the site in focus a little above the middle so the panel doesn't
+// hide it. zoom: the height of the view in metres (0 to fit).
+function fitView(zoom = Number(q.get('zoom') ?? 0) || 0, ms = 0) {
+  const W = canvas.clientWidth, H = canvas.clientHeight, ui = q.get('ui') !== '0';
+  let to;
+  if (gallery) to = nav.framing({ x: 0, z: 0 }, W / 2, ui ? H * 0.43 : H / 2, { ...ISO, h: zoom || 1100 });
+  else { const m = sites[focus].model; to = nav.framing({ x: m.frame.cx, z: m.frame.cz }, W / 2, ui ? H * 0.43 : H / 2, { ...ISO, h: zoom || Math.max(m.frame.w, m.frame.d) * 1.45 }); }
+  if (ms > 0) nav.animateTo(to, ms); else nav.setView(to);
 }
-function placeCamera() {
-  const a = innerWidth / innerHeight, h = view.zoom / 2;
-  cam.left = -h * a; cam.right = h * a; cam.top = h; cam.bottom = -h;
-  cam.updateProjectionMatrix();
-  // the classic isometric: 45 degrees round, about 35 degrees down; nudged so the panel doesn't hide the subject
-  const t = new THREE.Vector3(view.x, 0, view.z + (q.get('ui') === '0' ? 0 : view.zoom * 0.12));
-  cam.position.copy(t).add(new THREE.Vector3(1, 1.15, 1).normalize().multiplyScalar(1000));
-  cam.lookAt(t);
-  sun.position.copy(t).add(new THREE.Vector3(-260, 420, 180));
-  sun.target.position.copy(t);
-  const sc = sun.shadow.camera as THREE.OrthographicCamera, r = Math.min(900, view.zoom * 0.9);
-  sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 10; sc.far = 1500; sc.updateProjectionMatrix();
-}
-const ptrs = new Map<number, { x: number; y: number }>();
-let pinch = 0;
-canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
-canvas.addEventListener('pointerup', (e) => { ptrs.delete(e.pointerId); pinch = 0; });
-canvas.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); pinch = 0; });
-canvas.addEventListener('pointermove', (e) => {
-  const p = ptrs.get(e.pointerId);
-  if (!p) return;
-  if (ptrs.size === 2) {
-    const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinch) view.zoom = Math.max(40, Math.min(2400, view.zoom * (pinch / d)));
-    pinch = d;
-  } else {
-    // screen drag to ground movement along the isometric axes
-    const k = view.zoom / innerHeight, dx = (e.clientX - p.x) * k, dy = (e.clientY - p.y) * k * 1.4;
-    view.x -= (dx - dy) * Math.SQRT1_2; view.z -= (-dx - dy) * Math.SQRT1_2;
-  }
-  p.x = e.clientX; p.y = e.clientY;
-});
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); view.zoom = Math.max(40, Math.min(2400, view.zoom * Math.exp(e.deltaY * 0.001))); }, { passive: false });
-
 // ---------------- catchment ring and icons ----------------
 let showRing = q.get('ring') === '1';
 // the ring as a flat ribbon with a faint fill, since WebGL lines are one pixel wide on phones
@@ -145,7 +126,7 @@ function drawOverlay() {
   const shape = new THREE.Shape(ov.ring.map((p) => new THREE.Vector2(p.x, -p.z)));
   const fill = new THREE.Mesh(new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2), fillMat);
   fill.position.y = 0.5;
-  ringLine.add(fill, new THREE.Mesh(ribbon(ov.ring, Math.max(1.5, view.zoom / 180)), ringMat));
+  ringLine.add(fill, new THREE.Mesh(ribbon(ov.ring, Math.max(1.5, view.h / 180)), ringMat));
   const col = ov.colour === '#2c2c2e' || ov.colour === '#1d1d1f' ? '#ffffff' : ov.colour;
   ringMat.color.set(col); fillMat.color.set(col);
   for (const ic of ov.icons) {
@@ -210,8 +191,8 @@ toggle('delivered', () => state.recentlyDelivered, (v) => { state.recentlyDelive
 toggle('all', () => applyAll, (v) => { applyAll = v; });
 toggle('ring', () => showRing, (v) => { showRing = v; });
 toggle('night', () => night, (v) => { night = v; setNight(); });
-toggle('zoomall', () => gallery, (v) => { gallery = v; view.zoom = 0; fitView(); });
-const go = (d: number) => { focus = (focus + d + sites.length) % sites.length; gallery = false; $('zoomall').classList.remove('on'); fitView(); applyState(); };
+toggle('zoomall', () => gallery, (v) => { gallery = v; fitView(0, 450); });
+const go = (d: number) => { focus = (focus + d + sites.length) % sites.length; gallery = false; $('zoomall').classList.remove('on'); fitView(0, 450); applyState(); };
 $('prev').addEventListener('click', () => go(-1));
 $('next').addEventListener('click', () => go(1));
 $('variant').addEventListener('click', () => { const s = sites[focus]; s.variant = (s.variant + 1) % INDUSTRY_TYPES[s.id].variants.length; rebuild(focus); applyState(); });
@@ -227,7 +208,7 @@ function setNight() {
 }
 
 // ---------------- loop ----------------
-function resize() { renderer.setSize(innerWidth, innerHeight, false); placeCamera(); }
+function resize() { renderer.setSize(innerWidth, innerHeight, false); nav.apply(); }
 addEventListener('resize', resize);
 fitView();
 setNight();
@@ -235,10 +216,12 @@ resize();
 applyState();
 const t0 = performance.now();
 let fixedTime: number | null = q.has('t') ? Number(q.get('t')) : null;
-function frame() {
+let last = performance.now();
+function frame(now: number) {
   const t = fixedTime ?? (performance.now() - t0) / 1000;
   fx.update(t);
-  placeCamera();
+  nav.update(Math.min(0.1, (now - last) / 1000), now);
+  last = now;
   renderer.render(scene, cam);
   placeIcons();
   requestAnimationFrame(frame);
@@ -246,8 +229,9 @@ function frame() {
 requestAnimationFrame(frame);
 
 // for headless screenshots and poking about in the console
+(window as unknown as { nav: NavRig }).nav = nav;
 (window as unknown as { demo: unknown }).demo = {
-  fx, sites, state, scene, renderer, toWorld,
+  fx, nav, sites, state, scene, renderer, toWorld,
   setTime: (t: number | null) => { fixedTime = t; },
   focusOn: (id: IndustryId, variant?: string) => {
     focus = INDUSTRY_IDS.indexOf(id); gallery = false;
@@ -259,8 +243,8 @@ requestAnimationFrame(frame);
     Object.assign(state, rest);
     if (n !== undefined) { night = n; setNight(); }
     if (ring !== undefined) showRing = ring;
-    if (g !== undefined) { gallery = g; view.zoom = 0; fitView(); }
-    if (zoom) view.zoom = zoom;
+    if (g !== undefined) { gallery = g; fitView(zoom ?? 0); }
+    else if (zoom) nav.setView({ h: zoom });
     applyState();
   },
 };
