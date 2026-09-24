@@ -377,7 +377,17 @@ function parapet(k: Kit, cx: number, cz: number, w: number, d: number, y: number
   k.box(cx - w / 2 + t / 2, y, cz, t, h, d - 2 * t, m);
   k.box(cx + w / 2 - t / 2, y, cz, t, h, d - 2 * t, m);
 }
-const cornice = (k: Kit, cx: number, cz: number, w: number, d: number, y: number, m: THREE.Material, out = 0.3, h = 0.4) => k.box(cx, y, cz, w + out * 2, h, d + out * 2, m);
+// A cornice is a band round the top of the walls: its top is only the overhang, a frame round
+// the roof. (As a solid slab its top covered the whole roof at the roof's own height, and the two
+// fought over which to draw — the flashing triangles.)
+function cornice(k: Kit, cx: number, cz: number, w: number, d: number, y: number, m: THREE.Material, out = 0.3, h = 0.4) {
+  const W = w + out * 2, D = d + out * 2;
+  k.walls(rect(cx, cz, W, D), true, y, 1, h, 0, m);
+  k.cap(rect(cx, cz + d / 2 + out / 2, W, out), y + h, m);
+  k.cap(rect(cx, cz - d / 2 - out / 2, W, out), y + h, m);
+  k.cap(rect(cx - w / 2 - out / 2, cz, out, d), y + h, m);
+  k.cap(rect(cx + w / 2 + out / 2, cz, out, d), y + h, m);
+}
 function flatRoof(k: Kit, cx: number, cz: number, w: number, d: number, y: number, edge: THREE.Material, r: () => number, plant = true) {
   k.cap(rect(cx, cz, w - 0.2, d - 0.2), y + 0.05, plain(GRAVEL));
   parapet(k, cx, cz, w, d, y, 0.8, edge);

@@ -1288,7 +1288,8 @@ function getPlaces(): Places {
 const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
 
 let last = performance.now();
-let growAt = 0;
+let growAt = 0; // game minutes until the next building
+const GAME_MIN_PER_S = 4; // how fast the clock runs: game minutes per real second
 let lastH = view.h;
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
 // Phones differ enormously, so rather than guess, the game watches its own frame times: if
@@ -1332,10 +1333,11 @@ function frame(now: number) {
   // keep blueprint handles a finger's width wide at any zoom
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
   doomMat.opacity = 0.3 + 0.25 * Math.sin(now / 160);
-  // the town grows: one new building every few tenths of a second
-  growAt -= dt;
+  // the town grows at a town's pace: about one new building every 20 minutes of game time
+  // (so it speeds up and slows down with the clock), with some randomness so it doesn't tick
+  growAt -= dt * GAME_MIN_PER_S;
   if (growAt <= 0 && queue.length) {
-    growAt = 0.35;
+    growAt = 12 + rand() * 16;
     const l = queue.shift()!;
     if (net.lotFree(l)) { spawnLot(l); refreshTrees(l); }
   }
@@ -1355,7 +1357,7 @@ function frame(now: number) {
   // merge at most a couple of changed chunks a frame
   let merged = 0;
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
-  clock += dt * 4;
+  clock += dt * GAME_MIN_PER_S;
   const hour = (clock / 60) % 24;
   traffic.generate(getPlaces(), hour, LEVELS[level][1], now);
   traffic.generate(getPlaces(), hour, LEVELS[level][1], now);
