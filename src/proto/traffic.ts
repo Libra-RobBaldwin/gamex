@@ -498,7 +498,7 @@ export class Traffic {
     for (let i = this.above(b, pos); i < b.length; i++) {
       const e = b[i];
       if (e.pos - LONGEST > rear) break;
-      if (e.c === self || skip?.(e) || (lets && e.kind === 4 && !this.letsIn(lets, e))) continue;
+      if (e.c === self || skip?.(e) || (lets && e.kind === 4 && !this.letsIn(lets, e, pos))) continue;
       if (e.pos - e.c.back < rear) { rear = e.pos - e.c.back; best = e; }
     }
     return best;
@@ -1012,6 +1012,11 @@ export class Traffic {
     const inside: { vw: View; x: User }[] = [], outside: { vw: View; x: User }[] = [], yieldTo: { vw: View; x: User }[] = [];
     for (const x of this.users.get(node) ?? []) {
       if (x.c === c || !this.related(P, x.path) || (x.adm === Infinity && x.t < x.path.ext0 - E_IN)) continue;
+      // (nor anyone queued behind us in our own lane: they wait for us whatever the table says. Its
+      // metre steps are cautious, so a follower of a different length standing its usual couple of
+      // metres behind can look as if it's already where it would have to wait for us, and we'd sit
+      // waiting for it for ever)
+      if (x.path.inKey === P.inKey && !x.c.turn && x.c.seg === c.seg && x.c.s < c.s) continue;
       const o = near(x);
       if (!o) continue;
       if (x.adm !== Infinity) inside.push(o);
@@ -1103,8 +1108,9 @@ export class Traffic {
   // Does a driver let in someone asking to move into their lane in front of them? Only if they can
   // do it by easing off: one level with them or just ahead has to wait for them to go by instead,
   // so the two never stand side by side waiting for each other.
-  private letsIn(c: Car, e: Entry) {
-    const g = e.pos - e.c.back - c.s - c.front;
+  // (`at`: where the driver is along the lane, for one still coming out of a junction into it)
+  private letsIn(c: Car, e: Entry, at = c.s) {
+    const g = e.pos - e.c.back - at - c.front;
     return g > 1 && idm(c.v, c.v0 ?? c.vmax, g, e.c.v, DRIVE[c.kind]) > -3;
   }
   private change(c: Car, to: number, now: number) {
@@ -1531,7 +1537,9 @@ export class Traffic {
     if (P.gate === undefined || c.merged) {
       // what's in the lane we're heading into, and beyond
       const mine = P.outS - (P.ext1 - T.t);
-      const e = this.aheadIn(this.buckets.get(P.exitKey), mine, c, this.inbound(P));
+      // (anyone asking to be let into it only if we can let them in by easing off, as in a lane: one
+      // level with us waits for us to go by, else we'd each stand waiting for the other)
+      const e = this.aheadIn(this.buckets.get(P.exitKey), mine, c, this.inbound(P), c);
       if (e) ob(e.pos - e.c.back - mine - c.front, e.c.v);
       else this.onward(c, T.next, T.node, P.exitLane, this.len(T.next), P.ext1 - T.t + this.len(T.next) - P.outS, 0, ob);
     }
