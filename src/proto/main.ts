@@ -25,10 +25,17 @@ import { PLAIN_MAT } from './buildgen';
 import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
+import { TownEconomy, TOWN_NAME } from './game/econ';
+import { Purse, PRICE_SHARE } from './game/money';
 import { starterStops } from './game/crowdsites';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
-const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
+// the purse (game/money.ts): prices are the game's share of list prices, charged when built
+const purse = new Purse();
+const price = (list: number) => purse.price(list);
+const perM = (list: number) => `£${Math.round(list * PRICE_SHARE).toLocaleString('en-GB')}/m`;
+const short = (need: number) => `Not enough money · ${money(need)} needed, ${money(purse.balance)} in the bank`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // ---------------- world ----------------
@@ -289,6 +296,7 @@ function siteUnder(sx: number, sy: number, g: P) {
 let queue: Lot[] = [];
 let placesDirty = true;
 let onRoadsChanged = () => {};
+let townRef: TownEconomy | null = null; // (made once the town is laid out, below)
 const LEVELS = [['Traffic', 1], ['Busy', 2], ['Quiet', 0.4]] as const;
 let level = 0;
 function spawnLot(l: Lot, animate = true) {
@@ -444,6 +452,7 @@ const shell = new Shell($('#ui'), {
   onPause: () => togglePause(),
   onRate: () => cycleRate(),
   onPerf: () => togglePerf(),
+  onTown: () => showTown(),
 });
 // the tool in use (a road or rail type, or bus stops), if any
 let tool: ToolHandle | null = null;
@@ -490,7 +499,7 @@ function hint(text?: string, ic?: Icon) {
 }
 
 // ---- tools: picking a card in the Build sheet swaps the bar for a tool strip ----
-const typeSpec = (t: RoadType) => { const d = ROADS[t]; return `${Math.round(halfOfType(t) * 2)} m wide · ${d.mph} mph · £${d.cost.toLocaleString('en-GB')}/m`; };
+const typeSpec = (t: RoadType) => { const d = ROADS[t]; return `${Math.round(halfOfType(t) * 2)} m wide · ${d.mph} mph · ${perM(d.cost)}`; };
 function endTool() {
   tool = null;
   shell.endTool();
@@ -529,7 +538,8 @@ function lineChanged() {
   const n = lineDraft.length;
   showLine(n ? callOrder(lineDraft, lineLoop) : [], lineDraft);
   tool?.setUndo(n > 0);
-  tool?.setPrimary({ label: 'Create', icon: 'check', kind: 'primary', disabled: n < 2, onClick: finishLine });
+  const cost = busPrice(busOffer) * NEW_LINE_BUSES;
+  tool?.setPrimary({ label: n < 2 ? 'Create' : `Create · ${money(cost)}`, icon: 'check', kind: 'primary', disabled: n < 2 || !purse.can(cost), title: purse.can(cost) ? `${NEW_LINE_BUSES} buses` : short(cost), onClick: finishLine });
   tool?.setPanel(n ? `<div class="what">${icon('transport')}<span>${lineDraft.map((id, i) => `<b>${i + 1}</b> ${esc(lines.name(id))}`).join(' · ')}${lineLoop ? ' · <b>back to 1</b>' : n > 2 ? ' · and back' : ''}</span></div>` : null);
   hint();
 }
@@ -545,11 +555,27 @@ function lineTap(sx: number, sy: number) {
 }
 function finishLine() {
   if (lineDraft.length < 2) return;
-  const l = lines.add(lineDraft, lineLoop, 2, busOffer);
+  const cost = busPrice(busOffer) * NEW_LINE_BUSES;
+  if (!purse.can(cost)) { hint(short(cost), 'alert'); return; }
+  const l = lines.add(lineDraft, lineLoop, NEW_LINE_BUSES, busOffer);
+  purse.spend(busPrice(busOffer) * lines.buses(l).length, 'vehicles');
   lineDraft = [];
   endTool();
   showLineInfo(l);
-  hint(`Line ${l.num} is running · ${lines.buses(l).length} buses`, 'bus');
+  hint(`Line ${l.num} is running · ${lines.buses(l).length} buses · ${money(busPrice(busOffer) * lines.buses(l).length)}`, 'bus');
+}
+// what a bus costs (the model the line runs, or the default one)
+function busPrice(offer?: string) { const f = traffic.fleet, o = (offer && f.busOffers().find((x) => x.id === offer)) || f.defaultBus(); return price(o?.cost ?? 180_000); }
+const NEW_LINE_BUSES = 2;
+// buy a bus for a line: false if there isn't the money or the room
+function buyBus(l: Line) {
+  const cost = busPrice(l.offer);
+  if (!purse.can(cost)) { hint(short(cost), 'alert'); return false; }
+  const c = lines.addBus(l);
+  if (!c) { hint('No room on the roads for a bus just now', 'alert'); return false; }
+  purse.spend(cost, 'vehicles');
+  hint(`Bus ${c.dress?.fleetNo ?? ''} joins line ${l.num} · ${money(cost)}`, 'bus');
+  return true;
 }
 // the stop badge nearest a tap, within a finger's width
 function stopNear(sx: number, sy: number): number | null {
@@ -632,7 +658,7 @@ function setType(t: RoadType) {
 shell.addBuildCategory({ id: 'roads', label: 'Roads', icon: 'road' });
 // (the small card's name and line: "Dual 2+2" over "50 mph · £950/m")
 const cardName = (t: RoadType) => ROADS[t].label.split(' · ')[0];
-const cardSpec = (t: RoadType) => `${ROADS[t].mph} mph · £${ROADS[t].cost.toLocaleString('en-GB')}/m`;
+const cardSpec = (t: RoadType) => `${ROADS[t].mph} mph · ${perM(ROADS[t].cost)}`;
 for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: `${ROADS[id].blurb} · ${typeSpec(id)}`, name: cardName(id), short: cardSpec(id), icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
 shell.addBuildItem('roads', { id: 'more', label: 'More road types', spec: 'Filter by lanes, speed, trees, bus and cycle lanes', short: 'Lanes, speed, trees…', icon: 'adjustments', tone: 'road', on: () => !PRESETS.includes(lastType.road), onPick: () => { openRoadPicker(true); return false; } });
 shell.addBuildCategory({ id: 'rail', label: 'Rail', icon: 'train' });
@@ -725,7 +751,7 @@ function openRoadPicker(fresh = false) {
     <div class="fl" role="group" aria-label="With"><span class="lbl">With</span>${tri('trees', 'trees', 'Trees')}${tri('bus', 'bus', 'Bus lanes')}${tri('cycle', 'bike', 'Cycle lanes')}${tri('parking', 'parking', 'Parking')}</div>
     <div class="cnt">${list.length} of ${Object.values(ROADS).filter((d) => d.cls === 'road').length} road types</div>
     ${list.length ? '' : '<small>No road type has all of these. Set a filter back to Any, or tap a With chip until it’s plain.</small>'}
-    <div class="rl">${list.map((d) => `<button data-pick="${d.id}" class="${d.id === lastType.road ? 'on' : ''}"><b>${icon(roadIcon(d))}${d.label}</b>${roadSvg(d)}<small>${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost.toLocaleString('en-GB')}/m · ${d.blurb}</small></button>`).join('')}</div>`,
+    <div class="rl">${list.map((d) => `<button data-pick="${d.id}" class="${d.id === lastType.road ? 'on' : ''}"><b>${icon(roadIcon(d))}${d.label}</b>${roadSvg(d)}<small>${Math.round(halfOfType(d.id) * 2)} m wide · ${perM(d.cost)} · ${d.blurb}</small></button>`).join('')}</div>`,
   fresh, { from: 'build', back: () => shell.openBuild('roads') });
   el.querySelectorAll<HTMLButtonElement>('[data-f]').forEach((b) => b.addEventListener('click', () => {
     const k = b.dataset.f as keyof RoadFilter, v = b.dataset.v!;
@@ -740,7 +766,7 @@ function openRoadPicker(fresh = false) {
   el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => b.addEventListener('click', () => {
     startRoadTool(b.dataset.pick!);
     const d = ROADS[opts.type];
-    hint(`${d.label} · ${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost}/m · drag to draw it`);
+    hint(`${d.label} · ${Math.round(halfOfType(d.id) * 2)} m wide · ${perM(d.cost)} · drag to draw it`);
   }));
 }
 
@@ -769,17 +795,22 @@ shell.addTransportTab({
 // A line's sheet: its stops, its buses, and its route on the map while the sheet is open.
 function showLineInfo(l: Line) {
   if (!lines.list.includes(l)) { closeSheet(); return; }
-  const n = lines.buses(l).length;
+  const n = lines.buses(l).length, st = townRef?.line(l.id), books = purse.line(l.id);
   lastLine = l;
+  const profit = books.lastFares - books.lastRunning, sell = Math.round(busPrice(l.offer) / 2);
   showLine(l.bus.seq, l.stops);
   shell.openInfo({
     key: `line:${l.id}`, title: `Line ${l.num}`, sub: lines.title(l), icon: 'transport', tone: 'stop',
-    facts: [['Stops', l.stops.map((id) => lines.name(id)).join(' · ')], ['Runs', l.loop ? 'Circular, round and round' : 'There and back'], ['Buses', `${n}`]],
-    note: 'Buses take the quickest way between stops, and call on whichever side of the road they come along.',
+    facts: [
+      ['Stops', l.stops.map((id) => lines.name(id)).join(' · ')], ['Runs', l.loop ? 'Circular, round and round' : 'There and back'], ['Buses', `${n}`],
+      ['Passengers last month', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'],
+      ['Fares last month', money(books.lastFares)], ['Running costs', money(-books.lastRunning)], ['Profit', money(profit)],
+    ],
+    note: `Buses take the quickest way between stops, and call on whichever side of the road they come along. Each passenger pays £2. A day here is a month in the town's life.`,
     actions: [
-      { label: 'Add a bus', icon: 'plus', kind: 'primary', onClick: () => { const c = lines.addBus(l); hint(c ? `Bus ${c.dress?.fleetNo ?? ''} joins line ${l.num}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert'); showLineInfo(l); } },
-      { label: 'Remove a bus', icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); setTimeout(() => showLineInfo(l), 50); } },
-      { label: 'Delete line', icon: 'trash', kind: 'danger', onClick: () => { lines.remove(l); closeSheet(); hint(`Line ${l.num} withdrawn`, 'transport'); } },
+      { label: `Add a bus · ${money(busPrice(l.offer))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(busPrice(l.offer)), onClick: () => { buyBus(l); showLineInfo(l); } },
+      { label: `Sell a bus · ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`Bus sold for ${money(sell)}`, 'bus'); setTimeout(() => showLineInfo(l), 50); } },
+      { label: 'Withdraw line', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} bus${k === 1 ? '' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
     ],
     onClose: () => { if (mode !== 'line') showLine(null); },
   });
@@ -805,8 +836,7 @@ shell.addTransportTab({
   render: (el) => {
     // the vehicle library's fleet for the game year (game/fleet.ts); buses and trains run now
     const year = gameYear(), list = purchaseList(year), fleet = traffic.fleet;
-    const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
-    const facts = (o: Offer) => `${o.capacity ? `${o.capacity} ${o.unit === 'pax' ? 'seats' : 't'} · ` : ''}${Math.round(o.speedKmh / 1.609)} mph · ${money(o.cost)} · ${money(o.running)} a year to run`;
+    const facts = (o: Offer) => `${o.capacity ? `${o.capacity} ${o.unit === 'pax' ? 'seats' : 't'} · ` : ''}${Math.round(o.speedKmh / 1.609)} mph · ${money(price(o.cost))}`;
     const row = (o: Offer, attr: string, ic: Icon, off = false) => `<button ${attr}${off ? ' disabled' : ''}><b>${icon(ic)}${esc(o.name)}</b><small>${facts(o)}</small></button>`;
     const trainKind = (o: Offer) => (o.kind === 'tram' ? 'tram' : MODEL[o.models[0]].style === 'rack-car' ? 'rack' : MODEL[o.models[0]].stats.power === 'electric' ? 'hs' : 'dmu');
     const buses = list.filter((o) => o.kind === 'bus' || o.kind === 'coach'), trains = list.filter((o) => o.kind === 'train' || o.kind === 'tram');
@@ -825,8 +855,7 @@ shell.addTransportTab({
       busOffer = o.id;
       if (!l) { hint(`New lines will run the ${o.name}`, 'bus'); return; }
       l.offer = o.id;
-      const c = lines.addBus(l);
-      hint(c ? `${o.name} joins line ${l.num} · fleet number ${c.dress?.fleetNo ?? ''}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert');
+      buyBus(l);
     }));
     el.querySelectorAll<HTMLButtonElement>('[data-set]').forEach((b) => b.addEventListener('click', () => {
       const o = trains.find((x) => x.id === b.dataset.set)!, t = fleet.defFor(o);
@@ -837,9 +866,42 @@ shell.addTransportTab({
   },
 });
 
+// ---- the town panel: how the town is doing, and why (game/econ.ts) ----
+const STATUS_WORD = { growing: 'Growing', stable: 'Steady', stalling: 'Stalling', declining: 'Declining' } as const;
+function showTown() {
+  const r = townRef?.report;
+  if (!r) return;
+  const n = (x: number) => Math.round(x).toLocaleString('en-GB');
+  const hist = [...r.history, r.residents], lo = Math.min(...hist), hi = Math.max(...hist), span = Math.max(1, hi - lo);
+  const pts = hist.map((v, i) => `${hist.length > 1 ? (i / (hist.length - 1)) * 100 : 100},${40 - ((v - lo) / span) * 34}`);
+  const spark = hist.length > 1 ? `<svg class="spark" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true"><path class="area" d="M0,44 L${pts.join(' L')} L100,44 Z"/><path d="M${pts.join(' L')}"/></svg>
+    <div class="spark-cap"><span>${hist.length - 1} days ago · ${n(hist[0])}</span><span>now · ${n(r.residents)}</span></div>` : '';
+  const reasons = r.reasons.slice(0, 5).map((x) => `<li class="${x.good ? 'good' : 'bad'}">${icon(x.good ? 'check' : 'alert')}<span>${esc(x.text.charAt(0).toUpperCase() + x.text.slice(1))}</span></li>`).join('');
+  const lineRows = lines.list.map((l) => { const s = townRef!.line(l.id); return s ? `<button class="lrow tone-stop" data-tl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${n(s.carriedLastMonth || s.carried)} carried a day · ${Math.round(s.loadFactor * 100)}% full · ${n(s.waiting)} waiting</span></button>` : ''; }).join('');
+  const el = shell.openInfo({
+    key: 'town', title: TOWN_NAME, sub: `${n(r.residents)} people · ${n(r.jobs)} jobs`, icon: 'building',
+    html: `<div class="townhead"><span class="pill ${r.status}">${STATUS_WORD[r.status]}</span></div>
+      <p class="note">${esc(r.headline.replace(/^\w+: /, ''))}</p>${spark}
+      <dl class="facts" style="margin-top:10px">
+        <dt>In the bank</dt><dd>${money(purse.balance)}</dd>
+        <dt>Fares yesterday</dt><dd>${money(purse.yesterday.fares)}</dd>
+        <dt>Running costs yesterday</dt><dd>${money(-purse.yesterday.running)}</dd>
+        <dt>Homes</dt><dd>${n(r.homes)}${r.vacancy > 0.02 ? ` · ${Math.round(r.vacancy * 100)}% empty` : ''}</dd>
+        <dt>Homes near a stop</dt><dd>${Math.round(r.service.homesNearStop * 100)}%</dd>
+        <dt>Workers who can reach a job</dt><dd>${Math.round(r.reach.work * 100)}%</dd>
+        <dt>Free plots</dt><dd>${n(r.service.plots)}</dd>
+      </dl>
+      <ul class="why">${reasons}</ul>
+      <p class="note" style="margin-top:10px">A day here is a month in the town's life: it reviews how it's doing each day, and fares and running costs come and go at a month's pace.</p>
+      ${lineRows ? `<div class="grp" style="margin-top:12px"><span class="tab">Your lines</span>${lineRows}</div>` : ''}`,
+  });
+  el.querySelectorAll<HTMLButtonElement>('[data-tl]').forEach((b) => b.addEventListener('click', () => { const l = lines.list.find((x) => x.id === +b.dataset.tl!); if (l) showLineInfo(l); }));
+}
+
 // ---- Menu: quality, the performance readout, a new town ----
 shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
 shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
+shell.addMenuItem({ id: 'town', label: TOWN_NAME, icon: 'building', sub: () => (townRef?.report ? `${STATUS_WORD[townRef.report.status]} · ${Math.round(townRef.report.residents).toLocaleString('en-GB')} people` : 'The town panel'), onClick: () => showTown() });
 shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
 shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
 shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
@@ -978,31 +1040,35 @@ function renderBar() {
   const pr = c.profile;
   const lift = pr && pr.maxY > 0.05
     ? `<div class="lift">${icon('mountain')}<span>${c.ok ? `up to <b>${pr.maxY.toFixed(1)} m</b> · steepest <b>${(pr.maxGrade * 100).toFixed(1)}%</b>${c.bridges ? ` · ${c.bridges} bridge${c.bridges > 1 ? 's' : ''}` : ''} · ${Math.round(c.raised)} m raised` : `would need <b>${pr.maxY.toFixed(1)} m</b> — red line shows the lowest it could go`}</span></div>${profileSvg(c)}` : '';
-  tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(c.cost)}</b></span></div>
-    ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(n * 6000)} compensation included</div></div>` : ''}
+  const cost = price(c.cost), afford = purse.can(cost);
+  tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(cost)}</b></span></div>
+    ${afford ? '' : `<div class="bad">${icon('alert')}<span>${short(cost)}</span></div>`}
+    ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(price(n * 6000))} compensation included</div></div>` : ''}
     ${lift}
     ${c.ok ? bridgeLines(c) : ''}
     ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
   tool.avoid(handles().map((h) => toScreen(h.p)));
-  tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging), onClick: buildDraft });
+  tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging && afford), onClick: buildDraft });
 }
 // the bridges in a blueprint: the type the chooser picked, its price and what's worth knowing
 function bridgeLines(c: Check) {
   return c.choices.map((ch) => {
     const o = ch.options.find((x) => x.def.id === ch.chosen);
     if (!o) return '';
-    return `<div class="lift">${icon('bridge')}<span><b>${o.def.label}</b> · ${Math.round(ch.s1 - ch.s0)} m · <b class="cost">${money(o.cost)}</b>${o.reasons.length ? ` · ${o.reasons.slice(0, 2).join(' · ')}` : ''}</span></div>`;
+    return `<div class="lift">${icon('bridge')}<span><b>${o.def.label}</b> · ${Math.round(ch.s1 - ch.s0)} m · <b class="cost">${money(price(o.cost))}</b>${o.reasons.length ? ` · ${o.reasons.slice(0, 2).join(' · ')}` : ''}</span></div>`;
   }).join('');
 }
 function buildDraft() {
   if (!draft || !draftCheck?.ok) return;
+  const cost = price(draftCheck.cost);
+  if (!purse.spend(cost, 'building')) { hint(short(cost), 'alert'); return; }
   const doomed = new Set(draftCheck.clears);
   const summary = doomed.size ? demolitionSummary([...doomed]) : null;
   buildRoad(draft.a, draft.b, ctrlOf(draft), opts);
   draft = null;
   draftChanged();
-  hint(summary ? `Demolished ${doomed.size}: ${summary.list}` : 'Built. New plots will fill in along it.', summary ? 'bulldozer' : 'check');
+  hint(summary ? `Demolished ${doomed.size}: ${summary.list} · ${money(cost)}` : `Built for ${money(cost)} · the town builds along it as it needs`, summary ? 'bulldozer' : 'check');
 }
 
 function buildRoad(a: End, b: End, ctrl: P | undefined, o: RoadOpts) {
@@ -1134,7 +1200,7 @@ function showBuildingInfo(b: Built) {
   if (u.pop) facts.push([u.unit.charAt(0).toUpperCase() + u.unit.slice(1), String(u.pop)]);
   shell.openInfo({
     key: `building:${b.lot.x},${b.lot.z}`, title: b.name, sub: b.detail, icon: b.region ? 'trees' : 'building', facts,
-    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }],
+    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }, { label: TOWN_NAME, icon: 'building', onClick: () => showTown() }],
   });
 }
 // a junction: how busy it is, and the way into its editor
@@ -1167,7 +1233,7 @@ const bridgeKey = (b: BuiltBridge) => `${b.seg}:${b.idx}`;
 function showBridgeInfo(b: BuiltBridge) {
   const L = b.layout, d = L.def, piers = L.supports.filter((q) => q.kind !== 'abutment').length;
   const mph = net.segs.get(b.seg)?.type.startsWith('rail') ? d.railMph : d.roadMph;
-  const facts: [string, string][] = [['Length', `${Math.round(b.s1 - b.s0)} m`], ['Spans', `${L.spans.length}${piers ? ` on ${piers} support${piers > 1 ? 's' : ''}` : ''}`], ['Cost to build', money(L.cost)], ['Upkeep', `${money(L.maint)} a year`]];
+  const facts: [string, string][] = [['Length', `${Math.round(b.s1 - b.s0)} m`], ['Spans', `${L.spans.length}${piers ? ` on ${piers} support${piers > 1 ? 's' : ''}` : ''}`], ['Cost to build', money(price(L.cost))]];
   if (mph) facts.push(['Speed limit', `${mph} mph`]);
   const over = net.segs.get(b.seg)?.bridges?.[b.idx]?.override;
   shell.openInfo({
@@ -1187,13 +1253,16 @@ function openBridgeEditor(b: BuiltBridge, fresh = true) {
     back: () => showBridgeInfo(b),
     body: `<div class="grp"><span class="tab">Types</span>${ch.options.map((o) => {
       const on = o.def.id === b.layout.def.id, rec = o.def.id === ch.recommended;
-      const sub = o.ok ? `${money(o.cost)} · ${money(o.maint)} a year${o.reasons.length ? ` · ${o.reasons[0]}` : ''}` : o.reasons[0] ?? 'Can’t be built here';
+      const sub = o.ok ? `${on ? 'built' : `${money(price(o.cost))} to rebuild`}${o.reasons.length ? ` · ${o.reasons[0]}` : ''}` : o.reasons[0] ?? 'Can’t be built here';
       return `<button data-type="${o.def.id}" class="${on ? 'on' : ''}" aria-pressed="${on}" ${o.ok ? '' : 'disabled'}><b>${rec ? icon('sparkles') : ''}${o.def.label}${rec ? ' · recommended' : ''}${on ? icon('check', 'tick') : ''}</b><small>${sub}</small></button>`;
     }).join('')}</div>`,
   });
   el.querySelectorAll<HTMLButtonElement>('[data-type]').forEach((btn) => btn.addEventListener('click', () => {
-    const mid = (b.s0 + b.s1) / 2;
+    const mid = (b.s0 + b.s1) / 2, o = ch.options.find((x) => x.def.id === btn.dataset.type);
+    if (!o || o.def.id === b.layout.def.id) return;
+    if (!purse.can(price(o.cost))) { hint(short(price(o.cost)), 'alert'); return; }
     if (!bridgeLayer.setType(net, b, btn.dataset.type as BuiltBridge['layout']['def']['id'])) return;
+    purse.spend(price(o.cost), 'building');
     rebuildRoads();
     const nb = bridgeLayer.at(b.seg, mid);
     if (nb) openBridgeEditor(nb, false);
@@ -1211,6 +1280,13 @@ function stopAt(p: P) {
   }
   return null;
 }
+// a stop's figures from the economy (both sides of the road together), a month being a game day
+function stopFigures(st: Stop): [string, string][] {
+  const e = townRef?.stop(st.id);
+  if (!e || !e.lines.length) return [['Waiting', '0 (no line calls here yet)']];
+  const n = (x: number) => Math.round(x).toLocaleString('en-GB');
+  return [['Waiting', n(e.waiting)], ['Boarded this month', n(e.boarded * 30)], ['Got off this month', n(e.alighted * 30)]];
+}
 function showStopInfo(seg: RSeg, st: Stop) {
   const d = net.def(seg), t = st.take;
   const bits = st.kind === 'kerb' ? ['buses stop in the lane'] : [
@@ -1220,7 +1296,7 @@ function showStopInfo(seg: RSeg, st: Stop) {
   ].filter(Boolean);
   shell.openInfo({
     key: `stop:${seg.id}:${st.id}`, title: lines.name(st.id), sub: `${st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by'} · ${d.label}`, icon: 'busStop', tone: 'stop',
-    facts: [['Lines', lines.list.filter((l) => l.stops.some((x) => lines.same(x, st.id))).map((l) => `${l.num}`).join(', ') || 'None yet'], ...people.stopFacts(seg, st)], note: bits.join(' · '),
+    facts: [['Lines', lines.list.filter((l) => l.stops.some((x) => lines.same(x, st.id))).map((l) => `${l.num}`).join(', ') || 'None yet'], ...stopFigures(st)], note: bits.join(' · '),
     actions: lines.list.filter((l) => l.stops.some((x) => lines.same(x, st.id))).slice(0, 3).map((l) => ({ label: `Line ${l.num}`, icon: 'transport' as Icon, onClick: () => showLineInfo(l) })),
   });
 }
@@ -1269,20 +1345,21 @@ function stopTap(p: P) {
   else {
     const d = net.def(q.seg);
     el = openPanel('stop', `Stop on this ${d.family.toLowerCase()}`, 'busStop',
-      res.plans.map((pl, i) => `<div class="plan${pl.ok ? '' : ' no'}"><div class="row"><span class="tab">${pl.title}</span><span class="cost">${money(pl.cost)}</span></div>
+      res.plans.map((pl, i) => `<div class="plan${pl.ok ? '' : ' no'}"><div class="row"><span class="tab">${pl.title}</span><span class="cost">${money(price(pl.cost))}</span></div>
         ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${icon('alert')}<span>${pl.blocked}</span></div>` : ''}
-        <button class="act primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
+        <button class="act primary" data-plan="${i}" ${pl.ok && purse.can(price(pl.cost)) ? '' : 'disabled'} ${purse.can(price(pl.cost)) ? '' : `title="${esc(short(price(pl.cost)))}"`}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
   }
   if (feeds.length) el.insertAdjacentHTML('afterbegin', `<p class="note">${icon('warehouse')} This stop would serve the ${esc(feeds.join(' and the '))} too, raising ${feeds.length > 1 ? 'their' : 'its'} production.</p>`);
   // turn the road to run up the screen in the clear map above the sheet, so the lay-by can be seen as it's chosen
   focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
   el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
     const pl = res.plans[+b.dataset.plan!];
+    if (!purse.spend(price(pl.cost), 'building')) { hint(short(price(pl.cost)), 'alert'); return; }
     net.addStop(q.seg.id, q.s, side, pl);
     for (const l of net.touched) { const bb = buildings.find((x) => x.lot === l); if (bb && !bb.dying) regenerate(bb); }
     closeSheet();
     rebuildRoads();
-    hint(`${pl.title} built${pl.take.land ? ` · ${pl.lots.length} front garden${pl.lots.length === 1 ? '' : 's'} trimmed` : ''}`, 'check');
+    hint(`${pl.title} built for ${money(price(pl.cost))}${pl.take.land ? ` · ${pl.lots.length} front garden${pl.lots.length === 1 ? '' : 's'} trimmed` : ''}`, 'check');
   }));
 }
 
@@ -1438,7 +1515,7 @@ const traffic = new Traffic(net, scene, rng(5));
 traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
-onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); };
+onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); townRef?.networkChanged(); };
 const lines = new Lines(traffic);
 const markers = new StopMarkers(net, traffic);
 scene.add(markers.group);
@@ -1471,7 +1548,6 @@ const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}
 const count = (n: number) => (n < 1e4 ? n.toLocaleString('en-GB') : n < 1e5 ? `${Math.floor(n / 100) / 10}k` : n < 1e6 ? `${Math.floor(n / 1e3)}k` : `${Math.floor(n / 1e5) / 10}m`);
 
 let last = performance.now();
-let growAt = 0; // game minutes until the next building
 const GAME_MIN_PER_S = 4; // how fast the clock runs: game minutes per real second
 // Game speed (pause, 1×, 2×, 4×) scales the clock, the town's growth and the traffic together.
 // Traffic keeps its own time base, which only ever runs ahead of real time: vehicles stamp some
@@ -1497,6 +1573,19 @@ let lastH = view.h;
 // the town's people: on the footways, at the stops, in the parks (see game/crowds.ts)
 const people = new TownCrowds({ scene, net, junctions, traffic, regions: () => infill }, GAME_MIN_PER_S);
 (window as unknown as { people: TownCrowds }).people = people;
+// the economy runs the town from here on (game/econ.ts): it decides what gets built, and how
+// many wait at the stops
+const town = new TownEconomy({
+  net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse,
+  standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
+  free: () => queue,
+  build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); },
+  rebuild: (l, kind) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; l.kind = kind; regenerate(b); placesDirty = true; },
+  clear: (l) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; net.lots = net.lots.filter((x) => x !== l); demolish(b); queue.push(l); },
+});
+townRef = town;
+people.numbers = town.numbers();
+let syncAt = 2;
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
 // Phones differ enormously, so rather than guess, the game watches its own frame times: if
 // frames run slow it steps down (fewer pixels, then cheaper shadows, then none), and when
@@ -1543,14 +1632,10 @@ function frame(now: number) {
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
   doomMat.opacity = 0.3 + 0.25 * Math.sin(now / 160);
   const gdt = dt * speed; // game seconds this frame
-  // the town grows at a town's pace: about one new building every 20 minutes of game time
-  // (so it speeds up and slows down with the clock), with some randomness so it doesn't tick
-  growAt -= gdt * GAME_MIN_PER_S;
-  if (growAt <= 0 && queue.length) {
-    growAt = 12 + rand() * 16;
-    const l = queue.shift()!;
-    if (net.lotFree(l)) { spawnLot(l); refreshTrees(l); gameGround.built(l); }
-  }
+  // the town grows and shrinks with how well it's served: the economy decides (game/econ.ts)
+  town.advance(gdt * GAME_MIN_PER_S);
+  syncAt -= dt;
+  if (syncAt <= 0) { syncAt = 2; town.sync(); if (shell.sheetKey === 'town') showTown(); }
   for (let i = buildings.length - 1; i >= 0; i--) {
     const b = buildings[i];
     if (!b.solo) continue;
@@ -1563,7 +1648,7 @@ function frame(now: number) {
       if (b.solo.scale.y >= 1) toChunk(b); // settled: merge into its chunk
     }
   }
-  if (infillDue && !queue.length && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
+  if (infillDue && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
   // merge at most a couple of changed chunks a frame
   let merged = 0;
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
@@ -1597,7 +1682,7 @@ function frame(now: number) {
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
   if (now - statsAt > 250) {
     statsAt = now;
-    const pop = buildings.reduce((s, b) => s + (USE[b.lot.kind].unit === 'jobs' ? 0 : USE[b.lot.kind].pop), 0);
+    const pop = town.report?.residents ?? 0;
     $('#st-clock').textContent = hhmm(clock);
     // (the rush hours in the short form timetables use, so the line fits a phone)
     const rush = speed ? rushLabel(hour) : 'paused';
@@ -1607,6 +1692,7 @@ function frame(now: number) {
     $('#st-buses').textContent = String(traffic.buses);
     $('#st-trains').textContent = String(traffic.trains.length);
     $('#st-pop').textContent = count(pop);
+    shell.setMoney(money(purse.balance));
   }
   const t1 = performance.now();
   const q = TIERS[tier];
@@ -1628,7 +1714,7 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
