@@ -117,7 +117,9 @@ export interface GroupSpec {
 }
 interface Group {
   spec: GroupSpec; bufs: Bufs | null; shown: number; target: number; lod: number; keep: number; builtAt: number;
-  dead: boolean; // removed from the store (its entries are dropped as they're met)
+  dead: boolean; // removed from the store (its entries fade out as they're met)
+  wasOn: boolean; cameOn: boolean; // on screen last frame; came on screen this frame
+  keepE: number; // `keep`, eased, so figures over the far budget fade away rather than vanish
   slots: (Entry | undefined)[]; // its entry in each mesh, by mesh and category (see slotOf)
 }
 
@@ -135,7 +137,7 @@ export const BUDGETS: Budget[] = [
 interface Entry { g: Group; cat: Cat; shown: number; hidden: number; version: number; n: number }
 const KINDS: Kind[] = ['person', 'personMid', 'card', 'animal', 'animalMid', 'bird', 'bike', 'pushchair', 'wheelchair'];
 const slotOf = (kind: Kind, cat: Cat) => KINDS.indexOf(kind) * CATS.length + CATS.indexOf(cat);
-const needed = (e: Entry) => e.g.bufs![e.cat].upTo(Math.ceil(Math.min(Math.max(e.g.shown, e.g.target), e.g.keep)));
+const needed = (e: Entry) => e.g.bufs![e.cat].upTo(Math.ceil(Math.min(Math.max(e.g.shown, e.g.target), Math.max(e.g.keep, e.g.keepE))));
 class Batch {
   mesh: THREE.Mesh;
   geo: THREE.InstancedBufferGeometry;
@@ -191,7 +193,7 @@ class Batch {
     const d = this.dyn.array as Float32Array;
     let o = 0;
     for (const e of this.entries) {
-      const rb = e.g.bufs![e.cat], c = Math.min(e.g.shown, e.g.keep);
+      const rb = e.g.bufs![e.cat], c = Math.min(e.g.shown, e.g.keepE);
       for (let i = 0; i < e.n; i++, o++) { d[o * 4] = c; d[o * 4 + 1] = rb.idx[i]; d[o * 4 + 2] = e.shown; d[o * 4 + 3] = e.hidden; }
     }
     this.dyn.needsUpdate = true;
@@ -265,7 +267,7 @@ export class PeopleStore {
   add(spec: GroupSpec) {
     const old = this.groups.get(spec.id);
     if (old) { old.spec = spec; old.target = spec.count; if (old.bufs) { this.fill(old); } return; }
-    this.groups.set(spec.id, { spec, bufs: null, shown: spec.count, target: spec.count, lod: 3, keep: Infinity, builtAt: 0, dead: false, slots: new Array(KINDS.length * CATS.length) });
+    this.groups.set(spec.id, { spec, bufs: null, shown: spec.count, target: spec.count, lod: 3, keep: Infinity, builtAt: 0, dead: false, wasOn: false, cameOn: false, keepE: 1e6, slots: new Array(KINDS.length * CATS.length) });
   }
   has(id: string) { return this.groups.has(id); }
   spec(id: string) { return this.groups.get(id)?.spec; }
@@ -274,13 +276,8 @@ export class PeopleStore {
     if (!g) return;
     this.groups.delete(id);
     g.dead = true;
-    // its entries are exactly those in its slots
-    g.slots.forEach((e, i) => {
-      if (!e) return;
-      const b = this.batches.get(KINDS[Math.floor(i / CATS.length)])!, at = b.entries.indexOf(e);
-      if (at >= 0) { b.entries.splice(at, 1); b.dirty = true; }
-      g.slots[i] = undefined;
-    });
+    // its entries fade out over the next frames (see update), so a rebuilt footway cross-fades
+    g.lod = 3;
   }
   // How many of a group to show. Changes ease in (a figure fades over about half a second)
   // unless `instant` (used when a queue re-forms after boarding).
@@ -357,7 +354,8 @@ export class PeopleStore {
       this.v.set(c.x, y, c.z + g.spec.radius).applyMatrix4(this.m);
       const r = Math.max(rx, Math.hypot(this.v.x - nx, this.v.y - ny)) + 0.08;
       const on = nz > -1 && nz < 1 && nx > -1 - r && nx < 1 + r && ny > -1 - r && ny < 1 + r;
-      if (!on || g.target <= 0.001) { g.lod = 3; continue; }
+      if (!on || Math.max(g.target, g.shown) <= 0.001) { g.lod = 3; g.wasOn = on; continue; }
+      g.cameOn = !g.wasOn; g.wasOn = true;
       let v = vis[nv];
       if (!v) vis.push((v = { g, ph, pri: 0 }));
       v.g = g; v.ph = ph; v.pri = nx * nx + ny * ny;
@@ -373,7 +371,7 @@ export class PeopleStore {
     for (let i = 0; i < nv; i++) {
       const { ph } = vis[i], g = vis[i].g!, was = g.lod;
       let lod = this.forceLod ?? (ph >= B.nearPx * (was <= 0 ? 0.9 : 1.1) ? 0 : ph >= B.midPx * (was <= 1 ? 0.9 : 1.1) ? 1 : ph >= B.farPx * (was <= 2 ? 0.9 : 1.1) ? 2 : 3);
-      const n = Math.ceil(g.target);
+      const n = Math.ceil(Math.max(g.target, g.shown));
       while (lod < 2 && used[lod] + n > cap[lod]) lod++;
       g.keep = Infinity;
       if (lod === 2 && used[2] + n > cap[2]) { g.keep = Math.max(0, cap[2] - used[2]); if (g.keep === 0) lod = 3; }
@@ -385,6 +383,8 @@ export class PeopleStore {
     }
     // ease shown counts towards their targets
     for (const g of this.groups.values()) {
+      const k = Math.min(g.keep, 1e6), dk = k - g.keepE;
+      if (dk !== 0) { const step = Math.max(2, Math.abs(dk) * 1.5) * fadeDt; g.keepE = Math.abs(dk) <= step ? k : g.keepE + Math.sign(dk) * step; }
       const d = g.target - g.shown;
       if (d !== 0) { const step = Math.max(2, Math.abs(d) * 1.5) * fadeDt; g.shown = Math.abs(d) <= step ? g.target : g.shown + Math.sign(d) * step; }
     }
@@ -395,7 +395,7 @@ export class PeopleStore {
       const E = b.entries;
       let w = 0;
       for (let i = 0; i < E.length; i++) {
-        const e = E[i], g = e.g, live = !g.dead;
+        const e = E[i], g = e.g;
         if (wanted(g, e.cat, b.kind)) {
           // back before it had faded out: fade in from as far as it had got
           if (e.hidden) { const h = e.hidden; e.hidden = 0; e.shown = fnow - (h > 0 ? Math.max(0, 0.6 - (fnow - h)) : 0); }
@@ -403,10 +403,10 @@ export class PeopleStore {
           // more figures wanted than copied, or far fewer: copy again
           const want = needed(e);
           if (want > e.n || want < e.n - 8) b.dirty = true;
-        } else if (!e.hidden && live && g.lod < 3) { e.hidden = fnow; }
+        } else if (!e.hidden && (g.dead || g.wasOn)) { e.hidden = fnow; } // removed, too small or a new level: fade
         else if (!e.hidden) { e.hidden = -1; }
-        // off screen or gone: drop at once; changed level: keep until faded out
-        if (e.hidden === 0 || (e.hidden > 0 && fnow - e.hidden < 0.65 && live)) E[w++] = e;
+        // off screen: drop at once; otherwise keep until faded out
+        if (e.hidden === 0 || (e.hidden > 0 && fnow - e.hidden < 0.65)) E[w++] = e;
         else if (g.slots[slotOf(b.kind, e.cat)] === e) g.slots[slotOf(b.kind, e.cat)] = undefined;
       }
       if (w !== E.length) { E.length = w; b.dirty = true; }
@@ -421,7 +421,7 @@ export class PeopleStore {
         if (g.slots[si]) continue; // already there (perhaps fading back in)
         // groups that appear because they came on screen are already at full strength; those that
         // appear because the view zoomed or they were just built fade in
-        const fresh = g.builtAt === fnow && !g.spec.instant;
+        const fresh = (g.builtAt === fnow || !g.cameOn) && !g.spec.instant;
         const e: Entry = { g, cat, shown: fresh || this.shownElsewhere(g, kind) ? fnow : fnow - 1, hidden: 0, version: -1, n: 0 };
         const b = this.batches.get(kind)!;
         b.entries.push(e);
