@@ -1,6 +1,32 @@
 # Handover: where everything stands
 
-## Latest: the bus loop is playable (24 Sep 2026, evening)
+## Latest: the player builds everything, and simpler tools (24 Sep 2026, night)
+
+Session https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8, on the user's feedback:
+nothing should be built at the start, the HUD was too big, and the tools were too complicated.
+- **Empty start:** no starter stops, bus line, stations or rail lines; the region's track is laid
+  bare (`layRegionRail(..., { trackOnly: true })`). The economy holds a town steady with no
+  service (`GAME_TUNE.local.visitors: 1`), so the player's service is what makes it grow.
+  `transferWalkM: 60` fixed zero riders.
+- **Next-step card** (`shell.goal`, `updateGoal` in `main.ts`): under the status strip. It reads
+  "build 2 stops", then "draw a line", then "watch the town grow". Tapping it opens the right
+  tool. It goes once the first line has run two days.
+- **Bus stop tool:** tap a road, and a blueprint goes down. Kerbside and Lay-by are two buttons
+  with prices, and Build confirms. The blueprint shows faintly through buildings in front of it.
+- **Road tool:** one row, showing the type name and price. The chevron or the sliders button
+  opens a drawer: row 1 holds the common types plus More, row 2 the shape, height, gradient and
+  Join/Over/Under. With a blueprint down, the hint pill steps aside for the card. A Build that
+  can't be pressed now looks disabled (before, it only faded under the primary colour). The
+  climb errors say what to do.
+- **Line tool:** frames every stop when it starts.
+- **Parallel sessions** each push a `claude/work-*` branch; merge them here as they land:
+  - traffic feel: `work-traffic-2`;
+  - save and CI: `work-save`;
+  - region streaming: `work-streaming`;
+  - stations on curves, bridges and underground: `work-stations-2`;
+  - region generator: `work-region`.
+
+## Earlier: the bus loop is playable (24 Sep 2026, evening)
 
 Session https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. **Read `docs/loop.md`
 ("Status")** for what was built and what's open.
