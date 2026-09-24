@@ -282,7 +282,13 @@ let selectedSite: IndustrySite | null = null, siteRings = false, siteT = 0;
 function showSite(s: IndustrySite) {
   industries.openInfo(s, shell, [{ label: 'Add a stop nearby', icon: 'busStop', onClick: () => startStopTool() }], () => { if (selectedSite === s) selectedSite = null; });
   selectedSite = s;
-  focusOn({ x: s.model.frame.cx, z: s.model.frame.cz }, Math.max(140, (s.model.frame.w + s.model.frame.d) * 1.3)); // in the clear map above the sheet
+  focusOn({ x: s.model.frame.cx, z: s.model.frame.cz }, industries.frameHeight(s)); // with its catchment, in the clear map above the sheet
+}
+// the site under a tap: where the ray meets what's drawn (a tall building hides the ground behind it)
+function siteUnder(sx: number, sy: number, g: P) {
+  ray.setFromCamera(ndc(sx, sy), cam);
+  const hit = ray.intersectObjects(cityGroup.children, true)[0];
+  return industries.at(hit ? { x: hit.point.x, z: hit.point.z } : g);
 }
 
 let queue: Lot[] = [];
@@ -1089,6 +1095,7 @@ function stopTap(p: P) {
   const res = net.planStop(q.seg.id, q.s, side);
   stopPreview = { seg: q.seg, t: q.s, side };
   drawGhost();
+  const feeds = industries.servedFrom(industries.kerbPoint(q.seg, q.s, side)).map((x) => x.model.variant.name); // (game/industry.ts)
   let el: HTMLElement;
   if (res.reason) el = openPanel('stop', 'Can’t put a stop here', 'busStop', `<div class="bad">${icon('alert')}<span>${res.reason}</span></div>`, true);
   else {
@@ -1098,6 +1105,7 @@ function stopTap(p: P) {
         ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${icon('alert')}<span>${pl.blocked}</span></div>` : ''}
         <button class="act primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
   }
+  if (feeds.length) el.insertAdjacentHTML('afterbegin', `<p class="note">${icon('warehouse')} This stop would serve the ${esc(feeds.join(' and the '))} too, raising ${feeds.length > 1 ? 'their' : 'its'} production.</p>`);
   // turn the road to run up the screen in the clear map above the sheet, so the lay-by can be seen as it's chosen
   focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
   el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
@@ -1126,7 +1134,7 @@ function tapMap(sx: number, sy: number): Mode {
   if (mode === 'stop') { stopTap(g); return mode; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
-  const site = st || jn !== null ? null : industries.at(g); // an industrial site (game/industry.ts)
+  const site = st || jn !== null ? null : siteUnder(sx, sy, g); // an industrial site (game/industry.ts)
   if (site) { showSite(site); return 'look'; }
   const b = st || jn !== null ? null : pickBuilding(sx, sy) ?? infillCells.get(cellKey(g.x, g.z)) ?? null;
   if (st) showStopInfo(st.seg, st.stop);
@@ -1515,8 +1523,8 @@ function frame(now: number) {
   // catchment rings for the selected site, or for every site while a stop is placed
   siteT += gdt;
   industries.tick(clock);
-  industries.frame(siteT, hour);
-  industries.showOverlay(selectedSite, mode === 'stop' ? (stopPreview ? pointAt(net.path(stopPreview.seg), stopPreview.t) : null) : siteRings ? null : undefined);
+  industries.frame(siteT, hour, cam);
+  industries.showOverlay(selectedSite, mode === 'stop' ? (stopPreview ? industries.kerbPoint(stopPreview.seg, stopPreview.t, stopPreview.side) : null) : undefined, mode === 'stop' || siteRings);
   // At 1× traffic steps once a frame as it always has; faster, it's cut into steps of at most
   // 1/30 s so cars don't jump through each other or past their stop lines. Paused, it holds still.
   if (speed > 0) {

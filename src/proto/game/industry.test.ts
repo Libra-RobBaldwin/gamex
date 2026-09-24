@@ -35,6 +35,18 @@ describe('industrial sites in the game', () => {
     for (const s of I.sites) for (const p of s.parts) expect(Object.keys(p.g.attributes).sort()).toEqual(['color', 'normal', 'position', 'uv']);
   });
 
+  it('lays a drive from each gate to the kerb, facing up', () => {
+    const { I } = estate();
+    for (const s of I.sites) {
+      const pos = s.parts[s.parts.length - 1].g.getAttribute('position');
+      for (let t = 0; t < pos.count; t += 3) {
+        const v = (i: number) => new THREE.Vector3().fromBufferAttribute(pos, t + i);
+        const n = v(1).sub(v(0)).cross(v(2).sub(v(0)));
+        expect(n.y).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it('gives up a site that a new road runs through, with its land, moving parts and chunk', () => {
     const { net, I, road } = estate();
     const s = I.sites.find((x) => ESTATE(x.lot))!;

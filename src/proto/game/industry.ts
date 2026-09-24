@@ -12,9 +12,9 @@
 // - A selected site, or every site while a stop is being placed, shows its catchment ring; the
 //   selected one also shows what it takes in and sends out as icons over the map.
 import * as THREE from 'three';
-import { pointAt, pathLength, rectCorners, stopSpan, type Lot, type Network, type P } from '../roads';
+import { pointAt, pathLength, rectCorners, stopSpan, type Lot, type Network, type P, type RSeg } from '../roads';
 import { polysTouch, pointInPoly } from '../land';
-import { buildIndustry, CARGO, INDUSTRY_TYPES, IndustryFx, overlayFor, serves, variantFor, type CargoId, type CatchmentOverlay, type FxHandle, type IndustryId, type IndustryModel, type IndustryVisualState, type Plot, type ServeKind } from '../industries';
+import { buildIndustry, toWorld, CARGO, INDUSTRY_TYPES, IndustryFx, overlayFor, serves, variantFor, type CargoId, type CatchmentOverlay, type FxHandle, type IndustryId, type IndustryModel, type IndustryVisualState, type Plot, type ServeKind } from '../industries';
 import { gameYear } from './era';
 import type { Action, Shell } from '../ui/shell';
 import flame from './icons/flame.svg?raw';
@@ -42,7 +42,11 @@ const cleanSvg = (s: string) => s.replace(/\s(width|height|class)="[^"]*"/g, '')
 export const cargoIcon = (c: CargoId) => cleanSvg(CARGO_SVG[c]).replace('<svg', '<svg class="ic" aria-hidden="true" focusable="false"');
 
 // ---------------- the feed: what each site shows ----------------
-/** A stop (or later a station or terminal) that can serve sites. */
+/**
+ * A stop (or later a station or terminal) that can serve sites. `radius` is its own reach, for
+ * its own ring; it isn't added to a site's catchment, so a site's ring on the map is exactly
+ * where a stop has to be to serve it.
+ */
 export interface ServePoint { x: number; z: number; kind: ServeKind; radius: number; label: string }
 export interface FeedContext { year: number; hour: number; stops: ServePoint[] }
 /** What the economy will provide. Until then `standInFeed` makes it up. */
@@ -92,7 +96,7 @@ export interface SiteWish { type: IndustryId; near: P; radius: number; variant?:
 export const siteActions: ((site: IndustrySite) => Action | null)[] = [];
 
 const SETBACK = 5; // metres from the kerb to the site fence
-const BUS_STOP_RADIUS = 30; // how far a stop's own catchment reaches, added to the site's
+const BUS_STOP_RADIUS = 30; // a stop's own reach (for its own ring one day; not added to a site's catchment)
 const same = (a: IndustryVisualState, b: IndustryVisualState) =>
   a.running === b.running && a.recentlyDelivered === b.recentlyDelivered && a.year === b.year &&
   Math.abs(a.production - b.production) < 0.05 && Math.abs(a.input - b.input) < 0.03 && Math.abs(a.output - b.output) < 0.03 && (a.neglect ?? 0) === (b.neglect ?? 0);
@@ -213,6 +217,7 @@ export class Industries {
     this.fx.remove(s.fx);
     this.net.land.release(s.key);
     this.onRemove(s);
+    this.boxes.delete(s);
     for (const p of s.parts) p.g.dispose();
     this.overlayKey = '';
   }
@@ -233,7 +238,25 @@ export class Industries {
       parts.push({ m: this.mat, g });
       mesh.geometry.dispose();
     }
+    parts.push({ m: this.mat, g: this.drive(m) });
     return parts;
+  }
+
+  // A tarmac drive from the gate across the verge to the kerb (plots are set back SETBACK metres),
+  // a centimetre under the site's own roads where the two meet.
+  private drive(m: IndustryModel) {
+    const f = m.frame, gx = m.anchors.gate.x, z0 = f.d / 2, z1 = f.d / 2 + SETBACK - 0.2, hw = 3.5, y = 0.06;
+    const W = (x: number, z: number) => { const p = toWorld(f, x, z); return [p.x, y, p.z]; };
+    const a = W(gx - hw, z0), b = W(gx + hw, z0), c = W(gx + hw, z1), d = W(gx - hw, z1);
+    // wound so the face points up, whichever way the site is turned
+    const up = (c[0] - a[0]) * (b[2] - a[2]) - (c[2] - a[2]) * (b[0] - a[0]) > 0;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(up ? [...a, ...b, ...c, ...a, ...c, ...d] : [...a, ...c, ...b, ...a, ...d, ...c], 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(Array.from({ length: 6 }, () => [0, 1, 0]).flat(), 3));
+    const col = new THREE.Color('#56595e');
+    g.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: 6 }, () => [col.r, col.g, col.b]).flat(), 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(12), 2));
+    return g;
   }
 
   // ---------------- serving ----------------
@@ -242,15 +265,22 @@ export class Industries {
     const out: ServePoint[] = [];
     for (const seg of this.net.segs.values()) {
       if (!seg.stops.length) continue;
-      const path = this.net.path(seg), half = this.net.half(seg), label = this.net.def(seg).label;
+      const label = this.net.def(seg).label;
       for (const st of seg.stops) {
-        const [a, b] = stopSpan(st), q = pointAt(path, (a + b) / 2);
-        out.push({ x: q.x + q.uz * st.side * half, z: q.z - q.ux * st.side * half, kind: 'lorry', radius: BUS_STOP_RADIUS, label: `${st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by'} on the ${label.toLowerCase()}` });
+        const [a, b] = stopSpan(st), q = this.kerbPoint(seg, (a + b) / 2, st.side);
+        out.push({ x: q.x, z: q.z, kind: 'lorry', radius: BUS_STOP_RADIUS, label: `${st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by'} on the ${label.toLowerCase()}` });
       }
     }
     return out;
   }
-  servingStops(s: IndustrySite, stops: ServePoint[]) { return stops.filter((p) => serves(s.overlay, p, p.radius, p.kind)); }
+  servingStops(s: IndustrySite, stops: ServePoint[]) { return stops.filter((p) => serves(s.overlay, p, 0, p.kind)); }
+  /** Where a stop at arc length `t` on `seg`, on `side`, stands: on the kerb (as stops() puts it). */
+  kerbPoint(seg: RSeg, t: number, side: 1 | -1): P {
+    const q = pointAt(this.net.path(seg), t), half = this.net.half(seg);
+    return { x: q.x + q.uz * side * half, z: q.z - q.ux * side * half };
+  }
+  /** The sites a stop at p would serve. */
+  servedFrom(p: P) { return this.sites.filter((s) => serves(s.overlay, p, 0, 'lorry')); }
   private context(hour: number): FeedContext { return { year: gameYear(), hour, stops: this.stops() }; }
 
   /** Once a game minute: ask the feed what each site should show, and redraw only what changed. */
@@ -271,10 +301,40 @@ export class Industries {
       this.fx.setState(s.fx, st);
     }
   }
-  /** Every frame: animate at the fx's own low rate, lamps from the clock. `t` is game seconds. */
-  frame(t: number, hour: number) {
+  /**
+   * Every frame: animate at the fx's own low rate, lamps from the clock. `t` is game seconds.
+   * With a camera, the moving parts are hidden (no draw calls, no work) while no site is in view.
+   */
+  frame(t: number, hour: number, cam?: THREE.Camera) {
+    if (cam) {
+      cam.updateMatrixWorld();
+      this.frustum.setFromProjectionMatrix(this.m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+      this.fx.group.visible = this.sites.some((s) => this.frustum.intersectsBox(this.boxOf(s)));
+      if (!this.fx.group.visible) return;
+    }
     this.fx.setNight(nightAt(hour));
     this.fx.update(t);
+  }
+  private frustum = new THREE.Frustum();
+  private m4 = new THREE.Matrix4();
+  private boxes = new Map<IndustrySite, THREE.Box3>();
+  // a site's plot, up to its tallest part plus the smoke over it
+  private boxOf(s: IndustrySite) {
+    let b = this.boxes.get(s);
+    if (!b) {
+      b = new THREE.Box3();
+      for (const p of s.poly) b.expandByPoint(new THREE.Vector3(p.x, 0, p.z));
+      b.max.y = s.model.height + 30;
+      this.boxes.set(s, b);
+    }
+    return b;
+  }
+  /** How high a view to frame a site and its catchment ring (for focusOn). */
+  frameHeight(s: IndustrySite) {
+    let r = 0;
+    const f = s.model.frame;
+    for (const p of s.overlay.ring) r = Math.max(r, Math.hypot(p.x - f.cx, p.z - f.cz));
+    return Math.max(140, r * 3.4);
   }
 
   // ---------------- inspecting ----------------
@@ -304,18 +364,18 @@ export class Industries {
 
   // ---------------- overlays ----------------
   /**
-   * Show catchments: `selected` gets its ring and cargo icons. While a stop is being placed
-   * (`placing` is the stop's spot, or null before the first tap), every site shows its ring, lit
-   * up if a stop there would serve it. Cheap to call every
-   * frame: it only rebuilds when what it shows changes.
+   * Show catchments. `selected` (a site whose sheet is open) gets a white ring and its cargo
+   * icons. With `all` set (a stop being placed, or the Layers toggle), every site shows a pale
+   * ring; `placing` is where the stop would stand (its kerb point), and the rings of the sites it
+   * would serve light up lime. Cheap to call every frame: it only rebuilds when what it shows
+   * changes.
    */
-  showOverlay(selected: IndustrySite | null, placing?: P | null) {
-    const isPlacing = placing !== undefined;
-    const serveAt = placing ? { x: placing.x, z: placing.z, kind: 'lorry' as const, radius: BUS_STOP_RADIUS, label: '' } : null;
-    const shown = isPlacing ? this.sites : selected ? [selected] : [];
-    const lit = (s: IndustrySite) => (serveAt ? serves(s.overlay, serveAt, serveAt.radius, 'lorry') : !isPlacing && s === selected);
-    const icons = !isPlacing && selected ? selected : null;
-    const key = `${shown.map((s) => `${s.n}${lit(s) ? '+' : ''}`).join(',')}|${icons ? `${icons.n}:${s2(icons)}` : ''}`;
+  showOverlay(selected: IndustrySite | null, placing?: P | null, all = placing !== undefined) {
+    const serveAt = placing ?? null;
+    const shown = all ? this.sites : selected ? [selected] : [];
+    const tone = (s: IndustrySite) => (serveAt && serves(s.overlay, serveAt, 0, 'lorry') ? 2 : s === selected ? 1 : 0);
+    const icons = selected;
+    const key = `${shown.map((s) => `${s.n}:${tone(s)}`).join(',')}|${icons ? `${icons.n}:${s2(icons)}` : ''}`;
     if (key === this.overlayKey) return;
     this.overlayKey = key;
     for (const c of [...this.overlay.children]) { this.overlay.remove(c); if ((c as THREE.Mesh).geometry) (c as THREE.Mesh).geometry.dispose(); }
@@ -324,7 +384,7 @@ export class Industries {
     const col = new THREE.Color();
     for (const s of shown) {
       const ring = s.overlay.ring, n = ring.length;
-      col.set(lit(s) ? '#5cb83a' : '#f4f1e6');
+      col.set(['#f4f1e6', '#ffffff', '#5cb83a'][tone(s)]); // lime only ever means "this stop would serve it"
       const cx = ring.reduce((a, p) => a + p.x, 0) / n, cz = ring.reduce((a, p) => a + p.z, 0) / n;
       for (let i = 0; i < n; i++) {
         const a = ring[i], b = ring[(i + 1) % n];

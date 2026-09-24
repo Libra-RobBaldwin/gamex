@@ -256,7 +256,8 @@ export class Traffic {
     const c = Math.cos(l.rot), s = Math.sin(l.rot), f = l.d / 2 + l.front;
     const p = { x: l.x - f * s, z: l.z + f * c };
     // traffic joins ordinary roads, never straight onto a motorway
-    const n = this.net.nearestSeg(p, 24, (s) => this.net.def(s).frontage);
+    // (an industrial site out of town has its gate on a fast rural road: game/industry.ts lots, id <= -1000)
+    const n = this.net.nearestSeg(p, 24, (s) => this.net.def(s).frontage || (l.id <= -1000 && this.net.def(s).cls === 'road' && this.net.def(s).family !== 'Motorway'));
     const a = n ? { seg: n.seg, s: n.s } : null;
     this.access.set(l.id, a);
     return a;
