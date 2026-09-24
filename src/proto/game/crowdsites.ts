@@ -8,7 +8,7 @@ import { closestOnPath, kerbOf, pathLength, pointAt, type Lot, type Network, typ
 import { legsAt, type Junction } from '../junction';
 import { CELL, type Region } from '../infill';
 import { USE } from '../buildgen';
-import { STD } from '../standards';
+import { crossingAt } from '../jshape';
 import { courseOf, type Course } from '../xsection';
 import { endsOf, section } from '../roaddraw';
 import type { QueueSite, Bench } from '../people/flows';
@@ -107,13 +107,9 @@ export function roadSites(net: Network, junctions: Map<number, Junction>): Sites
     const n = net.node(j.node);
     for (const leg of legsAt(net, j.node)) {
       const d = net.def(leg.seg);
-      if (d.pave <= 0 || d.lanes > 1 || d.median > 0 || Math.abs(n.y) > 0.3) continue;
-      const trim = sh.paveTrim[leg.seg.id];
-      if (!trim) continue;
-      let t = Math.max(trim[0], trim[1]) + 1.2;
-      // at a roundabout, clear of the splitter island
-      if (j.form === 'roundabout') t = Math.max(t, sh.R + STD.splitter.length + 1.5);
-      if (t > leg.len - 12) continue;
+      // (jshape.crossingAt: where roaddraw paints the crossing, so people cross where it's drawn)
+      const t = crossingAt(sh, j.form, { id: leg.seg.id, dir: leg.dir, ang: leg.ang, def: d, len: leg.len }, n.y);
+      if (t === null) continue;
       // (feet halfway between the pavement and the carriageway, so neither shows them sunk or floating)
       const u = leg.dir, K = kerbOf(d), y = n.y + 0.2;
       // the leg's frame, as jshape.W: `a` out along it, `b` across (+b the side traffic arrives on)

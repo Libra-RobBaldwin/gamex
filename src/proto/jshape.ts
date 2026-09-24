@@ -571,5 +571,18 @@ function ghostIslands(n: XZ, legs: ShapeLeg[], R: number, from: (l: ShapeLeg) =>
   return { polys, chevrons };
 }
 
+// Where people cross a junction's arm (game/crowdsites.ts walks them there, roaddraw paints it): a
+// little way back from the corner on a single carriageway with footways, clear of a roundabout's
+// splitter island; null where there's no crossing (a dual carriageway, a raised junction, too short).
+export function crossingAt(sh: Shape, form: string, l: ShapeLeg, y = 0): number | null {
+  const d = l.def;
+  if (d.pave <= 0 || d.lanes > 1 || d.median > 0 || Math.abs(y) > 0.3) return null;
+  const trim = sh.paveTrim[l.id];
+  if (!trim) return null;
+  let t = Math.max(trim[0], trim[1]) + 1.2;
+  if (form === 'roundabout') t = Math.max(t, sh.R + STD.splitter.length + 1.5);
+  return t > l.len - 12 ? null : t;
+}
+
 // The footprint of a roundabout of radius R: can it go here? (the ring and its footway)
 export const ringFootprint = (n: XZ, R: number, footway = 3) => circlePoly(n, R + footway, 28);

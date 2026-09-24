@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { BAY, ROADS, bayWeight, closestOnPath, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
 import { legsAt, type Junction } from './junction';
 import { STD } from './standards';
-import { GHOST_PAIR, legAt, legDir, legFrameOf, ringA, type ShapeLeg } from './jshape';
+import { GHOST_PAIR, crossingAt, legAt, legDir, legFrameOf, ringA, type ShapeLeg } from './jshape';
 import { TAPER, courseOf, normals, type Course, type Section2 } from './xsection';
 import type { XZ } from './land';
 import { laneBase, type RoadDef } from './catalog';
@@ -180,6 +180,8 @@ const islandMat = lit('#7aa653', over(4));
 const kerbMat = lit('#c9c4ba', { side: THREE.DoubleSide });
 const barrierMat = lit('#a9adb0', { side: THREE.DoubleSide });
 const hintMat = lit('#8c877d', over(1));
+// tactile paving at a crossing's dropped kerbs: blister paving, buff (uncontrolled) or red (at signals)
+const tactileBuffMat = lit('#c9a56a', over(1.5)), tactileRedMat = lit('#b0503e', over(1.5));
 const cutMat = lit('#6f9446');
 // the grass the roads draw themselves: verges, roundabout islands, cutting slopes (the game gives
 // them the ground's own look, so they match the fields and lawns round them)
@@ -357,6 +359,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   const F = () => new Flat();
   const pave = F(), asph = F(), lines = F(), verge = F(), median = F(), yellow = F(), bus = F(), cyc = F(), bays = F();
   const ballast = F(), sleepers = F(), railsF = F(), rack = F(), holes = F(), hint = F(), island = F(), wires = F();
+  const tactileBuff = F(), tactileRed = F();
   const cut = new Solid(), body = new Solid(), rails = new Solid(), barrier = new Solid(), kerbs = new Solid(), portal = new Solid(), poles = new Solid();
   const parked = carCols.map(() => new Solid());
   const furn = { glass: new Solid(), frame: new Solid(), red: new Solid() };
@@ -750,6 +753,17 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
         triW(mk, [[la + 5, c - 0.7], [la + 5, c + 0.7], [la + 3, c]], 0.36);
         triW(mka, [[la + 4.85, c - 0.45], [la + 4.85, c + 0.45], [la + 3.45, c]], 0.37);
       }
+      // where people cross the arm (jshape.crossingAt, the crossing game/crowdsites.ts walks them to):
+      // tactile paving on both footways at the dropped kerbs, buff for an uncontrolled crossing, red
+      // at the lights, where two lines of studs (TSRGD diagram 1055) mark it across the carriageway
+      const xt = crossingAt(sh, j.form, fl, n.y);
+      if (xt !== null) {
+        const deep = Math.min(1.2, d.pave), wide = 1.2, lit = j.form === 'signals', f = lit ? tactileRed : tactileBuff;
+        const up = segs.some((x) => net.def(x).pave === 0) ? 0.17 : 0.16; // (just over the footway, which a mixed junction lifts)
+        rect(f, xt - wide, xt + wide, kIn + 0.05, kIn + deep, up);
+        rect(f, xt - wide, xt + wide, -kIn - deep, -kIn - 0.05, up);
+        if (lit) for (const a of [xt - wide - 0.1, xt + wide + 0.1]) for (let b = -kIn + 0.3; b < kIn - 0.3; b += 0.6) rect(mk, a - 0.08, a + 0.08, b, b + 0.2, 0.36);
+      }
       // lane arrows, a pair per approach lane
       const lanes = j.lanes[leg.seg.id] ?? [];
       // arrows only where lanes actually divide the traffic (not on a plain single-lane approach)
@@ -881,7 +895,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
 
   const add = (f: Flat | Solid, m: THREE.Material, order = 0) => { if (f.pos.length) { const mesh = f.mesh(m); mesh.renderOrder = order; group.add(mesh); return mesh; } return null; };
   add(pave, paveMat); add(asph, asphaltMat); add(lines, lineMat); add(verge, vergeMat); add(median, medianMat); add(yellow, yellowMat);
-  add(bus, busMat); add(cyc, cycleMat); add(bays, bayMat); add(hint, hintMat);
+  add(bus, busMat); add(cyc, cycleMat); add(bays, bayMat); add(hint, hintMat); add(tactileBuff, tactileBuffMat); add(tactileRed, tactileRedMat);
   add(ballast, ballastMat); add(sleepers, sleeperMat); add(railsF, railMat); add(rack, rackMat); add(wires, poleMat);
   add(island, islandMat); add(kerbs, kerbMat); add(poles, poleMat); add(portal, portalMat);
   parked.forEach((p, i) => add(p, carCols[i]));
