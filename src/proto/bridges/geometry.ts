@@ -13,6 +13,9 @@ import { dashCuts, dashOn, mirrored, roadTop, type SectionKind } from './earthwo
 import { deckForm, formationDrop, TrackBuilder, type Track, type TrackRun } from './track';
 
 type V = [number, number, number];
+// Members bearing on another part run this far into it, so no two faces meet flush (which
+// flickers from some angles): beams into the slab above them, pier caps into what they carry.
+const EMBED = 0.1;
 
 // Triangles grouped by material.
 export class Geo {
@@ -207,7 +210,7 @@ function parapets(g: Geo, c: Crossing, s0: number, s1: number, L: Look, hw: numb
   for (const k of [-1, 1]) {
     const o = k * hw;
     if (L.parapet === 'stone') {
-      sweep(g, c, s0, s1, (s) => rect(o - k * 0.5, o, b(s) - 0.1, y(s) + 1.0), 'stone');
+      sweep(g, c, s0, s1, (s) => rect(o - k * 0.5, o, b(s) - 0.1, y(s) + 1.05), 'stone');
       sweep(g, c, s0, s1, (s) => rect(o - k * 0.55, o + k * 0.05, y(s) + 1.0, y(s) + 1.15), 'stoneDark', 3, false); // coping
     } else if (L.parapet === 'concrete') {
       sweep(g, c, s0, s1, (s) => rect(o - k * 0.4, o + k * 0.05, b(s) - 0.1, y(s) + 0.95), 'concrete');
@@ -226,7 +229,7 @@ function spanStructure(g: Geo, c: Crossing, lay: BridgeLayout, sp: Span, hw: num
   const len = sp.len, dep = depthOf(d, len);
   switch (d.id) {
     case 'trestle':
-      for (const n of [-hw * 0.6, 0, hw * 0.6]) sweep(g, c, sp.s0, sp.s1, (s) => rect(n - 0.3, n + 0.3, y(s) - dep, y(s) - L.slab), 'timberDark');
+      for (const n of [-hw * 0.6, 0, hw * 0.6]) sweep(g, c, sp.s0, sp.s1, (s) => rect(n - 0.3, n + 0.3, y(s) - dep, y(s) - L.slab + EMBED), 'timberDark');
       return;
     case 'masonry': return archSpan(g, c, sp, hw);
     case 'girder':
@@ -241,12 +244,12 @@ function spanStructure(g: Geo, c: Crossing, lay: BridgeLayout, sp: Span, hw: num
     case 'truss-deck': return truss(g, c, sp, hw, false);
     case 'beam': {
       const beams = Math.max(3, Math.round((hw * 2) / 2.6));
-      for (let i = 0; i < beams; i++) { const n = -hw + 1 + ((hw * 2 - 2) * i) / (beams - 1); sweep(g, c, sp.s0, sp.s1, (s) => rect(n - 0.35, n + 0.35, y(s) - dep, y(s) - L.slab), 'deck'); }
+      for (let i = 0; i < beams; i++) { const n = -hw + 1 + ((hw * 2 - 2) * i) / (beams - 1); sweep(g, c, sp.s0, sp.s1, (s) => rect(n - 0.35, n + 0.35, y(s) - dep, y(s) - L.slab + EMBED), 'deck'); }
       return;
     }
     case 'box': {
       const dm = Math.max(d.depth.min, len / 40);
-      sweep(g, c, sp.s0, sp.s1, (s) => { const u = (s - sp.s0) / len, x = 2 * u - 1, dd = dm + (dep - dm) * x * x; return [[-hw * 0.55, y(s) - L.slab], [hw * 0.55, y(s) - L.slab], [hw * 0.42, y(s) - dd], [-hw * 0.42, y(s) - dd]]; }, 'concrete', 4);
+      sweep(g, c, sp.s0, sp.s1, (s) => { const u = (s - sp.s0) / len, x = 2 * u - 1, dd = dm + (dep - dm) * x * x; return [[-hw * 0.55, y(s) - L.slab + EMBED], [hw * 0.55, y(s) - L.slab + EMBED], [hw * 0.42, y(s) - dd], [-hw * 0.42, y(s) - dd]]; }, 'concrete', 4);
       return;
     }
     case 'arch-concrete':
@@ -256,10 +259,10 @@ function spanStructure(g: Geo, c: Crossing, lay: BridgeLayout, sp: Span, hw: num
       if (sp.role === 'main') return tiedArch(g, c, sp, hw);
       return;
     case 'cable-stayed':
-      sweep(g, c, sp.s0, sp.s1, (s) => [[-hw, y(s) - L.slab], [hw, y(s) - L.slab], [hw * 0.8, y(s) - dep], [-hw * 0.8, y(s) - dep]], 'concrete', 4);
+      sweep(g, c, sp.s0, sp.s1, (s) => [[-hw * 0.98, y(s) - L.slab + EMBED], [hw * 0.98, y(s) - L.slab + EMBED], [hw * 0.8, y(s) - dep], [-hw * 0.8, y(s) - dep]], 'concrete', 4);
       return; // the cables belong to the pylons
     case 'suspension':
-      sweep(g, c, sp.s0, sp.s1, (s) => [[-hw, y(s) - L.slab], [hw, y(s) - L.slab], [hw * 0.85, y(s) - dep], [-hw * 0.85, y(s) - dep]], 'steelGrey', 4);
+      sweep(g, c, sp.s0, sp.s1, (s) => [[-hw * 0.98, y(s) - L.slab + EMBED], [hw * 0.98, y(s) - L.slab + EMBED], [hw * 0.85, y(s) - dep], [-hw * 0.85, y(s) - dep]], 'steelGrey', 4);
       if (sp.role !== 'approach') suspended(g, c, lay, sp, hw);
       return;
     case 'bascule':
@@ -291,8 +294,10 @@ function truss(g: Geo, c: Crossing, sp: Span, hw: number, through: boolean) {
   const H = through ? d.above!(sp.len) : depthOf(d, sp.len);
   const panels = Math.max(4, Math.round(sp.len / Math.max(5, H * 0.9)));
   const n0 = through ? hw + 0.4 : hw - 0.6, m: Mat = 'steelRed';
-  const lo = (s: number) => (through ? y(s) - 0.9 : y(s) - H), hi = (s: number) => (through ? y(s) + H : y(s) - 0.7);
-  const P = (i: number) => sp.s0 + (sp.len * i) / panels;
+  const lo = (s: number) => (through ? y(s) - 0.9 : y(s) - H), hi = (s: number) => (through ? y(s) + H : y(s) - 0.7 + EMBED);
+  // (a deck truss's end panel points sit a little in from the span's ends, so where two spans meet
+  // on a pier their end posts and struts stand side by side instead of one inside the other)
+  const P = (i: number) => sp.s0 + (sp.len * i) / panels + (through ? 0 : i === 0 ? 0.3 : i === panels ? -0.3 : 0);
   for (const k of [-1, 1]) {
     const n = k * n0;
     sweep(g, c, sp.s0, sp.s1, (s) => rect(n - 0.35, n + 0.35, lo(s), lo(s) + 0.8), m);
@@ -330,18 +335,22 @@ function concreteArch(g: Geo, c: Crossing, sp: Span, hw: number) {
   const rib = Math.max(1.4, sp.len / 70), y = (s: number) => deckAt(c, s);
   for (const k of [-1, 1]) {
     const n = k * hw * 0.55;
-    sweep(g, c, sp.s0, sp.s1, (s) => rect(n - 1, n + 1, underside(c, sp, s), underside(c, sp, s) + rib), 'concrete', Math.max(1.5, sp.len / 40));
+    // at the crown the rib stops just short of the slab: meeting it at a grazing angle would flicker
+    sweep(g, c, sp.s0, sp.s1, (s) => rect(n - 1, n + 1, underside(c, sp, s), Math.min(underside(c, sp, s) + rib, y(s) - 0.96)), 'concrete', Math.max(1.5, sp.len / 40));
   }
   const cols = Math.max(6, Math.round(sp.len / 12));
   for (let i = 1; i < cols; i++) {
-    const s = sp.s0 + (sp.len * i) / cols, f = frameAt(c, s), top = y(s) - 0.9, bot = underside(c, sp, s) + rib;
+    const s = sp.s0 + (sp.len * i) / cols, f = frameAt(c, s), top = y(s) - 0.9 + EMBED, bot = underside(c, sp, s) + rib;
     if (top - bot < 0.4) continue;
-    for (const k of [-1, 1]) { const p = at(f, k * hw * 0.55, 0); g.box('concrete', p[0], p[2], f.ux, f.uz, 0.5, 0.6, bot, top); }
+    for (const k of [-1, 1]) { const p = at(f, k * hw * 0.55, 0); g.box('concrete', p[0], p[2], f.ux, f.uz, 0.5, 0.6, bot, top - 0.2); } // ending inside the crossbeam
     const p = at(f, 0, 0);
     g.box('concrete', p[0], p[2], f.ux, f.uz, 0.4, hw * 0.75, top - 0.6, top);
   }
   // longitudinal beams under the slab between columns
-  for (const k of [-1, 1]) sweep(g, c, sp.s0, sp.s1, (s) => rect(k * hw * 0.55 - 0.5, k * hw * 0.55 + 0.5, y(s) - 1.6, y(s) - 0.8), 'concrete');
+  // (their tops well into the slab, clear of the crossbeams' tops; near the crown their undersides
+  // run down into the rib rather than grazing its top)
+  const ribTop = (s: number) => Math.min(underside(c, sp, s) + rib, y(s) - 0.96);
+  for (const k of [-1, 1]) sweep(g, c, sp.s0, sp.s1, (s) => rect(k * hw * 0.55 - 0.5, k * hw * 0.55 + 0.5, Math.min(y(s) - 1.6, ribTop(s) - 0.1), y(s) - 0.72), 'concrete');
 }
 
 // A bowstring (tied) arch: ribs over each edge of the deck, hangers down to it, wind bracing
@@ -408,10 +417,17 @@ function support(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number,
     case 'anchorage': {
       const out = q.s < (main?.s0 ?? 0) ? -1 : 1, p = at(f, 0, 0, out * 6);
       // the road runs over the anchorage block; the cables go into housings on each side of it
-      g.box('concrete', p[0], p[2], f.ux, f.uz, 9, hw + 4, Math.min(base, groundAt(c, q.s)) - 1, y - 0.6);
+      // (its top stays under the road wherever the block reaches, the road being on a grade)
+      let low = y;
+      for (let a = -9; a <= 9; a += 1.5) low = Math.min(low, deckAt(c, q.s + out * 6 + a));
+      // (and under the deck's box girder, which slopes across it)
+      // (and under the beams of any span passing over it)
+      let blockTop = low - lookOf(d, c.year).slab - 0.15;
+      for (const sp of lay.spans) if (sp.s1 > q.s + out * 6 - 9 && sp.s0 < q.s + out * 6 + 9) blockTop = Math.min(blockTop, low - depthOf(sp.def, sp.len) - 0.1);
+      g.box('concrete', p[0], p[2], f.ux, f.uz, 9, hw + 4, Math.min(base, groundAt(c, q.s)) - 1, blockTop);
       for (const k of [-1, 1]) {
         const h = at(f, k * (hw + 2.4), 0, out * 6);
-        g.box('concrete', h[0], h[2], f.ux, f.uz, 9, 1.6, y - 0.6, y + 3);
+        g.box('concrete', h[0], h[2], f.ux, f.uz, 9, 1.6, blockTop - EMBED, y + 3);
         g.box('footing', h[0], h[2], f.ux, f.uz, 9.5, 1.9, y + 3, y + 3.6);
       }
       return;
@@ -420,7 +436,7 @@ function support(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number,
       foot(q.along, q.across);
       const H = main ? d.above!(main.len) : 30, n0 = hw + 1.4;
       for (const k of [-1, 1]) g.bar('steelGrey', at(f, k * n0, base), at(f, k * n0, y + H), 3.2, 3.2);
-      for (const h of [top - 1.5, y + H * 0.45, y + H * 0.8, y + H - 1.5]) if (h > base + 1) g.bar('steelGrey', at(f, -n0, h), at(f, n0, h), 2.2, h === top - 1.5 ? 3 : 2.2);
+      for (const h of [top - 1.5 + 2 * EMBED, y + H * 0.45, y + H * 0.8, y + H - 1.5]) if (h > base + 1) g.bar('steelGrey', at(f, -n0, h), at(f, n0, h), 2.2, h === top - 1.5 + 2 * EMBED ? 3 : 2.2);
       // saddles where the cables cross the tower tops
       for (const k of [-1, 1]) { const p = at(f, k * n0, 0); g.box('cable', p[0], p[2], f.ux, f.uz, 2.2, 1.8, y + H, y + H + 1.2); }
       return;
@@ -431,7 +447,7 @@ function support(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number,
       const nb = hw + 3, nt = hw + 1.3;
       // H-shaped pylon: legs leaning in slightly, a crossbeam under the deck and one at the top
       for (const k of [-1, 1]) { g.bar('concrete', at(f, k * nb, base), at(f, k * (hw + 1.8), top), 2.8); g.bar('concrete', at(f, k * (hw + 1.8), top), at(f, k * nt, y + H), 2.4); }
-      g.bar('concrete', at(f, -(hw + 1.8), top - 1.2), at(f, hw + 1.8, top - 1.2), 2, 2.4);
+      g.bar('concrete', at(f, -(hw + 1.8), top - 1.2 + 2 * EMBED), at(f, hw + 1.8, top - 1.2 + 2 * EMBED), 2, 2.4);
       g.bar('concrete', at(f, -nt, y + H * 0.93), at(f, nt, y + H * 0.93), 1.8, 2.2);
       stays(g, c, lay, q, hw, H, main!);
       return;
@@ -461,17 +477,17 @@ function support(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number,
   if (d.id === 'trestle') return bent(g, c, q, hw);
   if (d.id === 'masonry') return masonryPier(g, c, q, hw);
   foot(q.along, q.across * (d.id === 'box' ? 0.6 : 0.9));
-  if (d.id === 'box') { for (const k of [-1, 1]) { const p = at(f, k * hw * 0.3, 0); g.box('concrete', p[0], p[2], f.ux, f.uz, q.along, hw * 0.18, base, top); } return; }
+  if (d.id === 'box') { for (const k of [-1, 1]) { const p = at(f, k * hw * 0.3, 0); g.box('concrete', p[0], p[2], f.ux, f.uz, q.along, hw * 0.18, base, top + 0.5); } return; } // well into the haunched girder
   if (d.id === 'beam' || d.id === 'arch-concrete' || d.id === 'arch-tied' || d.id === 'cable-stayed' || d.id === 'suspension') {
     // twin columns under a crosshead that shows past the deck edge
     for (const k of [-1, 1]) { const p = at(f, k * hw * 0.45, 0); g.box(L.pier, p[0], p[2], f.ux, f.uz, 0.8, 0.8, base, top - 1.1); }
-    g.box(L.pier, f.x, f.z, f.ux, f.uz, 1.0, hw + 0.8, top - 1.1, top);
+    g.box(L.pier, f.x, f.z, f.ux, f.uz, 1.0, hw + 0.8, top - 1.1, top + EMBED);
     return;
   }
   // girders and trusses: a solid pier with a cap standing out beyond the deck
   const wide = d.id === 'truss-through' ? hw + 1.3 : hw + 0.6;
   g.box(L.pier, f.x, f.z, f.ux, f.uz, q.along, wide * 0.85, base, top - 0.8);
-  g.box(L.pier === 'stone' ? 'stoneDark' : 'concrete', f.x, f.z, f.ux, f.uz, q.along + 0.3, wide + 0.3, top - 0.8, top);
+  g.box(L.pier === 'stone' ? 'stoneDark' : 'concrete', f.x, f.z, f.ux, f.uz, q.along + 0.3, wide + 0.3, top - 0.8, top + EMBED);
   if (water) cutwaters(g, f, q.along, wide * 0.85, base, q.level! + 1.5, L.pier);
 }
 
@@ -480,8 +496,13 @@ function abutment(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number
   const stone = q.def.material === 'stone' || q.def.material === 'timber' || (q.def.material === 'steel' && c.year < 1920);
   const m: Mat = stone ? 'stone' : 'concrete';
   const ground = groundAt(c, q.s), p = at(f, 0, 0, out * 1.2);
-  // the bank seat the deck rests on
-  g.box(m, p[0], p[2], f.ux, f.uz, 1.6, hw + 0.4, Math.min(ground, q.top) - 0.5, y - 0.2);
+  // the bank seat the deck rests on: a bearing's gap under the deck slab, and well under the
+  // approach's surface and verges (which fall away from it on a grade) where it reaches back into
+  // the bank
+  let low = y;
+  for (let a = -0.4; a <= 2.8; a += 0.4) low = Math.min(low, deckAt(c, q.s + out * a));
+  const seat = Math.min(low - lookOf(q.def, c.year).slab - 0.06, low - (c.road.cls === 'rail' ? 0.7 : 0.5));
+  g.box(m, p[0], p[2], f.ux, f.uz, 1.6, hw + 0.4, Math.min(ground, q.top) - 0.5, seat);
   // wing walls splaying back into the embankment
   for (const k of [-1, 1]) {
     const a = at(f, k * (hw + 0.2), 0), b = at(f, k * (hw + 3.2), 0, out * 7);
@@ -524,16 +545,22 @@ function bent(g: Geo, c: Crossing, q: Support, hw: number) {
   const f = frameAt(c, q.s), top = q.top, base = q.base, h = top - base;
   const tops = [-hw * 0.85, -hw * 0.3, hw * 0.3, hw * 0.85];
   const splay = (n: number) => n + Math.sign(n) * (Math.abs(n) > hw * 0.5 ? h / 6 : h / 20);
-  for (const n of tops) g.bar('timber', at(f, splay(n), base), at(f, n, top), 0.45);
+  for (const n of tops) g.bar('timber', at(f, splay(n), base), at(f, n, top - 0.15), 0.45);
   const cap = at(f, 0, 0);
-  g.box('timberDark', cap[0], cap[2], f.ux, f.uz, 0.35, hw + 1.1, top - 0.45, top);
+  g.box('timberDark', cap[0], cap[2], f.ux, f.uz, 0.35, hw + 1.1, top - 0.45, top + EMBED);
   // bracing every 5 m of height: an X between the outer posts and a horizontal wale
   const lerp = (n: number, t: number) => n + (splay(n) - n) * (1 - t);
+  let lastWale = -Infinity;
   for (let y0 = base + 0.5; y0 < top - 1.5; y0 += 5) {
     const y1 = Math.min(top - 0.6, y0 + 5), t0 = (y0 - base) / h, t1 = (y1 - base) / h;
+    if (y1 - lastWale < 0.5) continue; // the last two panels can end at the same height
+    lastWale = y1;
     const L0 = lerp(tops[0], t0), R0 = lerp(tops[3], t0), L1 = lerp(tops[0], t1), R1 = lerp(tops[3], t1);
-    g.bar('timberDark', at(f, L0, y0), at(f, R1, y1), 0.22);
-    g.bar('timberDark', at(f, R0, y0), at(f, L1, y1), 0.22);
+    // (a short last panel gets no X: its braces would lie almost flat along the wale)
+    if (y1 - y0 >= 2) {
+      g.bar('timberDark', at(f, L0, y0), at(f, R1, y1), 0.22);
+      g.bar('timberDark', at(f, R0, y0), at(f, L1, y1), 0.22);
+    }
     g.bar('timberDark', at(f, L1 - 0.3, y1), at(f, R1 + 0.3, y1), 0.25);
   }
   if (q.inWater && q.level !== undefined) g.box('footing', f.x, f.z, f.ux, f.uz, 0.9, Math.abs(splay(tops[3])) + 0.6, base - 0.3, q.level + 0.4);
@@ -566,7 +593,7 @@ function leaf(c: Crossing, sp: Span, from: number, to: number, hw: number, surfa
   const a = Math.min(from, to), b = Math.max(from, to), track: TrackRun[] | null = withTrack ? [] : null;
   deck(g, c, a, b, sp.def, hw, surface, rail, track);
   const y = (s: number) => deckAt(c, s);
-  for (const k of [-1, 1]) sweep(g, c, a, b, (s) => rect(k * hw * 0.6 - 0.35, k * hw * 0.6 + 0.35, y(s) - 1.6, y(s) - 0.8), 'steelBlue');
+  for (const k of [-1, 1]) sweep(g, c, a, b, (s) => rect(k * hw * 0.6 - 0.35, k * hw * 0.6 + 0.35, y(s) - 1.6, y(s) - 0.8 + EMBED), 'steelBlue');
   const f = frameAt(c, from), pivot: V = [f.x, y(from) - 0.8, f.z];
   // which way round the axis lifts the free end
   const dir = to > from ? 1 : -1;
@@ -583,6 +610,7 @@ export function bridgeObject(bg: BridgeGeometry, mats = bridgeMaterials(), opts:
   const meshes = (parts: BridgeGeometry['parts'], into: THREE.Object3D) => {
     for (const [m, geo] of Object.entries(parts) as [Mat, THREE.BufferGeometry][]) {
       const mesh = new THREE.Mesh(geo, mats[m]);
+      mesh.name = `bridge-${m}`;
       mesh.castShadow = m !== 'line' && m !== 'rail';
       mesh.receiveShadow = true;
       into.add(mesh);

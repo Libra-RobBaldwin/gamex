@@ -5,13 +5,13 @@
 import * as THREE from 'three';
 import { BRIDGES, BRIDGE_IDS, type BridgeId } from './catalogue';
 import { chooseBridge, override, type BridgeChoice } from './choose';
-import { extents, type Crossing } from './crossing';
+import type { Crossing } from './crossing';
 import { frameAt } from './geometry';
 import { metresPerPixel, type Track } from './track';
-import { layoutBridge, type BridgeLayout } from './layout';
-import { bridgeScene } from './scene';
-import { scenario, type Scenario, type ScenarioOpts } from './scenario';
-import { GALLERY, RIVER_CROSSING } from './gallery';
+import type { BridgeLayout } from './layout';
+import { bridgeScene, galleryCrossing } from './scene';
+import { scenario, type Scenario } from './scenario';
+import { RIVER_CROSSING } from './gallery';
 
 const $ = <T extends HTMLElement>(q: string) => document.querySelector(q) as T;
 const params = new URLSearchParams(location.search);
@@ -130,17 +130,11 @@ function show(sc: Scenario, c: Crossing, lay: BridgeLayout) {
 
 function gallery() {
   const id = BRIDGE_IDS[index], def = BRIDGES[id];
-  const opts: ScenarioOpts = GALLERY[id];
-  // the gallery shows each type on its own crossing, raised or eased as the chooser would
-  const ch = chooseBridge(scenario(opts).crossing);
-  const o = ch.options.find((x) => x.def.id === id)!;
-  const c = o.crossing ?? scenario(opts).crossing;
-  const sc = scenario(opts); // the water and roads underneath don't move when the deck is raised
-  const lay = o.layout ?? layoutBridge(c, def, ...(extents(c)[0] ?? [0, 0]));
+  const { sc, c, lay, choice: o } = galleryCrossing(id);
   $('#title').textContent = `${def.icon} ${def.label}`;
   $('#notes').textContent = o.ok ? o.reasons.join(' · ') : '';
   $('#list').classList.remove('show');
-  show({ ...sc, crossing: c }, c, lay);
+  show(sc, c, lay);
 }
 
 function chooser() {

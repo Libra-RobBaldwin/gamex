@@ -9,7 +9,12 @@ import { BATTER, dashCuts, EARTH_COLOURS, EarthGeo, earthMaterial, earthPaint, h
 import { BALLAST_DEPTH, formationDrop, TrackBuilder, type Track } from './track';
 import type { BridgeLayout } from './layout';
 import { bridgeMaterials, type Mat } from './materials';
-import type { Scenario } from './scenario';
+import { scenario, type Scenario } from './scenario';
+import { chooseBridge } from './choose';
+import { BRIDGES, type BridgeId } from './catalogue';
+import { extents } from './crossing';
+import { layoutBridge } from './layout';
+import { GALLERY } from './gallery';
 
 export interface BridgeScene {
   group: THREE.Group; // add this to the scene
@@ -17,6 +22,16 @@ export interface BridgeScene {
   track: Track; // every run of track in the scene
   setOpen: ((t: number) => void) | null; // lifts a bascule's leaves
   setDetail(metresPerPixel: number): void; // near or far track
+}
+
+// A gallery type on its own showcase crossing, raised or eased as the chooser would.
+export function galleryCrossing(id: BridgeId, bend?: number) {
+  const opts = bend === undefined ? GALLERY[id] : { ...GALLERY[id], bend };
+  const o = chooseBridge(scenario(opts).crossing).options.find((x) => x.def.id === id)!;
+  const c = o.crossing ?? scenario(opts).crossing;
+  const sc = scenario(opts); // the water and roads underneath don't move when the deck is raised
+  const lay = o.layout ?? layoutBridge(c, BRIDGES[id], ...(extents(c)[0] ?? [0, 0]));
+  return { sc: { ...sc, crossing: c }, c, lay, choice: o };
 }
 
 // Builds a bridge in its surroundings.
@@ -46,7 +61,7 @@ const waterMat = lit('#3f86b8', { transparent: true, opacity: 0.88 }), waterCut 
 const leafMat = lit('#3f7a3a'), trunkMat = lit('#5b4330');
 const red = lit('#d23b2e'), green = lit('#2f9a4a'), hullMat = lit('#2f3a48'), cabinMat = lit('#e9e4d8');
 
-function mesh(g: THREE.BufferGeometry, m: THREE.Material, shadow = true) { const x = new THREE.Mesh(g, m); x.receiveShadow = true; x.castShadow = shadow; return x; }
+function mesh(g: THREE.BufferGeometry, m: THREE.Material, shadow = true, name = '') { const x = new THREE.Mesh(g, m); x.receiveShadow = true; x.castShadow = shadow; x.name = name; return x; }
 function strip(pos: number[]) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); return g; }
 
 type V3 = [number, number, number];
@@ -226,7 +241,7 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
     const pa = a.pts.at(edge)!, pb = b.pts.at(edge)!;
     wc.push(pa[0], pa[1], pa[2], pb[0], pb[1], pb[2], pb[0], w.level, pb[2], pa[0], pa[1], pa[2], pb[0], w.level, pb[2], pa[0], w.level, pa[2]);
   }
-  out.add(mesh(earth.geometry(), earthMaterial(), false));
+  out.add(mesh(earth.geometry(), earthMaterial(), false, 'earth'));
   if (wc.length) out.add(mesh(strip(wc), waterCut, false));
   for (const w of sc.water) {
     const xa = x0 + w.s0 / k, xb = x0 + w.s1 / k;
@@ -274,7 +289,7 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
   // the route itself on the approaches: ballast and track, or the road's surface
   if (rail) for (const [a, b] of approaches) tb.add({ path: c.path, s0: a, s1: b, level: y, tracks: c.road.tracks, form: 'ballast', year: c.year });
   const mats = bridgeMaterials();
-  for (const [m, g] of Object.entries(route.geometries()) as [Mat, THREE.BufferGeometry][]) out.add(mesh(g, mats[m], false));
+  for (const [m, g] of Object.entries(route.geometries()) as [Mat, THREE.BufferGeometry][]) out.add(mesh(g, mats[m], false, `route-${m}`));
   trees(out, c, sc, sOf, x0, x1, W, (s) => (onApproach(s) ? reachAt(s) : hw + 14 + Math.max(0, y(s) - gr(s)) * 2));
   return out;
 }
@@ -283,7 +298,7 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
 function trees(out: THREE.Group, c: Crossing, sc: Scenario, sOf: (x: number) => number, x0: number, x1: number, W: number, reach: (s: number) => number) {
   let seed = 7;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const spots: THREE.Vector3[] = [];
+  const spots: THREE.Vector3[] = [], sizes: number[] = [];
   for (let i = 0; i < 900 && spots.length < 260; i++) {
     const x = x0 + (x1 - x0) * rnd(), z = (rnd() * 2 - 1) * W, s = sOf(x);
     if (sc.water.some((w) => s > w.s0 - 8 && s < w.s1 + 8)) continue;
@@ -292,17 +307,23 @@ function trees(out: THREE.Group, c: Crossing, sc: Scenario, sOf: (x: number) => 
     if (sc.under.some((u) => s > Math.min(u.s0, u.toe0 ?? u.s0) - 6 && s < Math.max(u.s1, u.toe1 ?? u.s1) + 6)) continue;
     const p = frameAt(c, s);
     if (Math.abs(z - p.z) < reach(s) + 5) continue;
+    // crowns never overlap: two cones of the same slope meeting would flicker where they cross
+    const r = 0.7 + rnd() * 0.6;
+    if (spots.some((q, j) => Math.hypot(q.x - x, q.z - z) < 3.2 * (r + sizes[j]) + 0.2)) continue;
     spots.push(new THREE.Vector3(x, groundAt(c, s), z));
+    sizes.push(r);
   }
   const crown = new THREE.InstancedMesh(new THREE.ConeGeometry(3.2, 9, 7), leafMat, spots.length);
-  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.6, 3, 5), trunkMat, spots.length);
+  // trunks are open tubes sunk a little into the ground: no end faces lying on the grass
+  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.6, 3.5, 5, 1, true), trunkMat, spots.length);
   const m4 = new THREE.Matrix4();
   spots.forEach((p, i) => {
-    const s = 0.7 + rnd() * 0.6;
+    const s = sizes[i];
     m4.makeScale(s, s, s).setPosition(p.x, p.y + 7 * s, p.z); crown.setMatrixAt(i, m4);
-    m4.makeScale(s, s, s).setPosition(p.x, p.y + 1.5 * s, p.z); trunk.setMatrixAt(i, m4);
+    m4.makeScale(s, s, s).setPosition(p.x, p.y + 1.25 * s, p.z); trunk.setMatrixAt(i, m4);
   });
   crown.castShadow = true; trunk.castShadow = true;
+  crown.name = 'tree-crowns'; trunk.name = 'tree-trunks';
   out.add(crown, trunk);
 }
 
