@@ -38,6 +38,8 @@ export interface SheetSpec {
   fresh?: boolean;
   /** Which bar button it belongs to (lit while it is open). */
   from?: BarKey;
+  /** Hold the sheet at its full height, so switching tabs doesn't move the tabs under the finger. */
+  fixed?: boolean;
 }
 export interface BuildCategory { id: string; label: string; icon: Icon; disabled?: string; note?: string }
 export interface BuildItem {
@@ -106,6 +108,8 @@ export interface Rect { left: number; top: number; right: number; bottom: number
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 const html = (el: Element, s: string) => { el.innerHTML = s; };
+// fade a sideways-scrolling row's far edge while there's more of it out of sight
+const fade = (o: HTMLElement) => { o.classList.toggle('more', o.scrollWidth > o.clientWidth + 1); o.classList.toggle('end', o.scrollLeft + o.clientWidth >= o.scrollWidth - 2); };
 const said = (ic: Icon, words: string) => `${icon(ic)}<span class="vh">${words}</span>`;
 function actionHtml(a: Action, i: number, prefix: string) {
   const cls = ['act', a.kind ?? ''].join(' ').trim();
@@ -127,6 +131,8 @@ export class Shell {
   private hintTimer = 0;
   private firstRunKey = '';
   private viewShown = '';
+  private viewBtnShown = '';
+  private tabScroll = 0;
 
   constructor(root: HTMLElement, opts: ShellOptions) {
     this.root = root;
@@ -190,6 +196,7 @@ export class Shell {
       if (e.key !== 'Escape') return;
       if (!this.$('#layers').hidden) this.closeLayers();
       else if (this.sheet) this.closeSheet();
+      else if (this.tool) { const t = this.tool; this.stopTool(); t.onCancel?.(); }
     });
     const ro = new ResizeObserver(() => this.layout());
     for (const s of ['#bar', '#tool', '#tpanel', '#sheet', '#hud-top']) ro.observe(this.$(s));
@@ -264,7 +271,7 @@ export class Shell {
     const body = el.querySelector('.sb');
     const keep = was && was.key === spec.key && !spec.fresh && body ? body.scrollTop : 0;
     this.sheet = spec;
-    el.className = `sheet facet tone-${spec.tone ?? 'look'}`;
+    el.className = `sheet facet tone-${spec.tone ?? 'look'}${spec.fixed ? ' fixed' : ''}`;
     el.setAttribute('aria-label', spec.title);
     html(el, `<header>
         ${spec.back ? `<button class="back" aria-label="Back" title="Back">${icon('arrowLeft')}</button>` : ''}
@@ -279,6 +286,13 @@ export class Shell {
     el.querySelector('.close')!.addEventListener('click', () => this.closeSheet());
     el.querySelector('.back')?.addEventListener('click', () => spec.back!());
     el.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => spec.onTab?.(b.dataset.tab!)));
+    const tabs = el.querySelector<HTMLElement>('.stabs');
+    if (tabs) {
+      tabs.scrollLeft = this.tabScroll;
+      const more = () => { this.tabScroll = tabs.scrollLeft; fade(tabs); };
+      tabs.addEventListener('scroll', more, { passive: true });
+      requestAnimationFrame(more);
+    }
     el.querySelectorAll<HTMLButtonElement>('[data-act]').forEach((b) => b.addEventListener('click', () => spec.actions![+b.dataset.act!].onClick()));
     el.querySelector('.sb')!.scrollTop = keep;
     this.markBar(spec.from ?? null);
@@ -327,7 +341,7 @@ export class Shell {
     const c = this.cats.find((x) => x.id === this.buildCat);
     const list = this.items.get(this.buildCat) ?? [];
     const body = this.openSheet({
-      key: `build:${this.buildCat}`, title: 'Build', sub: 'Pick something, then draw it on the map', from: 'build',
+      key: `build:${this.buildCat}`, title: 'Build', sub: 'Pick something, then draw it on the map', from: 'build', fixed: true,
       tabs: this.cats.map((x) => ({ id: x.id, label: x.label, icon: x.icon, disabled: x.disabled })), tab: this.buildCat,
       onTab: (id) => this.openBuild(id),
       body: `<div class="grid">${list.map((it, i) => `<button class="card${it.locked ? ' locked' : ''}${it.on?.() ? ' on' : ''} tone-${it.tone ?? 'look'}" data-item="${i}" ${it.locked ? 'aria-disabled="true"' : ''}>
@@ -352,7 +366,7 @@ export class Shell {
     this.ttab = tab ?? (this.ttabs.some((t) => t.id === this.ttab) ? this.ttab : this.ttabs[0]?.id ?? '');
     const t = this.ttabs.find((x) => x.id === this.ttab);
     const body = this.openSheet({
-      key: `transport:${this.ttab}`, title: 'Transport', sub: t?.sub ?? 'Your lines and vehicles', from: 'transport',
+      key: `transport:${this.ttab}`, title: 'Transport', sub: t?.sub ?? 'Your lines and vehicles', from: 'transport', fixed: true,
       tabs: this.ttabs.map((x) => ({ id: x.id, label: x.label, icon: x.icon })), tab: this.ttab,
       onTab: (id) => this.openTransport(id), body: '',
     });
@@ -396,6 +410,7 @@ export class Shell {
   }
   /** Light the view that's showing (cheap: only touches the DOM when it changes). */
   syncView(id = this.views?.current() ?? '') {
+    if (this.tool && id !== this.viewBtnShown) this.labelViewBtn(id);
     if (id === this.viewShown || this.$('#layers').hidden) return;
     this.viewShown = id;
     this.root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === id)));
@@ -404,6 +419,7 @@ export class Shell {
   private labelViewBtn(id = this.views?.current() ?? '') {
     const o = this.views?.options.find((x) => x.id === id);
     const b = this.$('#viewbtn');
+    this.viewBtnShown = id;
     b.querySelector('span')!.textContent = o?.label ?? '';
     b.setAttribute('aria-label', `View: ${o?.label ?? ''}, tap for the next`);
   }
@@ -458,7 +474,7 @@ export class Shell {
       o.scrollLeft = was;
       t.bind?.(o);
       // fade the edge while there are options scrolled out of sight
-      const more = () => { o.classList.toggle('more', o.scrollWidth > o.clientWidth + 1); o.classList.toggle('end', o.scrollLeft + o.clientWidth >= o.scrollWidth - 2); };
+      const more = () => fade(o);
       o.addEventListener('scroll', more, { passive: true });
       requestAnimationFrame(more);
     };
