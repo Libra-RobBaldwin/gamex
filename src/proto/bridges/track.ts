@@ -114,6 +114,9 @@ function paintTexture(w: number, h: number, paint: Paint) {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.magFilter = THREE.LinearFilter;
   t.minFilter = THREE.LinearMipmapLinearFilter;
+  // the track runs at any angle across the screen: without anisotropic filtering the mipmap
+  // chosen for its length smears the rails away across it (three.js clamps to what the GPU has)
+  t.anisotropy = 8;
   t.colorSpace = THREE.SRGBColorSpace;
   t.needsUpdate = true;
   return t;
@@ -131,7 +134,7 @@ function trackTop(n: number, s: number, _px: number, kind: SleeperKind, under: [
   const d = SLEEPERS[kind], an = Math.abs(n), dr = Math.abs(an - RAIL_CENTRE);
   // everything at its true width and in the colours the real rails light up to, so the far look
   // averages to what the near look shows and the switch between them doesn't pop
-  if (dr < 0.035) return hex('#959a9e'); // the head
+  if (dr < 0.035) return hex('#b8bcc0'); // the head, as bright as a lit rail top
   if (dr < 0.07) return hex('#3b3c40'); // the foot, and its shadow
   if (guard && Math.abs(an - (RAIL_CENTRE - GUARD_INSET)) < 0.03) return hex('#6a6d72');
   const onSleeper = an < d.len / 2 && Math.abs(s) < d.width / 2;
