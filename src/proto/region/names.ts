@@ -52,6 +52,8 @@ export const REAL_PLACES = [
   'Kingston', 'Kingsley', 'Kingswood', 'Stanton', 'Stanford', 'Stanley', 'Ashton', 'Ashby', 'Ashley', 'Bramley', 'Brampton', 'Thornbury', 'Thornton', 'Langley', 'Langford', 'Norton',
   'Sutton', 'Newton', 'Weston', 'Easton', 'Aston', 'Preston', 'Milton', 'Hinton', 'Burford', 'Bradwell', 'Whitchurch', 'Whitwell', 'Wickham', 'Woodbridge', 'Woodstock', 'Woodford',
   'Silverdale', 'Elmham', 'Elmsett', 'Elmswell', 'Hollingbury', 'Orrell', 'Alderwasley', 'Ambleston', 'Birchover', 'Bramblefield', 'Burdocks', 'Chalkfield', 'Culverhouse',
+  'Birchfield', 'Brookfield', 'Fernwood', 'Foxcote', 'Foxford', 'Heronbridge', 'Holywell', 'Moorgate', 'Nettleden', 'Otterden', 'Rushbury', 'Sedgwick',
+  'Willowfield', 'Withybrook', 'Felbridge', 'Elmfield', 'Silverwood', 'Moorside', 'Oakenshaw', 'Birchgrove', 'Elmhurst', 'Hazelford', 'Larkhall', 'Brackenhurst',
   'Great Barrow', 'Little Barrow', 'Long Marston', 'Little Marlow', 'Great Marlow', 'Upper Heyford', 'Lower Heyford', 'Nether Stowey', 'East Grinstead', 'West Wycombe',
 ];
 
@@ -98,9 +100,11 @@ export function placeName(rand: Rand, village: boolean, taken: Set<string>): str
       if (r < 0.2) name = `${BEFORE[Math.floor(rand() * BEFORE.length)]} ${name}`;
       else if (r < 0.35) name = `${name} ${AFTER[Math.floor(rand() * AFTER.length)]}`;
     }
-    if (taken.has(norm(name)) || [...taken].some((t) => t.includes(norm(first + second)) || norm(first + second).includes(t))) continue;
+    // (and no two places on a map share their first part: Withygate and Withystoke would be confusing)
+    if (taken.has(norm(name)) || taken.has(`first:${first}`) || [...taken].some((t) => t.includes(norm(first + second)) || norm(first + second).includes(t))) continue;
     if (isRealPlace(name)) continue;
     taken.add(norm(name));
+    taken.add(`first:${first}`);
     return name;
   }
   throw new Error('placeName: ran out of names');

@@ -6,7 +6,7 @@
 // For the road and rail sessions: `map.settlements` (centre, size, kind, name), `map.links` (a
 // trimmed Gabriel graph: which places to join, A or B road, and whether it crosses water) and
 // `generateRegion(seed).settlements[i].gates` (where the high streets leave each place).
-import { generateRegion, REGION_BOUND, type Region } from './generate';
+import { generateRegion, KINDS, REGION_BOUND, type Region } from './generate';
 import type { MapSpec } from './mapspec';
 import { TOWN_MAP } from './town';
 
@@ -27,7 +27,8 @@ export function regionMap(seed = REGION_SEED): MapSpec {
 export function mapOfRegion(g: Region): MapSpec {
   const city = g.settlements.find((s) => s.kind === 'city') ?? g.settlements[0];
   const at = (u: number, v: number) => ({ x: city.x + u * Math.cos(city.axis) - v * Math.sin(city.axis), z: city.z + u * Math.sin(city.axis) + v * Math.cos(city.axis) });
-  const line = [at(-95, 0), at(130, 0), at(0, -160)];
+  // (mid-block, clear of the junctions: the lattice's streets cross every `spacing` metres)
+  const S = KINDS[city.kind].spacing, line = [at(-1.5 * S, 0), at(1.5 * S, 0), at(0, -1.5 * S)];
   return {
     id: 'region',
     name: 'Region',
@@ -40,7 +41,7 @@ export function mapOfRegion(g: Region): MapSpec {
     generated: true,
     links: g.links,
     view: { x: city.x, z: city.z + 20, h: 300 },
-    stops: [...line, at(0, 160)],
+    stops: [...line, at(0, 1.5 * S)],
     line,
     industries: false,
     // woods over the whole map (a fifth of the town's density: it's 33 times the area, and the ground paints woods too)

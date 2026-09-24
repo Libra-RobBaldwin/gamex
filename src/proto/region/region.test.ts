@@ -189,6 +189,8 @@ describe('names', () => {
     expect(isRealPlace('Thornbary')).toBe(true); // one letter off
     expect(isRealPlace('Great Oakham')).toBe(true); // Oakham with a "Great"
     expect(isRealPlace('Otterton Green')).toBe(true);
+    expect(isRealPlace('Hollywell')).toBe(true); // Holywell, one letter off
+    expect(isRealPlace('Fellbridge')).toBe(true); // Felbridge
     for (const n of ['Heronwick', 'Teaselford', 'Linnetstow']) expect(isRealPlace(n)).toBe(false);
     expect(REAL_PLACES.length).toBeGreaterThan(300);
   });

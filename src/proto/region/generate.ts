@@ -105,6 +105,7 @@ function placeSettlements(r: Rand, seed: number, B: number, mw: MapWater): Settl
   const kinds: Kind[] = ['city', 'town', 'town', 'town', ...Array<Kind>(nVillages).fill('village')];
   const out: Settlement[] = [];
   const taken = new Set<string>();
+  const names = rng(mix(seed, 4)); // (a stream of their own: a change to the names never moves a place)
   const gapFor = (a: Kind, b: Kind) => (a === 'village' || b === 'village' ? 420 : 750);
   kinds.forEach((kind, n) => {
     const K = KINDS[kind];
@@ -122,7 +123,7 @@ function placeSettlements(r: Rand, seed: number, B: number, mw: MapWater): Settl
       const axis = range(r, 0, Math.PI);
       const plan: Plan = r() < K.grid ? 'grid' : 'organic';
       const id = out.length;
-      const s: Settlement = { id, name: placeName(r, kind === 'village', taken), kind, x: Math.round(p.x), z: Math.round(p.z), r: radius, axis, plan, seed: mix(seed, 100 + n), gates: [] };
+      const s: Settlement = { id, name: placeName(names, kind === 'village', taken), kind, x: Math.round(p.x), z: Math.round(p.z), r: radius, axis, plan, seed: mix(seed, 100 + n), gates: [] };
       out.push(s);
       return;
     }
