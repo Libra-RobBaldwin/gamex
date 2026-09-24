@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#12161e" />
+    <title>Industries gallery</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #12161e; font: 13px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; color: #e9edf3; }
+      #c { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+      #top { position: fixed; top: 0; left: 0; right: 0; padding: 8px 12px; background: linear-gradient(#12161ee0, #12161e00); pointer-events: none; }
+      #top b { font-size: 15px; }
+      #top small { display: block; opacity: 0.8; }
+      #panel { position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); background: #12161ee8; border-top: 1px solid #2a3240; }
+      .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+      .row label { width: 78px; flex: none; opacity: 0.85; }
+      .row input[type=range] { flex: 1; min-width: 0; }
+      .row output { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+      button { background: #253043; color: #e9edf3; border: 1px solid #3a475c; border-radius: 8px; padding: 6px 10px; font: inherit; min-height: 32px; }
+      button.on { background: #2e7d5b; border-color: #3fa476; }
+      #name { flex: 1; text-align: center; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .tog { display: flex; flex-wrap: wrap; gap: 6px; }
+      .icon { position: fixed; transform: translate(-50%, -100%); background: #12161ecc; border: 2px solid; border-radius: 10px; padding: 1px 5px 3px; font-size: 14px; pointer-events: none; white-space: nowrap; }
+      .icon i { display: block; height: 3px; margin-top: 2px; border-radius: 2px; background: currentColor; }
+      .icon.in { border-style: dashed; }
+      .icon.starved { animation: pulse 1s infinite; }
+      @keyframes pulse { 50% { opacity: 0.35; } }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="top"><b id="title">Industries</b><small id="detail"></small><small id="stats"></small></div>
+    <div id="icons"></div>
+    <div id="panel">
+      <div class="row"><button id="prev">◀</button><div id="name"></div><button id="next">▶</button></div>
+      <div class="row"><button id="variant">Variant</button><button id="seed">Reseed</button><button id="all" class="on">All</button><button id="ring">Catchment</button></div>
+      <div class="row"><label>Production</label><input id="prod" type="range" min="0" max="4" step="0.1" value="2" /><output id="prodv"></output></div>
+      <div class="row"><label>Input stock</label><input id="inp" type="range" min="0" max="1" step="0.01" value="0.6" /><output id="inpv"></output></div>
+      <div class="row"><label>Output stock</label><input id="out" type="range" min="0" max="1" step="0.01" value="0.6" /><output id="outv"></output></div>
+      <div class="row"><label>Neglect</label><input id="neg" type="range" min="0" max="1" step="0.01" value="0" /><output id="negv"></output></div>
+      <div class="row"><label>Year</label><input id="year" type="range" min="1850" max="2030" step="1" value="1965" /><output id="yearv"></output></div>
+      <div class="row tog"><button id="running" class="on">Running</button><button id="delivered" class="on">Delivery</button><button id="night">Night</button><button id="zoomall">Gallery</button></div>
+    </div>
+    <script type="module" src="/src/proto/industries/demo.ts"></script>
+  </body>
+</html>
