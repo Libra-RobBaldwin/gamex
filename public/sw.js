@@ -1,7 +1,7 @@
 // Offline support: network-first for pages, cache-first for hashed assets.
 // Every page on the site shares this worker (the game, the demos, Real Town Plans), so each page is
 // cached under its own address: a page offline is the page last seen there, never another one.
-const CACHE = 'tracks-v5'; // (v5: the front page is the 3D game; drops the old 2D app's files)
+const CACHE = 'tracks-v6'; // (v6: the front page opens on the start menu, which loads the game on demand)
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {

@@ -62,7 +62,7 @@ async function openPage(url, rigSrc) {
 
 // ---------------- the game ----------------
 {
-  const G = await openPage('/', 'window.proto.nav');
+  const G = await openPage('/?map=town', 'window.proto.nav');
   const { page, touch, rig, view, at, grab, err, reset, settle, freeze, thaw, cx, cy } = G;
   // count the taps the game hears
   await page.evaluate(() => {
