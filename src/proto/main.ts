@@ -11,6 +11,7 @@ import { Traffic, rushLabel, type Places } from './traffic';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CIVIC, grassMats, makeBuilding as generate, makeRegion, USE } from './buildgen';
 import { CELL, findRegions, type Region } from './infill';
+import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
 import { patchGround, setGroundQuality } from './ground';
 import './ui/fonts';
@@ -50,43 +51,23 @@ sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
-const view = { x: 0, z: 20, az: Math.PI / 4, el: 0.6, h: 300 };
 const HOME = { az: Math.PI / 4, el: 0.6 };
-const EL_MIN = 0.35, EL_MAX = 1.52, H_MIN = 35, H_MAX = 900;
-// animated camera moves (buttons, double-tap); any touch cancels them
-let goal: Partial<typeof view> | null = null;
+const EL_MIN = 0.35, EL_MAX = 1.52;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
-
-// light-space axes, for snapping the shadow map to its texel grid
-const SUN_DIR = new THREE.Vector3(-160, 260, 110).normalize();
-const SUN_X = new THREE.Vector3(0, 1, 0).cross(SUN_DIR).normalize();
-const SUN_Y = SUN_DIR.clone().cross(SUN_X).normalize();
-function placeCamera() {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  const aspect = w / h;
-  cam.left = (-view.h * aspect) / 2; cam.right = (view.h * aspect) / 2;
-  cam.top = view.h / 2; cam.bottom = -view.h / 2;
-  cam.updateProjectionMatrix();
-  const d = 1200;
-  cam.position.set(view.x + Math.sin(view.az) * Math.cos(view.el) * d, Math.sin(view.el) * d, view.z + Math.cos(view.az) * Math.cos(view.el) * d);
-  cam.lookAt(view.x, 0, view.z);
-  cam.updateMatrixWorld();
-  // The sun follows the view so shadows stay sharp where you're looking. Its shadow area only
-  // changes size in big steps and slides in whole shadow-map texels, so edges don't shimmer.
-  const r = 120 * Math.pow(1.6, Math.max(0, Math.ceil(Math.log((view.h * 0.9) / 120) / Math.log(1.6))));
-  const texel = (2 * r) / sun.shadow.mapSize.x;
-  const c = new THREE.Vector3(view.x, 0, view.z);
-  const u = c.dot(SUN_X), v = c.dot(SUN_Y);
-  c.addScaledVector(SUN_X, Math.round(u / texel) * texel - u).addScaledVector(SUN_Y, Math.round(v / texel) * texel - v);
-  sun.target.position.copy(c);
-  sun.position.copy(c).addScaledVector(SUN_DIR, 320);
-  const sc = sun.shadow.camera;
-  if (sc.right !== r) { sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 10; sc.far = 900; sc.updateProjectionMatrix(); }
-}
+// The shared camera (kit/camera.ts), the one every page uses: gestures, wheel, keys and animated moves
+// (any touch cancels those). The sun follows the view so shadows stay sharp where you're looking;
+// its shadow area only changes size in big steps and slides in whole shadow-map texels, so edges
+// don't shimmer. The game's own input hooks are set with the rest of the input code below.
+const nav = new NavRig(cam, canvas, {
+  view: { x: 0, z: 20, h: 300, ...HOME },
+  limits: { hMin: 35, hMax: 900, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
+  shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
+});
+const view = nav.view;
 
 function resize() {
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-  placeCamera();
+  nav.apply();
 }
 window.addEventListener('resize', resize);
 
@@ -420,7 +401,7 @@ const cls = () => (mode === 'rail' ? 'rail' : 'road') as 'road' | 'rail';
 // buttons (Build · Transport · Layers · Menu) at rest; sheets, a tool strip and a layers pop-over
 // when asked for. Everything below registers with it rather than adding markup of its own.
 const shell = new Shell($('#ui'), {
-  onCompass: () => { goal = { az: view.az + wrap(HOME.az - view.az), el: HOME.el }; },
+  onCompass: () => nav.resetNorth(),
   onPause: () => togglePause(),
   onRate: () => cycleRate(),
   onPerf: () => togglePerf(),
@@ -575,11 +556,11 @@ shell.addLayer({ id: 'flow', label: 'Traffic flow', icon: 'lights', disabled: 'N
 shell.addLayer({ id: 'catchment', label: 'Stop catchments', icon: 'busStop', disabled: 'Not in the game yet' });
 shell.addLayer({ id: 'demand', label: 'Where people want to go', icon: 'users', disabled: 'Not in the game yet' });
 shell.addLayer({ id: 'landuse', label: 'Land use', icon: 'building', disabled: 'Not in the game yet' });
-const viewNow = () => { const el = goal?.el ?? view.el; return el > 1.2 ? 'plan' : el < 0.45 ? 'low' : '3d'; };
+const viewNow = () => { const el = nav.goal.el; return el > 1.2 ? 'plan' : el < 0.45 ? 'low' : '3d'; };
 shell.setViews({
   options: [{ id: '3d', label: '3D' }, { id: 'low', label: 'Low' }, { id: 'plan', label: 'Plan' }],
   current: viewNow,
-  pick: (id) => { goal = { el: id === 'plan' ? EL_MAX : id === 'low' ? EL_MIN : HOME.el }; },
+  pick: (id) => { nav.tiltTo(id === 'plan' ? EL_MAX : id === 'low' ? EL_MIN : HOME.el); },
 });
 shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it · pinch to zoom, twist to turn, two fingers up or down to tilt');
 
@@ -606,14 +587,8 @@ function focusOn(p: P, h: number, dir?: P, el?: number) {
     const a = Math.atan2(-dir.x, -dir.z);
     az = [a, a + Math.PI].map((v) => view.az + wrap(v - view.az)).sort((x, y) => Math.abs(x - view.az) - Math.abs(y - view.az))[0];
   }
-  const save = { ...view };
-  Object.assign(view, { az, h, x: p.x, z: p.z, el: el ?? view.el });
-  placeCamera();
   const c = shell.clearRect();
-  const g = groundAt((c.left + c.right) / 2, (c.top + c.bottom) / 2);
-  Object.assign(view, save);
-  placeCamera();
-  goal = { az, h, x: p.x - (g.x - p.x), z: p.z - (g.z - p.z), ...(el ? { el } : {}) };
+  nav.animateTo(nav.framing(p, (c.left + c.right) / 2, (c.top + c.bottom) / 2, { az, h, ...(el ? { el } : {}) }));
 }
 
 // ---- road picker: a few filters over the whole catalogue ----
@@ -970,10 +945,9 @@ function drawGhost() {
 
 // ---------------- building card ----------------
 const ray = new THREE.Raycaster();
-const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+// (sx, sy relative to the canvas, as the shared camera gives them)
 function ndc(sx: number, sy: number) {
-  const r = canvas.getBoundingClientRect();
-  return new THREE.Vector2(((sx - r.left) / r.width) * 2 - 1, -((sy - r.top) / r.height) * 2 + 1);
+  return new THREE.Vector2((sx / canvas.clientWidth) * 2 - 1, -(sy / canvas.clientHeight) * 2 + 1);
 }
 function pickBuilding(sx: number, sy: number) {
   ray.setFromCamera(ndc(sx, sy), cam);
@@ -1118,56 +1092,22 @@ function tapMap(sx: number, sy: number): Mode {
   return 'look';
 }
 
-// ---------------- input (Google Maps style) ----------------
+// ---------------- input ----------------
+// The shared camera (kit/camera.ts) pans, pinches, turns and tilts the map (Google Maps style);
+// the game takes the finger when a tool needs it, and hears about taps.
 function groundAt(sx: number, sy: number): P {
-  ray.setFromCamera(ndc(sx, sy), cam);
-  const hit = new THREE.Vector3();
-  ray.ray.intersectPlane(plane, hit);
-  return { x: hit.x, z: hit.z };
+  const g = nav.groundUnder(sx, sy);
+  return { x: g.x, z: g.z };
 }
-function toScreen(p: P) {
-  const v = new THREE.Vector3(p.x, p.y ?? 0, p.z).project(cam);
-  return { x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight };
-}
-// move the camera so world point w sits under screen point (sx, sy)
-function keepUnder(w: P, sx: number, sy: number) {
-  placeCamera();
-  const g = groundAt(sx, sy);
-  view.x += w.x - g.x;
-  view.z += w.z - g.z;
-  placeCamera();
-}
+const toScreen = (p: P) => nav.groundToScreen(p);
 
-const pts = new Map<number, { x: number; y: number; t: number }>();
-type G = 'none' | 'maybe' | 'pan' | 'draw' | 'handle' | 'two';
-let gesture: G = 'none';
-let downAt = { x: 0, y: 0, t: 0 };
-let lastTap = { x: 0, y: 0, t: 0 };
-let fling = { vx: 0, vz: 0 };
-let panAnchor: P = { x: 0, z: 0 };
-let vel: { x: number; z: number; t: number }[] = [];
 let grabbed: 'a' | 'b' | 'c' = 'b';
-// two-finger state, measured from the moment the second finger landed
-let two = {
-  d0: 0, a0: 0, m0: { x: 0, y: 0 }, anchor: { x: 0, z: 0 }, h0: 0, az0: 0, el0: 0,
-  rotating: false, rotOff: 0, tilting: false, moved: false, t: 0,
-};
+// what a finger the game has taken is doing: dragging a blueprint handle, or drawing a road
+let claim: 'handle' | 'draw' | null = null;
+// the mode the last tap was handled in: a double tap zooms in only while looking round
+let tapMode: Mode = 'look';
 const tol = () => view.h * 0.035;
-const ROT_START = (12 * Math.PI) / 180;
 
-function startTwo() {
-  const [a, b] = [...pts.values()];
-  const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  two = {
-    d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, a0: Math.atan2(b.y - a.y, b.x - a.x), m0: m,
-    anchor: groundAt(m.x, m.y), h0: view.h, az0: view.az, el0: view.el,
-    rotating: false, rotOff: 0, tilting: false, moved: false, t: performance.now(),
-  };
-}
-function startPan(x: number, y: number) {
-  panAnchor = groundAt(x, y);
-  vel = [];
-}
 function handleUnder(x: number, y: number) {
   if (mode !== 'road' && mode !== 'rail') return null;
   let best: 'a' | 'b' | 'c' | null = null, bd = 34;
@@ -1208,155 +1148,51 @@ function curveTap(raw: P) {
   hint();
 }
 
-canvas.addEventListener('pointerdown', (e) => {
-  try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
-  goal = null;
-  fling = { vx: 0, vz: 0 };
-  if (pts.size === 1) {
-    downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
-    const h = handleUnder(e.clientX, e.clientY);
-    if (h) { gesture = 'handle'; grabbed = h; dragging = true; return; }
-    gesture = 'maybe';
-    startPan(e.clientX, e.clientY);
-  } else if (pts.size === 2) {
-    if (gesture === 'draw') { draft = null; draftChanged(); }
-    if (gesture === 'handle') { dragging = false; renderBar(); }
+nav.hooks = {
+  // a blueprint handle under the finger is dragged, not the map
+  onPointerDown: (p) => {
+    const h = handleUnder(p.sx, p.sy);
+    if (!h) return false;
+    claim = 'handle'; grabbed = h; dragging = true;
+    return true;
+  },
+  // straight and smooth roads are drawn by dragging; the curve tool uses taps, so dragging pans
+  // (the curve tool draws on a drag too, unless you've started placing it by taps)
+  onDragStart: (p) => {
+    if (!((mode === 'road' || mode === 'rail') && !draft && !(roadKind === 'curve' && picks.length))) return false;
+    const a = net.snapStart(p.start.ground, tol(), cls());
+    draft = { a, b: { ...a } };
+    trace = [a];
+    claim = 'draw'; dragging = true;
+    return true;
+  },
+  onClaimMove: (p) => {
+    const raw = groundAt(p.sx, p.sy);
+    if (claim === 'handle') moveHandle(grabbed, raw);
+    else if (claim === 'draw' && draft) {
+      draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight', cls());
+      if (roadKind === 'curve') { trace.push(raw); draft.c = fitCurve(draft.a, draft.b, trace); }
+      draftChanged();
+    }
+  },
+  onClaimEnd: (_p, why) => {
+    const was = claim;
+    claim = null;
     dragging = false;
-    gesture = 'two';
-    startTwo();
-  }
-});
-
-canvas.addEventListener('pointermove', (e) => {
-  if (!pts.has(e.pointerId)) return;
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
-  if (gesture === 'two' && pts.size >= 2) {
-    const [a, b] = [...pts.values()];
-    const d = Math.hypot(a.x - b.x, a.y - b.y);
-    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const rot = wrap(Math.atan2(b.y - a.y, b.x - a.x) - two.a0);
-    const scale = d / two.d0;
-    const dy = m.y - two.m0.y;
-    if (Math.abs(scale - 1) > 0.04 || Math.abs(rot) > 0.05 || Math.hypot(m.x - two.m0.x, dy) > 8) two.moved = true;
-    // two fingers sliding up/down together (not pinching or turning) tilts, like Google Maps
-    if (!two.rotating && !two.tilting && Math.abs(dy) > 14 && Math.abs(scale - 1) < 0.08 && Math.abs(rot) < 0.1 && Math.abs(m.x - two.m0.x) < Math.abs(dy) * 0.6) two.tilting = true;
-    if (two.tilting) {
-      view.el = Math.max(EL_MIN, Math.min(EL_MAX, two.el0 - dy * 0.006));
-      placeCamera();
-      return;
-    }
-    // rotation only kicks in after a deliberate twist, so pinching doesn't wobble
-    if (!two.rotating && Math.abs(rot) > ROT_START) { two.rotating = true; two.rotOff = Math.sign(rot) * ROT_START; }
-    view.h = Math.max(H_MIN, Math.min(H_MAX, two.h0 / scale));
-    view.az = two.az0 + (two.rotating ? rot - two.rotOff : 0);
-    keepUnder(two.anchor, m.x, m.y);
-    return;
-  }
-  if (gesture === 'handle') { moveHandle(grabbed, groundAt(e.clientX, e.clientY)); return; }
-  if (gesture === 'maybe' && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 8) {
-    // straight and smooth roads are drawn by dragging; the curve tool uses taps, so dragging pans
-    // (the curve tool draws on a drag too, unless you've started placing it by taps)
-    gesture = (mode === 'road' || mode === 'rail') && !draft && !(roadKind === 'curve' && picks.length) ? 'draw' : 'pan';
-    if (gesture === 'draw') {
-      const a = net.snapStart(groundAt(downAt.x, downAt.y), tol(), cls());
-      draft = { a, b: { ...a } };
-      trace = [a];
-      dragging = true;
-    }
-  }
-  if (gesture === 'pan') {
-    keepUnder(panAnchor, e.clientX, e.clientY);
-    vel.push({ x: view.x, z: view.z, t: performance.now() });
-    if (vel.length > 6) vel.shift();
-  } else if (gesture === 'draw' && draft) {
-    const raw = groundAt(e.clientX, e.clientY);
-    draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight', cls());
-    if (roadKind === 'curve') { trace.push(raw); draft.c = fitCurve(draft.a, draft.b, trace); }
-    draftChanged();
-  }
-});
-
-const end = (e: PointerEvent) => {
-  if (!pts.has(e.pointerId)) return;
-  const now = performance.now();
-  pts.delete(e.pointerId);
-  if (gesture === 'two') {
-    if (pts.size === 1) {
-      // a quick two-finger tap zooms out
-      if (!two.moved && now - two.t < 300) animateZoom(2, two.m0.x, two.m0.y);
-      // carry on panning with the finger that's left, without a jump
-      const [p] = [...pts.values()];
-      startPan(p.x, p.y);
-      gesture = 'pan';
-      two.moved = true; // only the first finger lift counts for the tap
-    }
-    return;
-  }
-  if (pts.size) return;
-  if (gesture === 'draw' || gesture === 'handle') { dragging = false; renderBar(); hint(); }
-  if (gesture === 'pan' && vel.length >= 2) {
-    const a = vel[0], b = vel[vel.length - 1];
-    const dt = (b.t - a.t) / 1000;
-    if (dt > 0 && now - b.t < 80) fling = { vx: (b.x - a.x) / dt, vz: (b.z - a.z) / dt };
-  }
-  if (gesture === 'maybe' && now - downAt.t < 400) {
-    if (tapMap(e.clientX, e.clientY) === 'look') {
-      // double-tap zooms in on the spot
-      if (now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
-        animateZoom(0.5, e.clientX, e.clientY);
-        lastTap.t = 0;
-      } else lastTap = { x: e.clientX, y: e.clientY, t: now };
-    }
-  }
-  gesture = 'none';
+    // a second finger turns it into a pinch, and a road half drawn is dropped
+    if (why === 'second-finger') { if (was === 'draw') { draft = null; draftChanged(); } else renderBar(); return; }
+    renderBar(); hint();
+  },
+  onTap: (p) => { tapMode = tapMap(p.sx, p.sy); },
+  // a double tap zooms in on the spot while looking round; with a tool, taps place things
+  onDoubleTap: () => tapMode !== 'look',
 };
-canvas.addEventListener('pointerup', end);
-canvas.addEventListener('pointercancel', end);
-canvas.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const w = groundAt(e.clientX, e.clientY);
-  view.h = Math.max(H_MIN, Math.min(H_MAX, view.h * (e.deltaY > 0 ? 1.12 : 1 / 1.12)));
-  keepUnder(w, e.clientX, e.clientY);
-}, { passive: false });
-
-// Zoom by a factor, keeping the tapped spot in place.
-function animateZoom(f: number, sx: number, sy: number) {
-  const w = groundAt(sx, sy);
-  const h = Math.max(H_MIN, Math.min(H_MAX, view.h * f));
-  // where the camera centre should end up so w stays under the finger
-  const c = groundAt(canvas.clientWidth / 2, canvas.clientHeight / 2);
-  const k = h / view.h;
-  goal = { h, x: view.x + (w.x - c.x) * (1 - k), z: view.z + (w.z - c.z) * (1 - k) };
-}
-
-function stepCamera(dt: number) {
-  if (goal) {
-    const t = Math.min(1, dt * 7);
-    let done = true;
-    for (const k of Object.keys(goal) as (keyof typeof view)[]) {
-      const g = goal[k]!;
-      view[k] += (g - view[k]) * t;
-      if (Math.abs(g - view[k]) > (k === 'h' || k === 'x' || k === 'z' ? 0.05 : 0.002)) done = false;
-    }
-    if (done) { Object.assign(view, goal); goal = null; }
-  }
-  if (gesture !== 'pan' && gesture !== 'two' && (fling.vx || fling.vz)) {
-    view.x += fling.vx * dt;
-    view.z += fling.vz * dt;
-    const decay = Math.exp(-dt * 4);
-    fling.vx *= decay; fling.vz *= decay;
-    if (Math.hypot(fling.vx, fling.vz) < 2) fling = { vx: 0, vz: 0 };
-  }
-  view.x = Math.max(-BOUND, Math.min(BOUND, view.x));
-  view.z = Math.max(-BOUND, Math.min(BOUND, view.z));
-  // point the compass needle at north (-z) as it appears on screen
-  const a = new THREE.Vector3(view.x, 0, view.z).project(cam), b = new THREE.Vector3(view.x, 0, view.z - 50).project(cam);
-  const ang = Math.atan2(-(b.y - a.y) * canvas.clientHeight, (b.x - a.x) * canvas.clientWidth);
-  // (the needle icon points up, so a quarter turn more than an arrow pointing right would need)
-  $('#needle').style.transform = `rotate(${(ang * 180) / Math.PI + 90}deg)`;
+// point the compass needle at north (-z) as it appears on screen
+// (the needle icon points up, so a quarter turn more than an arrow pointing right would need)
+nav.onChange(() => {
+  $('#needle').style.transform = `rotate(${(nav.northAngle() * 180) / Math.PI + 90}deg)`;
   shell.syncView();
-}
+});
 
 // ---------------- loop ----------------
 seedTown();
@@ -1460,8 +1296,7 @@ function frame(now: number) {
   last = now;
   const t0 = performance.now();
   perf.frames++; perf.frameMs += rawMs; perf.worst = Math.max(perf.worst, rawMs);
-  stepCamera(dt);
-  placeCamera();
+  nav.update(dt, now);
   if (gameGround.sync()) renderer.shadowMap.needsUpdate = true;
   // keep blueprint handles a finger's width wide at any zoom
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
@@ -1539,4 +1374,4 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
