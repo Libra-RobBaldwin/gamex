@@ -37,17 +37,22 @@ export function planRegionRail(all: RailSettlement[], o: { bound: number; isWate
   if (!city) return null;
   const towns = all.filter((s) => s !== city && s.kind === 'town');
   if (towns.length < 2) return null;
-  // the pair of towns the city lies most nearly between, not too far apart
-  let pair: [RailSettlement, RailSettlement] | null = null, best = Infinity;
+  // the pair of towns the city lies most nearly between, not too far apart; failing that (all the
+  // towns off to one side), from the city out through one town to the next
+  let order: RailSettlement[] | null = null, best = Infinity;
+  const bend = (a: RailSettlement, m: RailSettlement, b: RailSettlement) => { const ua = unit(sub(a, m)), ub = unit(sub(b, m)); return ua.x * ub.x + ua.z * ub.z; }; // -1: dead straight through m
   for (let i = 0; i < towns.length; i++) for (let j = i + 1; j < towns.length; j++) {
-    const a = towns[i], b = towns[j], ua = unit(sub(a, city)), ub = unit(sub(b, city));
-    const straight = ua.x * ub.x + ua.z * ub.z; // -1: dead straight through the city
-    const d = len(sub(a, city)) + len(sub(b, city));
-    const score = (straight + 1) * 4000 + d * 0.3;
-    if (straight < -0.3 && score < best) { best = score; pair = [a, b]; }
+    const a = towns[i], b = towns[j], straight = bend(a, city, b);
+    const score = (straight + 1) * 4000 + (len(sub(a, city)) + len(sub(b, city))) * 0.3;
+    if (straight < -0.3 && score < best) { best = score; order = [a, city, b]; }
   }
-  if (!pair) return null;
-  const order = [pair[0], city, pair[1]];
+  if (!order) for (const a of towns) for (const b of towns) {
+    if (a === b) continue;
+    const straight = bend(city, a, b), d = len(sub(a, city)) + len(sub(b, a));
+    const score = (straight + 1) * 4000 + d * 0.3;
+    if (straight < -0.3 && score < best) { best = score; order = [city, a, b]; }
+  }
+  if (!order) return null;
   // each station's heading: from the one before to the one after (a smooth run through)
   const heads = order.map((_, i) => unit(sub(order[Math.min(order.length - 1, i + 1)], order[Math.max(0, i - 1)])));
   const stations: RailStationPlan[] = order.map((s, i) => ({ settlement: s, ...stationSpot(s, heads[i]), hx: heads[i].x, hz: heads[i].z, route: 'main' as const }));
@@ -55,7 +60,8 @@ export function planRegionRail(all: RailSettlement[], o: { bound: number; isWate
   if (!legs) return null;
   // the branch: to the village nearest the main line (not one on it), from points on the town side of the city
   const villages = all.filter((s) => s.kind === 'village');
-  const c = stations[1], out = { x: c.hx, z: c.hz };
+  // (off the city's station, on the side the line goes on from it)
+  const ci = order.indexOf(city), c = stations[ci], k = ci === order.length - 1 ? -1 : 1, out = { x: c.hx * k, z: c.hz * k };
   let branch: RegionRailPlan['branch'] = null, bv: RailSettlement | null = null;
   const from = add(c, out, STRAIGHT - 40); // near the end of the city station's straight, on the way to the second town
   let bd = Infinity;
