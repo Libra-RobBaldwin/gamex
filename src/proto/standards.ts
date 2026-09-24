@@ -21,6 +21,14 @@ export const STD = {
   mini: { R: 7, footway: 2.5 },
   // splitter island at a single-lane roundabout entry
   splitter: { length: 12, width: 2.2 },
+  // the give-way line (TSRGD diagram 1003): two broken lines of 0.6 m dashes with 0.3 m gaps, 0.3 m
+  // apart (a mini-roundabout's, diagram 1003.3, is one), right across the entry from the kerb (or
+  // splitter island) to the kerb
+  giveWay: { dash: 0.6, gap: 0.3, width: 0.3, apart: 0.3 },
+  // the "give way ahead" triangle (TSRGD diagram 1023) in each approach lane: an outline triangle
+  // with its point towards the approaching driver (who sees it as the inverted give-way sign), its
+  // base nearest the line and `back` metres short of it
+  giveWayTriangle(mph: number) { return mph <= 40 ? { length: 3.75, width: 1.25, back: mph <= 30 ? 4 : 9 } : { length: 6, width: 2, back: 15 }; },
   // how far back from the edge of a junction's land a building's plot must stay
   junctionSetback: 0.5,
   // where a road changes to a narrower one (a dual carriageway ending, say), how long the

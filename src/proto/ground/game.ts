@@ -22,8 +22,9 @@ export class GameGround {
   readonly ground: Ground;
   private sites = new Set<Lot>();
   private full = true;
-  constructor(private w: GameWorld, bound: number) {
-    const size = Math.ceil((bound * 2 + 160) / 10) * 10;
+  // (`edge`: half the ground's width; the covers are painted, and hedges planted, right out to it)
+  constructor(private w: GameWorld, private edge: number) {
+    const size = Math.ceil((edge * 2) / 10) * 10;
     this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed: 11 });
   }
   // what only changes with the roads or the landscaping (kept between plots going up)
@@ -52,7 +53,7 @@ export class GameGround {
     const parks: GroundInput['parks'] = [];
     for (const r of this.w.parks?.() ?? []) for (const c of r.cells) { const h = r.size / 2; parks.push({ poly: [{ x: c.x - h, z: c.z - h }, { x: c.x + h, z: c.z - h }, { x: c.x + h, z: c.z + h }, { x: c.x - h, z: c.z + h }] }); }
     const industrial: XZ[] = [];
-    for (let x = -600; x <= 600; x += 40) for (let z = -600; z <= 600; z += 40) if (this.w.industrial({ x, z })) industrial.push({ x, z });
+    for (let x = -this.edge; x <= this.edge; x += 40) for (let z = -this.edge; z <= this.edge; z += 40) if (this.w.industrial({ x, z })) industrial.push({ x, z });
     const L = this.w.lake;
     return { blocked, lanes, parks, industrial, water: this.w.water?.() ?? [circlePoly(L, L.r + 6, 48)] };
   }

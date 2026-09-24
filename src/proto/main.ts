@@ -25,6 +25,8 @@ import { PLAIN_MAT } from './buildgen';
 import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { starterStops } from './game/crowdsites';
+import { edgeCrossings, edgeMesh } from './game/edge';
+import { GROUND } from './standards';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -32,9 +34,13 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 // ---------------- world ----------------
 // the lake: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
-const gameWater = new GameWater(520 * 1.3); // (the ground's half-width, BOUND * 1.3)
+// The map: you can build out to BOUND either side of the centre; the ground (and its painted fields
+// and hedges) runs on to EDGE, where it ends in a cut face (game/edge.ts). Roads out of town run on
+// off the map to EDGE.
+const BOUND = 820, EDGE = BOUND * GROUND;
+const OUT = BOUND - 10; // (where the starter town's roads out of town end: near enough the edge to run on off it)
+const gameWater = new GameWater(EDGE);
 const isWater = (p: P) => gameWater.isWater(p);
-const BOUND = 520;
 const net = new Network(isWater, BOUND, 11);
 gameWater.claim(net.land); // the lake's land ('water', 3 m past the waterline): plots and parks keep off it
 // an industrial estate south of the centre
@@ -70,7 +76,7 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 // don't shimmer. The game's own input hooks are set with the rest of the input code below.
 const nav = new NavRig(cam, canvas, {
   view: { x: 0, z: 20, h: 300, ...HOME },
-  limits: { hMin: 35, hMax: 900, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
+  limits: { hMin: 35, hMax: 1300, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
   shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
 });
 const view = nav.view;
@@ -83,9 +89,9 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND);
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, EDGE);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
-const ground = new THREE.Mesh(gameWater.groundGeometry(BOUND * 2.6), gameGround.ground.material);
+const ground = new THREE.Mesh(gameWater.groundGeometry(EDGE * 2), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 // Grass drawn on top of the ground (verges, roundabout islands, cutting slopes, gardens, parks)
@@ -95,6 +101,10 @@ for (const m of [...GRASS_MATS, ...grassMats()]) { m.color.set('#ffffff'); patch
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
 scene.add(gameGround.ground.hedges);
 scene.add(ground);
+// the cut face round the edge of the map (the roads running off it are added once they're built)
+let mapEdge = edgeMesh(EDGE);
+scene.add(mapEdge);
+function refreshEdge() { scene.remove(mapEdge); mapEdge.geometry.dispose(); mapEdge = edgeMesh(EDGE, edgeCrossings(net, EDGE)); scene.add(mapEdge); }
 // the lake (src/proto/game/water.ts): beaches and the bed laid over the ground (chained after the
 // ground's own patch), and the water and reeds on top: two draw calls
 gameWater.patch(gameGround.ground.material);
@@ -104,7 +114,8 @@ gameWater.light(scene, sun); // (evening light: the sun, sky and water change to
 // ---------------- trees (instanced) ----------------
 interface Tree { x: number; z: number; s: number; kind: number }
 let trees: Tree[] = [];
-for (let i = 0; i < 1400; i++) {
+// (woods and copses over the whole buildable map, as thick as they always were)
+for (let i = 0, n = Math.round(1400 * (BOUND / 520) ** 2); i < n; i++) {
   const p = { x: (rand() * 2 - 1) * BOUND, z: (rand() * 2 - 1) * BOUND };
   // woods on the outskirts, a few in town
   const dc = Math.hypot(p.x, p.z);
@@ -118,7 +129,7 @@ const trunkGeo = new THREE.CylinderGeometry(0.35, 0.5, 3.5, 6);
 const crownMat = new THREE.MeshLambertMaterial({ color: '#4f8a36', flatShading: true });
 const pineMat = new THREE.MeshLambertMaterial({ color: '#2f6b35', flatShading: true });
 const trunkMat = new THREE.MeshLambertMaterial({ color: '#6b4a2f' });
-const MAXT = 1600;
+const MAXT = Math.round(1700 * (BOUND / 520) ** 2);
 const crowns = new THREE.InstancedMesh(crownGeo, crownMat, MAXT);
 const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAXT);
 const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
@@ -197,11 +208,15 @@ function commitRoads(made: number[] = []) {
   redesignJunctions();
   claimJunctions();
   evictFromWorks();
-  bridgeLayer.sync(net); // lays out the bridges and stores their types on the segments, which drawRoads reads
+  // lays out the bridges (short of the junctions at their ends) and stores their types on the
+  // segments, which drawRoads reads
+  const reach = (s: RSeg, node: number) => (net.segsAt(node).length > 2 ? (junctions.get(node)?.shape?.mouth[s.id] ?? 0) + 2 : 0);
+  bridgeLayer.sync(net, (s) => [reach(s, s.a), reach(s, s.b)]);
   lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
   gameGround.invalidate();
+  refreshEdge();
 }
 let lamps: Lamp[] = [];
 const rebuildRoads = () => commitRoads();
@@ -390,22 +405,22 @@ function seedTown() {
   road({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 }, as('dual')); // a sweeping dual-carriageway bypass
   const over = { ...DEFAULT_OPTS, cross: 'bridge' as const };
   road({ x: -215, z: -150 }, { x: -215, z: 150 }, undefined, over); // a flyover across the main road
-  road({ x: 0, z: -150 }, { x: 510, z: -200 }, undefined, over); // a bridge over the lake, and on out of town to the east
+  road({ x: 0, z: -150 }, { x: OUT, z: -150 - (50 * OUT) / 510 }, undefined, over); // a bridge over the lake, and on out of town to the east
   // the industrial estate
   road({ x: 0, z: -200 }, { x: 0, z: -380 });
   road({ x: -190, z: -290 }, { x: 150, z: -290 });
   road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 });
   // a motorway along the south edge, reached from the estate by a dual carriageway
   // the motorway ends at a roundabout, where it carries on east as a fast dual carriageway
-  road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway'));
-  road({ x: 0, z: -470 }, { x: 510, z: -470 }, undefined, as('dual-2-70-0'));
+  road({ x: -OUT, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway'));
+  road({ x: 0, z: -470 }, { x: OUT, z: -470 }, undefined, as('dual-2-70-0'));
   road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
   // a main line railway along the north, lifted over the high road, and a road tunnel under the lake
-  net.build({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
+  net.build({ x: -OUT, z: 185 }, { x: OUT, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
   road({ x: 250, z: -470 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 }); // from the dual carriageway
   // roads out of town: west from the end of the high street, north under the railway (both run off the map)
-  road({ x: -230, z: 0 }, { x: -510, z: 0 }, undefined, as('rural-60'));
-  road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
+  road({ x: -230, z: 0 }, { x: -OUT, z: 0 }, undefined, as('rural-60'));
+  road({ x: 0, z: 200 }, { x: 0, z: OUT }, undefined, as('rural-60'));
   // junctions are designed (and take their land) before any plot is laid out
   commitRoads([...net.segs.keys()]);
   // industry: library sites on the estate and out of town claim their land before any plot is

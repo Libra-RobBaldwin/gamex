@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { section } from './roaddraw'; // (people: where a bus stands at a stop)
 import { BAY, bayWeight, closestOnPath, HALF, pathLength, pointAt, type Lot, type Network, type P, type RSeg, type Stop } from './roads';
-import { legsAt, moveOf, type Junction, type Leg, type Move } from './junction';
+import { junctionLift, legsAt, moveOf, type Junction, type Leg, type Move } from './junction';
 import { TRAINS, trainSpeed, type TrainDef } from './catalog';
 import { courseOf, laneSpan, sectionAt, taperOf, type Course, type Ends2 } from './xsection';
 import { DIMS, bodyOf, overlapping, type Kind, type Pose } from './footprint';
@@ -755,6 +755,9 @@ export class Traffic {
       outS = Math.min(Lo - 0.5, this.reachOf(j, node, next));
       turn = this.turnPts(j, node, seg, from, lane, next, exitLane, lineS, outS);
     }
+    // across a junction on a slope, on the plane it's drawn on (its ends are on the roads already)
+    const lf = j ? junctionLift(this.net, node, j.shape?.mouth) : null;
+    if (lf) turn = turn.map((p, i) => (i === 0 || i === turn.length - 1 ? p : { ...p, y: (p.y ?? y) + lf(p.x, p.z) }));
     // a stretch of the approach before it and of the road beyond
     const pre: P[] = [];
     for (let s = Math.max(0, lineS - E_IN); s < lineS - 0.3; s += 2) pre.push(this.lanePoint(seg, from, s, lane));
@@ -918,15 +921,23 @@ export class Traffic {
   // Null if that would leave us standing across somebody's way in the junction.
   private trajectory(c: Car, P: JPath, me: User, lead: { gap: number; v: number }, yieldTo: { vw: View; x: User }[], ring: boolean) {
     const a = DRIVE[c.kind].a * 0.8, dt = 0.2, q0 = me.t, out = new Float32Array(61);
+    // Where each of them will be. On a roundabout, one already committed and on the move keeps pulling
+    // away (gently, up to what its course allows): taken as holding the crawl it's at now, it would look
+    // as if it would leave us standing, and a queue would go onto the ring one car at a time with a gap
+    // after each. Anyone else is taken to carry on as they are.
+    const ahead = yieldTo.map(({ x }) => ({ p: x.t, v: x.v, ax: ring && x.adm !== Infinity && x.v > 1 ? DRIVE[x.c.kind].a * 0.3 : 0 }));
     let q = q0, vq = c.v;
     out[0] = q;
     for (let k = 1; k <= 60; k++) {
       let cap = q0 + lead.gap + lead.v * k * dt, moving = lead.v > 0.5;
-      for (const { vw, x } of yieldTo) {
-        const p = x.t + x.v * k * dt;
+      for (let i = 0; i < yieldTo.length; i++) {
+        const { vw, x } = yieldTo[i], h = ahead[i];
+        if (h.ax) h.v = Math.max(h.v, Math.min(spd(x.path, h.p), h.v + h.ax * dt));
+        h.p += h.v * dt;
+        const p = h.p;
         if (vw.apart(p, q)) continue;
         const lim = vw.limitMe(p);
-        if (lim - 0.5 < cap) { cap = lim - 0.5; moving = x.v > 0.5 && vw.limitMe(p + 2) - lim > 1; }
+        if (lim - 0.5 < cap) { cap = lim - 0.5; moving = h.v > 0.5 && vw.limitMe(p + 2) - lim > 1; }
       }
       let nv = Math.min(spd(P, q), vq + a * dt);
       if (q + nv * dt > cap) nv = Math.max(0, (cap - q) / dt);
