@@ -199,8 +199,10 @@ smoothed, then set against capacity:
 - Occupancy moves in quickly and out slowly, and only once low demand has lasted.
 
 Every town reports a status (growing, stable, stalling, declining), a headline, ranked
-reasons in plain words ("shops only 40% supplied with goods", "no bus or rail service") and
-the numbers for a town panel. Growing means something went up (and the game put it up) or
+reasons in plain words ("shops only 40% supplied with goods", "no bus or rail service",
+"buses on Line 1 are full: 40% of people waiting couldn't get on") and the numbers for a town
+panel. A town whose stops turned away a tenth or more of those who came to board last month is
+told so, naming the line that turned most away, since more vehicles there is what would help. Growing means something went up (and the game put it up) or
 people moved in; demand that nothing comes of isn't growth, and demand that has fallen and
 settled isn't stalling.
 

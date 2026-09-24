@@ -47,6 +47,7 @@ export interface Facts {
   reachWork: number; workCar: number; workNoCar: number; workTransit: number; reachShop: number; reachLeisure: number;
   goods: number; materials: number; visitors: number; // supplied share of need (NaN when nothing needs it)
   stops: number; lines: number; homesNearStop: number; plots: number; abandoned: number;
+  crowding: Crowding;
   ratio: PerUse; built: number; lost: number;
 }
 export interface TState {
@@ -75,6 +76,9 @@ export function newTown(id: number, name: string, x: number, z: number, carShare
 }
 
 // What the economy lends the town review: this month's reach, and hands to act with.
+// Of those who came to board your lines at a town's stops, the share who found no room, and the
+// line that turned most away (with its own share).
+export interface Crowding { share: number; line: { name: string; rail: boolean; share: number } | null }
 export interface TownCtx {
   tune: Tune; month: number; calibrate: boolean; assess: boolean; // assess: work out demand but change nothing
   work: Reach; shop: Reach; leisure: Reach;
@@ -84,6 +88,7 @@ export interface TownCtx {
   densify(b: BState, kind: BuildingKind): void;
   abandon(b: BState): void; restore(b: BState): void; demolish(b: BState): void; vacate(b: BState, fraction: number): void;
   service(t: TState): { stops: number; lines: number };
+  crowding(t: TState): Crowding;
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -360,7 +365,7 @@ function facts(t: TState, c: TownCtx, abandoned: number, built: number, lost: nu
     goods: share(T.local.goods * t.base.shop * T.goodsPerShopJobHour, t.supply.goods, gN),
     materials: share(T.local.materials * t.base.works * T.materialsPerWorksJobHour, t.supply.materials, mN),
     visitors: share(T.local.visitors * t.base.office * (T.visitsPerOfficeJobDay / 24), t.supply.visitors, vN),
-    stops: svc.stops, lines: svc.lines, homesNearStop: homes > 0 ? near / homes : 0, plots, abandoned, ratio, built, lost,
+    stops: svc.stops, lines: svc.lines, homesNearStop: homes > 0 ? near / homes : 0, plots, abandoned, ratio, built, lost, crowding: c.crowding(t),
   };
 }
 
@@ -378,6 +383,10 @@ export function report(t: TState, T: Tune): TownReport {
   else add(`only ${pct(f.reachWork)} of workers can get to a job within ${T.workMin} min`, false, 0.55 * (1 - f.reachWork));
   if (f.workNoCar < 0.6 && f.reachWork < 0.95) add(`only ${pct(f.workNoCar)} of people without a car can get to work in ${T.workMin} min`, false, 0.3 * (1 - f.workNoCar) * (1 - t.carShare));
   if (f.workers > f.jobs * 1.15 && f.reachWork < 0.9) add(`not enough jobs: ${Math.round(f.workers).toLocaleString('en-GB')} workers for ${Math.round(f.jobs).toLocaleString('en-GB')} jobs`, false, 0.2);
+  // full vehicles: a journey on your lines counts towards reach only for those who find room
+  const cr = f.crowding;
+  if (cr.line && cr.share >= 0.1)
+    add(`${cr.line.rail ? 'trains' : 'buses'} on ${cr.line.name} are full: ${pct(cr.line.share)} of people waiting couldn't get on`, false, 0.5 * cr.share);
   if (f.reachShop < 0.8) add(`shops within ${T.shopMin} min can serve only ${pct(f.reachShop)} of residents`, false, 0.3 * (1 - f.reachShop));
   // what it's fed
   const fed = (v: number, what: string, stuff: string, per: number) => {
@@ -424,7 +433,7 @@ export function report(t: TState, T: Tune): TownReport {
       goods: f.goods, materials: f.materials, visitors: f.visitors,
       goodsPerHour: t.supply.goods, materialsPerHour: t.supply.materials, visitorsPerDay: t.supply.visitors * 24,
     },
-    service: { stops: f.stops, lines: f.lines, homesNearStop: f.homesNearStop, plots: f.plots },
+    service: { stops: f.stops, lines: f.lines, homesNearStop: f.homesNearStop, plots: f.plots, turnedAway: f.crowding.share },
     history: [...t.history],
   };
 }

@@ -57,6 +57,9 @@ export class LineState {
   private readonly want: Float64Array;
   private readonly got: Float64Array;
   private readonly judged: Uint8Array; // the first month with people to judge by is taken as it is
+  // last month's counts at each slot: people who came to board, and how many of them did
+  readonly lastWant: Float64Array;
+  readonly lastGot: Float64Array;
   sites: unknown[] = []; // whatever the owner keeps for each slot's stop
   // freight on board by (cargo, alight slot); where each cargo boarding at a slot is taken
   readonly fonb: Float64Array;
@@ -96,6 +99,8 @@ export class LineState {
     this.want = new Float64Array(k);
     this.got = new Float64Array(k);
     this.judged = new Uint8Array(k);
+    this.lastWant = new Float64Array(k);
+    this.lastGot = new Float64Array(k);
     this.fonb = new Float64Array(this.def.pax ? 0 : NC * k);
     this.fowed = new Float64Array(this.def.pax ? 0 : NC * k);
     this.dest = new Int16Array(this.def.pax ? 0 : NC * k).fill(-1);
@@ -308,6 +313,7 @@ export class LineState {
       const r = this.want[i] > 1 ? Math.min(1, this.got[i] / this.want[i]) : 1;
       this.room[i] += (this.judged[i] ? a : 1) * (r - this.room[i]);
       if (this.want[i] > 1) this.judged[i] = 1;
+      this.lastWant[i] = this.want[i]; this.lastGot[i] = Math.min(this.got[i], this.want[i]);
       this.want[i] = this.got[i] = 0;
     }
   }
@@ -343,6 +349,7 @@ export class LineState {
       phase: this.phase, dwell: [...this.dwell], q: [...this.q], onboard: [...this.onboard], owed: [...this.owed],
       fonb: [...this.fonb], fowed: [...this.fowed], load: this.load, month: { ...this.month }, last: { ...this.last },
       room: [...this.room], want: [...this.want], got: [...this.got], judged: [...this.judged],
+      lastWant: [...this.lastWant], lastGot: [...this.lastGot],
     };
   }
   restore(s: ReturnType<LineState['save']>) {
@@ -361,5 +368,7 @@ export class LineState {
     s.want.forEach((v, i) => (this.want[i] = v));
     s.got.forEach((v, i) => (this.got[i] = v));
     s.judged.forEach((v, i) => (this.judged[i] = v));
+    s.lastWant?.forEach((v, i) => (this.lastWant[i] = v));
+    s.lastGot?.forEach((v, i) => (this.lastGot[i] = v));
   }
 }

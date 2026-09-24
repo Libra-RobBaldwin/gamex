@@ -14,7 +14,7 @@ import {
 } from './econdefs';
 import { LineState, NC, type LineCtx, type StopPos } from './econlines';
 import { Pairs, Skim, assignTrips, installTrips, reach, type PairCache, type Reach, type ZoneAccess } from './econaccess';
-import { newTown, perUse, reviewTown, type BState, type TState, type TownCtx, type ZState } from './econtowns';
+import { newTown, perUse, reviewTown, type BState, type Crowding, type TState, type TownCtx, type ZState } from './econtowns';
 
 export { LineState } from './econlines';
 export type { TState, ZState, BState } from './econtowns';
@@ -107,7 +107,7 @@ export class Economy {
   private skim: Skim;
   private pairCache: PairCache = { places: [], cars: [] }; // who pairs with whom, and car times, between rebuilds
   private pairs: Pairs | null = null;
-  private svc = new Map<TState, { stops: number; lines: number }>();
+  private svc = new Map<TState, { stops: number; lines: number; at: SState[] }>();
   // the last review's reach, by the zone order of that review (zones added since renumber the
   // rest, so `at` maps each zone reviewed to its place in these arrays)
   private lastReach: { work: Reach; shop: Reach; leisure: Reach; zones: ZState[]; at?: Map<ZState, number> } | null = null;
@@ -620,8 +620,14 @@ export class Economy {
     for (const t of this.townMap.values()) {
       const seen = new Set<number>(), lines = new Set<number>();
       for (const z of t.zones) for (const a of z.acc) seen.add(a.s);
-      for (const i of seen) { const st = this.stopMap.get(this.skim.ids[i]); for (const s of st?.slots ?? []) if (s.line.pax && s.line.running) lines.add(s.line.id); }
-      this.svc.set(t, { stops: seen.size, lines: lines.size });
+      const at: SState[] = [];
+      for (const i of [...seen].sort((a, b) => a - b)) {
+        const st = this.stopMap.get(this.skim.ids[i]);
+        if (!st) continue;
+        at.push(st);
+        for (const s of st.slots) if (s.line.pax && s.line.running) lines.add(s.line.id);
+      }
+      this.svc.set(t, { stops: seen.size, lines: lines.size, at });
     }
   }
 
@@ -798,6 +804,7 @@ export class Economy {
       demolish: (b) => { this.forget(b); b.zone.cleared[b.use]++; this.actions.push({ t: 'demolish', building: b.id }); },
       vacate: (b, fraction) => { if (!assess) this.actions.push({ t: 'vacate', building: b.id, fraction }); },
       service: (t) => this.svc.get(t) ?? { stops: 0, lines: 0 },
+      crowding: (t) => this.crowding(t),
     };
     for (const t of [...this.townMap.values()].sort((a, b) => a.id - b.id)) {
       const before = t.report;
@@ -809,6 +816,27 @@ export class Economy {
     // the month's changes feed next month's trips
     this.trips();
     this.timing.parts.trips += performance.now() - t2;
+  }
+
+  // Of the people who came to board your lines at a town's stops last month, the share who
+  // found no room (on any line, or at a stop too full to wait at), and the line that turned
+  // most away.
+  private crowding(t: TState): Crowding {
+    const want = new Map<LineState, number>(), got = new Map<LineState, number>();
+    let W = 0, G = 0;
+    for (const st of this.svc.get(t)?.at ?? [])
+      for (const { line: L, slot } of st.slots) {
+        if (!L.pax || !L.running) continue;
+        const w = L.lastWant[slot], g = L.lastGot[slot];
+        want.set(L, (want.get(L) ?? 0) + w); got.set(L, (got.get(L) ?? 0) + g);
+        W += w; G += g;
+      }
+    let worst: LineState | null = null, most = 0;
+    for (const [L, w] of [...want].sort((a, b) => a[0].id - b[0].id)) {
+      const turned = w - got.get(L)!;
+      if (turned > most) { most = turned; worst = L; }
+    }
+    return { share: W > 1 ? (W - G) / W : 0, line: worst ? { name: worst.name, rail: worst.def.mode === 'rail', share: most / want.get(worst)! } : null };
   }
 
   private townNews(t: TState, before: TownReport | null) {

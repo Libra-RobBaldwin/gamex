@@ -263,6 +263,8 @@ export interface TownReport {
   uses: Record<Use, UseReport>;
   reach: { work: number; workCar: number; workNoCar: number; workTransit: number; shop: number; leisure: number };
   supply: { goods: number; materials: number; visitors: number; goodsPerHour: number; materialsPerHour: number; visitorsPerDay: number };
-  service: { stops: number; lines: number; homesNearStop: number; plots: number }; // plots: free to build on
+  // plots: free to build on; turnedAway: the share of those who came to board at its stops last
+  // month who found no room
+  service: { stops: number; lines: number; homesNearStop: number; plots: number; turnedAway: number };
   history: number[]; // residents at each of the last reviews, oldest first
 }
