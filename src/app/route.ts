@@ -1,10 +1,10 @@
 // Where an address takes you: the start menu (and which of its screens), or straight into a game.
-// `/?map=<id>` and `/?place=<id>` are deep links that skip the menu; `#new`, `#how`, `#settings`
-// and `#about` are the menu's own screens, so the phone's back button steps back through them.
+// `/?map=<id>` and `/?place=<id>` are deep links that skip the menu; `#new`, `#how`, `#library`,
+// `#settings` and `#about` are the menu's own screens, so the phone's back button steps back through them.
 
 import { DEFAULT_MAP, mapById, type MapInfo } from '../proto/maps';
 
-export const SCREENS = ['home', 'new', 'how', 'settings', 'about'] as const;
+export const SCREENS = ['home', 'new', 'how', 'library', 'settings', 'about'] as const;
 export type Screen = (typeof SCREENS)[number];
 
 export type Route =

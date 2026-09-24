@@ -63,9 +63,9 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   check(t.fcp > 0 && t.fcp < 1000, `the menu's first frame arrives in under 1 s (${Math.round(t.fcp)} ms)`);
   if (!process.env.BASE) check(t.js < 200_000, `the menu loads under 200 kB of script (${Math.round(t.js / 1000)} kB)`);
   check(await page.$('[data-continue]') === null, 'no Continue while nothing is saved');
-  check((await page.$$('.mrow')).length === 4, 'New game, How to play, Settings and About');
+  check((await page.$$('.mrow')).length === 5, 'New game, How to play, Library, Settings and About');
   await page.screenshot({ path: `${shots}/1-home.png` });
-  for (const s of ['how', 'settings', 'about', 'new']) {
+  for (const s of ['how', 'library', 'settings', 'about', 'new']) {
     await page.tap(`[data-go="${s}"]`);
     await page.waitForSelector(`.scr-${s}`);
     await page.screenshot({ path: `${shots}/1-${s}.png` });
@@ -244,6 +244,46 @@ for (const id of ['town', 'sandbox']) {
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${shots}/7-landscape-game.png` });
   noErrors(page, 'landscape');
+  await ctx.close();
+}
+
+// ---- 8. the Library: every explorer opens from the menu, as part of the app, and back returns ----
+{
+  const { ctx, page } = await phone();
+  await page.goto(BASE + '/#library');
+  await atMenu(page);
+  const ids = await page.$$eval('[data-explorer]', (as) => as.map((a) => a.dataset.explorer));
+  check(ids.length === 6, `the Library lists the six explorers (${ids.join(', ')})`);
+  for (const id of ids) {
+    await page.tap(`[data-explorer="${id}"]`);
+    const shown = await page.waitForSelector('#lib-back', { state: 'visible', timeout: 90000 }).then(() => true, () => false);
+    await page.waitForTimeout(4000);
+    const r = await page.evaluate(() => {
+      const b = document.querySelector('#lib-back')?.getBoundingClientRect();
+      return {
+        emoji: (document.body.innerText.replace(/[©®™◀▶]/g, '').match(/\p{Extended_Pictographic}/gu) ?? []).join(''),
+        perf: [...document.querySelectorAll('#stats, #perf')].some((e) => e.offsetParent !== null),
+        onScreen: !!b && b.top >= 0 && b.left >= 0 && b.bottom <= innerHeight && b.width >= 44 && b.height >= 32,
+        top: b && document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('#lib-back') !== null,
+      };
+    });
+    check(shown && r.onScreen && r.top, `${id}: opens with a Library button on top, in reach`);
+    check(!r.perf && !r.emoji, `${id}: no developer readouts and no emoji${r.emoji ? ` (${r.emoji})` : ''}`);
+    await page.screenshot({ path: `${shots}/8-${id}.png` });
+    await page.tap('#lib-back');
+    await page.waitForSelector('#app .scr-library', { timeout: 30000 });
+  }
+  check(true, 'the Library button returns to the Library each time');
+  // the phone's back button does too
+  await page.tap('[data-explorer="bridges"]');
+  await page.waitForSelector('#lib-back', { timeout: 90000 });
+  await page.goBack();
+  await page.waitForSelector('#app .scr-library', { timeout: 30000 }).then(() => check(true, 'back from an explorer returns to the Library'), () => check(false, 'back from an explorer returns to the Library'));
+  noErrors(page, 'library');
+  // opened directly, an explorer page is left as it was, for development
+  await page.goto(BASE + '/bridges-demo.html');
+  await page.waitForTimeout(3000);
+  check(await page.$('#lib-back') === null, 'opened directly, an explorer has no Library button');
   await ctx.close();
 }
 

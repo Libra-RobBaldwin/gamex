@@ -16,6 +16,6 @@ npm run build    # typecheck + production build to dist/
 ## Layout
 - `index.html` → `src/app/main.ts`: the start menu (New game, How to play, Settings, About) and the guided start. It loads the game, `src/proto/main.ts` (3D, three.js), only when a map is picked; `/?map=<id>` deep links go straight in. The maps are listed in `src/proto/maps.ts`. The game's HUD is `src/proto/ui/shell.ts` (see `docs/hud.md`).
 - `src/proto/`: the game's systems: roads, junctions, traffic, economy, and the libraries (bridges, industries, vehicles, people, water, ground, terrain).
-- `*-demo.html`: a page per library, for trying it on its own. `places.html` is Real Town Plans (`src/places`).
+- `*-demo.html`: a page per library, for trying it on its own. The start menu's **Library** screen opens them with `?from=library` (`src/app/library.ts`), which adds a way back and hides the developer readouts; opened directly they're unchanged. `places.html` is Real Town Plans (`src/places`).
 - `proto.html`: redirects old links to the front page.
 - `src/defs.ts`, `src/sim.ts`, `src/world.ts`, `src/scenarios.ts`, `src/geo.ts`: the first 2D prototype's data and simulation. Its screen is retired; the game still uses `defs.ts`, and `sim.test.ts` still covers the rest.
