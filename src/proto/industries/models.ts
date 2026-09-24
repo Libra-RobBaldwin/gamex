@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { rng } from '../roads';
 import { rect, shadeHex } from './kit';
-import { INDUSTRY_TYPES, variantFor, type IndustryId, type Variant } from './catalogue';
+import { INDUSTRY_TYPES, flowLive, variantFor, type IndustryId, type Variant } from './catalogue';
 import { fitPlot, PAL, Site, type Plot, type SiteFrame } from './site';
 import type { Anchors, Dynamics } from './state';
 
@@ -538,7 +538,8 @@ const port: Recipe = (s, v) => {
     s.notes.push(`${n} ship-to-shore cranes`, 'container stacks');
   } else if (v === 'bulk') {
     s.heap(-W * 0.25, qz + 32, W * 0.3, 14, 8, 'iron_ore', 'out', false);
-    s.heap(W * 0.18, qz + 32, W * 0.25, 14, 8, 'coal', 'in', false);
+    const coalRole = INDUSTRY_TYPES.port.outputs.some((f) => f.cargo === 'coal' && flowLive(f, s.year)) ? 'out' : 'in'; // exported, later imported
+    s.heap(W * 0.18, qz + 32, W * 0.25, 14, 8, 'coal', coalRole, false);
     for (let i = 0; i < 3; i++) s.jibCrane(-W * 0.35 + i * W * 0.35, qz + 4, 18, 22, '#3f6d93', true);
     for (let i = 0; i < 2; i++) s.tank(W * 0.38 - i * 13, front - 14, 6, 10, 'oil', 'out', '#e3e0d8');
     s.conveyor(-W * 0.25, qz + 4, 12, -W * 0.25, qz + 26, 9, '#8e4a35');
