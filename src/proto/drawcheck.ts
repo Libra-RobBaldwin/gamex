@@ -153,9 +153,10 @@ const CARR = BIT.asph | BIT.paint;
 
 // Check the window round one place (a junction or a join) at height y. `keep` says which cells to look
 // at (the places' own surroundings, not a neighbour's); `r` is the tolerance, in cells.
-export function checkWindow(idx: TriIndex, node: number, c: P, rad: number, y: number, res = 0.1, r = 2, minArea = 0.03): Defect[] {
+// (top: how far above y surfaces still count, for a junction whose roads climb away from it)
+export function checkWindow(idx: TriIndex, node: number, c: P, rad: number, y: number, res = 0.1, r = 2, minArea = 0.03, top = 1.2): Defect[] {
   const R = new Raster(c.x - rad, c.z - rad, c.x + rad, c.z + rad, res);
-  for (const t of idx.near(R.x0, R.z0, c.x + rad, c.z + rad)) R.tri(t.m, t.a, t.i, y - 0.3, y + 1.2);
+  for (const t of idx.near(R.x0, R.z0, c.x + rad, c.z + rad)) R.tri(t.m, t.a, t.i, y - 0.3, y + top);
   const out: Defect[] = [];
   const inside = (p: P) => Math.hypot(p.x - c.x, p.z - c.z) < rad - 1;
   const add = (kind: Defect['kind'], m: Uint8Array, min = minArea, test?: (cells: number[]) => boolean) => {

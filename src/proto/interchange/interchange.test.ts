@@ -86,7 +86,8 @@ describe('motorway junctions', () => {
       const j = js.get(n)!, c = net.node(n);
       // a merge or diverge: windows all along its nose and taper; the others round the node
       const at = j.slip?.kind ? j.slip.path.filter((_, i) => i % 15 === 0) : [c];
-      for (const p of at) bad.push(...checkWindow(idx, n, p, j.slip?.kind ? 30 : Math.max(45, j.R + 20), c.y, 0.1, 2));
+      // (a terminal's side road climbs to its bridge within the window: count its surfaces up there too)
+      for (const p of at) bad.push(...checkWindow(idx, n, p, j.slip?.kind ? 30 : Math.max(45, j.R + 20), c.y, 0.1, 2, 0.03, 3));
     }
     // (specks under 0.05 m², a few cells of the raster, are its resolution: the town's own junctions have
     // them; and a give-way corner on the ring's curve leaves a hairline of asphalt, 5 cm wide, along it)
