@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#12161e" />
+    <title>Bridges demo</title>
+    <style>
+      :root { --glass: rgba(18, 22, 30, 0.84); --line: rgba(255, 255, 255, 0.12); --text: #eef2f7; --muted: #9aa6b5; --accent: #4cc3ff; --bad: #ff7a6d; --gold: #ffd35a; color-scheme: dark; }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #a9cbe3; font-family: Inter, system-ui, sans-serif; color: var(--text); user-select: none; }
+      #c { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; touch-action: none; }
+      .glass { background: var(--glass); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); }
+      button { font: inherit; font-weight: 600; color: var(--text); background: rgba(40, 46, 58, 0.95); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+      button.on { background: var(--accent); color: #062033; }
+      #top { position: fixed; top: 8px; left: 8px; right: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+      #top .row { display: flex; align-items: center; gap: 6px; }
+      #title { flex: 1; text-align: center; font-weight: 700; font-size: 15px; }
+      #facts { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: center; }
+      #notes { font-size: 11.5px; color: var(--gold); text-align: center; }
+      #notes:empty { display: none; }
+      #dock { position: fixed; left: 8px; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
+      #modes { display: flex; gap: 6px; justify-content: center; }
+      #list { max-height: 38dvh; overflow-y: auto; padding: 6px; display: none; }
+      #list.show { display: block; }
+      .opt { display: grid; grid-template-columns: 22px 1fr auto; gap: 2px 8px; padding: 6px 8px; border-radius: 10px; font-size: 12.5px; cursor: pointer; }
+      .opt.on { background: rgba(76, 195, 255, 0.2); }
+      .opt.no { opacity: 0.55; cursor: default; }
+      .opt .why { grid-column: 2 / 4; color: var(--muted); font-size: 11.5px; }
+      .opt.no .why { color: var(--bad); }
+      .opt b { font-weight: 700; }
+      .rec { color: var(--gold); font-size: 11px; margin-left: 4px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="top" class="glass">
+      <div class="row"><button id="prev">‹</button><div id="title"></div><button id="next">›</button></div>
+      <div id="facts"></div>
+      <div id="notes"></div>
+    </div>
+    <div id="dock">
+      <div id="list" class="glass"></div>
+      <div id="modes">
+        <button id="gallery" class="on">Gallery</button>
+        <button id="chooser">Chooser</button>
+        <button id="view">Top</button>
+        <button id="lift">Lift</button>
+      </div>
+    </div>
+    <script type="module" src="/src/proto/bridges/demo.ts"></script>
+  </body>
+</html>
