@@ -11,6 +11,13 @@ export default defineConfig({
       },
     },
   },
+  // Agents' git worktrees live under .claude/: changes there mustn't reload the pages being served.
+  server: { watch: { ignored: ['**/.claude/**'] } },
   // Agents' git worktrees live under .claude/ and parked tests under docs/; neither is this checkout's suite.
-  test: { exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', 'docs/**'] },
+  test: {
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', 'docs/**'],
+    // Geometry and benchmark tests run for seconds on a shared machine; 5 s is a hang guard, not a
+    // budget (the tests assert their own time budgets).
+    testTimeout: 30_000,
+  },
 });

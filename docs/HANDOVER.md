@@ -8,6 +8,25 @@ carry on.
 Read this first, then `docs/ROADMAP.md` (direction), `docs/ENGINE.md` (architecture) and the
 per-library docs in `docs/`.
 
+## Focus (the user, 24 Sep ~13:20): the core game loop first
+
+The user said we'd lost sight of the goal, and agreed this plan. The goal is the game in
+`docs/ROADMAP.md`: build roads and bus and rail lines, good service makes towns grow, and the
+growth creates the next problem. Real places come last.
+
+1. **Land the core already in flight:** junctions, traffic, library vehicles in traffic and the economy
+   library. Water and ground are nearly done, so merge them, but start nothing new on scenery.
+2. **Then one stream only: the game loop** (`docs/loop.md`). You draw a bus route or rail
+   line between parts of town and people ride it. It earns fares, and the town grows or shrinks
+   with the service, shown on one town panel. The loop is built in the **invented town**, which
+   the user chose over Horley for now.
+3. **Parked. Noted here, not deleted, and not to be restarted without the user:**
+   - **Real Town Plans page:** it works; it's at `claude/work-places-page` once merged. It goes on Vercel when the user connects it (`docs/deploy.md`).
+   - **Polishing the plans page's progress bar:** a review was started and then stopped.
+   - **Horley as the game's town:** the real-town code merges with the invented town as the default.
+   - **Missing houses in real places:** OpenStreetMap hasn't mapped many of Horley's houses, for example around Kingsley Road, Wellington Way, Parkhurst Road and Southlands Avenue. There are two fixes: Ordnance Survey OpenMap Local building outlines (Open Government Licence, so credit OS), or procedural houses along unmapped residential streets.
+   - **Cyclists.**
+
 ## Second session (from 24 Sep, ~10:20 UTC): status
 
 A session on the user's other account picked this up:
@@ -20,21 +39,35 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   - all eight finished libraries (PRs #1–#8).
 - **Checks at cccd45c:** tsc is clean and 429 tests pass. Under heavy CPU load, `terrain/bench.test.ts` and one water test can time out; both pass on a re-run.
 - **The HUD redesign (approved by the user):** `docs/hud.md` and `docs/hud/mockup.html`.
-- **This session:**
-  - wiring the libraries into the game (workflow wf_ba6d60c5-e72):
-    - vehicles, people, industries, bridges and water, then a merge, an adversarial playtest and a fix;
-    - local branches `work/int-*`, then `work/integrate`;
-  - traffic, economy and terminals (workflow wf_3a219236-759; local branches `work/<stream>`).
+- **This session:** coordinates. It merges each cloud session's PR into the integration
+  branch once that session's own review is done, checks the result at phone size, and
+  republishes the game links.
 - **Cloud sessions:** each works on its own branch, pushes after every commit, and opens a PR into the integration branch.
 
   | Stream | Branch | Session |
   |---|---|---|
   | New HUD in the game | `claude/work-hud` | session_01LHmZZcerrUyGq1TSiFcnKZ |
-  | One camera kit in the game and every demo | `claude/work-kit-nav` | session_01DCEbMvXXTVSr8K2R3gAvY8 |
-  | Bridge earthworks and track detail | `claude/work-bridges-track` | session_017X98YbhdPPReFEcpyd4diZ |
-  | Ground with character, shared by every demo | `claude/work-ground` | session_01Yc7nmze9XbVcixsU4xaTBj |
+  | One camera kit in the game and every demo (PR #10) | `claude/work-kit-nav` | session_01DCEbMvXXTVSr8K2R3gAvY8 |
+  | Bridge earthworks and track detail (PR #11) | `claude/work-bridges-track` | session_017X98YbhdPPReFEcpyd4diZ |
+  | Ground with character, shared by every demo (merged early at 4fddbf8) | `claude/work-ground` | session_01Yc7nmze9XbVcixsU4xaTBj |
   | Vehicle doors and moving parts | `claude/work-vehicles-moving` | session_012fqK9zWp7BH6mQXJMQ8S1Z |
+  | Library vehicles in the game | `claude/work-int-vehicles` | session_01RXnbKFLJQMD26MEQxZ1fy7 |
+  | People in the game | `claude/work-int-people` | session_015U21FuobTAx2YnV2ch42Z1 |
+  | Industries in the game | `claude/work-int-industries` | session_01CMd8cDqGDoUBeqWsmqkX6W |
+  | Bridge types in the game | `claude/work-int-bridges` | session_01PGN5VG2KUzJDurcUfdRkxB |
+  | Water in the game | `claude/work-int-water` | session_01S28Gtoj2KAb54E513p46YQ |
+  | Traffic lane-drop and give-up fixes | `claude/work-traffic` | session_01K6gzHHoJ3nPfxbCNeuPWtv |
+  | Economy review, and a wiring plan in docs/economy.md | `claude/work-economy` | session_01PTFxCsS6mT4JTYZEgkTgrZ |
+  | Freight terminals and supply chains | `claude/work-terminals` | session_01CE6XJ8Bv6zXW5sTZM9iCLw |
+  | A real town (Horley) instead of the invented one, from the OSM importer | `claude/work-real-town` | session_019665XqqPm9U1NRR99GLvBm |
+  | Junctions and joins that line up, on the invented town and on real OSM networks | `claude/work-junctions` | session_0185VszrHr5qQCJHYZH7rSeq |
+  | Real Town Plans as a standalone web page for Vercel | `claude/work-places-page` | session_01GtT32NAQuqxrCU1YcEtfSw |
 
+- **Network:** full access was enabled at ~12:30. The Overpass servers were "too busy" at first, so the Horley data is being fetched in tiles with polite retries.
+- **Next wave (not started):**
+  - wire the economy and terminals into the live game, from docs/economy.md and docs/terminals.md;
+  - then cyclists;
+  - then make the timing benchmarks robust under CPU load.
 - **Dropped:** the UI fix stream for the old dock; the new HUD supersedes it.
 - **New preview links (this account):**
 
@@ -47,6 +80,35 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   | Bridges | https://claude.ai/artifact/L72vN7hP41VjDp29fJnBLd |
   | Industries | https://claude.ai/artifact/6JyuqJ7Tdb5m2p4hYyhJzR |
   | HUD mock-up | https://claude.ai/artifact/WGbq3v6p161GpesZehQ1gW |
+  | Early look (HUD and ground, before review) | https://claude.ai/artifact/7YPVNSXYBMSRNRTG41zGJY |
+  | Real Town Plans tool: postcode, area, plans | https://claude.ai/artifact/7xoS53FzWa2WdyR3NBYPTH |
+
+### The Real Town Plans tool: how its requests are served
+
+A published page can't reach outside servers. So the page (artifact capability `artifact`,
+plus `assets` for images) saves a request by republishing itself: `state.request` =
+`{kind: 'lookup', postcode}` or `{kind: 'build', bbox, size_km, name}`. That wakes the session
+that published it.
+
+The tooling lives in this session's scratchpad under `places/`:
+
+- **`places.py lookup`** uses postcodes.io and stitches a 6×6 grid of OSM z15 tiles.
+- **`places.py fetch`** downloads from Overpass in tiles of about 1.3 km, with polite retries.
+- **`places.py trim`** keeps only the tags the importer reads.
+- **`places.py render`** runs the game's importer and turns its SVG drawings into JPEGs.
+- **`page.py`** reads the state out of a saved copy of the page and writes the next version.
+
+To serve a request:
+
+1. Read the artifact.
+2. Run the step it asks for.
+3. Upload the images as assets.
+4. Set `state.lookup`, or append to `state.areas`.
+5. Clear `state.request`, and never keep the postcode.
+6. Republish.
+
+A later session would need to rebuild this tooling in its own scratchpad; the page itself
+carries on working.
 
 ## The game and previews (published artifacts, owned by the org account)
 
@@ -193,6 +255,21 @@ directory and are gone.
 - Commit trailers used so far:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` and a `Claude-Session:` line
   (use the new session's link). No model IDs in code, commits or PRs.
+
+## Estimating time (the user asked for this)
+
+Give wall-clock estimates from how fast AI sessions have actually worked on this project, never
+from how long a human developer would take. These timings were measured on 24 Sep:
+
+| Work | Measured | Examples |
+|---|---|---|
+| A focused change the coordinator makes directly | 5–15 min | grass matching the ground; the lawn colour |
+| A cloud session, from start to its first working PR | 15–30 min | integrations 15–28 min; traffic 21; ground in the game 28 |
+| A cloud session, including its adversarial review and fixes | 45–90 min | terminals 22 min; the camera kit and bridge track about 60–90; the HUD about 85 |
+| Merging a finished stream, checking it and republishing the link | about 5 min | |
+
+- **Parallel streams:** the wall-clock is the slowest stream plus merging, not the sum.
+- **Name the waits separately.** Examples: busy map servers, the user's own steps (Vercel, settings) and usage limits. Say which part of an estimate is ours and which is a wait.
 
 ## Tools
 

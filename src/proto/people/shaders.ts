@@ -19,6 +19,7 @@ attribute float aPart;
 ${ATTRS.map((a) => `attribute vec4 ${a};`).join('\n')}
 attribute vec4 iShow; // count, index, shown, hidden
 uniform float uTime;
+uniform float uFade; // the fade clock: keeps running while the game is paused (see PeopleStore.update)
 uniform float uRain;
 flat varying float vFade;
 flat varying float vSel;
@@ -70,8 +71,8 @@ float trackEval(float extraS) {
     al *= (flags & 8) != 0 ? 1.0 - step(iTime.z, t) : 1.0 - smoothstep(iTime.z - 0.5, iTime.z, t);
   }
   al *= clamp(iShow.x - iShow.y, 0.0, 1.0);
-  al *= smoothstep(iShow.z, iShow.z + 0.6, t);
-  if (iShow.w > 0.0) al *= 1.0 - smoothstep(iShow.w, iShow.w + 0.6, t);
+  al *= smoothstep(iShow.z, iShow.z + 0.6, uFade);
+  if (iShow.w > 0.0) al *= 1.0 - smoothstep(iShow.w, iShow.w + 0.6, uFade);
   return al;
 }
 // heading angle (travel direction a) to a rotation about y taking local +z onto it
@@ -470,8 +471,8 @@ const DITHER = /* glsl */ `if (vFade < bayer4(gl_FragCoord.xy)) discard;`;
 
 const FIGURE: Record<number, string> = { 0: PERSON, 1: CARD, 2: ANIMAL, 3: BIRD, 4: PROP };
 
-export interface Uniforms { uTime: { value: number }; uRain: { value: number } }
-export function makeUniforms(): Uniforms { return { uTime: { value: 0 }, uRain: { value: 0 } }; }
+export interface Uniforms { uTime: { value: number }; uFade: { value: number }; uRain: { value: number } }
+export function makeUniforms(): Uniforms { return { uTime: { value: 0 }, uFade: { value: 0 }, uRain: { value: 0 } }; }
 
 function patchVertex(src: string, kind: number) {
   return src
@@ -483,7 +484,7 @@ export function makeMaterials(kind: Kind, u: Uniforms) {
   const k = KIND_ID[kind];
   const mat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uTime = u.uTime; sh.uniforms.uRain = u.uRain;
+    sh.uniforms.uTime = u.uTime; sh.uniforms.uFade = u.uFade; sh.uniforms.uRain = u.uRain;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\n${COMMON}\n${FIGURE[k]}`)
       .replace('#include <beginnormal_vertex>', `vec3 objectNormal = normal;\nvec3 pPos = position;\n{ float f; figure(pPos, objectNormal, f); if (f <= 0.003) pPos = HIDDEN; vFade = f; vLocal = position; }`)
@@ -495,7 +496,7 @@ export function makeMaterials(kind: Kind, u: Uniforms) {
   mat.customProgramCacheKey = () => `people-${k}`;
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   depth.onBeforeCompile = (sh) => {
-    sh.uniforms.uTime = u.uTime; sh.uniforms.uRain = u.uRain;
+    sh.uniforms.uTime = u.uTime; sh.uniforms.uFade = u.uFade; sh.uniforms.uRain = u.uRain;
     sh.vertexShader = patchVertex(sh.vertexShader, k);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_PARS}`)
