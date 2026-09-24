@@ -121,8 +121,13 @@ const DECK = 1.2;
 // `bridged`: stretches (by distance along the path) the bridges library draws instead
 // (game/bridges.ts). With it, the ramps either side get retaining walls down to the ground and no piers.
 export function structures(path: P[], body: Solid, rails: Solid | null, HALF: number, bridged?: [number, number][]) {
-  const n = path.length;
   if (!path.some((p) => (p.y ?? 0) > 0.05)) return;
+  // cut the path exactly where each bridge starts and ends, so the walls meet its abutments
+  if (bridged?.length) {
+    const A = arcs(path), cuts = bridged.flat().filter((t) => t > 0.05 && t < A[A.length - 1] - 0.05);
+    path = [...path.map((p, i) => ({ p, t: A[i] })), ...cuts.map((t) => { const q = pointAt(path, t); return { p: { x: q.x, z: q.z, y: q.y }, t }; })].sort((a, b) => a.t - b.t).map((x) => x.p);
+  }
+  const n = path.length;
   const at = bridged ? arcs(path) : [];
   const inBridge = (i: number) => !!bridged?.some(([a, b]) => (at[i - 1] + at[i]) / 2 > a && (at[i - 1] + at[i]) / 2 < b);
   const side = path.map((_, i) => {
@@ -337,7 +342,8 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     const d = net.def(s), path = finePath(net, s), A = arcs(path), L = A[A.length - 1];
 
     const half = net.half(s);
-    structures(path, body, rails, half, (s.bridges ?? []).map((b) => [b.s0, b.s1] as [number, number])); // bridges: game/bridges.ts
+    // (a raised stretch the library couldn't bridge keeps the old deck on piers, not walls to the ground)
+    structures(path, body, rails, half, s.bridges ? s.bridges.map((b) => [b.s0, b.s1] as [number, number]) : path.every((p) => (p.y ?? 0) <= 6) ? [] : undefined); // bridges: game/bridges.ts
     // ---- cuttings and tunnels: open to the sky while shallow, covered once deep ----
     const Y = (i: number) => path[i].y ?? 0;
     const DEEP = -9;

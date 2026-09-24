@@ -33,7 +33,7 @@ export interface StopPlan { kind: 'kerb' | 'layby'; ok: boolean; title: string; 
 export const CLEAR_COST = 6000; // compulsory purchase per building
 export const RAISE_COST = 170; // extra per metre of road, per metre it's raised (embankment low, viaduct high)
 
-import { clipBridges, crossingOf, priceBridges, storeBridges, type SegBridge } from './game/bridges';
+import { blocksBridges, clipBridges, crossingOf, earthworks, priceBridges, storeBridges, type SegBridge } from './game/bridges';
 import type { BridgeChoice } from './bridges/choose';
 import { FLOOR, GRADES, heightAt, solveProfile, type CrossMode, type HeightMode, type Limit, type Profile, type Spec } from './grade';
 export const TUNNEL_COST = 450; // per metre, per metre below ground (cut and cover shallow, bored deep)
@@ -484,7 +484,8 @@ export class Network {
       const name = oDef.cls === 'rail' ? 'the railway' : oDef.family === 'Motorway' ? 'the motorway' : 'the road';
       // motorways, and road meeting rail, are always grade separated; otherwise it's the player's call
       const separate = opts.cross !== 'junction' || def.family === 'Motorway' || crossed.some(isMotorway) || oDef.cls !== def.cls;
-      const over = { s0: c.s - span, s1: c.s + span, lo: c.e + spec.clear, why: c.e > 0.5 ? `the raised ${name.slice(4)}` : name };
+      // (over a railway, its headroom for the wires, whatever crosses it: the bridges need it too)
+      const over = { s0: c.s - span, s1: c.s + span, lo: c.e + (oDef.cls === 'rail' ? Math.max(spec.clear, GRADES.rail.clear) : spec.clear), why: c.e > 0.5 ? `the raised ${name.slice(4)}` : name };
       const under = { s0: c.s - span, s1: c.s + span, hi: c.e - spec.clear, why: c.e < -0.5 ? `the sunken ${name.slice(4)}` : name };
       if (c.e >= spec.clear - 0.01 && opts.cross !== 'bridge') limits.push({ ...under, why: 'the flyover' }); // already high enough to pass under
       else if (c.e <= -spec.clear + 0.01 && opts.cross !== 'tunnel') limits.push({ ...over, why: 'the tunnel' }); // already deep enough to pass over
@@ -497,6 +498,7 @@ export class Network {
     const hilly = pr.maxY > 0.01 || pr.minY < -0.01;
     path = hilly ? densify(flat, 3) : flat.map((p) => ({ ...p }));
     let acc = 0, up = false, down = false;
+    const base = cost; // (before the earthworks: bridges below may re-price them)
     path.forEach((p, i) => {
       if (i) acc += dist(path[i - 1], p);
       p.y = hilly ? heightAt(pr, acc) : 0;
@@ -523,10 +525,17 @@ export class Network {
       const priced = priceBridges(crossingOf(this, path, def, me, resolve));
       choices = priced.choices;
       if (choices.length) {
+        const none = choices.find((ch) => !ch.chosen);
+        if (none) return res(`No bridge can be built here: ${none.options.find((o) => o.def.id === 'beam')?.reasons[0] ?? none.options[0]?.reasons[0] ?? 'nothing fits'}`);
         bridges = choices.length;
-        cost += priced.cost - priced.raise;
-        if (priced.lifted) { path = priced.lifted.path.map((p) => ({ ...p })); profile = (priced.lifted as { profile?: Profile }).profile ?? profile; }
+        if (priced.lifted) { path = priced.lifted.path.map((p) => ({ ...p })); profile = (priced.lifted.profile as Profile | undefined) ?? profile; }
+        // the ramps and embankments outside the bridges, on the path that will be built, plus the bridges
+        const ew = earthworks(path, choices);
+        cost = base + ew.cost + priced.cost; raised = ew.raised; sunk = ew.sunk;
       }
+      // and the bridges already built overhead must still be able to span it
+      const blocked = blocksBridges(this, path, def);
+      if (blocked) return res(blocked);
     }
     cost = Math.round(cost);
     // buildings in the way are compulsorily purchased and demolished

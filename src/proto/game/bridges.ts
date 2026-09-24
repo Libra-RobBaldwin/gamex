@@ -10,11 +10,11 @@
 //   per material, so every bridge in the town costs about a dozen draw calls.
 import * as THREE from 'three';
 import {
-  BRIDGES, bridgeMaterials, buildBridge, chooseBridge, extents, layoutBridge, override,
-  type BridgeChoice, type BridgeGeometry, type BridgeId, type BridgeLayout, type Crossing, type Mat, type Obstacle,
+  BRIDGES, bridgeMaterials, buildBridge, chooseBridge, deckWidth, extents, layoutBridge, override,
+  type BridgeChoice, type BridgeGeometry, type BridgeId, type BridgeLayout, type BridgeOption, type Crossing, type Mat, type Obstacle,
 } from '../bridges';
 import type { RoadDef } from '../catalog';
-import { RAISE_COST, pathLength, pointAt, type Network, type P, type RSeg } from '../roads';
+import { RAISE_COST, TUNNEL_COST, closestOnPath, pathLength, pointAt, type Network, type P, type RSeg } from '../roads';
 import { gameYear } from './era';
 
 // What's stored on a segment (RSeg.bridges): where each bridge is and its type. `override` is the
@@ -22,11 +22,23 @@ import { gameYear } from './era';
 // and stays that way (a bridge isn't rebuilt when its type's era ends).
 export interface SegBridge { s0: number; s1: number; type: BridgeId; override: boolean }
 
+// A road that isn't built yet but would pass under a bridge (for checking a blueprint).
+export interface Under { path: P[]; half: number; rail: boolean }
+
 const MPH = 0.44704;
+const box = (path: P[], pad: number) => {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const p of path) { x0 = Math.min(x0, p.x); z0 = Math.min(z0, p.z); x1 = Math.max(x1, p.x); z1 = Math.max(z1, p.z); }
+  return [x0 - pad, z0 - pad, x1 + pad, z1 + pad] as const;
+};
 
 // Everything under a road that a pier mustn't stand on, by distance along `path` (whose y is the
-// road's height). `skip` leaves out the segment itself (and the ones it's made from).
-export function obstaclesOf(net: Network, path: P[], skip: (seg: number) => boolean = () => false): Obstacle[] {
+// road's height). `skip` leaves out the segment itself; `extra` adds roads not built yet.
+//
+// Roads underneath are found by walking the deck: wherever a pier (a line across the deck's
+// width, and a bit) would touch a road's full width below, that stretch is kept clear. That covers roads crossed at
+// a skew, the arms of a junction, and a road running along under a viaduct alike.
+export function obstaclesOf(net: Network, path: P[], road: RoadDef, skip: (seg: number) => boolean = () => false, extra: Under[] = []): Obstacle[] {
   const L = pathLength(path), out: Obstacle[] = [];
   // water, sampled as roads.ts check() does
   const step = 2;
@@ -36,17 +48,43 @@ export function obstaclesOf(net: Network, path: P[], skip: (seg: number) => bool
     if (wet && w0 < 0) w0 = Math.max(0, s - step);
     if (w0 >= 0 && (!wet || s + step > L)) { out.push({ kind: 'water', s0: w0, s1: Math.min(L, s), level: 0, name: 'the water' }); w0 = -1; }
   }
-  // roads and railways passing underneath: no piers on them, and headroom over them
-  for (const c of net.crossings(path)) {
-    if (c.seg !== undefined && skip(c.seg)) continue;
-    const y = pointAt(path, c.s).y;
-    if (y - c.e < 2) continue; // joined, or it's the one going over
-    const other = c.seg !== undefined ? net.segs.get(c.seg) : c.node !== undefined ? net.segsAt(c.node).find((s) => !skip(s.id)) : undefined;
-    if (!other) continue;
-    const oh = c.node !== undefined ? net.nodeHalf(c.node) : net.half(other);
-    const span = Math.min(60, (oh + 1.5) / Math.max(0.25, c.sin));
-    const od = net.def(other);
-    out.push({ kind: od.cls === 'rail' ? 'rail' : 'road', s0: Math.max(0, c.s - span), s1: Math.min(L, c.s + span), surface: c.e, name: od.cls === 'rail' ? 'the railway' : 'the road' });
+  // roads and railways underneath: no piers on them, and headroom over them
+  const reach = deckWidth(road) / 2 + 1;
+  if (path.some((p) => (p.y ?? 0) > 2.5)) {
+    const me = box(path, 0);
+    const under: (Under & { b: readonly number[] })[] = [];
+    for (const s of net.segs.values()) {
+      if (skip(s.id)) continue;
+      const sp = net.path(s), h = net.half(s), b = box(sp, h + reach);
+      if (b[0] > me[2] || b[2] < me[0] || b[1] > me[3] || b[3] < me[1]) continue;
+      under.push({ path: sp, half: h, rail: net.def(s).cls === 'rail', b });
+    }
+    for (const u of extra) under.push({ ...u, b: box(u.path, u.half + reach) });
+    const runs = under.map(() => ({ s0: -1, s1: -1, y: Infinity }));
+    const close = (i: number) => {
+      const r = runs[i];
+      if (r.s0 < 0) return;
+      out.push({ kind: under[i].rail ? 'rail' : 'road', s0: Math.max(0, r.s0 - 0.5), s1: Math.min(L, r.s1 + 0.5), surface: r.y, name: under[i].rail ? 'the railway' : 'the road' });
+      runs[i] = { s0: -1, s1: -1, y: Infinity };
+    };
+    for (let s = 0; s <= L + 1e-6; s += 1) {
+      const p = pointAt(path, s);
+      under.forEach((u, i) => {
+        let hit = false;
+        if (p.y > 2.5 && p.x >= u.b[0] && p.x <= u.b[2] && p.z >= u.b[1] && p.z <= u.b[3]) {
+          // a pier here is a line across the deck: does any of it come within the road's width?
+          const q = closestOnPath(p, u.path);
+          if (p.y - q.y > 2 && q.d < u.half + reach + 1) {
+            for (let k = -reach; k <= reach + 1e-6 && !hit; k += 1) {
+              const e = closestOnPath({ x: p.x - p.uz * k, z: p.z + p.ux * k }, u.path);
+              if (e.d < u.half + 1 && p.y - e.y > 2) { hit = true; const r = runs[i]; if (r.s0 < 0) r.s0 = s; r.s1 = s; r.y = Math.min(r.y, e.y); }
+            }
+          }
+        }
+        if (!hit) close(i);
+      });
+    }
+    under.forEach((_, i) => close(i));
   }
   // keep-outs: other junctions' land (their islands and slip roads) under a raised deck
   let k0 = -1, key = '';
@@ -60,18 +98,28 @@ export function obstaclesOf(net: Network, path: P[], skip: (seg: number) => bool
   return out.sort((a, b) => a.s0 - b.s0);
 }
 
-export function crossingOf(net: Network, path: P[], road: RoadDef, skip?: (seg: number) => boolean, resolve?: Crossing['resolve']): Crossing {
+export function crossingOf(net: Network, path: P[], road: RoadDef, skip?: (seg: number) => boolean, resolve?: Crossing['resolve'], extra?: Under[]): Crossing {
   const p = path.map((q) => ({ x: q.x, z: q.z, y: q.y ?? 0 }));
-  return { path: p, obstacles: obstaclesOf(net, p, skip), road, year: gameYear(), resolve };
+  return { path: p, obstacles: obstaclesOf(net, p, road, skip, extra), road, year: gameYear(), resolve };
+}
+
+// The chooser, tidied for the game: a type shorter than it can be built (a suspension bridge
+// over a pond) is refused too, and the recommendation moves on if it was one of those.
+function choose(c: Crossing, range: [number, number]): BridgeChoice {
+  const ch = chooseBridge(c, range);
+  const L = range[1] - range[0];
+  const options: BridgeOption[] = ch.options.map((o) => (o.ok && L < o.def.length.min ? { ...o, ok: false, reasons: [`${Math.round(L)} m is too short for a ${o.def.label.toLowerCase()} (${o.def.length.min} m at least)`] } : o));
+  options.sort((a, b) => (a.ok === b.ok ? (a.ok ? a.cost - b.cost : 0) : a.ok ? -1 : 1));
+  const best = options.filter((o) => o.ok).sort((a, b) => a.wholeLife - b.wholeLife)[0];
+  return { ...ch, options, recommended: best?.def.id, chosen: best?.def.id };
 }
 
 // ---------- pricing a blueprint (Network.check) ----------
 
 export interface Priced {
-  choices: BridgeChoice[];
+  choices: BridgeChoice[]; // s0..s1 of each is the chosen layout's, on the path to build
   cost: number; // what the bridges cost (game money)
-  raise: number; // what RAISE_COST charged inside them, to take back off
-  lifted?: Crossing; // the profile to build, when the chosen type needed the deck raised or the ramps eased
+  lifted?: Crossing & { profile?: unknown }; // the profile to build, when the chosen type needed the deck raised or the ramps eased
 }
 
 // Tiny memo: the blueprint is re-checked on every drag move, and the chooser is the slow part.
@@ -79,34 +127,66 @@ const memo: { key: string; out: Priced }[] = [];
 const keyOf = (c: Crossing) => `${c.road.id}|${c.year}|${c.path.map((p) => `${p.x.toFixed(1)},${p.z.toFixed(1)},${p.y!.toFixed(2)}`).join(';')}|${JSON.stringify(c.obstacles)}`;
 
 export function priceBridges(c: Crossing): Priced {
-  if (!c.path.some((p) => (p.y ?? 0) > 3)) return { choices: [], cost: 0, raise: 0 };
+  if (!c.path.some((p) => (p.y ?? 0) > 3)) return { choices: [], cost: 0 };
   const key = keyOf(c), hit = memo.find((m) => m.key === key);
   if (hit) return hit.out;
-  const choices = extents(c).map((ex) => chooseBridge(c, ex));
-  let cost = 0, raise = 0, lifted: Crossing | undefined, lift = -1;
-  for (const ch of choices) {
+  // the chooser re-solves the profile often and with the same few needs: remember them
+  const seen = new Map<string, Crossing | undefined>(), res = c.resolve;
+  const cc: Crossing = res ? { ...c, resolve: (n) => { const k = `${n.raise.toFixed(2)}|${n.grade ?? ''}`; if (!seen.has(k)) seen.set(k, res(n)); return seen.get(k); } } : c;
+  const raw = extents(cc).map((ex) => choose(cc, ex));
+  let cost = 0, lifted: Crossing | undefined, lift = -1;
+  const choices = raw.map((ch) => {
     const o = ch.options.find((x) => x.def.id === ch.chosen);
-    if (!o) continue; // nothing fits: the old embankment price stands
+    if (!o) return ch; // nothing fits: check() refuses
     cost += o.cost;
-    raise += raiseCost(c.path, ch.s0, ch.s1);
-    if (o.crossing && o.crossing !== c && o.lift > lift) { lift = o.lift; lifted = o.crossing; }
-  }
-  const out = { choices, cost: Math.round(cost), raise: Math.round(raise), lifted };
+    if (o.crossing && o.crossing !== cc && o.lift > lift) { lift = o.lift; lifted = o.crossing; }
+    return { ...ch, s0: o.layout!.s0, s1: o.layout!.s1 };
+  });
+  const out = { choices, cost: Math.round(cost), lifted };
   memo.unshift({ key, out });
   memo.length = Math.min(memo.length, 6);
   return out;
 }
 
-// what roads.ts charged for raising the road between s0 and s1
-function raiseCost(path: P[], s0: number, s1: number) {
-  let acc = 0, out = 0;
+// What roads.ts charges for a path outside its bridges: RAISE_COST for embankments and ramps,
+// TUNNEL_COST below ground. Also how much of it is raised or sunk.
+export function earthworks(path: P[], choices: BridgeChoice[]) {
+  let acc = 0, cost = 0, raised = 0, sunk = 0;
   for (let i = 1; i < path.length; i++) {
-    const L = Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z), m = acc + L / 2;
+    const a = path[i - 1].y ?? 0, b = path[i].y ?? 0, L = Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z), m = acc + L / 2, ym = (a + b) / 2;
     acc += L;
-    const ym = ((path[i].y ?? 0) + (path[i - 1].y ?? 0)) / 2;
-    if (m >= s0 && m <= s1 && ym > 0) out += L * ym * RAISE_COST;
+    if (a > 1.5 || b > 1.5) raised += L;
+    if (a < -1.5 || b < -1.5) sunk += L;
+    if (choices.some((ch) => ch.chosen && m >= ch.s0 && m <= ch.s1)) continue;
+    cost += ym > 0 ? L * ym * RAISE_COST : L * Math.min(-ym, 14) * TUNNEL_COST;
   }
-  return out;
+  return { cost, raised, sunk };
+}
+
+// Over a road or railway below: the standard headroom, or (for a bridge already built, when the
+// network changes under it) whatever it has: a low bridge, as with any old one with a height limit.
+const lowered = (c: Crossing): Crossing => ({ ...c, obstacles: c.obstacles.map((o) => (o.kind === 'road' || o.kind === 'rail' ? { ...o, clear: 0.5 } : o)) });
+const LOW_NOTE = 'Less than the standard headroom over the road below: a low bridge, signed for high vehicles';
+
+// A road about to be built under bridges already there: can each of them still be laid out over
+// it, with no pier on it? (Headroom may come up short: that bridge becomes a low one.)
+// Returns why not, if not.
+export function blocksBridges(net: Network, path: P[], road: RoadDef): string | undefined {
+  const u: Under = { path, half: deckWidth(road) / 2, rail: road.cls === 'rail' };
+  const me = box(path, 40);
+  for (const s of net.segs.values()) {
+    if (!s.bridges) continue;
+    const sp = net.path(s), b = box(sp, 0);
+    if (b[0] > me[2] || b[2] < me[0] || b[1] > me[3] || b[3] < me[1]) continue;
+    const c = lowered(crossingOf(net, sp, net.def(s), (id) => id === s.id, undefined, [u]));
+    for (const ex of extents(c)) {
+      const was = s.bridges.find((x) => Math.min(x.s1, ex[1]) > Math.max(x.s0, ex[0]));
+      if (was && layoutBridge(c, BRIDGES[was.type], ex[0], ex[1]).ok) continue;
+      if (choose(c, ex).chosen) continue;
+      return `The bridge overhead has no room for its piers either side of this ${road.cls === 'rail' ? 'railway' : 'road'}`;
+    }
+  }
+  return undefined;
 }
 
 // Carry a blueprint's bridges onto the segments build() made from it: `from` is where each
@@ -136,12 +216,17 @@ export class BridgeLayer {
   group = new THREE.Group();
   private segs = new Map<number, SegState>();
   private dirty = true;
+  private topo = '';
   constructor() { this.group.name = 'bridges'; }
 
   // Lay out every bridge whose segment (or what's under it) changed, and store the types on the
   // segments; roaddraw.ts reads RSeg.bridges to leave those stretches to the library. Returns
   // whether anything changed. Call before drawRoads().
   sync(net: Network) {
+    // nothing to do if no road changed and no type was picked (the common case: a junction edit)
+    const topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}`).join();
+    if (topo === this.topo && !this.dirty) return false;
+    this.topo = topo;
     for (const id of [...this.segs.keys()]) if (!net.segs.has(id)) { this.drop(id); this.dirty = true; }
     for (const s of net.segs.values()) {
       const path = net.path(s);
@@ -155,6 +240,7 @@ export class BridgeLayer {
       this.segs.get(s.id)!.sig = `${keyOf(c)}|${JSON.stringify(s.bridges ?? null)}`;
       this.dirty = true;
     }
+    this.topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}`).join();
     if (this.dirty) this.redraw();
     const was = this.dirty;
     this.dirty = false;
@@ -166,13 +252,19 @@ export class BridgeLayer {
     const out: Built[] = [], keep: SegBridge[] = [];
     for (const [a, b] of extents(c)) {
       const was = stored.filter((x) => overlap(x.s0, x.s1, a, b) > 0).sort((x, y) => overlap(y.s0, y.s1, a, b) - overlap(x.s0, x.s1, a, b))[0];
-      // the stored type, if it still fits (its era may have passed: built bridges stay)
-      let lay = was ? layoutBridge(c, BRIDGES[was.type], a, b) : undefined, over = !!was?.override;
-      if (!lay?.ok) {
-        const ch = chooseBridge(c, [a, b]), o = ch.options.find((x) => x.def.id === ch.chosen);
-        lay = o?.layout; over = false;
+      // the stored type, if it still fits (its era may have passed: built bridges stay); else the
+      // chooser's. Blueprints are refused where nothing fits, but the network can still change
+      // underneath (a road that ran under before the deck was re-laid): then the bridge stays,
+      // with its piers off the roads, and only the headroom is short.
+      const low = lowered(c);
+      let lay: BridgeLayout | undefined, over = false;
+      for (const x of [c, low]) {
+        lay = was ? layoutBridge(x, BRIDGES[was.type], a, b) : undefined; over = !!was?.override;
+        if (!lay?.ok) { const ch = choose(x, [a, b]); lay = ch.options.find((o) => o.def.id === ch.chosen)?.layout; over = false; }
+        if (lay?.ok) break;
       }
       if (!lay?.ok) continue; // nothing fits: roaddraw keeps its old deck for this stretch
+      if (!layoutBridge(c, lay.def, a, b).ok) lay = { ...lay, notes: [LOW_NOTE, ...lay.notes] };
       keep.push({ s0: a, s1: b, type: lay.def.id, override: over });
       // the deck slab sits a hair under the game's road surface, so the two never fight
       const draw = { ...c, path: c.path.map((p) => ({ ...p, y: (p.y ?? 0) - 0.04 })) };
@@ -222,7 +314,7 @@ export class BridgeLayer {
   // What could be built there now (this year's types, on the deck as built), with the one built marked.
   options(b: Built): BridgeChoice {
     const c = { ...b.crossing, year: gameYear() };
-    const ch = chooseBridge(c, [b.s0, b.s1]);
+    const ch = choose(c, [b.s0, b.s1]);
     return { ...ch, chosen: b.layout.def.id };
   }
 
@@ -230,13 +322,14 @@ export class BridgeLayer {
   setType(net: Network, b: Built, id: BridgeId) {
     const s = net.segs.get(b.seg), ch = this.options(b);
     if (!s?.bridges?.[b.idx] || override(ch, id).chosen !== id || !ch.options.find((o) => o.def.id === id)?.ok) return false;
-    s.bridges[b.idx] = { ...s.bridges[b.idx], type: id, override: id !== ch.recommended || s.bridges[b.idx].override };
+    s.bridges[b.idx] = { ...s.bridges[b.idx], type: id, override: id !== ch.recommended };
     return true;
   }
 
-  // Speed limit on a bridge (m/s), for traffic.ts; Infinity where there's none.
-  capAt(seg: RSeg, s: number) {
-    const b = this.at(seg.id, s);
+  // Speed limit on a bridge (m/s), for traffic.ts; Infinity where there's none. `dir` is the way
+  // the vehicle is going (+1 from seg.a): it slows for the bridge in the `ahead` metres before it.
+  capAt(seg: RSeg, s: number, dir: 1 | -1 = 1, ahead = 40) {
+    const b = this.segs.get(seg.id)?.bridges.find((x) => s >= x.s0 - (dir > 0 ? ahead : 0) && s <= x.s1 + (dir < 0 ? ahead : 0));
     if (!b) return Infinity;
     const mph = seg.type.startsWith('rail') ? b.layout.def.railMph : b.layout.def.roadMph;
     return mph ? mph * MPH : Infinity;

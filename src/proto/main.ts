@@ -1022,11 +1022,14 @@ function showJunctionInfo(node: number) {
 // ---------------- bridges (game/bridges.ts) ----------------
 // the bridge drawn under a screen point: its deck, sampled along its length
 function bridgeAt(sx: number, sy: number) {
-  let best: BuiltBridge | null = null, bd = 30;
+  let best: BuiltBridge | null = null, bd = Infinity;
   for (const b of bridgeLayer.list()) {
-    for (let s = b.s0; s <= b.s1; s += 3) {
-      const q = toScreen(pointAt(b.crossing.path, s)), d = Math.hypot(q.x - sx, q.y - sy);
-      if (d < bd) { bd = d; best = b; }
+    const hw = b.layout.width / 2;
+    for (let s = b.s0; s <= b.s1; s += 2) {
+      // within the deck's width as drawn on screen (and a finger's slack)
+      const p = pointAt(b.crossing.path, s), q = toScreen(p), e = toScreen({ x: p.x - p.uz * hw, z: p.z + p.ux * hw, y: p.y });
+      const d = Math.hypot(q.x - sx, q.y - sy);
+      if (d < Math.hypot(e.x - q.x, e.y - q.y) + 10 && d < bd) { bd = d; best = b; }
     }
   }
   return best;
@@ -1165,10 +1168,10 @@ function tapMap(sx: number, sy: number): Mode {
     return mode;
   }
   if (mode === 'stop') { stopTap(g); return mode; }
-  const br = bridgeAt(sx, sy); // (a bridge is tapped where it's drawn, up in the air)
-  if (br) { showBridgeInfo(br); return 'look'; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
+  const br = st || jn !== null ? null : bridgeAt(sx, sy); // (a bridge is tapped where it's drawn, up in the air)
+  if (br) { showBridgeInfo(br); return 'look'; }
   const b = st || jn !== null ? null : pickBuilding(sx, sy) ?? infillCells.get(cellKey(g.x, g.z)) ?? null;
   if (st) showStopInfo(st.seg, st.stop);
   else if (jn !== null) showJunctionInfo(jn);
@@ -1431,7 +1434,7 @@ refreshTrees();
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
-traffic.speedCap = (seg, s) => bridgeLayer.capAt(seg, s); // speed limits on bridges (game/bridges.ts)
+traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
 onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; };
