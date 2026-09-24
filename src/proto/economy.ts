@@ -47,7 +47,8 @@ interface SState extends StopPos {
   visit: { town: TState; w: number }[]; // whose workplaces passengers getting off here arrive at
   inds: IState[]; // industries in reach of a freight stop, nearest first
   near: SState[]; // other freight stops close enough to hand freight between
-  fare: number; // taken this step
+  fare: number; // taken and not yet shown in a money event
+  fareListed: boolean; // in fareStops
   month: { boarded: number; alighted: number; overflow: number };
   last: { boarded: number; alighted: number; overflow: number };
 }
@@ -112,7 +113,8 @@ export class Economy {
   // rest, so `at` maps each zone reviewed to its place in these arrays)
   private lastReach: { work: Reach; shop: Reach; leisure: Reach; zones: ZState[]; at?: Map<ZState, number> } | null = null;
   private dirty = { times: true, service: true };
-  private fareStops: SState[] = []; // stops that took fares this step
+  private fareStops: SState[] = []; // stops with fares not yet shown in a money event
+  private runningOwed = 0; // running costs not yet shown in a money event
   private paxStops: SState[] = []; // passenger stops with lines calling
   private ctx: LineCtx;
 
@@ -139,7 +141,7 @@ export class Economy {
       fare: (L, slot, amount) => {
         if (amount <= 0) return;
         const st = site(L, slot);
-        if (st) { if (st.fare === 0) this.fareStops.push(st); st.fare += amount; }
+        if (st) { if (!st.fareListed) { st.fareListed = true; this.fareStops.push(st); } st.fare += amount; }
         this.totals.fares += amount;
       },
       arrive: (L, slot, people) => {
@@ -300,7 +302,7 @@ export class Economy {
         id: s.id, kind: s.kind as StopKind, x: s.x, z: s.z, name: s.name ?? `${def.name} ${s.id}`, def, radius: s.radius ?? def.radius,
         pool: new Float64Array(NC), slots: [], served: false, skim: -1, consumes: FREIGHT.map(() => null), carries: new Uint8Array(NC),
         fArrive: new Float64Array(NC).fill(Infinity), fPool: new Float64Array(NC).fill(Infinity), drop: FREIGHT.map(() => null), next: FREIGHT.map(() => null),
-        visit: [], inds: [], near: [], fare: 0,
+        visit: [], inds: [], near: [], fare: 0, fareListed: false,
         month: { boarded: 0, alighted: 0, overflow: 0 }, last: { boarded: 0, alighted: 0, overflow: 0 },
       });
     }
@@ -379,12 +381,20 @@ export class Economy {
       running += cost;
     }
     this.totals.running += running;
+    // Money events are in whole pounds; what's left over is carried to the next, so the events
+    // add up to the books (a quiet stop's pennies are shown once they come to a pound).
+    let kept = 0;
     for (const st of this.fareStops) {
-      if (!this.quiet && st.fare >= 1) this.emit({ t: 'money', kind: 'fare', amount: Math.round(st.fare), stop: st.id, x: st.x, z: st.z });
-      st.fare = 0;
+      const r = Math.round(st.fare);
+      if (this.quiet) st.fare = 0;
+      else if (r !== 0) { this.emit({ t: 'money', kind: 'fare', amount: r, stop: st.id, x: st.x, z: st.z }); st.fare -= r; }
+      if (Math.abs(st.fare) > 1e-9) this.fareStops[kept++] = st;
+      else { st.fare = 0; st.fareListed = false; }
     }
-    this.fareStops.length = 0;
-    if (!this.quiet && running > 0) this.emit({ t: 'money', kind: 'running', amount: -Math.round(running) });
+    this.fareStops.length = kept;
+    this.runningOwed = this.quiet ? 0 : this.runningOwed + running;
+    const rr = Math.round(this.runningOwed);
+    if (rr !== 0) { this.emit({ t: 'money', kind: 'running', amount: -rr }); this.runningOwed -= rr; }
     for (const L of this.lineList) { this.work += L.work; L.work = 0; }
     this.work += this.stopMap.size + this.indMap.size;
     this.time += dt;
@@ -951,7 +961,7 @@ export class Economy {
     const arr = (a: Float64Array) => [...a];
     return {
       v: 1, time: this.time, month: this.month, acc: this.acc, nextDay: this.nextDay, nextReview: this.nextReview, rand: this.rand.s,
-      reqNo: this.reqNo, nextId: this.nextId, totals: structuredClone(this.totals),
+      reqNo: this.reqNo, nextId: this.nextId, runningOwed: this.runningOwed, totals: structuredClone(this.totals),
       towns: [...this.townMap.values()].map((t) => ({
         id: t.id, base: { ...t.base }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, labour: t.labour, customers: t.customers,
         supply: { ...t.supply }, month: { ...t.month }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
@@ -960,7 +970,7 @@ export class Economy {
       zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared } })),
       buildings: [...this.buildingMap.values()].map((b) => ({ id: b.id, zone: b.zone.id, x: b.x, z: b.z, kind: b.kind, cap: b.cap, occ: b.occ, abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest })),
       industries: [...this.indMap.values()].map((i) => ({ id: i.id, rate: i.rate, stock: arr(i.stock), input: arr(i.input), produced: i.produced, moved: i.moved, received: i.received, converted: i.converted, last: { ...i.last } })),
-      stops: [...this.stopMap.values()].map((s) => ({ id: s.id, pool: arr(s.pool), month: { ...s.month }, last: { ...s.last } })),
+      stops: [...this.stopMap.values()].map((s) => ({ id: s.id, pool: arr(s.pool), fare: s.fare, month: { ...s.month }, last: { ...s.last } })),
       lines: this.lineList.map((L) => ({ id: L.id, ...L.save() })),
       pending: [...this.pending.values()].map((p) => ({ req: p.req, t: p.t, zone: p.zone.id, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building?.id, cleared: !!p.cleared })),
     };
@@ -972,7 +982,7 @@ export class Economy {
     Economy.restoring = true;
     let e: Economy;
     try { e = new Economy({ ...world, buildings: [] }, oracles, opts); } finally { Economy.restoring = false; }
-    Object.assign(e, { time: s.time, month: s.month, acc: s.acc, nextDay: s.nextDay, nextReview: s.nextReview, reqNo: s.reqNo, nextId: s.nextId });
+    Object.assign(e, { time: s.time, month: s.month, acc: s.acc, nextDay: s.nextDay, nextReview: s.nextReview, reqNo: s.reqNo, nextId: s.nextId, runningOwed: s.runningOwed ?? 0 });
     e.rand.s = s.rand;
     e.totals = structuredClone(s.totals);
     for (const z of s.zones) { const q = e.zoneMap.get(z.id); if (q) Object.assign(q, z); }
@@ -991,7 +1001,7 @@ export class Economy {
       Object.assign(q, { rate: i.rate, produced: i.produced, moved: i.moved, received: i.received, converted: i.converted, last: { ...i.last } });
       q.stock.set(i.stock); q.input.set(i.input);
     }
-    for (const st of s.stops) { const q = e.stopMap.get(st.id); if (q) { q.pool.set(st.pool); q.month = { ...st.month }; q.last = { ...st.last }; } }
+    for (const st of s.stops) { const q = e.stopMap.get(st.id); if (q) { q.pool.set(st.pool); if (st.fare) { q.fare = st.fare; q.fareListed = true; e.fareStops.push(q); } q.month = { ...st.month }; q.last = { ...st.last }; } }
     for (const l of s.lines) e.lineMap.get(l.id)?.restore(l);
     for (const p of s.pending) {
       const zone = e.zoneMap.get(p.zone);
