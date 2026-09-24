@@ -66,6 +66,8 @@ interface Car {
   ents?: Entry[]; ne?: number; users?: User[]; // (reused from frame to frame, so the garbage collector isn't kept busy)
   why?: string; // why it isn't going into the junction yet (for debugging)
   roomWait?: number; // how long it has stood at the line for want of room beyond
+  divertAt?: number; // when it last looked for another way out of a junction with no room beyond
+  readmit?: number; // when it last asked, standing at the line, whether it could go ahead of whoever it waits for
   pose?: Pose;
 }
 interface Train { def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; col: THREE.Color; gone?: boolean }
@@ -89,6 +91,7 @@ const LONGEST = 7; // the furthest any vehicle reaches in front of or behind its
 const GIVE_UP = 90; // seconds stood still before a driver gives up and goes another way
 const DIVERT = 15; // seconds stood at a junction with no room beyond before trying another way out of it
 const STARVE = 20; // seconds waiting in a junction after which nobody else may go ahead of you
+const CLAIM = 4; // seconds stood at the line for want of room beyond, after which that room is kept for you
 const KEEP = 20; // seconds stood waiting to be let into the lane for a turn before turning from the lane you're in
 const AMBER = 3, ALLRED = 2;
 const LAT = 3; // m/s² sideways: how hard vehicles corner
@@ -148,6 +151,7 @@ export class Traffic {
   private buckets = new Map<number, Entry[]>();
   private users = new Map<number, User[]>();
   private committed = new Map<number, Car[]>();
+  private claims = new Map<number, Car[]>(); // who has been waiting longest for room in each lane beyond a junction
   private appr = new Map<number, User[]>();
   private admSeq = 0;
   private ids = 1;
@@ -536,6 +540,7 @@ export class Traffic {
     for (const b of this.buckets.values()) b.length = 0;
     for (const l of this.users.values()) l.length = 0;
     for (const l of this.committed.values()) l.length = 0;
+    for (const l of this.claims.values()) l.length = 0;
     this.appr.clear();
     for (const c of this.cars) { c.uref.length = 0; c.entry = undefined; c.ne = 0; }
     for (const c of this.cars) {
@@ -569,6 +574,7 @@ export class Traffic {
         const adm = c.admNode === pl.node ? c.adm ?? Infinity : Infinity;
         this.addUser(pl.node, c, pl.path, pl.path.ext0 - (pl.path.lineS - c.s), adm);
         if (adm < Infinity) this.commit(pl.path.exitKey, c);
+        else if ((c.roomWait ?? 0) > CLAIM) { let l = this.claims.get(pl.path.exitKey); if (!l) this.claims.set(pl.path.exitKey, (l = [])); l.push(c); }
       }
     }
     for (const b of this.buckets.values()) b.sort((x, y) => x.pos - y.pos);
@@ -945,6 +951,9 @@ export class Traffic {
     }
     const mine = c.admNode === P.node ? c.adm ?? Infinity : Infinity;
     for (const o of this.committed.get(P.exitKey) ?? []) if (o !== c && (o.turn || (o.adm ?? Infinity) < mine)) free -= o.front + o.back + 2;
+    // and room is kept for whoever has been waiting at their line for it longer than we have (else a
+    // lorry could wait for ever while cars from the other arms take each few metres as they come free)
+    if (mine === Infinity) for (const o of this.claims.get(P.exitKey) ?? []) if (o !== c && (o.roomWait ?? 0) > (c.roomWait ?? 0)) free -= o.front + o.back + 2;
     return free >= c.front + c.back + 1;
   }
   // May this vehicle commit to the junction now? Returns its place in the junction's order, or null
@@ -1016,6 +1025,17 @@ export class Traffic {
     c.adm = adm; c.admNode = pl.node;
     for (const u of c.uref) if (u.path === pl.path) u.adm = adm;
     this.commit(pl.path.exitKey, c);
+  }
+  // Standing at the line behind someone earlier in the order who has since stopped short of us: if
+  // everyone would now let us go first (as a driver waiting to pull out would judge it afresh), we
+  // take a place ahead of them rather than wait for them to come by.
+  private readmit(c: Car, pl: Plan, now: number) {
+    c.readmit = now;
+    const was = c.adm!, why = c.why;
+    this.uncommit(c, pl);
+    const ok = this.admit(c, pl, now);
+    this.commitTo(c, pl, ok !== null && ok < was ? ok : was);
+    c.why = why;
   }
   // Committed, but the room beyond has gone (or we've still a lane to change into, or the one in
   // front hasn't a place) and we can still stop: give up our place and wait.
@@ -1242,12 +1262,12 @@ export class Traffic {
         // standing at the line with the road beyond full: after a while, try another way out
         if (ok === null && c.why === 'no room beyond' && c.v < 0.5 && pl.path.lineS - c.s - c.front < 4) {
           c.roomWait = (c.roomWait ?? 0) + dt;
-          if (c.roomWait > DIVERT && this.divert(c, pl)) { c.roomWait = 0; return; }
+          if (c.roomWait > DIVERT && now - (c.divertAt ?? 0) > 2000) { c.divertAt = now; if (this.divert(c, pl)) { c.roomWait = 0; return; } }
         } else c.roomWait = 0;
       } else if (pl.jd.j && (c.merge !== undefined || !this.leaderFirst(c, pl.path, pl.node) || !this.exitRoom(c, pl.path)) && pl.path.lineS - c.s - c.front > (c.v * c.v) / 6 + 0.5) {
         // (nor ahead of the one in front of us, if it has given its place back or pulled in ahead of us)
         this.uncommit(c, pl); admitted = false; hold = true;
-      }
+      } else if (pl.jd.j && c.v < 0.5 && pl.path.lineS - c.s - c.front < 3 && now - (c.readmit ?? 0) > 500) this.readmit(c, pl, now);
     }
     if (pl) v0 = Math.min(v0, Math.sqrt(spd(pl.path, pl.path.ext0) ** 2 + 4 * Math.max(0, pl.path.lineS - c.s)));
     // everything in the way, as the gentlest acceleration that respects all of it
