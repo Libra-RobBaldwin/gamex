@@ -141,6 +141,57 @@ no slower than before.
 - **Accept:** linking two towns by rail raises trips between them, and the panel of each
   shows it. Cutting the line lowers them.
 
+### F. The front of the app: a start menu and onboarding (the user, 24 Sep ~15:05)
+
+Opening the app today drops you straight into the game. It should work like an application.
+
+- **Start screen:** branded "Untitled" (the green, League Spartan + Archivo, Tabler icons, no
+  emoji). It has **Continue** (when there's a save), **New game**, **How to play**,
+  **Settings** and **About** (credits, with "© OpenStreetMap contributors").
+- **New game** lists the scenarios from one registry (`src/proto/maps.ts`), each with a name,
+  a line of description, a picture and its state:
+  - **Starter town** (today's map);
+  - **Region** (this plan; shown as "coming soon" until R1 marks it ready);
+  - **Real town** (`?place=`, Horley and the Real Town Plans places);
+  - **Sandbox** (an empty map).
+- **First visit:** a short guided start of 3–5 steps: move the map, build a road, place a stop,
+  start a line. You can skip it or replay it from How to play. Whether it has been seen is
+  stored in `localStorage`, and the app works when that's blocked.
+- **It behaves like an app:**
+  - The 3D game isn't loaded until you pick a scenario (a dynamic import), so the menu opens
+    instantly.
+  - The phone's back button and a menu button in the HUD return to the menu, after asking to
+    save.
+  - `/?map=<id>` and `/?place=<id>` deep links skip the menu.
+  - It works offline (the existing service worker), in portrait and in landscape.
+- **Accept:**
+  - A fresh visit at 412×915 shows the menu, not the game, and the first frame arrives in
+    under 1 s.
+  - Every ready scenario starts, and back returns to the menu with no console errors.
+  - A deep link goes straight in.
+  - The guide shows once, and again from How to play.
+
+## Cloud sessions (started 24 Sep ~15:10)
+
+The work is split so that each session owns its own files. Every session starts from
+`claude/cloud-session-history-rvqkm1`, merges it in often, and opens its PR back into it.
+
+| Session | Branch | Owns | Steps |
+|---|---|---|---|
+| Front menu and onboarding | `claude/work-front-menu` | `index.html` boot, `src/app/`, `src/proto/maps.ts`, the HUD menu button | F |
+| Region generator | `claude/work-region` | `src/proto/region/`, the `MapSpec` refactor at the top of `main.ts` | R1, then R0 |
+| One-way roads and motorway junctions | `claude/work-motorways` | additive changes to `roads.ts`, `traffic.ts`, `roaddraw.ts` and `junction.ts`, and `src/proto/interchange/` | R2 (the one-way flag, slip roads and junctions; the region's links once R1 lands) |
+| Stations and signalling | `claude/work-rail` | `src/proto/rail/` | R3 |
+
+- **The contract between the menu and the maps:** `MAPS` in `src/proto/maps.ts` has, for each
+  map, an id, a name, a description and a `ready` flag, and `?map=<id>` picks it. The menu
+  session creates the file. The region session only flips `region` to ready and adds its
+  loader.
+- **The bus loop** keeps M1–M3. The rail session builds the station, platform and signalling
+  library, and hands M4 a ready API instead of both building stations.
+- R4 (streaming and performance) and R5 (labels, places list, trips between towns) start once
+  R1–R3 have merged.
+
 ## Who does what (other sessions are running)
 
 The other sessions running now, and how this plan stays out of their way:
