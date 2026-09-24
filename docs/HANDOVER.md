@@ -40,7 +40,10 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   | Traffic lane-drop and give-up fixes | `claude/work-traffic` | session_01K6gzHHoJ3nPfxbCNeuPWtv |
   | Economy review, and a wiring plan in docs/economy.md | `claude/work-economy` | session_01PTFxCsS6mT4JTYZEgkTgrZ |
   | Freight terminals and supply chains | `claude/work-terminals` | session_01CE6XJ8Bv6zXW5sTZM9iCLw |
+  | A real town (Horley) instead of the invented one, from the OSM importer | `claude/work-real-town` | session_019665XqqPm9U1NRR99GLvBm |
+  | Junctions and joins that line up, on the invented town and on real OSM networks | `claude/work-junctions` | session_0185VszrHr5qQCJHYZH7rSeq |
 
+- **Network:** full access was enabled at ~12:30. The Overpass servers were "too busy" at first, so the Horley data is being fetched in tiles with polite retries.
 - **Next wave (not started):**
   - wire the economy and terminals into the live game, from docs/economy.md and docs/terminals.md;
   - then cyclists;
@@ -58,6 +61,7 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   | Industries | https://claude.ai/artifact/6JyuqJ7Tdb5m2p4hYyhJzR |
   | HUD mock-up | https://claude.ai/artifact/WGbq3v6p161GpesZehQ1gW |
   | Early look (HUD and ground, before review) | https://claude.ai/artifact/7YPVNSXYBMSRNRTG41zGJY |
+  | Real town plans (Banbury; Horley to come) | https://claude.ai/artifact/7xoS53FzWa2WdyR3NBYPTH |
 
 ## The game and previews (published artifacts, owned by the org account)
 

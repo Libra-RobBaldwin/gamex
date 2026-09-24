@@ -180,6 +180,9 @@ const kerbMat = lit('#c9c4ba', { side: THREE.DoubleSide });
 const barrierMat = lit('#a9adb0', { side: THREE.DoubleSide });
 const hintMat = lit('#8c877d', over(1));
 const cutMat = lit('#6f9446');
+// the grass the roads draw themselves: verges, roundabout islands, cutting slopes (the game gives
+// them the ground's own look, so they match the fields and lawns round them)
+export const GRASS_MATS: THREE.MeshLambertMaterial[] = [vergeMat, islandMat, cutMat];
 const portalMat = new THREE.MeshBasicMaterial({ color: '#0d0f12', side: THREE.DoubleSide });
 const poleMat = lit('#2b2e33');
 const shelterGlass = lit('#b9d6e2', { transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide });
