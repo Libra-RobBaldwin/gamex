@@ -242,7 +242,8 @@ for (const name of names) {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at(...s)[0], y: at(...s)[1], deltaX: 0, deltaY: 100 });
     await page.waitForTimeout(100);
     const v = await view(), dy = await page.evaluate(() => window.__wheel);
-    const e = await err(g, ...s), want = Math.pow(1.12, dy / 100);
+    // (a mouse notch is at least one whole step of 1.12, however the browser scales it)
+    const e = await err(g, ...s), want = Math.pow(1.12, Math.max(100, dy) / 100);
     check(name, 'wheel zooms about the cursor', dy > 0 && Math.abs(v.h / h0 - want) < 0.005 && e < 1.5, { ratio: +(v.h / h0).toFixed(4), want: +want.toFixed(4), deltaY: dy, errPx: +e.toFixed(3) });
   }
 

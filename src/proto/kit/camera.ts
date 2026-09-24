@@ -652,15 +652,28 @@ export class NavRig extends NavCore {
         let px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * element.clientHeight : e.deltaY;
         // a trackpad pinch arrives as ctrl+wheel with small deltas: make it track the fingers
         if (e.ctrlKey) px *= 8.8;
+        // a mouse wheel's notch (lines or pages, or a big pixel step, which some browsers halve
+        // on high-density screens) is always at least one whole step, as the game has always had;
+        // a trackpad's small smooth deltas zoom smoothly
+        else if (e.deltaMode !== 0 || Math.abs(px) >= 50) px = Math.sign(px) * Math.max(100, Math.abs(px));
         const p = at(e);
         this.wheel(p.x, p.y, px);
       }, { passive: false });
     }
     const kt = o.keyboard === false ? null : o.keyboard === true || o.keyboard === undefined ? window : o.keyboard;
     if (kt) {
+      // keys belong to whatever has focus when it's a text box, or inside something that
+      // scrolls (a side panel's list: arrows and Page Down scroll it, not the map)
       const typing = (e: KeyboardEvent) => {
         const t = e.target as HTMLElement | null;
-        return !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+        if (!t || !t.tagName) return false;
+        if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return true;
+        for (let n: HTMLElement | null = t; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+          if (n === element) return false;
+          const oy = getComputedStyle(n).overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight) return true;
+        }
+        return false;
       };
       const name = (e: KeyboardEvent) => KEYS[e.code] ?? (e.key === '+' ? 'in' : e.key === '-' || e.key === '_' ? 'out' : undefined);
       on(kt, 'keydown', (e: KeyboardEvent) => {

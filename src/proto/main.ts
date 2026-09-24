@@ -958,9 +958,9 @@ function drawGhost() {
 
 // ---------------- building card ----------------
 const ray = new THREE.Raycaster();
+// (sx, sy relative to the canvas, as the shared camera gives them)
 function ndc(sx: number, sy: number) {
-  const r = canvas.getBoundingClientRect();
-  return new THREE.Vector2(((sx - r.left) / r.width) * 2 - 1, -((sy - r.top) / r.height) * 2 + 1);
+  return new THREE.Vector2((sx / canvas.clientWidth) * 2 - 1, -(sy / canvas.clientHeight) * 2 + 1);
 }
 function pickBuilding(sx: number, sy: number) {
   ray.setFromCamera(ndc(sx, sy), cam);
