@@ -23,6 +23,9 @@ export interface TerminalsModel {
   detail: string;
 }
 export interface TerminalBuildOpts extends LayoutOpts { year?: number; seed?: number }
+// Triangles for all of one site's terminals together, on top of the site's own 1,000 to 1,600: a
+// big works with the dearest tier and kit it can be sold in every mode stays inside it (tested).
+export const SITE_TERMINAL_TRIS = 4000;
 
 const hash = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
 const CANOPY = '#2e7d5b', CRANE_RED = '#c8452f', CRANE_BLUE = '#3f6d93', GRAVEL = '#a8a294', APRON = '#b9b4a8';

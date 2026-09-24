@@ -3,12 +3,13 @@ import * as THREE from 'three';
 import { STATIONS } from '../../defs';
 import { CARGO, INDUSTRY_IDS, INDUSTRY_TYPES, type CargoId, type IndustryId } from '../industries/catalogue';
 import { IndustryFx } from '../industries/fx';
+import { runCycles } from '../industries/chains';
 import { buildIndustry, defaultPlot, type IndustryModel } from '../industries/models';
 import {
   CARGO_CLASS, FITS, LADDER, LOAD_TIME_2D, MODES, MODE_OF, SIM_SECONDS_PER_HOUR, TIERS, TIER_IDS, inEra, suitOf, throughput, tierCost, type FitId, type Mode, type TierId,
 } from './catalogue';
 import { bounds, overlaps, place, roomCheck, waterline, type Box } from './layout';
-import { buildTerminals, fxModel } from './models';
+import { SITE_TERMINAL_TRIS, buildTerminals, fxModel } from './models';
 import {
   IDLE_CUT_DAYS, IDLE_MOTHBALL_DAYS, IDLE_WARN_DAYS, MOTHBALL_UPKEEP, REMOVE_REFUND, apply, berthRate, capacity, dwellFactor, dwellHours, estimateFlows,
   levelCap, levelsAt, offers, outAt, report, review, shareOutput, shownFor, specFor, startingTerminals, suggest, terminalFor, tick, townSpec,
@@ -308,6 +309,92 @@ describe('capacity and growth', () => {
     expect(offers(town, st, CTX).find((o) => o.tier === 'jetty')!.status).toBe('not_offered');
     expect(offers(townSpec('Portsea', 8000, true), st, { ...CTX, water: true }).find((o) => o.tier === 'jetty')!.status).toBe('available');
   });
+
+  it('counts only terminals vehicles can reach, and says so when none can', () => {
+    const st = withT(2, open('road', 'loading_bay'), open('rail', 'rail_terminal', 'rapid_loader'));
+    const cut = { ...CTX, rail: false };
+    // no rail line: the rail terminal moves nothing, is served by nothing, and ages
+    const f = estimateFlows(colliery, st, 3.5, {}, cut);
+    expect(f.served).toEqual({ road: true, rail: false });
+    expect(f.moved).toBeLessThanOrEqual(outAt(colliery, levelCap(colliery, st, { rail: false })) + 1e-6);
+    expect(review(colliery, st, cut, 3.5, f).level).toBeLessThan(3.5); // more than the bay can move: it eases back
+    expect(tick(colliery, st, 40, f.served!, 40).st.terminals.find((t) => t.mode === 'rail')!.warned).toBe(true);
+    expect(report(colliery, st, cut, 2).capacity.byMode.rail).toMatchObject({ reached: false, levels: 0 });
+    expect(report(colliery, st, cut, 2).dwell('rail', 'coal', 240)).toBeNull();
+    // with nothing else working, the suggestion names the missing link
+    expect(suggest(colliery, withT(2, open('rail', 'rail_terminal')), cut, 1)?.text).toBe('No train can reach the rail freight terminal: it needs a rail line to the site');
+  });
+});
+
+describe('consistency with the chains', () => {
+  // A level's worth of every input the chain can supply that year, as runCycles wants it: each
+  // 'any' input enough for all the cycles (so they share equally), exports and boosts in full.
+  const fedStock = (id: IndustryId, year?: number) => {
+    const t = INDUSTRY_TYPES[id], stock: Partial<Record<CargoId, number>> = {};
+    const spec = specFor(id, undefined, year);
+    for (const f of t.inputs) if (spec.in[f.cargo]) stock[f.cargo] = f.amount * t.rate * SIM_SECONDS_PER_HOUR * (t.role === 'sink' || t.role === 'hub' ? 1 / f.amount : 1);
+    return stock;
+  };
+
+  it("moves what the chains' production rule makes and uses in an hour at level 1, every year", () => {
+    for (const id of INDUSTRY_IDS) for (const year of [undefined, 1800, 1850, 1900, 1920, 1950, 1985, 2000, 2030]) {
+      const t = INDUSTRY_TYPES[id];
+      if (year !== undefined && !inEra(t.era, year)) continue;
+      for (const variant of [undefined, ...t.variants]) {
+        const spec = specFor(id, variant, year);
+        const r = runCycles(id, fedStock(id, year), 1, SIM_SECONDS_PER_HOUR, { variant, year });
+        const label = `${id} ${variant?.id ?? ''} ${year ?? 'any year'}`;
+        for (const c of new Set([...Object.keys(spec.in), ...Object.keys(r.used)]) as Set<CargoId>) expect(spec.in[c] ?? 0, `${label} takes ${c}`).toBeCloseTo(r.used[c] ?? 0, 6);
+        for (const c of new Set([...Object.keys(spec.out), ...Object.keys(r.made)]) as Set<CargoId>) expect(spec.out[c] ?? 0, `${label} sends ${c}`).toBeCloseTo(r.made[c] ?? 0, 6);
+      }
+    }
+  });
+
+  it('sizes nothing on a trade that is not running, or an input nobody makes yet', () => {
+    const docks = (y: number) => specFor('port', undefined, y);
+    expect(Object.keys(docks(1820).out)).toEqual([]); // no imports before steelworks and refineries
+    expect(Object.keys(docks(1820).in).sort()).toEqual(['coal', 'goods']); // and no steel to export
+    expect(docks(1980).in.coal).toBeGreaterThan(0);
+    expect(docks(2000).in.coal ?? 0).toBe(0);
+    expect(docks(2000).out.coal).toBeGreaterThan(0);
+    // a factory in 1800 can only get sawn timber; by 1950 it shares its cycles three ways
+    expect(Object.keys(specFor('goods_factory', undefined, 1800).in)).toEqual(['planks']);
+    expect(Object.keys(specFor('goods_factory', undefined, 1950).in).sort()).toEqual(['chemicals', 'planks', 'steel']);
+    // limestone is counted with the extra steel it makes
+    const s = specFor('steelworks', undefined, 1900);
+    expect(s.in.stone).toBeGreaterThan(0);
+    expect(s.out.steel).toBeCloseTo(1.5 * 1.25 * SIM_SECONDS_PER_HOUR, 9);
+  });
+
+  it('offers no tier bigger than the smallest that moves all a site will ever make', () => {
+    // and so a colliery is never offered a marshalling yard, nor a port a jetty's worth of choice it can't use
+    let worst = { x: 0, what: '' };
+    for (const id of INDUSTRY_IDS) for (let year = INDUSTRY_TYPES[id].era[0]; year <= 2050; year += 10) {
+      const spec = specFor(id, undefined, year), ctx = { year, rail: true, water: true };
+      for (const o of offers(spec, withT(3), ctx)) {
+        if (o.status === 'not_offered' || o.status === 'era') continue;
+        for (const lower of LADDER[o.mode].filter((t) => TIERS[t].rank < o.rank && inEra(TIERS[t].era, year))) {
+          const best = Math.max(...TIERS[lower].fits.filter((f) => inEra(FITS[f].era, year)).map((fit) => levelsAt(spec, { tier: lower, fit })));
+          expect(best, `${id} ${year}: ${lower} already moves it all, yet ${o.tier} is offered`).toBeLessThan(4);
+        }
+        const x = levelsAt(spec, o) / 4;
+        if (x > worst.x) worst = { x, what: `${id} ${year} ${o.tier} ${o.fit}` };
+      }
+    }
+    // the most any offered terminal moves over all a site will ever make: a colliery's rail freight
+    // terminal with a rapid loader, which fills a train in minutes and then waits for the next
+    expect(worst.x, worst.what).toBeLessThan(5);
+  });
+
+  it('still lets every site reach full production with what it is offered', () => {
+    for (const id of INDUSTRY_IDS) for (const year of [1960, 2000]) {
+      if (!inEra(INDUSTRY_TYPES[id].era, year)) continue;
+      const spec = specFor(id, undefined, year);
+      const offered = offers(spec, withT(3), { year, rail: true, water: true }).filter((o) => o.status === 'available');
+      const best = MODES.map((m) => Math.max(0, ...offered.filter((o) => o.mode === m).map((o) => levelsAt(spec, o))));
+      expect(best.reduce((a, b) => a + b, 0), `${id} ${year}`).toBeGreaterThanOrEqual(4);
+    }
+  });
 });
 
 describe('buying, upgrading and removing', () => {
@@ -390,6 +477,57 @@ describe('buying, upgrading and removing', () => {
     tick(colliery, st, 400, {}, 400);
     review(colliery, st, CTX, 1, estimateFlows(colliery, st, 1, { stockFill: 1 }));
     expect(JSON.stringify(st)).toBe(before);
+  });
+
+  it('cancels unfinished work for half its cost, and never pays out more than went in', () => {
+    const st = withT(3, open('rail', 'rail_terminal'));
+    const up = apply(steel, st, { ...CTX, day: 0 }, { kind: 'build', mode: 'rail', tier: 'marshalling_yard', fit: 'standard' });
+    if (!up.ok) throw new Error(up.reason);
+    const c = apply(steel, up.st, { ...CTX, day: 5 }, { kind: 'cancel', mode: 'rail' });
+    if (!c.ok) throw new Error(c.reason);
+    expect(c.cost).toBe(-0.5 * up.cost);
+    expect(terminalFor(c.st, 'rail')).toMatchObject({ tier: 'rail_terminal', status: 'open' });
+    expect(terminalFor(c.st, 'rail')!.pending).toBeUndefined();
+    // a new terminal still being built goes altogether
+    const b = apply(colliery, withT(1), CTX, { kind: 'build', mode: 'road', tier: 'loading_bay' });
+    if (!b.ok) throw new Error(b.reason);
+    const cb = apply(colliery, b.st, CTX, { kind: 'cancel', mode: 'road' });
+    expect(cb.ok && cb.cost).toBe(-500);
+    expect(cb.ok && cb.st.terminals).toEqual([]);
+    expect(apply(colliery, st, CTX, { kind: 'cancel', mode: 'rail' }).ok).toBe(false); // nothing to cancel
+    // ordering and cancelling over and over only ever costs money
+    let s2: SiteTerminals = st, net = 0;
+    for (let i = 0; i < 5; i++) {
+      const o = apply(steel, s2, CTX, { kind: 'build', mode: 'rail', tier: 'marshalling_yard' });
+      if (!o.ok) throw new Error(o.reason);
+      const x = apply(steel, o.st, CTX, { kind: 'cancel', mode: 'rail' });
+      if (!x.ok) throw new Error(x.reason);
+      net += o.cost + x.cost; s2 = x.st;
+    }
+    expect(net).toBeGreaterThan(0);
+  });
+
+  it("treats the docks' own quay as theirs, and what's built on it as the player's", () => {
+    const docks = specFor('port', undefined, 1980), ctx = { ...CTX, year: 1980 };
+    const st0 = { ...startingTerminals('port'), grade: 3 as const };
+    // a refit keeps it the docks' own
+    const rf = apply(docks, st0, ctx, { kind: 'refit', mode: 'water', fit: 'grab_cranes' });
+    if (!rf.ok) throw new Error(rf.reason);
+    expect(terminalFor(tick(docks, rf.st, 20, { water: true }, 20).st, 'water')).toMatchObject({ tier: 'quay', fit: 'grab_cranes', builtIn: true });
+    // a bigger terminal is the player's: it can be demolished, which leaves the old quay
+    const up = apply(docks, st0, ctx, { kind: 'build', mode: 'water', tier: 'port_terminal', fit: 'container_cranes' });
+    if (!up.ok) throw new Error(up.reason);
+    expect(up.cost).toBe(tierCost('port_terminal', 'container_cranes')); // nothing off for a quay they never paid for
+    const built = tick(docks, up.st, 0, {}, 1000).st;
+    expect(terminalFor(built, 'water')!.builtIn).toBeFalsy();
+    const rm = apply(docks, built, ctx, { kind: 'remove', mode: 'water' });
+    if (!rm.ok) throw new Error(rm.reason);
+    expect(rm.cost).toBe(-Math.round(REMOVE_REFUND * tierCost('port_terminal', 'container_cranes')));
+    expect(terminalFor(rm.st, 'water')).toMatchObject({ tier: 'quay', builtIn: true, status: 'open' });
+    // left idle it's cut back to the quay, which is the docks' own again and goes no further
+    let idle = built;
+    for (let d = 10; d <= 1500; d += 10) idle = tick(docks, idle, 10, {}, 1000 + d).st;
+    expect(terminalFor(idle, 'water')).toMatchObject({ tier: 'quay', builtIn: true, status: 'mothballed' });
   });
 });
 
@@ -536,6 +674,21 @@ describe('models', () => {
       expect(stray, `${label}: a vertex off its ground`).toBeNull();
     }
     expect(Math.max(...sizes)).toBeLessThanOrEqual(2600);
+  });
+
+  it("keeps a whole site's terminals within one budget, however they're chosen", () => {
+    // the heaviest tier and fit each mode could be sold, all at once: a refinery or a steelworks
+    // on the water with a tank-farm road terminal, marshalling yard and oil terminal is the worst
+    let worst = { tris: 0, what: '' };
+    for (const id of INDUSTRY_IDS) {
+      const m = bare.get(id)!, spec = specFor(id, undefined, 2000);
+      const offered = offers(spec, withT(3), { year: 2000, rail: true, water: true }).filter((o) => o.status === 'available' || o.status === 'owned');
+      const pick = usable(id).map((mode) => offered.filter((o) => o.mode === mode).flatMap((o) => TIERS[o.tier].fits.map((fit) => ({ mode, tier: o.tier, fit })))
+        .map((s) => ({ s, tris: buildTerminals(m, [s], { water: true, year: 2000 }).tris })).sort((a, b) => b.tris - a.tris)[0]?.s).filter((s) => !!s);
+      const t = buildTerminals(m, pick, { water: true, year: 2000 });
+      if (t.tris > worst.tris) worst = { tris: t.tris, what: `${id}: ${pick.map((p) => `${p.tier} ${p.fit}`).join(', ')}` };
+    }
+    expect(worst.tris, worst.what).toBeLessThanOrEqual(SITE_TERMINAL_TRIS);
   });
 
   it('is the same from the same inputs, and changes with the fit', () => {

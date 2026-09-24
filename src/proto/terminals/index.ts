@@ -3,4 +3,4 @@
 export * from './catalogue';
 export * from './rules';
 export { place, roomCheck, bounds, waterBehind, waterline, overlaps, type Box, type Placement, type Side, type LayoutOpts, type Wanted } from './layout';
-export { buildTerminals, fxModel, type Shown, type TerminalsModel, type TerminalBuildOpts } from './models';
+export { SITE_TERMINAL_TRIS, buildTerminals, fxModel, type Shown, type TerminalsModel, type TerminalBuildOpts } from './models';

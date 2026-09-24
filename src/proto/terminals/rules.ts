@@ -163,8 +163,8 @@ export const berthRate = (h: Handling, c: CargoId, dir: Dir = 'load') => {
   return ref / dwellHours(h, c, ref, dir);
 };
 // The same stop as a multiple of the 2D game's LOAD_TIME, for anything still on the 2D clock (a
-// game hour is 60 of its seconds): a lorry of coal at a loading bay stands for about 13 game
-// minutes, which is 6.4 LOAD_TIMEs, where the 2D game gave every vehicle one.
+// game hour is 60 of its seconds): a lorry of coal at a loading bay stands for about 12 game
+// minutes, which is 6.2 LOAD_TIMEs, where the 2D game gave every vehicle one.
 export const dwellFactor = (h: Handling, cargo: CargoId, dir: Dir = 'load') =>
   (dwellHours(h, cargo, REFERENCE_LOAD[TIERS[h.tier].mode], dir) * SIM_SECONDS_PER_HOUR) / LOAD_TIME_2D;
 
