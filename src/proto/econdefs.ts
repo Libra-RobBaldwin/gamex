@@ -262,6 +262,8 @@ export interface TownReport {
   residents: number; homes: number; vacancy: number; jobs: number; workers: number;
   uses: Record<Use, UseReport>;
   reach: { work: number; workCar: number; workNoCar: number; workTransit: number; shop: number; leisure: number };
+  // goods..visitors: supplied share of need; the per-hour and per-day figures are what your lines
+  // delivered last month
   supply: { goods: number; materials: number; visitors: number; goodsPerHour: number; materialsPerHour: number; visitorsPerDay: number };
   // plots: free to build on; turnedAway: the share of those who came to board at its stops last
   // month who found no room

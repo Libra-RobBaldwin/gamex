@@ -66,6 +66,9 @@ export interface TState {
   // taken to be fed from off the map when it was made (fading as the smoothed view does)
   got: { goods: number; materials: number; visitors: number };
   offmap: { goods: number; materials: number; visitors: number };
+  // What your lines alone delivered last month, per hour: what the town panel says is arriving
+  // (the smoothed `supply` also remembers earlier months and what the town started with)
+  delivered: { goods: number; materials: number; visitors: number };
   // Goods and materials the town takes, per hour: as much as its businesses can make use of,
   // however well supplied (set at each review). What's delivered goes into a store of a couple of
   // days' worth that empties at that rate; beyond it the town takes no more, and isn't paid for.
@@ -84,7 +87,7 @@ export function newTown(id: number, name: string, x: number, z: number, carShare
   const u = (): UState => ({ demand: 0, raw: 0, up: 0, down: 0, grew: -99, shrank: -99, stuck: false, settled: 0 });
   return {
     id, name, x, z, carShare, zones: [], base: perUse(), cal: perUse(1), at: perUse(), bias: perUse(1), calibrated: false, primed: false, assessed: false, labour: 1, customers: 1,
-    supply: { goods: 0, materials: 0, visitors: 0 }, month: { goods: 0, materials: 0, visitors: 0 }, got: { goods: 0, materials: 0, visitors: 0 }, offmap: { goods: 0, materials: 0, visitors: 0 },
+    supply: { goods: 0, materials: 0, visitors: 0 }, month: { goods: 0, materials: 0, visitors: 0 }, got: { goods: 0, materials: 0, visitors: 0 }, offmap: { goods: 0, materials: 0, visitors: 0 }, delivered: { goods: 0, materials: 0, visitors: 0 },
     accept: { goods: 0, materials: 0 }, held: { goods: 0, materials: 0 },
     use: { home: u(), shop: u(), office: u(), works: u(), civic: u() }, health: perUse(1), history: [], recent: { built: [], lost: [] },
     done: { built: 0, lost: 0 }, facts: null, report: null,
@@ -492,16 +495,18 @@ export function report(t: TState, T: Tune): TownReport {
     add(`${cr.line.rail ? 'trains' : 'buses'} on ${cr.line.name} are full: ${pct(cr.line.share)} of people waiting couldn't get on`, false, 0.5 * cr.share);
   if (f.reachShop < 0.8) add(`shops within ${T.shopMin} min can serve only ${pct(f.reachShop)} of residents`, false, 0.3 * (1 - f.reachShop));
   // what it's fed
+  // How well supplied is judged on the town's memory of deliveries (as growth is), but what it
+  // says is arriving is what your lines brought last month, so a town nothing comes to says so.
   const fed = (v: number, what: string, stuff: string, per: number) => {
     if (Number.isNaN(v)) return;
-    if (v < 0.9) add(`${what} only ${pct(Math.min(v, 9.99))} supplied with ${stuff}${per < 0.01 ? ` (no ${stuff} delivered)` : ''}`, false, 0.5 * (1 - v));
+    if (v < 0.9) add(`${what} only ${pct(Math.min(v, 9.99))} supplied with ${stuff}${per < 0.01 ? `, no ${stuff} delivered` : ''}`, false, 0.5 * (1 - v));
     else if (v >= 1.05) add(`${what} well supplied with ${stuff} (${pct(Math.min(v, 9.99))})`, true, 0.3 * Math.min(1, v - 1) + 0.05);
   };
-  fed(f.goods, 'shops', 'goods', t.supply.goods);
-  fed(f.materials, 'works', 'building materials', t.supply.materials);
+  fed(f.goods, 'shops', 'goods', t.delivered.goods);
+  fed(f.materials, 'works', 'building materials', t.delivered.materials);
   if (!Number.isNaN(f.visitors)) {
-    const day = Math.round(t.supply.visitors * 24);
-    const arriving = day < 1 ? 'no passengers arriving' : `${day.toLocaleString('en-GB')} passenger${day === 1 ? '' : 's'} a day`;
+    const day = Math.round(t.delivered.visitors * 24);
+    const arriving = day < 1 ? 'no passengers arriving by your lines' : `${day.toLocaleString('en-GB')} passenger${day === 1 ? '' : 's'} a day`;
     if (f.visitors < 0.9) add(`offices get ${pct(f.visitors)} of the visitors they need (${arriving})`, false, 0.5 * (1 - f.visitors));
     else if (f.visitors >= 1.05) add(`offices busy with visitors (${arriving})`, true, 0.3 * Math.min(1, f.visitors - 1) + 0.05);
   }
@@ -534,7 +539,7 @@ export function report(t: TState, T: Tune): TownReport {
     reach: { work: f.reachWork, workCar: f.workCar, workNoCar: f.workNoCar, workTransit: f.workTransit, shop: f.reachShop, leisure: f.reachLeisure },
     supply: {
       goods: f.goods, materials: f.materials, visitors: f.visitors,
-      goodsPerHour: t.supply.goods, materialsPerHour: t.supply.materials, visitorsPerDay: t.supply.visitors * 24,
+      goodsPerHour: t.delivered.goods, materialsPerHour: t.delivered.materials, visitorsPerDay: t.delivered.visitors * 24,
     },
     service: { stops: f.stops, lines: f.lines, homesNearStop: f.homesNearStop, plots: f.plots, turnedAway: f.crowding.share },
     history: [...t.history],
