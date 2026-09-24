@@ -24,9 +24,10 @@ export class GameGround {
   private sites = new Set<Lot>();
   private full = true;
   private reach: number; // how far out industrial land is looked for
-  // (`texel`: metres per cover texel, coarser on a big map so its covers stay a sensible size; `hedges`: plant hedgerows)
-  constructor(private w: GameWorld, bound: number, texel?: number, hedges = true) {
-    const size = Math.ceil((bound * 2 + 160) / 10) * 10;
+  // (`texel`: metres per cover texel, coarser on a big map so its covers stay a sensible size; `hedges`: plant hedgerows;
+  // `edge`: half the ground's width, if the covers should be painted right out to it)
+  constructor(private w: GameWorld, bound: number, texel?: number, hedges = true, edge?: number) {
+    const size = Math.ceil(((edge ? edge * 2 : bound * 2 + 160)) / 10) * 10;
     this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed: 11, texel, hedges });
     this.reach = Math.max(600, Math.ceil((bound * 1.15) / 40) * 40);
   }
