@@ -58,6 +58,95 @@ carry on.
 Read this first, then `docs/ROADMAP.md` (direction), `docs/ENGINE.md` (architecture) and the
 per-library docs in `docs/`.
 
+## Backlog from finished streams (archived 24 Sep)
+
+From the ten merged streams (PRs #10–#16, #18–#20), with duplicates merged. At 13:49 UTC terminals, int-people and hud were still mid-turn: collect their unpushed work (station stops, compact HUD) before archiving.
+
+### A. The first playable loop
+
+- Give lines real routes. Today buses wander and call at every stop on their side, Transport > Lines has no routes, and "New line" is disabled. A line is stops in order plus vehicles, with one livery and operator. (hud, int-vehicles)
+- Wire the economy into the game, and feed `CrowdNumbers` from it instead of `TownNumbers`. That covers waiting per stop, hourly footfall and boarded counts. (int-people)
+- Money: fill the money slot (`setMoney` is never called) and charge fares. Also charge for roads, bridges and a change of bridge type: costs are shown but never charged. (hud, int-bridges, bridges-track)
+- Buy vehicles through the economy: map `VEHICLES` in `defs.ts` onto library offers and charge for purchases (vehicles plan step 8). (int-vehicles, vehicles-moving)
+- Railway stations. Build > Stops has the railway station and bus station locked. Trains should stop at platforms and open their platform-side doors (fleet.ts only drives buses' kerb doors). People board and alight through each car's `doorPositions`. (int-people, vehicles-moving, hud)
+- Tapping a vehicle should open its info sheet. `tapMap` handles bridges, sites and buildings, but not vehicles. (hud)
+- Layers: turn on the "Stop catchments" and "Where people want to go" overlays. (hud)
+- Measure on a real Pixel. People `BUDGETS` are guesses, and every perf and look check so far ran under SwiftShader. (int-people, int-industries, terminals)
+
+### B. Live-game bugs and performance, soon
+
+- Road drawing stutters: bridge blueprint checks take 20–160 ms. Cache them and move them into a worker. (int-bridges)
+- Roads and bridges ignore the lake. `alignRoute` doesn't use `crossings()` or `navLimits()`, and bridges don't take `pierBans`, the soffit or the flood level (water steps 3–4, bridges step 8). (int-water, int-bridges)
+- The merges added frame-time cost:
+  - lake views 11–15% slower;
+  - industries 4–7% slower;
+  - the Parade demo's per-frame JS at 1.3–1.5 times the baseline;
+  - passenger-rail near-LOD triangles up 20–70%;
+  - draw calls in the busy zoomed-out view up from 430 to 441.
+
+  (int-water, int-industries, int-vehicles, vehicles-moving)
+- Switch off middle-LOD vehicle shadows on weak phones through the adaptive-quality tiers. (int-vehicles, vehicles-moving)
+- A walker is drawn once per route leg, so routes must stay short. (int-people)
+- Signal phases don't control pedestrian crossings. (int-people)
+- A 26 px flicker seam and "4 known cosmetic issues" aren't written down anywhere. Get them from the bridges-track transcript before archiving that session. (bridges-track)
+- Timing tests fail under CPU load and pass when re-run: the bridges benchmark and one water test. (int-vehicles, int-water, terminals)
+- The gesture and HUD Playwright checks only run by hand. Put them in CI. (kit-nav, hud)
+
+### C. Later or parked
+
+- Freight, after the loop:
+  - the economy adopts `INDUSTRY_TYPES`;
+  - a real `IndustryFeed` replaces `standInFeed`;
+  - terminals live-game steps 1–5, including saves, production, the `siteActions` sheet, unlocking Build > Freight and removing the Lorry depot card;
+  - cost balancing;
+  - placement that respects `minSize`;
+  - lorries, vans, boats and planes to buy.
+
+  (terminals, int-industries, hud, int-vehicles)
+- Terminal model limits: one terminal per mode, one load/unload rate, fixed input shares, rectangular annexes, no quay or goods-depot models. (terminals)
+- Industry sites: rebuild when the era changes, real vehicle anchors, docks on the real water edge, a mesh worker, plot fitting, OSM plots, smoke and night lights. (int-industries)
+- Commuting from real staffing and mode choice. (int-people)
+- Save and Load town. Bulldoze and undo for built roads. (hud, terminals)
+- Needs terrain first:
+  - the Landscape tool;
+  - pier heights and arches (bridges step 10);
+  - levelled sites;
+  - rivers and basins;
+  - cross-slope on skew crossings;
+  - earth cut-face map edges.
+
+  (hud, int-bridges, int-industries, int-water, bridges-track)
+- Track detail in the game's railways (the six `TrackBuilder` steps), and the shared grass in place of `earthTexture()`. (bridges-track)
+- Bridges: bascule closures, suspension bridges refusing heavy loads, land claims for piers, English-only reason strings, pier spacing. (int-bridges, bridges-track)
+- Water: canals, ports, ferries, worker streaming, region seams, hydrology and drawing limits. (int-water)
+- Vehicles: night glow and hazard lamps, bogies and steering (`vr.add` gets no curvature), pantographs, lettering, far-LOD impostors, and batched far traffic for big maps. (int-vehicles, vehicles-moving)
+- People: streaming ids, avoiding each other, street furniture, seasons, and the animals' look. Cyclists stay parked. (int-people)
+- Demos:
+  - a shared demo shell;
+  - a library bus with working doors in the people demo;
+  - the architecture test also catching demos' own ground and vehicle meshes;
+  - a flows view and tutorial in the industries demo.
+
+  (kit-nav, int-people, int-industries, vehicles-moving)
+- HUD debug probes (`dbg*.mjs`, `anim.mjs`): delete them or turn them into real checks. (hud)
+- Stale docs:
+  - `reports/vehicles.md`, `reports/water.md`, `reports/bridges.md` and `water.md` §5;
+  - `kit.md` (places.html is skipped too);
+  - `people.md` on bus doors;
+  - this file's stream tables.
+
+  (several)
+
+### Dropped as already done
+
+- Bus doors from the vehicle library. `crowds.ts` `doorsOf()` uses `fleet.kerbDoors()` and `doorPositions` (2651070). (int-people)
+- Raised-deck embankments missing from the bridge price. `priceBridges()` prices the raised path that gets built. (bridges-track)
+- The industries and people demos' own nav. Both use `NavRig`, and the architecture test enforces it. (int-industries, int-people)
+- Connector re-auth: not a code item, so it goes to the coordinator. (vehicles-moving)
+
+When they were archived, the terminals, people and HUD sessions had woken from Vercel's PR comments and started follow-ups that may never have been pushed. Terminals' one commit is PR #25. The bridge-track session's "26 px flicker seam" and "4 cosmetic issues" are known only from its final summary.
+
+
 ## Focus (the user, 24 Sep ~13:20): the core game loop first
 
 The user said we'd lost sight of the goal, and agreed this plan. The goal is the game in
