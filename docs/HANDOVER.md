@@ -40,7 +40,9 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   | Traffic lane-drop and give-up fixes | `claude/work-traffic` | session_01K6gzHHoJ3nPfxbCNeuPWtv |
   | Economy review, and a wiring plan in docs/economy.md | `claude/work-economy` | session_01PTFxCsS6mT4JTYZEgkTgrZ |
   | Freight terminals and supply chains | `claude/work-terminals` | session_01CE6XJ8Bv6zXW5sTZM9iCLw |
+  | A real town (Horley) instead of the invented one, from the OSM importer | `claude/work-real-town` | session_019665XqqPm9U1NRR99GLvBm |
 
+- **Network:** the cloud environment's policy blocks the OSM hosts. Fetching real map data needs `overpass-api.de` (and the mirror `overpass.kumi.systems`) allowed in the environment's Network access settings.
 - **Next wave (not started):**
   - wire the economy and terminals into the live game, from docs/economy.md and docs/terminals.md;
   - then cyclists;
