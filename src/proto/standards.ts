@@ -48,6 +48,9 @@ export const STD = {
   // extra lane, an auxiliary lane, alongside the nearside lane for `length` before the nose (a
   // diverge) or after it (a merge), with a short `taper` at its far end.
   parallel(mph: number) { return mph >= 70 ? { length: 200, taper: 90 } : mph >= 60 ? { length: 170, taper: 80 } : mph >= 50 ? { length: 140, taper: 70 } : { length: 110, taper: 60 } },
+  // chevron markings (TSRGD diagram 1042) in a hatched area between lanes: solid bars in close-set
+  // V's inside a solid edge line; the bar's width along the road and the gap between bars
+  chevron(mph: number) { return mph >= 60 ? { bar: 1.0, gap: 1.6, edge: 0.2 } : mph >= 40 ? { bar: 0.8, gap: 1.4, edge: 0.15 } : { bar: 0.6, gap: 1.2, edge: 0.1 }; },
   // the width of the hatched nose where the slip road's kerb and the carriageway's part
   noseTip: 1.2,
 };

@@ -8,7 +8,7 @@ import type { Leg } from '../junction';
 import { closestOnPath, pathLength, pointAt, type Network, type P } from '../roads';
 import { kerbOf, laneBase } from '../catalog';
 import { STD } from '../standards';
-import type { Shape, SlipMarks, SlipShape } from '../jshape';
+import { chevronsIn, type Shape, type SlipMarks, type SlipShape } from '../jshape';
 import type { XZ } from '../land';
 
 // main: the carriageway arriving and leaving; slip: the slip road
@@ -92,15 +92,11 @@ export function slipShape(net: Network, node: number, r: SlipRoles): Shape | nul
   const line = (r0: number, r1: number, off: (rho: number) => number) => { const pts: XZ[] = []; for (let rho = r0; rho < r1; rho += 2) pts.push(frame(rho, off(rho))); pts.push(frame(r1, off(r1))); return pts; };
   const W = M.mph >= 60 ? 0.15 : 0.1, edge = 0.1;
   const [nose0, nose1] = merge ? [rhoN, 0] : [0, rhoN], [tap0, tap1] = merge ? [0, TP] : [-TP, 0];
-  const H = STD.hatch(M.mph), hatch: XZ[][] = [];
   const inner = (rho: number) => e(rho) - wS / 2;
-  for (let c = nose0 + H.spacing / 2; c < nose1; c += H.spacing) {
-    const a = gen + edge + 0.15, b = inner(c) - edge - 0.15;
-    if (b - a < 0.4) continue;
-    // a stripe at 45°, leaning the way the traffic goes
-    const d = (b - a) * (merge ? 1 : -1), w = H.stripe / 2;
-    hatch.push([frame(c - w, a), frame(c + w, a), frame(c + d + w, b), frame(c + d - w, b)]);
-  }
+  // the nose: chevrons (TSRGD 1042) between the carriageway's edge line and the slip lane's, their
+  // points towards the wide end (its own edge lines are drawn below, with the rest)
+  const ch = chevronsIn((rho) => frame(rho, gen + edge), (rho) => frame(rho, inner(rho) - edge), 0, rhoN, M.mph);
+  const hatch: XZ[][] = ch.bars;
   const marks: SlipMarks = {
     solid: [
       { pts: line(nose0, nose1, () => gen), w: edge }, // the carriageway's edge, along the nose

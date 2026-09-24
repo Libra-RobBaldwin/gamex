@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { BAY, ROADS, bayWeight, closestOnPath, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
 import { legsAt, type Junction } from './junction';
 import { STD } from './standards';
-import { legAt, legDir, legFrameOf, ringA, type ShapeLeg } from './jshape';
+import { GHOST_PAIR, legAt, legDir, legFrameOf, ringA, type ShapeLeg } from './jshape';
 import { TAPER, courseOf, normals, type Course, type Section2 } from './xsection';
 import type { XZ } from './land';
 import { laneBase, type RoadDef } from './catalog';
@@ -535,7 +535,9 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       const o = -(kerbOf(d) + d.verge - 0.6), bq = part(s0 + 0.3, s1 - 0.3);
       // (not where it would stand on another carriageway: where the pair splays in to a junction, say)
       const others = [...net.segs.values()].filter((x) => x !== s && x.oneway && net.def(x).cls === 'road');
-      const clear = (x: number, z: number) => !others.some((x2) => { const c = closestOnPath({ x, z }, net.path(x2)); return c.d < net.half(x2) + 0.3; });
+      const clear = (x: number, z: number) => !others.some((x2) => { const c = closestOnPath({ x, z }, net.path(x2)); // (the barrier stands d.verge - 0.6 out from the kerb: stop where the kerbs are nearer than a
+        // ghost island's width, plus a metre, where the pair splays into a junction's chevrons)
+        return c.d < net.half(x2) + 0.3 || c.d < kerbOf(net.def(x2)) + GHOST_PAIR + 1.6 - d.verge; });
       for (let i = 1; i < bq.p.length; i++) {
         const p = bq.p[i - 1], q = bq.p[i], L2 = Math.hypot(q.x - p.x, q.z - p.z) || 1, nx = (q.z - p.z) / L2, nz = -(q.x - p.x) / L2;
         const P0 = [p.x + nx * o, p.z + nz * o], Q0 = [q.x + nx * o, q.z + nz * o];
@@ -705,6 +707,8 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       else pave.poly(q, y + 0.16);
     });
     for (const q of sh.aprons) asph.poly(q, y + 0.25);
+    // ghost islands where roads meet a roundabout close together: chevrons on the carriageway
+    for (const q of sh.ghost?.chevrons ?? []) { lines.tri3(q[0].x, y + 0.35, q[0].z, q[1].x, y + 0.35, q[1].z, q[2].x, y + 0.35, q[2].z); lines.tri3(q[0].x, y + 0.35, q[0].z, q[2].x, y + 0.35, q[2].z, q[3].x, y + 0.35, q[3].z); }
     for (const isl of sh.islands) {
       kerbed(isl, y);
       // a keep-left bollard at the end facing oncoming traffic

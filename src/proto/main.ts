@@ -1511,7 +1511,7 @@ nav.onChange(() => {
 
 // A motorway junction on its own, to look at: /proto.html?junction=dumbbell (or gsr, diamond; &slips=parallel)
 function seedJunctionDemo(form: IxForm | null, style: SlipStyle) {
-  const R = form === 'gsr' || style === 'parallel' || !form ? 780 : 510;
+  const R = 780;
   net.bound = Math.max(BOUND, R + 10); // (a grade-separated roundabout's slip roads reach past the town's edge)
   // (north of the lake)
   net.build({ x: -60, z: -510 }, { x: -60, z: 510 }, undefined, { ...DEFAULT_OPTS, type: 'dual' });
