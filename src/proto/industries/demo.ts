@@ -104,6 +104,8 @@ function fitView(zoom = Number(q.get('zoom') ?? 0) || 0, ms = 0) {
   const ui = q.get('ui') !== '0';
   const pad = ui ? { top: $('top').getBoundingClientRect().bottom, bottom: $('panel').getBoundingClientRect().height, left: 8, right: 60 } : {};
   let to = nav.fitting(siteBox(gallery ? sites : [sites[focus]]), pad, ISO);
+  // room to zoom out a little past the whole gallery
+  if (gallery) nav.setLimits({ hMax: Math.max(2400, to.h * 1.5) });
   if (zoom) to = { ...to, h: zoom };
   if (ms > 0) nav.animateTo(to, ms); else nav.setView(to);
 }
