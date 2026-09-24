@@ -57,6 +57,7 @@ interface Car {
   nextSeg?: number;
   oldLane?: number; lcAt?: number; lcHold?: number; v0?: number; uturn?: boolean;
   merge?: number; mergeBy?: number; // the lane it's waiting to be let into, and where it has to stop if it isn't
+  keep?: number; // the junction it turns at from the lane it's in, having waited too long to get into the right one
   turn?: { path: JPath; t: number; node: number; next: RSeg };
   plan?: Plan; merged?: boolean;
   adm?: number; admNode?: number;
@@ -88,6 +89,7 @@ const LONGEST = 7; // the furthest any vehicle reaches in front of or behind its
 const GIVE_UP = 90; // seconds stood still before a driver gives up and goes another way
 const DIVERT = 15; // seconds stood at a junction with no room beyond before trying another way out of it
 const STARVE = 20; // seconds waiting in a junction after which nobody else may go ahead of you
+const KEEP = 20; // seconds stood waiting to be let into the lane for a turn before turning from the lane you're in
 const AMBER = 3, ALLRED = 2;
 const LAT = 3; // m/s² sideways: how hard vehicles corner
 const BEND = 0.1; // radians: a join sharper than this is driven round its curve, not straight across
@@ -1015,7 +1017,8 @@ export class Traffic {
     for (const u of c.uref) if (u.path === pl.path) u.adm = adm;
     this.commit(pl.path.exitKey, c);
   }
-  // Committed, but the room beyond has gone and we can still stop: give up our place and wait.
+  // Committed, but the room beyond has gone (or we've still a lane to change into, or the one in
+  // front hasn't a place) and we can still stop: give up our place and wait.
   private uncommit(c: Car, pl: Plan) {
     c.adm = undefined; c.admNode = undefined;
     for (const u of c.uref) if (u.path === pl.path) u.adm = Infinity;
@@ -1092,7 +1095,7 @@ export class Traffic {
     const sp = this.span(c.seg, c.from, c.lane);
     if (sp[1] < L - 0.5 && sp[1] - c.s < 250) { want = c.lane - 1; end = sp[1] - c.front; }
     let allowed: number[] = [];
-    if (pl && pl.path.lineS - c.s < 200) {
+    if (pl && pl.path.lineS - c.s < 200 && c.keep !== pl.node) {
       allowed = this.allowedLanes(pl, c);
       if (allowed.length && !allowed.includes(c.lane)) {
         const tgt = allowed.reduce((b, i) => (Math.abs(i - c.lane) < Math.abs(b - c.lane) ? i : b), allowed[0]);
@@ -1107,6 +1110,8 @@ export class Traffic {
       const by = Math.min(end, hard - 6), last = Math.min(end, noWay ? hard - 1 : by);
       if (c.s < last && this.canChange(c, want, true)) { this.change(c, want, now); return; }
       if (turn && !noWay && c.s >= by - 3 && this.reroute(c, pl!)) return;
+      // (with no other way, and nobody letting us across, we go from the lane we're in in the end)
+      if (turn && noWay && end === Infinity && c.wait > KEEP && c.s >= last - 1.5) { c.keep = pl!.node; c.merge = undefined; c.mergeBy = undefined; return; }
       // (and one that finds itself past even that, say having started out there, turns from the lane it's in)
       if (c.s >= last) { c.merge = undefined; c.mergeBy = undefined; return; }
       // otherwise ask to be let in, and wait for it where we have to be across
@@ -1227,7 +1232,8 @@ export class Traffic {
     let admitted = !!pl && c.admNode === pl.node, hold = false;
     if (pl && pl.path.lineS - c.s <= this.sphere(c)) {
       if (!admitted) {
-        const ok = this.admit(c, pl, now);
+        // (not while we've still to get into another lane: we'd be holding up everyone after us)
+        const ok = c.merge !== undefined ? this.no(c, 'changing lane') : this.admit(c, pl, now);
         const signals = pl.jd.j?.form === 'signals' && !pl.path.slip;
         // at the lights, only once we're too close to stop if they change
         const close = pl.path.lineS - c.s - c.front <= Math.max(2.5, (c.v * c.v) / 6 + c.v * 0.3);
@@ -1238,7 +1244,10 @@ export class Traffic {
           c.roomWait = (c.roomWait ?? 0) + dt;
           if (c.roomWait > DIVERT && this.divert(c, pl)) { c.roomWait = 0; return; }
         } else c.roomWait = 0;
-      } else if (pl.jd.j && !this.exitRoom(c, pl.path) && pl.path.lineS - c.s - c.front > (c.v * c.v) / 6 + 0.5) { this.uncommit(c, pl); admitted = false; hold = true; }
+      } else if (pl.jd.j && (c.merge !== undefined || !this.leaderFirst(c, pl.path, pl.node) || !this.exitRoom(c, pl.path)) && pl.path.lineS - c.s - c.front > (c.v * c.v) / 6 + 0.5) {
+        // (nor ahead of the one in front of us, if it has given its place back or pulled in ahead of us)
+        this.uncommit(c, pl); admitted = false; hold = true;
+      }
     }
     if (pl) v0 = Math.min(v0, Math.sqrt(spd(pl.path, pl.path.ext0) ** 2 + 4 * Math.max(0, pl.path.lineS - c.s)));
     // everything in the way, as the gentlest acceleration that respects all of it
@@ -1411,7 +1420,7 @@ export class Traffic {
     c.turn = { path: P, t: P.ext0 + (c.s - P.lineS), node: pl.node, next: pl.next };
     c.merged = false;
     if (!c.bus) c.route.shift();
-    c.plan = undefined; c.oldLane = undefined; c.merge = undefined; c.mergeBy = undefined; c.nextSeg = undefined;
+    c.plan = undefined; c.oldLane = undefined; c.merge = undefined; c.mergeBy = undefined; c.nextSeg = undefined; c.keep = undefined;
     // count what really turns where, so junctions can be re-optimised on real traffic
     if (!pl.jd.j) return;
     let m = this.seen.get(pl.node);
