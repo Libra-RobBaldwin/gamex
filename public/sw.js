@@ -1,5 +1,7 @@
 // Offline support: network-first for pages, cache-first for hashed assets.
-const CACHE = 'tracks-v2';
+// Every page on the site shares this worker (the game, the demos, Real Town Plans), so each page is
+// cached under its own address: a page offline is the page last seen there, never another one.
+const CACHE = 'tracks-v3';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
@@ -21,8 +23,8 @@ self.addEventListener('fetch', (e) => {
   if (req.mode === 'navigate') {
     e.respondWith(
       fetch(req)
-        .then((res) => { caches.open(CACHE).then((c) => c.put('/', res.clone())); return res; })
-        .catch(() => caches.match('/')),
+        .then((res) => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); } return res; })
+        .catch(() => caches.match(req, { ignoreSearch: true }).then((hit) => hit || caches.match('/'))),
     );
     return;
   }
