@@ -236,3 +236,17 @@ export function patchGround(m: THREE.MeshLambertMaterial, u: GroundUniforms) {
   return m;
 }
 export function forgetGround(m: THREE.MeshLambertMaterial) { materials.delete(m); }
+
+// The ground's fragment code as compiled at a quality level (its #if blocks resolved), for
+// counting texture reads.
+export function groundFragment(q: GroundQuality) {
+  const lv = QN[q], out: string[] = [], keep: boolean[] = [];
+  for (const line of FRAG_BODY.split('\n')) {
+    const t = line.trim(), m = /^#if GROUND_Q >= (\d)/.exec(t);
+    if (m) { keep.push(lv >= Number(m[1])); continue; }
+    if (t === '#else') { keep[keep.length - 1] = !keep[keep.length - 1]; continue; }
+    if (t === '#endif') { keep.pop(); continue; }
+    if (keep.every(Boolean)) out.push(line);
+  }
+  return out.join('\n');
+}
