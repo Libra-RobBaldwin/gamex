@@ -278,7 +278,12 @@ function shelter(solid: { glass: Solid; frame: Solid; red: Solid }, path: P[], t
   for (const e of [-2, 2]) { const p0 = at(e, back), p1 = at(e, front + sx * 0.4); solid.glass.quad([p0[0], y + 0.1, p0[1]], [p1[0], y + 0.1, p1[1]], [p1[0], y + 2.3, p1[1]], [p0[0], y + 2.3, p0[1]]); }
   solid.frame.box((at(0, (back + front) / 2))[0], (at(0, (back + front) / 2))[1], q.ux, q.uz, 2.15, 0.8, y + 2.3, y + 2.45);
   for (const e of [-2, 2]) { const p = at(e, back); solid.frame.box(p[0], p[1], q.ux, q.uz, 0.05, 0.05, y, y + 2.3); }
-  const f = at(3.2, front - sx * 0.2);
+  // a bench along the back, where the first people to arrive sit (game/crowdsites.ts)
+  const bn = at(0, back - sx * 0.3);
+  solid.frame.box(bn[0], bn[1], q.ux, q.uz, 1.5, 0.17, y + 0.53, y + 0.61); // (seat height above the pavement, which is 0.15 up)
+  // the flag stands ahead of the shelter in the direction the buses come (on the right-hand side
+  // of the road that's back along it), where the front door stops
+  const f = at(3.2 * sx, front - sx * 0.2);
   solid.frame.box(f[0], f[1], q.ux, q.uz, 0.05, 0.05, y, y + 3);
   solid.red.box(f[0], f[1], q.ux, q.uz, 0.03, 0.35, y + 2.4, y + 2.95);
 }
