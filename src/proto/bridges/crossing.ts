@@ -3,7 +3,7 @@
 // route, so the chooser and the support layout can work in one dimension.
 import { GRADES } from '../grade';
 import { halfOf, kerbOf, type RoadDef } from '../catalog';
-import { pointAt, type P } from '../roads';
+import type { P } from '../roads';
 
 // the solver's clearances allow ~1.2 m of deck (GRADES.clear = headroom + deck); headroom is what's left
 export const ASSUMED_DECK = 1.2;
@@ -34,7 +34,26 @@ export interface Crossing {
 }
 
 export const groundAt = (c: Crossing, s: number) => (c.ground ? c.ground(s) : 0);
-export const deckAt = (c: Crossing, s: number) => pointAt(c.path, s).y;
+export const deckAt = (c: Crossing, s: number) => pointOn(c.path, s).y;
+
+// Point and direction at distance s along a path: the same answer as roads.ts pointAt, but with
+// the running lengths cached per path and a binary search, because layout and geometry ask
+// thousands of times along paths of a thousand points.
+const runs = new WeakMap<P[], number[]>();
+export function pointOn(path: P[], s: number) {
+  let cum = runs.get(path);
+  if (!cum) {
+    cum = [0];
+    for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z));
+    runs.set(path, cum);
+  }
+  if (path.length < 2) { const p = path[0]; return { x: p.x, z: p.z, y: p.y ?? 0, ux: 1, uz: 0 }; }
+  let lo = 1, hi = path.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] < s) lo = m + 1; else hi = m; }
+  const a = path[lo - 1], b = path[lo], L = cum[lo] - cum[lo - 1];
+  const t = L ? Math.max(0, Math.min(1, (s - cum[lo - 1]) / L)) : 0, ya = a.y ?? 0, yb = b.y ?? 0;
+  return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, y: ya + (yb - ya) * t, ux: (b.x - a.x) / (L || 1), uz: (b.z - a.z) / (L || 1) };
+}
 // parapet to parapet: the road's full width (pavements or verges) or the track bed with a walkway
 export const deckWidth = (d: RoadDef) => (d.cls === 'rail' ? kerbOf(d) * 2 + 1.6 : halfOf(d) * 2 + 0.6);
 

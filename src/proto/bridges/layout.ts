@@ -4,10 +4,9 @@
 // cable-stayed, suspension, lifting bridges) put their one main span over the widest thing to be
 // crossed and reach the banks on ordinary approach spans. Everything is worked out along the
 // route in one dimension; plan positions are only added at the end.
-import { pointAt } from '../roads';
 import type { XZ } from '../land';
 import { BRIDGES, COST_SCALE, approachFor, closedPerOpening, deckRate, depthOf, type BridgeDef } from './catalogue';
-import { deckAt, deckWidth, gradeOver, groundAt, headroomOf, type Crossing, type Obstacle } from './crossing';
+import { deckAt, deckWidth, gradeOver, groundAt, headroomOf, pointOn, type Crossing, type Obstacle } from './crossing';
 
 export type SupportKind = 'abutment' | 'pier' | 'pylon' | 'tower' | 'anchorage' | 'leaf-pier' | 'springing';
 export interface Support {
@@ -322,7 +321,7 @@ export function layoutBridge(c: Crossing, d: BridgeDef, a: number, b: number): B
   const supports: Support[] = [];
   const spanAt = (s: number, side: -1 | 1) => plan.spans.find((sp) => (side < 0 ? Math.abs(sp.s1 - s) < 1e-3 : Math.abs(sp.s0 - s) < 1e-3));
   const add = (s: number, kind: SupportKind, sd: BridgeDef) => {
-    const p = pointAt(c.path, s);
+    const p = pointOn(c.path, s);
     const l = spanAt(s, -1), r = spanAt(s, 1);
     // it carries the lower of the two spans' undersides where they meet it
     const tops = [l, r].filter((x): x is Span => !!x).map((sp) => underside(c, sp, s));

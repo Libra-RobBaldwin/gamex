@@ -5,9 +5,8 @@
 // cutwaters and pilasters, trestle bents splaying out, trusses and arch ribs over the deck,
 // pylons and towers beside it, fans of white cables and a thick main cable. Low-poly throughout.
 import * as THREE from 'three';
-import { pointAt } from '../roads';
 import { depthOf, type BridgeDef } from './catalogue';
-import { deckAt, groundAt, type Crossing } from './crossing';
+import { deckAt, groundAt, pointOn, type Crossing } from './crossing';
 import { underside, type BridgeLayout, type Span, type Support } from './layout';
 import { bridgeMaterials, type Mat } from './materials';
 
@@ -63,7 +62,7 @@ export class Geo {
 // ---------- following the route ----------
 
 interface Frame { x: number; y: number; z: number; ux: number; uz: number; nx: number; nz: number }
-const frameAt = (c: Crossing, s: number): Frame => { const p = pointAt(c.path, s); return { x: p.x, y: p.y, z: p.z, ux: p.ux, uz: p.uz, nx: -p.uz, nz: p.ux }; };
+const frameAt = (c: Crossing, s: number): Frame => { const p = pointOn(c.path, s); return { x: p.x, y: p.y, z: p.z, ux: p.ux, uz: p.uz, nx: -p.uz, nz: p.ux }; };
 // a point `n` to the left of the centreline (negative is right), at height y, `a` further along
 const at = (f: Frame, n: number, y: number, a = 0): V => [f.x + f.nx * n + f.ux * a, y, f.z + f.nz * n + f.uz * a];
 function samples(s0: number, s1: number, step: number) {
@@ -346,7 +345,7 @@ function suspended(g: Geo, c: Crossing, lay: BridgeLayout, sp: Span, hw: number)
   for (let i = 1; i < n; i++) {
     const s = sp.s0 + (sp.len * i) / n, f = frameAt(c, s), top = cableY(c, lay, s) - 0.6;
     if (top - y(s) < 0.6) continue;
-    for (const k of [-1, 1]) g.bar('cable', at(f, k * n0, y(s)), at(f, k * n0, top), 0.25);
+    for (const k of [-1, 1]) g.bar('cable', at(f, k * n0, y(s)), at(f, k * n0, top), 0.3);
   }
 }
 
@@ -502,7 +501,7 @@ function stays(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number, H
       const top = at(f, k * (hw + 1.4), hgt);
       for (const [dir, reach] of [[toMain, midReach], [-toMain, backReach]] as const) {
         const s = q.s + dir * (10 + (reach - 10) * t), fd = frameAt(c, s);
-        g.bar('cable', top, at(fd, k * (hw + 0.2), deckAt(c, s) + 0.3), 0.3);
+        g.bar('cable', top, at(fd, k * (hw + 0.2), deckAt(c, s) + 0.3), 0.4);
       }
     }
   }
