@@ -31,7 +31,7 @@ prototype (`src/main.ts`). It has no three.js camera and isn't the game.
 | `kit/camera.ts` `NavCore` | The gesture state machine and view, with no DOM. Feed it pointer events and it moves `view`. Unit-tested with scripted fingers. | `NavRig` |
 | `kit/camera.ts` `NavRig` | `NavCore` bound to an element's pointer, wheel and key events, driving an orthographic or perspective three.js camera. It supports a floating origin (`origin`, `rebaseAt`, `onRebase`). | the game, every demo |
 | `kit/camera.ts` `SunFollow` | Keeps a directional light's shadow on the view. The box grows in big steps and slides in whole shadow-map texels, so shadow edges don't shimmer. | the game, people, vehicles, industries |
-| `kit/camera.ts` `mountNavControls` | Optional on-screen buttons in the brand's colours: a compass that shows north and resets the view, rotate left and right, zoom in and out. | water, bridges, industries |
+| `kit/camera.ts` `mountNavControls` | Optional on-screen buttons in the brand's colours: a compass that shows north and resets the view, rotate left and right, zoom in and out. Page CSS can't restyle them. `below: el` keeps them under a page's panel however tall it grows. | water, bridges, industries |
 
 ## What the navigation does
 
@@ -64,7 +64,12 @@ gesture:
 - `onDragStart` returns true to take it once it moves past the tap slop (drawing a road).
 
 The camera then leaves that finger alone and passes its moves to `onClaimMove`. A second finger
-hands control back to the camera for a pinch (`onClaimEnd(p, 'second-finger')`).
+hands control back to the camera for a pinch (`onClaimEnd(p, 'second-finger')`). When one finger
+of a pinch lifts, `onRemaining` can take back the finger that is left; otherwise it pans.
+
+Limits push back without dead zones. After pinching, tilting or panning past a limit, the
+gesture counts from the limit, so turning back works at once. A flick that lifts past its last
+move pans to where it lifted. A touch that stops a glide only stops it: it is not a tap.
 
 Limits come from `limits: { hMin, hMax, elMin, elMax, bounds }`. Presets and buttons use
 `animateTo(view, ms)`, `framing(point, sx, sy, patch)`, `fit(box, pad)`, `zoomAt`, `rotateBy`,
@@ -103,7 +108,7 @@ Variations:
   the target, and everything else is the same.
 - **A host that draws or drags**: return true from `onPointerDown` or `onDragStart`, and handle
   `onClaimMove` and `onClaimEnd`. The game does this in its build modes. The vehicle turntable
-  claims the drag to turn the vehicle.
+  claims the drag to turn the vehicle, and uses `onRemaining` for the finger left after a pinch.
 - **Framing a subject clear of panels**: use `nav.fitting(box, { top, bottom })` or
   `nav.framing(point, sx, sy, { h })`. The bridges and industries demos use these.
 - **Object viewer**: `oneFinger: 'orbit'` makes one finger turn and tilt instead of pan. No page
@@ -119,6 +124,9 @@ Variations:
   press, fling, pinch, twist threshold, tilt hand-over, a third finger, lift order, cancel,
   claims, mouse, wheel, keys, limits, `animateTo` and reset north.
 - `kit/architecture.test.ts` checks the rule above.
+- The `*.review.*` files hold the failing tests from four adversarial reviews (kit core, the
+  game against its old behaviour, every demo, and real phone touch in the browser). All of them
+  pass now. Keep them; they are regression tests.
 - `e2e/nav.e2e.mjs` runs in a real phone-sized touch browser (412×915, DPR 2) on the game and
   every demo. It scripts fingers through the DevTools protocol and measures, in screen pixels,
   that the ground grabbed stays under the finger. It also checks double tap, wheel, keyboard,
