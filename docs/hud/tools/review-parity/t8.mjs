@@ -1,0 +1,15 @@
+import { open, check, emptyPt, buildingPt } from './lib.mjs';
+const { browser, page, errs } = await open(412, 915, 3000);
+check('first-run pill shown on first load', await page.isVisible('#firstrun'), await page.textContent('#firstrun'));
+await page.waitForTimeout(8000);
+const b = await buildingPt(page);
+await page.touchscreen.tap(b.x, b.y); await page.waitForTimeout(500);
+check('first-run pill dismissed by a tap', await page.isHidden('#firstrun'));
+check('tap on a building opens its info sheet', await page.isVisible('#sheet'), await page.textContent('.sheet h2'));
+const e = await emptyPt(page);
+await page.touchscreen.tap(e.x, e.y); await page.waitForTimeout(400);
+check('tap on empty map closes the sheet', await page.isHidden('#sheet'));
+await page.reload(); await page.waitForTimeout(4000);
+check('first-run pill not shown again after reload', await page.isHidden('#firstrun'));
+check('no page errors', errs.length === 0, JSON.stringify(errs));
+await browser.close();

@@ -1,0 +1,20 @@
+// First-run pill (long text now): does it collide with the stats drawer or compass? Visible as soon as page usable.
+import { chromium } from 'playwright-core';
+import { box } from './lib.mjs';
+const [w, h] = (process.argv[2] || '412x915').split('x').map(Number);
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist','--ignore-certificate-errors'] });
+const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const out = new URL('./shots/', import.meta.url).pathname;
+await page.goto('http://127.0.0.1:5173/proto.html');
+await page.waitForFunction(() => { const e = document.getElementById('firstrun'); return e && !e.hidden; }, null, { timeout: 60000 });
+await page.waitForTimeout(1000);
+const p = await box(page, '#firstrun'), c = await box(page, '#compass');
+console.log('pill', JSON.stringify(p), 'compass', JSON.stringify(c), 'text', await page.textContent('#firstrun'));
+await page.screenshot({ path: `${out}${w}x${h}-firstrun-v2.png` });
+await page.tap('#clockbtn'); await page.waitForTimeout(400);
+const p2 = await box(page, '#firstrun'), d = await box(page, '#drawer');
+const vis = await page.evaluate(() => !document.getElementById('firstrun').hidden);
+const ov = vis && p2.top < d.bottom && p2.bottom > d.top;
+console.log(`${ov ? 'FAIL' : 'PASS'} pill vs opened stats drawer: pill ${JSON.stringify(p2)} drawer ${JSON.stringify(d)} pill visible ${vis}`);
+await page.screenshot({ path: `${out}${w}x${h}-firstrun-drawer-v2.png` });
+await browser.close();
