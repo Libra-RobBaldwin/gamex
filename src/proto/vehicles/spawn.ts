@@ -38,7 +38,7 @@ function styleWeight(s: BodyStyle, y: number) {
   }
 }
 // Volume makers sell far more cars than coachbuilders.
-const BRAND_VOLUME: Record<string, number> = { pennard: 4, morikawa: 4, varnholt: 3, lavergne: 3, norrvik: 1.5, dravnik: 1.2, tollworth: 1.5, hardesty: 0.5, fellgate: 1, chalcott: 0.3, hallbrook: 0.4, vessanti: 0.15, lumora: 1, ludgate: 0 };
+const BRAND_VOLUME: Record<string, number> = { ashcombe: 4, morikawa: 4, varnholt: 3, lavergne: 3, norrvik: 1.5, dravnik: 1.2, tollworth: 1.5, hardesty: 0.5, fellgate: 1, chalcott: 0.3, hallbrook: 0.4, vessanti: 0.15, novaform: 1, ludgate: 0 };
 
 // Models on the road in a year: built that year or up to about fifteen years before, fading out.
 function onRoad(m: Model, y: number) {
@@ -63,7 +63,7 @@ function pool(kind: string, y: number) {
   };
   p = MODELS.filter(want).map((m) => {
     let w = onRoad(m, y);
-    if (m.category === 'car') w *= styleWeight(m.style, y) * (BRAND_VOLUME[m.brand] ?? 1);
+    if (kind === 'car') w *= styleWeight(m.style, y) * (BRAND_VOLUME[m.brand] ?? 1);
     // heritage buses linger on as preserved vehicles at a trickle
     if (m.category === 'bus' && y - m.to > 15 && y - m.to < 60) w = Math.max(w, 0.02);
     return [m, w] as [Model, number];

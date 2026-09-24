@@ -42,11 +42,11 @@ export const OPERATORS: Operator[] = [
     blurb: 'The council\'s own buses, until deregulation in 1986 sold them off.',
   },
   {
-    id: 'rowan', name: 'Rowan Travel', kind: 'bus', code: 'RT', from: 1987, to: 2030, area: 'regional',
+    id: 'blackthorn', name: 'Blackthorn Travel', kind: 'bus', code: 'RT', from: 1987, to: 2030, area: 'regional',
     fleet: ['bus-single', 'bus-double', 'minibus', 'coach'],
     liveries: [
-      { name: 'Rowan swoops', from: 1987, to: 2008, colours: ['#1f7a4a', '#f2c21a', W, '#1f7a4a'] },
-      { name: 'Rowan leaf', from: 2009, to: 2030, colours: ['#1f7a4a', '#9ad04a', '#1f7a4a', W] },
+      { name: 'Blackthorn swoops', from: 1987, to: 2008, colours: ['#1f7a4a', '#f2c21a', W, '#1f7a4a'] },
+      { name: 'Blackthorn leaf', from: 2009, to: 2030, colours: ['#1f7a4a', '#9ad04a', '#1f7a4a', W] },
     ],
     blurb: 'A post-deregulation group that bought up the corporation fleets.',
   },
@@ -97,7 +97,7 @@ export const OPERATORS: Operator[] = [
   },
   // ---------------- railways ----------------
   {
-    id: 'wessex-mercia', name: 'Wessex & Mercia Railway', kind: 'rail', code: 'WMR', from: 1900, to: 1947, area: 'national',
+    id: 'southmoor-cotswold', name: 'Southmoor & Cotswold Railway', kind: 'rail', code: 'SCR', from: 1900, to: 1947, area: 'national',
     fleet: ['steam-tank', 'steam-tender', 'tender', 'coach-stock', 'wagon-box', 'wagon-hopper', 'brake-van'],
     liveries: [
       { name: 'Locomotive blue', from: 1900, to: 1947, colours: ['#1f3060', '#151515', '#151515', '#b3261e'], styles: ['steam-tank', 'steam-tender', 'tender'] },
@@ -107,7 +107,7 @@ export const OPERATORS: Operator[] = [
     blurb: 'A pre-nationalisation company running from the south coast to the Midlands.',
   },
   {
-    id: 'north-pennine', name: 'North Pennine Railway', kind: 'rail', code: 'NPR', from: 1900, to: 1947, area: 'national',
+    id: 'high-fells', name: 'High Fells Railway', kind: 'rail', code: 'HFR', from: 1900, to: 1947, area: 'national',
     fleet: ['steam-tank', 'steam-tender', 'tender', 'coach-stock', 'wagon-box', 'wagon-hopper', 'brake-van'],
     liveries: [
       { name: 'Moss green', from: 1900, to: 1947, colours: ['#4a6a2a', '#151515', '#151515', '#c9a33a'], styles: ['steam-tank', 'steam-tender', 'tender'] },
@@ -134,9 +134,9 @@ export const OPERATORS: Operator[] = [
     blurb: 'The nationalised railway. Green, then blue with yellow ends, then the sector liveries of the late eighties.',
   },
   {
-    id: 'pennant', name: 'Pennant Express', kind: 'rail', code: 'PX', from: 1997, to: 2030, area: 'national',
+    id: 'waymark', name: 'Waymark Express', kind: 'rail', code: 'PX', from: 1997, to: 2030, area: 'national',
     fleet: ['hs-power', 'hs-coach', 'electric-loco', 'coach-stock', 'emu-car'],
-    liveries: [{ name: 'Pennant green and gold', from: 1997, to: 2030, colours: ['#123d33', '#c9a33a', '#3f4449', '#c9a33a'] }],
+    liveries: [{ name: 'Waymark green and gold', from: 1997, to: 2030, colours: ['#123d33', '#c9a33a', '#3f4449', '#c9a33a'] }],
     blurb: 'The long-distance franchise on the east side of the country.',
   },
   {
@@ -152,7 +152,7 @@ export const OPERATORS: Operator[] = [
     blurb: 'Rural and regional trains across the northern hills.',
   },
   {
-    id: 'harbour-valleys', name: 'Harbour & Valleys', kind: 'rail', code: 'HV', from: 2003, to: 2030, area: 'regional',
+    id: 'harbour-hills', name: 'Harbour & Hills', kind: 'rail', code: 'HV', from: 2003, to: 2030, area: 'regional',
     fleet: ['dmu-car', 'emu-car', 'coach-stock', 'diesel-loco'],
     liveries: [{ name: 'Red and teal', from: 2003, to: 2030, colours: ['#c42a2a', '#1f8a8a', '#3f4449', Y] }],
     blurb: 'Valley lines and the coast route in the west.',
@@ -201,7 +201,7 @@ export const OPERATORS: Operator[] = [
     blurb: 'Supermarket distribution out of the big sheds by the motorway.',
   },
   {
-    id: 'pellow', name: 'Pellow Tankers', kind: 'haulier', code: 'PT', from: 1960, to: 2030, area: 'national',
+    id: 'ashby', name: 'Ashby Tankers', kind: 'haulier', code: 'PT', from: 1960, to: 2030, area: 'national',
     fleet: ['tractor', 'trailer-tanker', 'rigid-tanker'],
     liveries: [{ name: 'White and red', from: 1960, to: 2030, colours: [W, '#c42a2a', W, '#c42a2a'] }],
     blurb: 'Fuel, milk and chemicals in stainless barrels.',
@@ -225,7 +225,7 @@ export const OPERATORS: Operator[] = [
     blurb: 'Sheep and cattle to market.',
   },
   {
-    id: 'carbridge', name: 'Carbridge Vehicle Logistics', kind: 'haulier', code: 'CV', from: 1965, to: 2030, area: 'national',
+    id: 'dockside', name: 'Dockside Vehicle Logistics', kind: 'haulier', code: 'CV', from: 1965, to: 2030, area: 'national',
     fleet: ['tractor', 'trailer-car'],
     liveries: [{ name: 'Blue and white', from: 1965, to: 2030, colours: ['#1f3f8a', W, '#1f3f8a', W] }],
     blurb: 'New cars from the docks and the factories to the dealers.',
@@ -247,24 +247,24 @@ export const OPERATORS: Operator[] = [
     blurb: 'Bin lorries, gritters and the parks department.',
   },
   {
-    id: 'oakshire-police', name: 'Oakshire Constabulary', kind: 'police', code: 'OC', from: 1920, to: 2030, area: 'regional',
+    id: 'thornshire-police', name: 'Thornshire Constabulary', kind: 'police', code: 'TC', from: 1920, to: 2030, area: 'regional',
     fleet: ['police'],
     liveries: [
       { name: 'Black', from: 1920, to: 1964, colours: ['#151515', '#151515', '#151515', W] },
       { name: 'White with a red stripe', from: 1965, to: 1994, colours: [W, '#c42a2a', W, '#1f3f8a'] },
       { name: 'Blue and yellow checks', from: 1995, to: 2030, colours: [W, '#1f3fbf', W, '#e8d21a'] },
     ],
-    blurb: 'The county force of the fictional Oakshire.',
+    blurb: 'The county force of the fictional Thornshire.',
   },
   {
-    id: 'oakshire-ambulance', name: 'Oakshire Ambulance Service', kind: 'ambulance', code: 'OAS', from: 1948, to: 2030, area: 'regional',
+    id: 'thornshire-ambulance', name: 'Thornshire Ambulance Service', kind: 'ambulance', code: 'TAS', from: 1948, to: 2030, area: 'regional',
     fleet: ['ambulance'],
     liveries: [
       { name: 'Cream', from: 1948, to: 1985, colours: ['#efe3c2', '#efe3c2', '#efe3c2', '#1f3f8a'] },
       { name: 'White with green', from: 1986, to: 2004, colours: [W, '#1f8a3a', W, '#1f8a3a'] },
       { name: 'Yellow and green checks', from: 2005, to: 2030, colours: ['#e8d21a', '#1f8a3a', '#e8d21a', '#1f8a3a'] },
     ],
-    blurb: 'Emergency ambulances for Oakshire.',
+    blurb: 'Emergency ambulances for Thornshire.',
   },
   {
     id: 'oakport-hackney', name: 'Oakport Hackney Carriages', kind: 'taxi', code: 'OH', from: 1948, to: 2030, area: 'city',
@@ -276,7 +276,7 @@ export const OPERATORS: Operator[] = [
     blurb: 'Licensed cabs on the ranks outside the stations.',
   },
   {
-    id: 'nonna-bruna', name: 'Nonna Bruna Ices', kind: 'ice-cream', code: 'NB', from: 1955, to: 2030, area: 'city',
+    id: 'fiorella', name: 'Fiorella Ices', kind: 'ice-cream', code: 'NB', from: 1955, to: 2030, area: 'city',
     fleet: ['ice-cream'],
     liveries: [
       { name: 'Strawberry and cream', from: 1955, to: 2030, colours: ['#f2c4c8', '#efe3c2', '#efe3c2', '#b3261e'] },
@@ -298,7 +298,7 @@ export const OPERATORS: Operator[] = [
     blurb: 'Holiday narrowboats by the week.',
   },
   {
-    id: 'solent-crossways', name: 'Solent Crossways Ferries', kind: 'ferry', code: 'SCF', from: 1960, to: 2030, area: 'regional',
+    id: 'estuary-crossways', name: 'Estuary Crossways Ferries', kind: 'ferry', code: 'SCF', from: 1960, to: 2030, area: 'regional',
     fleet: ['ferry', 'coaster'],
     liveries: [{ name: 'White and blue', from: 1960, to: 2030, colours: [W, '#1f3f8a', W, '#c42a2a'] }],
     blurb: 'Car ferries to the islands.',

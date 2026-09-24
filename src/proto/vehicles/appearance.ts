@@ -15,8 +15,8 @@ const TRADE = ['#f2f2f0', '#f2f2f0', '#f2f2f0', '#1e2f55', '#b3261e', '#2f5a3a',
 // The operator a fleet vehicle belongs to in a given year, if any. Taxis, police cars and
 // ambulances always have one; buses, lorries and trains usually do.
 export function operatorFor(m: Model, year: number, seed: number): Operator | undefined {
-  if (m.style === 'police') return OPERATOR['oakshire-police'];
-  if (m.style === 'ambulance') return OPERATOR['oakshire-ambulance'];
+  if (m.style === 'police') return OPERATOR['thornshire-police'];
+  if (m.style === 'ambulance') return OPERATOR['thornshire-ambulance'];
   if (m.style === 'taxi') return OPERATOR['oakport-hackney'];
   if (m.category === 'car') return undefined;
   const r = rng(seed ^ 0x5bd1e995);

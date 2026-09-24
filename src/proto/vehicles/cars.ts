@@ -268,7 +268,7 @@ function classic(k: Kit, m: Model) {
   if (lod === 0) { wingAt(xf, true); wingAt(xr, false); }
   else for (const x of [xf, xr]) for (const s of [1, -1]) k.box(x - r - 0.1, x + r + 0.1, r * 1.6, r * 2.2, s > 0 ? hwB : -hwW, s > 0 ? hwW : -hwB, wing, { nx: null });
   const bx0 = xr + (r + 0.1) * Math.cos((15 * Math.PI) / 180), bx1 = xf - (r + 0.1);
-  for (const s of [1, -1]) k.box(bx0, bx1, r - 0.02, r + 0.05, s > 0 ? hwB : -hwW + 0.02, s > 0 ? hwW - 0.02 : -hwB, wing);
+  if (lod === 0) for (const s of [1, -1]) k.box(bx0, bx1, r - 0.02, r + 0.05, s > 0 ? hwB : -hwW + 0.02, s > 0 ? hwW - 0.02 : -hwB, wing);
   // wheels: tall and thin
   for (const x of d.axles) {
     if (lod === 0) wheels(k, x, r, zc + 0.06, 0.12, 'spoke');

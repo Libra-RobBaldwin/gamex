@@ -23,7 +23,9 @@ function plate(k: Kit, pts: [number, number][], y0: number, y1: number, top: Sty
 
 // ---------------- boats ----------------
 function hull(k: Kit, L: number, B: number, draught: number, free: number, bowLen: number, sternSz = 0.85, sheer = 0.3) {
-  const cs: P2[] = [[-0.6, -draught], [0.6, -draught], [1, -draught * 0.35], [1, free], [-1, free], [-1, -draught * 0.35]];
+  // the mid level drops the bilge chines: nobody sees below the waterline from there
+  const cs: P2[] = k.lod === 0 ? [[-0.6, -draught], [0.6, -draught], [1, -draught * 0.35], [1, free], [-1, free], [-1, -draught * 0.35]] : [[-0.8, -draught], [0.8, -draught], [1, free], [-1, free]];
+  const deck = k.lod === 0 ? 3 : 2, bilge = (j: number) => k.lod === 0 && (j === 1 || j === 5);
   const hw = B / 2;
   const sects = [
     { x: -L / 2, sy: 1, sz: hw * sternSz, dy: 0 },
@@ -32,7 +34,7 @@ function hull(k: Kit, L: number, B: number, draught: number, free: number, bowLe
     { x: L / 2 - bowLen * 0.4, sy: 1.05, sz: hw * 0.7, dy: sheer * 0.4 },
     { x: L / 2, sy: 1.1, sz: hw * 0.06, dy: sheer },
   ];
-  k.loftX(cs, sects, (j) => (j === 0 ? null : j === 3 ? C.deck : j === 1 || j === 5 ? C.antifoul : hullSt), hullSt, null);
+  k.loftX(cs, sects, (j) => (j === 0 ? null : j === deck ? C.deck : bilge(j) ? C.antifoul : hullSt), hullSt, null);
 }
 function wheelhouse(k: Kit, x0: number, x1: number, y0: number, y1: number, hw: number) {
   k.box(x0, x1, y0, y1, -hw, hw, body, { py: roofSt });
@@ -151,11 +153,11 @@ export function buildAir(k: Kit, m: Model) {
     plate(k, [[wx + chord / 2, root], [wx - chord / 2, root], [wx - chord * 0.2 - sweep, tip], [wx + chord * 0.15 - sweep, tip]], wy - 0.15, wy + 0.1, body, fixed('#b9bdc0'));
     // tailplane
     const tx = -L / 2 + tailLen * 0.35, tc = tailLen * 0.4, ts = span * 0.18;
-    const ty = style === 'turboprop' ? cy + R * 0.7 + L * 0.2 : cy + R * 0.3;
+    const ty = style === 'turboprop' ? cy + R * 0.6 + L * 0.16 - 0.1 : cy + R * 0.3;
     plate(k, [[tx + tc / 2, 0], [tx - tc / 2, 0], [tx - tc / 2 - ts * 0.3, s * ts], [tx - tc / 4 - ts * 0.3, s * ts]], ty - 0.08, ty + 0.05, body, fixed('#b9bdc0'));
   }
   // fin
-  const fh = style === 'light-aircraft' ? 1.3 : L * 0.2;
+  const fh = style === 'light-aircraft' ? 1.3 : style === 'turboprop' ? L * 0.16 : style === 'widebody' ? L * 0.14 : L * 0.19;
   k.prism([[-L / 2 + tailLen * 0.95, cy + R * 0.6], [-L / 2 + 0.2, cy + R * 0.7], [-L / 2 - 0.1, cy + R * 0.6 + fh], [-L / 2 + tailLen * 0.35, cy + R * 0.6 + fh]], 0.12 + R * 0.04, hullSt, () => hullSt);
   // engines
   const engines = num(g, 'engines', 2);

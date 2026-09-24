@@ -54,7 +54,8 @@ function make(brand: Brand, line: Line, style: BodyStyle, from: number, to: numb
   const road = cat === 'car' || cat === 'van' || cat === 'lorry' || cat === 'bus';
   const mark = gens > 1 ? (road ? ` Mk ${ROMAN[g] ?? g + 1}` : ` (${from})`) : '';
   // one line in several body styles gets a suffix (the Kelsall estate), the main style none
-  const variant = line.styles.length > 1 && style !== line.styles[0] && cat === 'car' ? ` ${STYLE_LABEL[style].toLowerCase()}` : '';
+  const variant = line.styles.length > 1 && (cat !== 'car' || style !== line.styles[0])
+    ? ` ${style === 'dmu-car' ? 'diesel' : style === 'emu-car' ? 'electric' : STYLE_LABEL[style].toLowerCase()}` : '';
   const family = `${line.family}${mark}${variant}`;
   const id = `${brand.id}-${slug(line.family)}-${g + 1}-${style}${idSuffix}`;
   const seed = hash(id);
@@ -119,7 +120,7 @@ export function buildCatalogue(): Model[] {
     }
   }
   // Police cars: the force buys whatever family cars and estates suit the decade.
-  const POLICE_FAMILIES = ['Kelsall', 'Hepworth', 'Staufen', 'Vallen', 'Tornby', 'Tarnhow', 'Kiyora', 'Marden', 'Highcombe', 'Oberau'];
+  const POLICE_FAMILIES = ['Kelsall', 'Thursby', 'Staufen', 'Skarholm', 'Tornby', 'Tarnhow', 'Kiyora', 'Wickmoor', 'Highcombe', 'Oberau'];
   for (const m of out.slice()) {
     if (m.category !== 'car' || !POLICE_FAMILIES.some((f) => m.family.startsWith(f))) continue;
     if (m.style !== 'saloon' && m.style !== 'estate' && m.style !== 'suv' && m.style !== 'hatchback') continue;
@@ -127,7 +128,7 @@ export function buildCatalogue(): Model[] {
     const brand = BRAND[m.brand];
     const r = rng(hash(m.id + '-police'));
     const spec = carSpec('police', m.from, lineOf(m)?.size ?? 'medium', brand, r, m.style);
-    out.push({ ...m, id: `${m.id}-police`, style: 'police', family: `${m.family} police car`, name: `${m.name} police car`, dims: m.dims, design: { ...m.design, ...spec.design, ...pickShape(m) }, seed: hash(m.id + '-police'), tags: ['oakshire-police'], stats: { ...m.stats, cost: Math.round(m.stats.cost * 1.3) } });
+    out.push({ ...m, id: `${m.id}-police`, style: 'police', family: `${m.family} police car`, name: `${m.name} police car`, dims: m.dims, design: { ...m.design, ...spec.design, ...pickShape(m) }, seed: hash(m.id + '-police'), tags: ['thornshire-police'], stats: { ...m.stats, cost: Math.round(m.stats.cost * 1.3) } });
   }
   return out;
 }

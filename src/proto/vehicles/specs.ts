@@ -50,6 +50,7 @@ export function carSpec(style: BodyStyle, year: number, size: SizeClass, brand: 
   if (key === 'supercar') L = Math.max(L, 4.3);
   const W = (byYear(year, [[1935, 1.56], [1960, 1.6], [1980, 1.66], [2000, 1.75], [2020, 1.84]]) + SIZE_W[sz] + s.dw) * jit();
   let H = s.h * jit();
+  const Wc = Math.min(W, 2.1); // the widest supercars stop short of 2.1 m
   if (key === 'hatchback' || key === 'saloon' || key === 'estate') H *= byYear(year, [[1950, 1.06], [1975, 0.96], [2000, 1], [2020, 1.02]]);
   if (key === 'suv' && year < 1985) H *= 1.1; // the tall utility of the early days
   if (key === 'classic') H = (size === 'large' ? 1.8 : 1.68) * jit();
@@ -58,7 +59,7 @@ export function carSpec(style: BodyStyle, year: number, size: SizeClass, brand: 
   const front = key === 'supercar' ? 0.42 : key === 'taxi' ? 0.5 : 0.56;
   const wr = key === 'classic' ? byYear(year, [[1905, 0.42], [1930, 0.36]]) : e.wheelR * (key === 'suv' ? 1.15 : key === 'pickup' ? 1.2 : key === 'supercar' ? 1.06 : sz === 'tiny' ? 0.82 : 1);
   const clearance = key === 'classic' ? 0.22 : key === 'suv' ? 0.22 : key === 'pickup' ? 0.24 : key === 'supercar' ? 0.1 : key === 'sports' ? 0.12 : 0.15;
-  const d = dims(L, W, H, twoAxle(L, wb, front), wr, clearance);
+  const d = dims(L, Wc, H, twoAxle(L, wb, front), wr, clearance);
 
   const rakeF = e.rake * s.rake * (key === 'taxi' ? 1 : 1);
   const hH = H;
@@ -82,7 +83,7 @@ export function carSpec(style: BodyStyle, year: number, size: SizeClass, brand: 
   if (b === 'hardesty') { design.lamps = year < 1956 ? 'round' : year < 1977 ? 'twin-round' : year < 1996 ? 'rect' : design.lamps; if (year < 1986) design.bumper = 'chrome'; }
   if (b === 'fellgate' && year < 1990) design.lamps = 'round';
   if (b === 'ludgate') { design.lamps = year < 1997 ? 'round' : 'wrap'; design.sign = true; }
-  if (b === 'lumora') { design.lamps = 'strip'; design.grille = 'closed'; design.wheel = 'aero'; design.blackPillars = true; }
+  if (b === 'novaform') { design.lamps = 'strip'; design.grille = 'closed'; design.wheel = 'aero'; design.blackPillars = true; }
   if (b === 'norrvik' && year >= 1972 && year < 1996) { design.lamps = 'rect'; design.bumper = 'rubber'; }
   if (year >= 2020 && r() < 0.25) { design.grille = 'closed'; design.lamps = 'strip'; }
   if (key === 'supercar' || key === 'sports') design.noseH = s.nose * hH, design.bumper = year < 1970 ? 'chrome' : 'body';
@@ -113,7 +114,7 @@ export function carSpec(style: BodyStyle, year: number, size: SizeClass, brand: 
   const seats = key === 'mpv' ? 7 : key === 'sports' || key === 'supercar' || key === 'pickup' ? 2 : key === 'taxi' ? 5 : 5;
   const top = byYear(year, [[1905, 50], [1930, 100], [1960, 135], [1990, 185], [2020, 200]]) + (key === 'sports' ? 40 : key === 'supercar' ? 120 : key === 'coupe' ? 30 : 0);
   const price = (sz === 'tiny' ? 9000 : sz === 'small' ? 14000 : sz === 'medium' ? 20000 : sz === 'large' ? 32000 : 38000) * (b === 'chalcott' ? 3 : b === 'vessanti' ? 8 : b === 'varnholt' ? 1.6 : b === 'dravnik' ? 0.6 : 1) * (key === 'supercar' ? 3 : 1);
-  const stats: Stats = { capacity: seats, unit: 'pax', speedKmh: Math.round(top), cost: Math.round(price / 100) * 100, running: Math.round(price * 0.08 / 10) * 10, power: b === 'lumora' || (year >= 2020 && design.grille === 'closed') ? 'electric' : 'petrol' };
+  const stats: Stats = { capacity: seats, unit: 'pax', speedKmh: Math.round(top), cost: Math.round(price / 100) * 100, running: Math.round(price * 0.08 / 10) * 10, power: b === 'novaform' || (year >= 2020 && design.grille === 'closed') ? 'electric' : 'petrol' };
   return { dims: d, design, stats };
 }
 
@@ -370,7 +371,7 @@ export function boatSpec(style: BodyStyle, year: number, r: Rand): Spec {
   const S: Partial<Record<BodyStyle, [number, number, number, number, number]>> = {
     // length, beam, height above water, capacity, speed
     narrowboat: [range(r, 17, 21), 2.08, 1.8, 25, 6], barge: [range(r, 32, 50), range(r, 5.5, 7), 3.2, 600, 12],
-    coaster: [range(r, 60, 85), range(r, 10, 13), 12, 2500, 22], 'container-ship': [range(r, 180, 260), range(r, 28, 36), 34, 60000, 40], ferry: [range(r, 110, 160), range(r, 20, 26), 26, 1500, 38],
+    coaster: [range(r, 60, 85), range(r, 10, 13), 17, 2500, 22], 'container-ship': [range(r, 180, 260), range(r, 28, 36), 34, 60000, 40], ferry: [range(r, 110, 160), range(r, 20, 26), 26, 1500, 38],
   };
   const [L, B, H, cap, sp] = S[style] ?? [20, 3, 2, 10, 10];
   const d = dims(L, B, H, [], 0, 0);
