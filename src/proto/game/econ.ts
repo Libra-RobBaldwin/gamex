@@ -16,6 +16,7 @@ import type { Lines } from './lines';
 import { TownNumbers, type CrowdNumbers } from './crowds';
 import type { StopSite } from './crowdsites';
 import { FARE, MONTH, RUNNING, type Purse } from './money';
+import type { Stations } from './rail';
 
 export const TOWN_ID = 1;
 export const TOWN_NAME = 'Ashcombe';
@@ -33,6 +34,7 @@ export interface TownHooks {
   industrial(p: P): boolean;
   clock(): number; // game minutes since the start
   purse?: Purse; // fares and running costs go here as they happen (game/money.ts)
+  stations?: Stations; // railway stations (game/rail.ts)
 }
 
 // The library's tuning, set for this town (measured with the town as it starts, its starter line,
@@ -102,7 +104,7 @@ export class TownEconomy {
     return out;
   }
   // one stop per place (a stop and the one facing it), keyed by the lower of their ids
-  private key(stop: number) { const p = this.h.traffic.place(stop); return p ? Math.min(...p.stops.map((s) => s.id)) : stop; }
+  private key(stop: number) { if (this.h.stations?.byId(stop)) return stop; const p = this.h.traffic.place(stop); return p ? Math.min(...p.stops.map((s) => s.id)) : stop; }
   private stopList(): StopIn[] {
     const out: StopIn[] = [], seen = new Set<number>();
     for (const seg of this.h.net.segs.values()) for (const st of seg.stops) {
@@ -112,10 +114,11 @@ export class TownEconomy {
       const p = this.h.net.path(seg), q = p[Math.min(p.length - 1, Math.max(0, Math.round((st.s / Math.max(1, this.h.net.length(seg))) * (p.length - 1))))];
       out.push({ id: k, kind: 'bus_stop', x: q.x, z: q.z, name: this.h.lines.name(k) });
     }
+    for (const st of this.h.stations?.list ?? []) out.push({ id: st.id, kind: 'rail_station', x: st.x, z: st.z, name: st.name });
     return out;
   }
   private lineList(): LineIn[] {
-    return this.h.lines.list.map((l) => ({ id: l.id, name: `Line ${l.num}`, stops: l.bus.seq.map((s) => this.key(s)), vehicle: vehicleFor(l.offer, this.h.traffic, l.id), count: this.h.lines.buses(l).length }))
+    return this.h.lines.list.map((l) => ({ id: l.id, name: `Line ${l.num}`, stops: l.bus.seq.map((s) => this.key(s)), vehicle: l.mode === 'rail' ? trainKind(l.train?.id) : vehicleFor(l.offer, this.h.traffic, l.id), count: this.h.lines.buses(l).length }))
       .filter((l) => l.count > 0 && l.stops.length >= 2);
   }
   private sig() { return JSON.stringify([this.stopList().map((s) => s.id), this.lineList().map((l) => [l.id, l.stops, l.count, l.vehicle])]); }
@@ -124,6 +127,9 @@ export class TownEconomy {
     return {
       // along the roads the buses take, at a town pace
       travelTime: (a, b, v) => {
+        // between stations: along the track, near enough the straight line
+        const sa = this.h.stations?.byId(a), sb = this.h.stations?.byId(b);
+        if (sa || sb) return sa && sb ? (Math.hypot(sa.x - sb.x, sa.z - sb.z) * 1.1) / ((VEHICLES[v].kmh * 0.7 * 1000) / 60) + 0.5 : Infinity;
         const k = `${a}>${b}`;
         let m = this.travel.get(k);
         if (m === undefined) {
@@ -185,7 +191,7 @@ export class TownEconomy {
       // (the month turned over: the rest of last month, then this one's)
       const riders = now >= was ? now - was : Math.max(0, (s?.carriedLastMonth ?? 0) - was) + now;
       this.carried.set(l.id, now);
-      const buses = this.h.lines.buses(l).length, kind = vehicleFor(l.offer, this.h.traffic, l.id);
+      const buses = this.h.lines.buses(l).length, kind = l.mode === 'rail' ? trainKind(l.train?.id) : vehicleFor(l.offer, this.h.traffic, l.id);
       const run = buses * (RUNNING[kind as keyof typeof RUNNING] ?? RUNNING.bus) * (minutes / 1440);
       purse?.flow(l.id, riders * MONTH * FARE, run);
     }
@@ -257,6 +263,10 @@ function vehicleFor(offer: string | undefined, traffic: Traffic, line: number): 
 // what a free plot needs to be re-planned for another kind of building: its least width, and
 // the range of heights to build to
 const REPLAN: Partial<Record<BuildingKind, [number, number, number]>> = { office: [8.5, 14, 22], shop: [6, 7, 11], flats: [8.5, 11, 16], house: [8.5, 6, 6], terrace: [5.5, 7, 9] };
+// what a train counts as in the economy
+function trainKind(id?: string): VehicleKind {
+  return id === 'intercity' || id === 'hs' || id === 'tram' || id === 'rack' ? id : 'dmu';
+}
 // the game can build a plot denser along the same use: house, terrace, flats, tower
 const CHAIN: LotKind[] = ['house', 'terrace', 'flats', 'tower'];
 function densifies(from: LotKind, to: BuildingKind) {

@@ -10,7 +10,10 @@ export const MONTH = 30; // days of the town's life in each game day
 export const PRICE_SHARE = 0.1; // of the list prices (roads, bridges, stops, vehicles)
 export const START = 400_000; // £ in the bank on a new game
 // running a bus for a game day (its month): driver, fuel, upkeep
-export const RUNNING: Record<'minibus' | 'bus' | 'decker' | 'coach', number> = { minibus: 700, bus: 1100, decker: 1300, coach: 1500 };
+export const RUNNING: Record<'minibus' | 'bus' | 'decker' | 'coach' | 'dmu' | 'tram' | 'rack' | 'intercity' | 'hs', number> = {
+  minibus: 700, bus: 1100, decker: 1300, coach: 1500,
+  dmu: 4000, tram: 3500, rack: 3500, intercity: 9000, hs: 14000, // a train for a game day
+};
 
 export interface Books { fares: number; running: number; building: number; vehicles: number; sold: number }
 const empty = (): Books => ({ fares: 0, running: 0, building: 0, vehicles: 0, sold: 0 });
