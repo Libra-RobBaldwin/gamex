@@ -1,0 +1,51 @@
+export const meta = {
+  name: 'bridges-earthworks-and-track',
+  description: 'Bridges demo: readable earthworks, fix rail/grass z-fighting, detailed low-cost track; adversarial visual + perf review; fix',
+  phases: [
+    { title: 'Build', detail: 'earthworks texture/shading, z-layer fix, instanced track detail' },
+    { title: 'Review', detail: 'screenshots of every type, coplanarity scan, draw calls/triangles' },
+    { title: 'Fix', detail: 'apply confirmed findings' },
+  ],
+}
+const SP = args.sp
+const ISO = `
+ISOLATION: you run in your own fresh git worktree (your current directory). Never modify /home/user/gamex (the main checkout — other agents work there) or other worktrees. First: git status; git fetch origin claude/bridges-lib; then create your branch as instructed; npm install.
+Commit on your branch: short summary line, blank line, a few bullets, then exactly these trailers:
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EDn6ScXmNn8wUEBAmG2GGU
+Never push. Report branch and sha. Scratch files only under ${SP}/<your role>/.
+`
+const COMMON = `
+Project: "Untitled", a TypeScript + three.js transport/city game played on an Android phone (isometric camera). The bridges library lives in src/proto/bridges/ on branch claude/bridges-lib: catalogue.ts, crossing.ts, layout.ts, geometry.ts (bridge meshes by material via a Geo builder; deck surfaces, rails), materials.ts (bridgeMaterials), scenario.ts, gallery.ts, demo.ts (the phone demo: world() builds ground strips, water, roads underneath, the route on embankments either side of the bridge via sweepAlong 'sides' grass + 'eg' surface/ballast/rail strips, earthEdges() cut-face map edges, trees), bridges-demo.html. Recently fixed: masonry pilasters, suspension anchorages, truss portals (a test samples every triangle for the traffic envelope), deck profile smoothing in src/proto/grade.ts, roads underneath follow the ground, earth cut-face edges.
+The user's new feedback on the bridges demo:
+1. "On the wooden truss one [the timber trestle], where we've reconstructed the ground against the bridge entrances, you can kind of see that against the grass but there's no texture so you can't see that the grass has been moved. Need to fix that." — embankment and cutting slopes (and the ground generally) need to read as reshaped earth: texture and/or shading so slopes, toes and crests are visible from the isometric camera in daylight.
+2. "We've also got a problem with the Z layer on the steel bridge: it's the rail that goes across the top and the foundations for that rail are not working against the grass." — the ballast/track bed on the approaches (and possibly on decks) z-fights with the grass/embankment surfaces (e.g. ballast at y(s)-0.02..y(s) over an embankment top at y(s)-0.05, and where the embankment height is ~0 the ballast is coplanar with the ground).
+3. "Any chance we could add a bit more detail to how the rail looks as well? At the moment it's really plain. Can't see any sleepers or anything like that. I just want it to be good but again need to respect all the resource constraints so it's not laggy."
+Checks: npx tsc --noEmit ; npx vitest run. Visual checks: npx vite --port <your port> (dev server) then open /bridges-demo.html in headless Chromium (executablePath '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']; playwright-core at ${SP}/pw/node_modules; viewport 412x915 @2x, isMobile, hasTouch). Gallery navigation: #next / #prev buttons, #title shows the type; #view toggles Top view; #chooser mode. Example screenshot script: ${SP}/pw/bridgeshot2.mjs (args: url out.png "<title substring>"). View screenshots with the Read tool. Style: concise comments in plain UK English explaining why; match existing code.
+`
+const REPORT = { type: 'object', properties: { branch: { type: 'string' }, sha: { type: 'string' }, summary: { type: 'string' }, files_changed: { type: 'array', items: { type: 'string' } }, evidence: { type: 'string', description: 'tests, measured draw calls/triangles before and after, screenshot paths' }, known_issues: { type: 'array', items: { type: 'string' } } }, required: ['branch', 'sha', 'summary', 'files_changed', 'evidence', 'known_issues'] }
+const FINDINGS = { type: 'object', properties: { findings: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, severity: { type: 'string', enum: ['high', 'medium', 'low'] }, where: { type: 'string' }, detail: { type: 'string' }, evidence: { type: 'string' }, confirmed: { type: 'boolean' } }, required: ['title', 'severity', 'where', 'detail', 'evidence', 'confirmed'] } }, verdict: { type: 'string' } }, required: ['findings', 'verdict'] }
+
+phase('Build')
+const build = await agent(`${ISO.replace('create your branch as instructed', 'git checkout -b bridges-track origin/claude/bridges-lib')}${COMMON}
+YOUR ROLE: builder. Branch: bridges-track. Serve on port 4251.
+First take BEFORE screenshots of every gallery type (top and angled) and record draw calls and triangles (renderer.info — expose it on window if needed) so you can compare.
+Deliver:
+A. Earthworks that read: a shared, cheap ground look — a small tiling procedural texture (canvas-generated once, e.g. 256px, mipmapped, world-space UVs) for grass, used by the ground and the embankment/cutting slopes, plus distinct treatment of reshaped ground: slopes a slightly different grass (rougher/yellower, or mown stripes along the slope), a darker toe line or drainage ditch at the foot, a crest line, and shading from real slope normals (not flat-ambient) so an embankment is obvious from the isometric camera. Cuttings likewise (exposed soil or rock on steep cuts). Keep it to a couple of materials; no per-frame cost.
+B. Z-layer fix, done properly, not by nudging numbers: the track bed is a real raised ballast profile (a trapezoid ~0.3–0.4 m high with sloping shoulders) sitting on a formation that's part of the embankment; road surfaces sit on their own raised pavement; no two surfaces within a few centimetres of each other overlap anywhere in the scene. Use polygonOffset only as a last resort. Write an automated coplanarity test over the demo scene's geometry for every gallery type (like the triangle-sampling traffic-envelope test in geometry.test.ts): up-facing triangles from different meshes/materials at nearly the same height whose footprints overlap => failure. Make it pass.
+C. Track detail that stays cheap: for rail routes (approaches and decks), timber or concrete sleepers (by era: timber pre-1960s, concrete after), two rails per track with a visible head and foot, chairs or clips optional, ballast shoulders, a cess path at each side, and on bridge decks the appropriate form (ballasted deck on masonry/concrete, bare timbers on steel girder/truss decks with guard rails). Sleepers must be INSTANCED (one InstancedMesh per sleeper kind for the whole scene) or merged per bridge, with a level of detail: individual sleepers only when the camera is close enough to resolve them, otherwise a textured strip. Put the track builder in a reusable module (e.g. src/proto/bridges/track.ts, exported) so the main game's railways can adopt it later; note the integration steps in docs/bridges.md.
+D. Performance: report draw calls and triangles before/after for each gallery type; the demo must not gain more than a handful of draw calls; triangles within reason for a phone (state the budget you used).
+E. Tests: coplanarity test (B), track builder tests (sleeper spacing ~0.65 m, gauge 1.435 m, counts scale with length, LOD switch), keep all existing tests green. AFTER screenshots of every type (same views). Contact sheet of before/after at ${SP}/bridges-track/sheet.png.
+Commit on bridges-track. Return REPORT.`, { label: 'build:track-earthworks', phase: 'Build', schema: REPORT, isolation: 'worktree' })
+
+phase('Review')
+const review = build ? await agent(`${ISO.replace('create your branch as instructed', `git checkout -b bridges-track-review ${build.branch}`)}${COMMON}
+YOUR ROLE: adversarial visual and performance reviewer (don't change source except adding failing tests). Builder report: ${JSON.stringify(build)}. Serve on port 4252.
+Check every gallery type, in top and angled views, day, at phone size, and the chooser crossing: can you clearly see embankments/cuttings against flat ground? any z-fighting or shimmer anywhere (ground vs embankment, ballast vs formation, road vs pavement, water vs banks, earth-edge faces, bridge decks vs approaches; take two screenshots with a tiny camera move and diff them to find shimmering)? do sleepers/rails look right (gauge, spacing, era materials, deck form on steel vs masonry) and switch LOD without popping? any gaps where approach track meets the deck? do trees or roads intersect earthworks? performance: draw calls and triangles vs the builder's numbers; any per-frame allocation or cost added? Re-run the coplanarity test and try to break it (e.g. other gallery types, a curved deck with bend, the chooser scenario). Write failing tests in src/proto/bridges/track.review.test.ts where you can, commit them on bridges-track-review, and mark confirmed=true only with a failing test or a screenshot as evidence. Return FINDINGS.`, { label: 'review:track-earthworks', phase: 'Review', schema: FINDINGS, isolation: 'worktree' }) : null
+
+phase('Fix')
+const conf = (review?.findings ?? []).filter((f) => f.confirmed)
+const fix = conf.length ? await agent(`${ISO.replace('create your branch as instructed', 'git checkout -b bridges-track-2 bridges-track-review')}${COMMON}
+YOUR ROLE: fixer. Branch: bridges-track-2 (from bridges-track-review: builder's work + reviewer's failing tests). Serve on port 4253. Confirmed findings: ${JSON.stringify(conf)}. Verdict: ${review?.verdict}. Fix each root cause; make all tests pass (fix a wrong review test and say why); keep the performance budget; re-take the screenshots that showed problems and update ${SP}/bridges-track/sheet-2.png. Commit on bridges-track-2. Return REPORT.`, { label: 'fix:track-earthworks', phase: 'Fix', schema: REPORT, isolation: 'worktree' }) : null
+
+return { build, review, fix }
