@@ -10,7 +10,7 @@
 import { icon, type Icon } from './icons';
 import { NAME, markSvg, needleSvg } from './brand';
 
-export type Tone = 'road' | 'rail' | 'stop' | 'look';
+export type Tone = 'road' | 'rail' | 'stop' | 'look' | 'bulldoze';
 export type BarKey = 'build' | 'transport' | 'layers' | 'menu';
 
 /** A button in a sheet's action row or the tool strip. */

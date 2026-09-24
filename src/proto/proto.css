@@ -44,6 +44,9 @@ body[data-mode='rail'], .tone-rail {
 body[data-mode='stop'], .tone-stop {
   --mode: #f28c28; --mode-hi: #ffb466; --mode-ink: #361402; --mode-mid: #a8441a; --mode-soft: rgba(242, 140, 40, 0.22);
 }
+body[data-mode='bulldoze'], .tone-bulldoze {
+  --mode: #e2563f; --mode-hi: #ff8f78; --mode-ink: #fff; --mode-mid: #9c2d1f; --mode-soft: rgba(226, 86, 63, 0.22);
+}
 .tone-look { --mode: #5cb83a; --mode-hi: #8fd96a; --mode-ink: #0a2414; --mode-mid: #2a7a50; --mode-soft: rgba(92, 184, 58, 0.2); }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }

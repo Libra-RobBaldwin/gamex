@@ -488,7 +488,7 @@ async function seedTown() {
 }
 
 // ---------------- UI ----------------
-type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line' | 'station';
+type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line' | 'station' | 'bulldoze';
 type RoadKind = 'straight' | 'curve' | 'smooth';
 let mode: Mode = 'look';
 let roadKind: RoadKind = 'straight';
@@ -560,13 +560,14 @@ function setKind(k: RoadKind) {
 }
 // The hint over the map. It leads with the current tool's icon unless given its own. With a tool
 // in use it stays until replaced; otherwise it's a short message that clears itself.
-const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop', line: 'transport', station: 'train' };
+const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop', line: 'transport', station: 'train', bulldoze: 'bulldozer' };
 function hint(text?: string, ic?: Icon) {
   let t = text;
   if (t === undefined) {
     if (!tool) return shell.hint(null);
     if (mode === 'stop') t = stopPreview ? '' : 'Tap a road, on the side you want the stop'; // (with a blueprint down, the card says it all)
     else if (mode === 'station') t = 'Tap a straight, level stretch of railway · platforms go either side';
+    else if (mode === 'bulldoze') t = doomed ? '' : 'Tap a road or a bus stop to take it away';
     else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : ''; // (then the card says what next)
     else if (draft && slipPlan) t = 'A slip road: drag ahead and out to leave the motorway, back and out to join it · then Build';
     else if (draft) t = ''; // (the blueprint's card says what to do)
@@ -585,6 +586,7 @@ function endTool() {
   shell.endTool();
   shell.closeSheet();
   stopPreview = null;
+  if (doomed) { doomed = null; drawGhost(); }
   if (mode === 'line') { lineDraft = []; showLine(null); }
   setMode('look');
 }
@@ -606,6 +608,61 @@ function switchType(t: RoadType) {
   lastType[cls()] = t;
   tool?.set({ name: cardName(t), spec: cardSpec(t), icon: roadIcon(ROADS[t]) });
   tool?.setOpen(false);
+}
+// ---- bulldoze: take away a road or a bus stop. Not a road buildings face (they'd be left with
+// no way in), not a stop a line calls at, not part of a motorway junction; half a road's price
+// comes back. ----
+let doomed: { seg: RSeg; stop?: Stop } | null = null;
+function startBulldozeTool() {
+  tool = shell.startTool({ name: 'Bulldoze', spec: 'Tap a road or a bus stop', icon: 'bulldozer', tone: 'bulldoze', onDone: endTool, onCancel: endTool });
+  setMode('bulldoze');
+  doomed = null;
+  hint();
+}
+function bulldozeTap(p: P) {
+  const hit = stopAt(p);
+  const q = hit ? null : net.nearestSeg(p, 14, (x) => net.def(x).cls === 'road');
+  if (!hit && !q) { doomed = null; drawGhost(); tool?.setPanel(null); tool?.setPrimary(null); hint('Tap a road or a bus stop', 'alert'); return; }
+  const seg = hit ? hit.seg : q!.seg, calls = (id: number) => lines.list.filter((l) => l.mode === 'bus' && l.stops.some((x) => lines.same(x, id)));
+  doomed = { seg, stop: hit?.stop };
+  drawGhost();
+  let what: string, why: string | null = null, refund = 0;
+  if (hit) {
+    const on = calls(hit.stop.id);
+    what = `${lines.name(hit.stop.id)} · ${hit.stop.kind === 'layby' ? 'lay-by' : 'kerbside'} stop`;
+    if (on.length) why = `Line ${on.map((l) => l.num).join(' and ')} calls here · withdraw it first`;
+  } else {
+    const d = net.def(seg), len = pathLength(net.path(seg));
+    what = `${d.label.split(' · ')[0]} · ${Math.round(len)} m`;
+    refund = Math.round(price(d.cost * len) / 2);
+    const lined = seg.stops.flatMap((st) => calls(st.id));
+    if (buildings.some((b) => !b.dying && b.lot.seg === seg.id)) why = 'Buildings face this road, and it’s their only way in';
+    else if (lined.length) why = `Line ${[...new Set(lined.map((l) => l.num))].join(' and ')} calls at a stop on it · withdraw the line first`;
+    else if (interchanges.some((ix) => ix.segs.includes(seg.id))) why = 'Part of a motorway junction, which comes away as a whole (not yet)';
+  }
+  tool?.setPanel(`<div class="what">${icon('bulldozer')}<span>${esc(what)}${refund ? ` · <b class="cost">${money(refund)}</b> back` : ''}</span></div>
+    ${why ? `<div class="bad">${icon('alert')}<span>${esc(why)}</span></div>` : '<p class="why">Tap something else to pick it instead</p>'}`);
+  tool?.setPrimary({ label: 'Remove', icon: 'bulldozer', kind: 'danger', disabled: !!why, onClick: () => bulldoze(what, refund) });
+  hint();
+}
+function bulldoze(what: string, refund: number) {
+  if (!doomed) return;
+  const { seg, stop } = doomed;
+  doomed = null;
+  if (stop) { seg.stops = seg.stops.filter((x) => x !== stop); net.claimSeg(seg); }
+  else {
+    net.removeSeg(seg.id);
+    // (the empty plots along it go with it)
+    net.lots = net.lots.filter((l) => l.seg !== seg.id);
+    queue = queue.filter((l) => l.seg !== seg.id);
+  }
+  if (refund) purse.refund(refund);
+  drawGhost();
+  rebuildRoads();
+  tool?.setPanel(null);
+  tool?.setPrimary(null);
+  hint(`${what} taken away${refund ? ` · ${money(refund)} back` : ''}`, 'bulldozer');
+  updateGoal();
 }
 function startStopTool() {
   tool = shell.startTool({ name: 'Bus stop', spec: 'Tap the side of a road', icon: 'busStop', tone: 'stop', onDone: endTool, onCancel: endTool });
@@ -814,17 +871,11 @@ for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].lab
 shell.addBuildItem('roads', { id: 'more', label: 'More road types', spec: 'Filter by lanes, speed, trees, bus and cycle lanes', short: 'Lanes, speed, trees…', icon: 'adjustments', tone: 'road', on: () => !PRESETS.includes(lastType.road), onPick: () => { openRoadPicker(true); return false; } });
 shell.addBuildCategory({ id: 'rail', label: 'Rail', icon: 'train' });
 for (const id of RAIL_PRESETS) shell.addBuildItem('rail', { id, label: ROADS[id].label, spec: ROADS[id].blurb, short: `${ROADS[id].mph} mph · ${pctTxt(ROADS[id].maxGrade)}`, icon: roadIcon(ROADS[id]), tone: 'rail', on: () => lastType.rail === id, onPick: () => startRoadTool(id) });
-shell.addBuildCategory({ id: 'stops', label: 'Stops', icon: 'busStop' });
+shell.addBuildCategory({ id: 'stops', label: 'Stops', icon: 'busStop' }); // (bus stations, lorry depots and freight terminals get cards when they're in the game)
 shell.addBuildItem('stops', { id: 'bus-stop', label: 'Bus stop', spec: 'On any road; a lay-by where there is room', short: 'On any road', icon: 'busStop', tone: 'stop', onPick: () => startStopTool() });
-shell.addBuildItem('stops', { id: 'bus-station', label: 'Bus station', spec: 'Several bays, for busy routes', icon: 'bus', locked: 'Not in the game yet' });
 shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight, level run of track', short: 'On straight track', icon: 'train', tone: 'rail', onPick: () => { endTool(); railGame.startStationTool(); } });
-shell.addBuildItem('stops', { id: 'depot', label: 'Lorry depot', spec: 'Where your lorries start and are kept', icon: 'warehouse', locked: 'Not in the game yet' });
-shell.addBuildCategory({ id: 'freight', label: 'Freight', icon: 'warehouse', note: 'Terminals are bought for an industry; better ones unlock as it grows.' });
-shell.addBuildItem('freight', { id: 'terminals', label: 'Freight terminals', name: 'Terminals', spec: 'Loading bays, sidings and jetties for industries', icon: 'warehouse', locked: 'Come with the terminals update' });
 shell.addBuildCategory({ id: 'bulldoze', label: 'Bulldoze', icon: 'bulldozer' });
-shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Tap or drag over what you want to remove; costs shown first', icon: 'bulldozer', locked: 'Not in the game yet: roads stay once built' });
-shell.addBuildCategory({ id: 'landscape', label: 'Landscape', icon: 'mountain' });
-shell.addBuildItem('landscape', { id: 'terrain', label: 'Raise and lower land', name: 'Raise, lower', spec: 'Hills, cuttings and embankments', icon: 'mountain', locked: 'Needs terrain, which isn’t in the game yet' });
+shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Take away a road or a bus stop; half a road’s price comes back', short: 'Roads and stops', icon: 'bulldozer', tone: 'bulldoze', onPick: () => startBulldozeTool() });
 
 // ---- the Layers pop-over: overlays (none are in the game yet) and the view ----
 shell.addLayer({ id: 'flow', label: 'Traffic flow', icon: 'lights', disabled: 'Not in the game yet' });
@@ -1368,6 +1419,7 @@ const handleMat = new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: fal
 const handleRing = new THREE.MeshBasicMaterial({ color: '#1f8fd6', depthTest: false });
 const guideMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7, depthWrite: false });
 const xrayMat = new THREE.MeshBasicMaterial({ color: '#4cc3ff', transparent: true, opacity: 0.3, depthTest: false, depthWrite: false });
+const xrayBadMat = new THREE.MeshBasicMaterial({ color: '#ff5a4d', transparent: true, opacity: 0.3, depthTest: false, depthWrite: false });
 const doomMat = new THREE.MeshBasicMaterial({ color: '#ff2a1a', transparent: true, opacity: 0.45, depthWrite: false });
 const ghost = new THREE.Group();
 ghost.renderOrder = 5;
@@ -1444,6 +1496,16 @@ function drawGhost() {
     const m = pf.mesh(ghostMat); m.renderOrder = 5; ghost.add(m);
     // and faintly through any building in front of it, so it's never lost behind one
     const xm = pf.mesh(xrayMat); xm.renderOrder = 8; ghost.add(xm);
+  }
+  if (doomed && net.segs.has(doomed.seg.id)) {
+    // what the bulldozer takes: the stop's length of kerb, or the whole road, in red
+    const { seg, stop } = doomed, path = net.path(seg), f = new Flat();
+    if (stop) {
+      const [a, b] = stopSpan(stop), K = kerbOf(net.def(seg));
+      f.strip(subPath(path, Math.max(0, a), Math.min(pathLength(path), b)), () => (stop.side === 1 ? [K - 3.2, K + 3.0] : [-K - 3.0, -K + 3.2]), 0.8);
+    } else f.ribbon(path, net.half(seg) + 0.5, 0.8);
+    const m = f.mesh(badMat); m.renderOrder = 5; ghost.add(m);
+    const xm = f.mesh(xrayBadMat); xm.renderOrder = 8; ghost.add(xm);
   }
   for (const [f, mat, order] of [[gf, guideMat, 9], [rf, handleRing, 10], [hf, handleMat, 11]] as const) {
     if (!f.pos.length) continue;
@@ -1666,6 +1728,7 @@ function tapMap(sx: number, sy: number): Mode {
     return mode;
   }
   if (mode === 'stop') { stopTap(g); return mode; }
+  if (mode === 'bulldoze') { bulldozeTap(g); return mode; }
   if (mode === 'line') { lineTap(sx, sy); return mode; }
   if (railGame.tap(sx, sy, g)) return 'stop'; // (a railway tool: rail/game.ts)
   if (mode === 'station') { stationTap(g); return mode; } // (the interim stations, game/rail.ts: not offered while rail/ is)
@@ -2085,7 +2148,7 @@ loading.finish();
 let loaded = false;
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
 Object.assign((window as unknown as { proto: object }).proto, { interchanges, blueprint: (a: P, b: P) => { draft = { a: net.snapStart(a, 4), b: net.snapEnd(net.snapStart(a, 4), b, 4, true) }; draftChanged(); } });
