@@ -185,7 +185,7 @@ export class Economy {
     }
     const zs: ZState = {
       id: z.id, idx: -1, town, x: z.x, z: z.z, r: z.r ?? 120, plots: z.plots, reserved: 0, blocked: 0, allow, cleared: perUse(),
-      buildings: [], indJobs: 0, cov: 0, centre: 0.5, acc: [], cap: perUse(), occCap: perUse(), pHome: 1, labour: 1, customers: 1,
+      buildings: [], indJobs: 0, cov: 0, centre: 0.5, size: 0, group: -1, acc: [], cap: perUse(), occCap: perUse(), pHome: 1, labour: 1, customers: 1,
     };
     this.zoneMap.set(z.id, zs);
     town.zones.push(zs);
@@ -580,6 +580,9 @@ export class Economy {
       for (const s of touched) accCap[s] = accD[s] = seen[s] = 0;
       touched.length = 0;
       z.cov = total > 0 ? covered / total : 0;
+      z.size = total;
+      // blocked with the rest of its town if it has a stop, so service to one town isn't lent to the next
+      z.group = z.acc.length ? z.town.id : -1;
     }
     for (const [s, m] of visit) {
       const sum = [...m.values()].reduce((a, v) => a + v, 0);

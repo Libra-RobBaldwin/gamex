@@ -209,28 +209,32 @@ export class Skim {
 
 // ---------------- pairs ----------------
 export interface ZoneAccess { s: number; walk: number; cov: number } // skim stop, minutes on foot, share of the zone
-export interface ZoneGeo { id: number; x: number; z: number; r: number; acc: ZoneAccess[] }
+// `size`: places in its buildings. `group`: zones with the same group (and cell) are blocked
+// together: the economy gives a zone near a stop its town, so a block reached by bus or rail
+// is one town's, and a railway to one town doesn't bring the next town's jobs within reach.
+export interface ZoneGeo { id: number; x: number; z: number; r: number; size: number; group: number; acc: ZoneAccess[] }
 
-// What stays the same between rebuilds while the zones stay put, a row per zone: the places it
-// pairs with, and the car oracle's answers for them in the same order. Roads change far less
-// often than bus routes, so the economy empties `cars` when the network changes rather than
-// asking every month, and both when zones move or come and go.
-export interface PairCache { places: (Int32Array | undefined)[]; cars: (Float32Array | undefined)[] }
+// What stays the same between rebuilds while the zones stay put (and keep their groups), a row
+// per zone: the places it pairs with, and the car oracle's answers for them in the same order.
+// Roads change far less often than bus routes, so the economy empties `cars` when the network
+// changes rather than asking every month, and both when zones move or come and go.
+export interface PairCache { places: (Int32Array | undefined)[]; cars: (Float32Array | undefined)[]; groups?: Int32Array }
 
 // A block of zones, standing in for all of them as somewhere to go from further off: it's
-// reached at its middle by car, and by bus or rail at whichever of its stops is best.
+// reached at its middle by car, and by bus or rail at whichever of its stops is best, with the
+// walk from that stop averaged over the places near it, as for a zone.
 interface Block { x: number; z: number; rep: number; entry: { s: number; walk: number }[] }
 
 // Places are zones (0 .. Z-1) and then blocks. A zone pairs one to one with the zones in the
-// 3 x 3 cells of `pairCellM` round it; then with blocks one level up (cells three times the
-// size) in the 3 x 3 of the level above not already covered; and so on out to `maxPairM`. Every
-// zone in range is covered once, by a block no bigger than about a third of its distance.
+// 3 x 3 cells of `pairCellM` round it; then with the blocks in cells three times the size, in
+// the 3 x 3 of the level above, that aren't next to its own; and so on out to `maxPairM`. Every
+// zone in range is covered once, by a block at least its own width away.
 export class Pairs {
   n = 0;
   readonly Z: number;
   readonly N: number; // places
   readonly levels: number; // levels of blocks
-  readonly up: Int32Array; // Z x levels: the block each zone is in at each level
+  readonly up: Int32Array; // Z x levels: the block each zone is in at each level (as a place)
   readonly start: Int32Array; // pairs from zone i are start[i] .. start[i+1]-1
   i: Int32Array; j: Int32Array;
   car: Float32Array; // door to door with a car to hand (they'll walk or ride if that's quicker)
@@ -257,25 +261,32 @@ export class Pairs {
       CX[i * L1] = Math.floor(zones[i].x / c0); CZ[i * L1] = Math.floor(zones[i].z / c0);
       for (let l = 1; l <= L; l++) { CX[i * L1 + l] = Math.floor(CX[i * L1 + l - 1] / 3); CZ[i * L1 + l] = Math.floor(CZ[i * L1 + l - 1] / 3); }
     }
-    // a dense grid of blocks at each level (only occupied cells get one)
+    // what the cache holds was worked out for these groups
+    const groups = Int32Array.from(zones, (z) => z.group);
+    if (!cache.groups || cache.groups.length !== Z || cache.groups.some((g, i) => g !== groups[i])) {
+      cache.places = []; cache.cars = []; cache.groups = groups;
+    }
+    // a dense grid at each level, each occupied cell holding its blocks (one per group) as a list
     const grids = Array.from({ length: L }, (_, l) => {
       let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (let i = 0; i < Z; i++) { const x = CX[i * L1 + l], z = CZ[i * L1 + l]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
       const w = Z ? x1 - x0 + 1 : 0, h = Z ? z1 - z0 + 1 : 0;
       return { x0, z0, w, h, cell: new Int32Array(w * h).fill(-1) };
     });
-    const blockAt = (l: number, x: number, z: number) => {
+    const firstAt = (l: number, x: number, z: number) => {
       const g = grids[l], a = x - g.x0, b = z - g.z0;
       return a < 0 || b < 0 || a >= g.w || b >= g.h ? -1 : g.cell[a * g.h + b];
     };
-    const members: number[][] = [];
+    const members: number[][] = [], group: number[] = [], next: number[] = [];
     this.up = new Int32Array(Z * L);
     for (let i = 0; i < Z; i++)
       for (let l = 0; l < L; l++) {
         const g = grids[l], k = (CX[i * L1 + l] - g.x0) * g.h + (CZ[i * L1 + l] - g.z0);
-        if (g.cell[k] < 0) { g.cell[k] = members.length; members.push([]); }
-        members[g.cell[k]].push(i);
-        this.up[i * L + l] = Z + g.cell[k];
+        let b = g.cell[k];
+        while (b >= 0 && group[b] !== groups[i]) b = next[b];
+        if (b < 0) { b = members.length; members.push([]); group.push(groups[i]); next.push(g.cell[k]); g.cell[k] = b; }
+        members[b].push(i);
+        this.up[i * L + l] = Z + b;
       }
     const blocks: Block[] = members.map((m) => {
       let x = 0, z = 0;
@@ -283,9 +294,12 @@ export class Pairs {
       x /= m.length; z /= m.length;
       let rep = m[0], best = Infinity;
       for (const i of m) { const dx = zones[i].x - x, dz = zones[i].z - z, d = dx * dx + dz * dz; if (d < best) { best = d; rep = i; } }
-      const walk = new Map<number, number>();
-      for (const i of m) for (const a of zones[i].acc) if (!(walk.get(a.s)! <= a.walk)) walk.set(a.s, a.walk);
-      return { x, z, rep, entry: [...walk.entries()].sort((a, b) => a[0] - b[0]).map(([s, w]) => ({ s, walk: w })) };
+      const near = new Map<number, [number, number]>(); // stop -> places near it, and their walk
+      for (const i of m) for (const a of zones[i].acc) {
+        const w = Math.max(1e-6, zones[i].size * a.cov), e = near.get(a.s);
+        if (e) { e[0] += w; e[1] += w * a.walk; } else near.set(a.s, [w, w * a.walk]);
+      }
+      return { x, z, rep, entry: [...near.entries()].sort((a, b) => a[0] - b[0]).map(([s, [w, wt]]) => ({ s, walk: wt / w })) };
     });
     this.N = Z + blocks.length;
     // The places each zone pairs with, in a fixed order: the zones in the level-0 cells next to its
@@ -294,18 +308,16 @@ export class Pairs {
     const places = (i: number, out: Int32Array) => {
       let m = 0;
       const a = zones[i], ax = CX[i * L1], az = CZ[i * L1];
-      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
-        const b = blockAt(0, ax + dx, az + dz);
-        if (b >= 0) for (const j of members[b]) out[m++] = j;
-      }
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++)
+        for (let b = firstAt(0, ax + dx, az + dz); b >= 0; b = next[b]) for (const j of members[b]) out[m++] = j;
       for (let l = 0; l < L; l++) {
         const bx0 = CX[i * L1 + l], bz0 = CZ[i * L1 + l], px = CX[i * L1 + l + 1], pz = CZ[i * L1 + l + 1];
         for (let qx = px * 3 - 3; qx < px * 3 + 6; qx++) for (let qz = pz * 3 - 3; qz < pz * 3 + 6; qz++) {
           if (qx >= bx0 - 1 && qx <= bx0 + 1 && qz >= bz0 - 1 && qz <= bz0 + 1) continue;
-          const b = blockAt(l, qx, qz);
-          if (b < 0) continue;
-          const B = blocks[b], dx = a.x - B.x, dz = a.z - B.z;
-          if (dx * dx + dz * dz <= maxPair2) out[m++] = Z + b;
+          for (let b = firstAt(l, qx, qz); b >= 0; b = next[b]) {
+            const B = blocks[b], dx = a.x - B.x, dz = a.z - B.z;
+            if (dx * dx + dz * dz <= maxPair2) out[m++] = Z + b;
+          }
         }
       }
       return m;
