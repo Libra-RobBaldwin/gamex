@@ -1,7 +1,8 @@
 // Who can get where, and how. Three layers, each rebuilt only when what it depends on changes:
 //  - the transit skim: the best way between every pair of passenger stops over your lines
 //    (waiting, riding, changing), with the route kept for assigning trips. Lines running between
-//    the same two stops are taken together, since people board whichever comes first;
+//    the same two places (the same stops, or stops a short walk apart) are taken together,
+//    since people board whichever comes first;
 //  - pairs: door-to-door minutes from each zone to the places round it, on foot, by car (the
 //    game's oracle) and by bus or rail (walk to a stop, the skim, walk from the stop). Nearby
 //    zones pair one to one; further off, a zone pairs with blocks of zones, coarser with
@@ -102,42 +103,64 @@ export class Skim {
         }
       }
     }
-    const from: number[] = [], to: number[] = [], time: number[] = [], gen: number[] = [], room: number[] = [], hop: number[] = [];
-    for (const [key, list] of byPair) {
-      // A slower line is worth boarding if its ride beats waiting on for the quicker ones; those
-      // taken together come more often, so the wait is half their combined headway.
-      list.sort((a, b) => a.ride - b.ride || a.L.id - b.L.id);
-      let F = 0, FR = 0, n = 0;
-      for (const c of list) {
-        if (n && c.ride >= Math.min(0.5 / F, tune.maxWaitMin) + FR / F) break;
-        F += 1 / c.L.headway; FR += c.ride / c.L.headway; n++;
-      }
-      const wait = Math.min(0.5 / F, tune.maxWaitMin), ride = FR / F;
-      const h: Hop = list.slice(0, n).map((c) => ({ line: c.L, board: c.i, alight: c.j, share: 1 / c.L.headway / F }));
-      let r = 0;
-      for (const x of h) r += x.share * x.line.room[x.board];
-      from.push(Math.floor(key / S)); to.push(key % S);
-      time.push(wait + tune.boardMin + ride); gen.push(tune.waitWeight * wait + tune.boardMin + ride); room.push(r);
-      hop.push(this.hops.length);
-      this.hops.push(h);
-    }
-    // short walks between stops
+    // the stops within a short walk of each (they count as one interchange), and the walk
     const cell = tune.transferWalkM, grid = new Map<string, number[]>();
     stops.forEach((s, i) => {
       const key = `${Math.floor(s.x / cell)},${Math.floor(s.z / cell)}`;
       (grid.get(key) ?? grid.set(key, []).get(key)!).push(i);
     });
-    stops.forEach((s, u) => {
+    const near: { v: number; t: number }[][] = stops.map((s, u) => {
+      const out: { v: number; t: number }[] = [];
       const cx = Math.floor(s.x / cell), cz = Math.floor(s.z / cell);
       for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++)
         for (const v of grid.get(`${cx + dx},${cz + dz}`) ?? []) {
           if (v === u) continue;
           const d = Math.hypot(stops[v].x - s.x, stops[v].z - s.z);
-          if (d > cell) continue;
-          const t = (d * tune.detour) / tune.walkMpm;
-          from.push(u); to.push(v); time.push(t); gen.push(tune.walkWeight * t); room.push(1); hop.push(-1);
+          if (d <= cell) out.push({ v, t: (d * tune.detour) / tune.walkMpm });
         }
+      return out;
     });
+    const from: number[] = [], to: number[] = [], time: number[] = [], gen: number[] = [], room: number[] = [], hop: number[] = [];
+    // People waiting between two places board whichever comes first of the lines between them,
+    // whether it calls at the stop they stand at or one a short walk off (each route often has
+    // its own pole): so each pair of stops a line runs between takes the lines between the stops
+    // near either end too, each with its walk (as it feels, in `cost`) added to its ride.
+    type Cand = { L: LineState; i: number; j: number; walk: number; cost: number };
+    for (const [key, direct] of byPair) {
+      const u = Math.floor(key / S), v = key % S;
+      const list: Cand[] = direct.map((c) => ({ L: c.L, i: c.i, j: c.j, walk: c.ride, cost: c.ride }));
+      const ends = (x: number) => [{ v: x, t: 0 }, ...near[x]];
+      for (const a of ends(u)) for (const b of ends(v)) {
+        if ((a.v === u && b.v === v) || a.v === v || b.v === u) continue;
+        const other = byPair.get(a.v * S + b.v);
+        if (!other) continue;
+        const w = a.t + b.t;
+        for (const c of other) {
+          const cand = { L: c.L, i: c.i, j: c.j, walk: c.ride + w, cost: c.ride + tune.walkWeight * w };
+          const cur = list.findIndex((x) => x.L === c.L);
+          if (cur < 0) list.push(cand);
+          else if (cand.cost < list[cur].cost) list[cur] = cand;
+        }
+      }
+      // A slower line is worth boarding if its ride beats waiting on for the quicker ones; those
+      // taken together come more often, so the wait is half their combined headway.
+      list.sort((a, b) => a.cost - b.cost || a.L.id - b.L.id);
+      let F = 0, FC = 0, FT = 0, n = 0;
+      for (const c of list) {
+        if (n && c.cost >= Math.min(0.5 / F, tune.maxWaitMin) + FC / F) break;
+        F += 1 / c.L.headway; FC += c.cost / c.L.headway; FT += c.walk / c.L.headway; n++;
+      }
+      const wait = Math.min(0.5 / F, tune.maxWaitMin);
+      const h: Hop = list.slice(0, n).map((c) => ({ line: c.L, board: c.i, alight: c.j, share: 1 / c.L.headway / F }));
+      let r = 0;
+      for (const x of h) r += x.share * x.line.room[x.board];
+      from.push(u); to.push(v);
+      time.push(wait + tune.boardMin + FT / F); gen.push(tune.waitWeight * wait + tune.boardMin + FC / F); room.push(r);
+      hop.push(this.hops.length);
+      this.hops.push(h);
+    }
+    // short walks between stops
+    near.forEach((list, u) => { for (const { v, t } of list) { from.push(u); to.push(v); time.push(t); gen.push(tune.walkWeight * t); room.push(1); hop.push(-1); } });
     // adjacency in compressed rows
     const E = from.length, off = new Int32Array(S + 1);
     for (let e = 0; e < E; e++) off[from[e] + 1]++;

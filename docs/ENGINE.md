@@ -132,8 +132,10 @@ dwell, and dwell grows with the crowd. `vehicles()` places each vehicle a headwa
 its line, with the load on its leg, for drawing buses, trains and lorries. A step costs lines ×
 stops + stops + industries. Neither depends on population: a test counts the work.
 
-**Getting about.** Lines between the same two stops are taken together, since people board
-whichever comes first: their frequencies add and each carries its share. Routes and modes are
+**Getting about.** Lines between the same two places are taken together, since people board
+whichever comes first: their frequencies add and each carries its share. That holds for lines
+from neighbouring stops too (within the 250 m that counts as one interchange, as when each route
+has its own pole), with the walk to the other stop added to that line's ride. Routes and modes are
 chosen on how long a journey *feels*: walking to and from a stop and waiting count double, as
 in WebTAG, walking all the way counts as it is, and taking a bus or train at all is worth a
 few minutes, so nobody rides 300 m. A journey on your lines counts towards reach only for the
