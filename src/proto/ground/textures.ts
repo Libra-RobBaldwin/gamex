@@ -12,13 +12,11 @@ export interface DetailTexture { size: number; data: Uint8Array; ms: number }
 
 // Remaps a channel to mean 0.5 and the given spread, clamped to 0..1.
 function level(a: Float32Array, sd: number) {
-  let m = 0;
-  for (let i = 0; i < a.length; i++) m += a[i];
+  let m = 0, q = 0;
+  for (let i = 0; i < a.length; i++) { const v = a[i]; m += v; q += v * v; }
   m /= a.length;
-  let v = 0;
-  for (let i = 0; i < a.length; i++) { const d = a[i] - m; v += d * d; }
-  const k = sd / Math.max(1e-6, Math.sqrt(v / a.length));
-  for (let i = 0; i < a.length; i++) a[i] = Math.min(1, Math.max(0, 0.5 + (a[i] - m) * k));
+  const k = sd / Math.max(1e-6, Math.sqrt(Math.max(0, q / a.length - m * m)));
+  for (let i = 0; i < a.length; i++) { const v = 0.5 + (a[i] - m) * k; a[i] = v < 0 ? 0 : v > 1 ? 1 : v; }
 }
 
 // A soft round dab of radius r (texels) at (x, y), wrapping around the edges (n is a power of
@@ -64,9 +62,9 @@ export function makeDetail(seed = 1, n = 512): DetailTexture {
   // tufts: a faint fine mottle, then many short strokes, mostly lighter (blades catching the
   // light) with darker ones between (the shade down in the sward)
   addWrappedNoise(R, n, Math.round(n / 5), 0.35, seed + 1);
-  for (let i = 0, m = Math.round(26000 * k * k); i < m; i++) {
+  for (let i = 0, m = Math.round(17000 * k * k); i < m; i++) {
     const light = r() < 0.62;
-    stroke(R, n, r() * n, r() * n, r() * Math.PI * 2, 4 + r() * 9, (light ? 1.5 : -1.9) * (0.5 + r() * 0.5));
+    stroke(R, n, r() * n, r() * n, r() * Math.PI * 2, 5 + r() * 9, (light ? 1.5 : -1.9) * (0.5 + r() * 0.5));
   }
   level(R, 0.16);
 

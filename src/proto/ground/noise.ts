@@ -37,14 +37,13 @@ export function addWrappedNoise(out: Float32Array, n: number, cells: number, amp
     const g = x / c, i = Math.floor(g);
     i0[x] = i % cells; i1[x] = (i + 1) % cells; fx[x] = smooth(g - i);
   }
+  // per row, blend the two lattice rows first; then each texel is one lerp along the row
+  const mix = new Float32Array(cells);
   for (let y = 0; y < n; y++) {
     const g = y / c, j = Math.floor(g), fy = smooth(g - j);
     const r0 = (j % cells) * cells, r1 = ((j + 1) % cells) * cells, row = y * n;
-    for (let x = 0; x < n; x++) {
-      const a = lat[r0 + i0[x]], b = lat[r0 + i1[x]], d = lat[r1 + i0[x]], e = lat[r1 + i1[x]], f = fx[x];
-      const top = a + (b - a) * f, bot = d + (e - d) * f;
-      out[row + x] += top + (bot - top) * fy;
-    }
+    for (let i = 0; i < cells; i++) mix[i] = lat[r0 + i] + (lat[r1 + i] - lat[r0 + i]) * fy;
+    for (let x = 0; x < n; x++) { const a = mix[i0[x]]; out[row + x] += a + (mix[i1[x]] - a) * fx[x]; }
   }
 }
 

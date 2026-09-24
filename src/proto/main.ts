@@ -1714,7 +1714,7 @@ function setTier(t: number) {
   sun.castShadow = q.shadow > 0;
   if (q.shadow && sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
   renderer.shadowMap.needsUpdate = true;
-  setGroundQuality(tier >= 3 ? 'low' : tier === 2 ? 'medium' : 'high');
+  setGroundQuality(tier >= 3 ? 'low' : tier >= 1 ? 'medium' : 'high');
   people.setTier(tier); // fewer, simpler figures on the lower tiers, and no shadows from them
 }
 function judgeFrames(now: number) {

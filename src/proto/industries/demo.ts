@@ -5,6 +5,7 @@
 // and for terminals: &terminals=1&tset=road:lorry_depot:conveyor,rail:rail_terminal:rapid_loader&rail=0&water=1
 // &level=&fill=&service=&crowded=1&reviews=<n>&idle=<days>&anchors=1&zoomk=<scale on the fitted zoom>
 import * as THREE from 'three';
+import { Ground } from '../ground';
 import { INDUSTRY_IDS, INDUSTRY_TYPES, type IndustryId } from './catalogue';
 import { IndustryFx, type FxHandle } from './fx';
 import { buildIndustry, type IndustryModel } from './models';
@@ -36,7 +37,7 @@ scene.add(hemi, sun, sun.target);
 // ---------------- the gallery ----------------
 const COLS = 4, CELL = 200;
 const cellOf = (i: number) => ({ x: ((i % COLS) - (COLS - 1) / 2) * CELL, z: (Math.floor(i / COLS) - 1.5) * CELL });
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: '#6f9a4c' }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2), new Ground().material);
 ground.receiveShadow = true;
 scene.add(ground);
 const roadMat = new THREE.MeshLambertMaterial({ color: '#4c4f54' });

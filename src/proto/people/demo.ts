@@ -2,6 +2,7 @@
 // school and a field) with the game's isometric camera. The flows here stand in for the
 // economy: they're simple curves of the clock. Open /people-demo.html with the Vite dev server.
 import * as THREE from 'three';
+import { Ground } from '../ground';
 import { PeopleStore, BUDGETS, emitPerson, emitAnimal } from './store';
 import { Crowds, footwaysOf, stopSite, type Flow, type QueueSite } from './flows';
 import { DAY } from './schedule';
@@ -40,6 +41,8 @@ window.addEventListener('resize', resize);
 
 // ---------------- scenery (plain boxes; the game draws the real thing) ----------------
 const mats = new Map<string, THREE.MeshLambertMaterial>();
+// grass is the shared ground ('grass' in place of a colour)
+mats.set('grass', new Ground().material);
 const mat = (c: string) => { let m = mats.get(c); if (!m) mats.set(c, (m = new THREE.MeshLambertMaterial({ color: c }))); return m; };
 function box(x0: number, z0: number, x1: number, z1: number, y0: number, y1: number, c: string, shadow = true) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(x1 - x0), y1 - y0, Math.abs(z1 - z0)), mat(c));
@@ -55,7 +58,7 @@ function tree(x: number, z: number, s = 1) {
   const c = new THREE.Mesh(new THREE.IcosahedronGeometry(2.1 * s, 0), mat('#4f7a3a')); c.position.set(x, 3.6 * s, z); c.castShadow = true; scene.add(c);
 }
 const PAVE_Y = 0.12, KERB = 3.25, BACK = 6.25;
-flat(-400, -300, 400, 300, 0, '#7da35a');
+flat(-400, -300, 400, 300, 0, 'grass');
 // the high street
 flat(-160, -KERB, 160, KERB, 0.02, '#44474c');
 for (let x = -158; x < 160; x += 6) flat(x, -0.07, x + 3, 0.07, 0.03, '#e8e6e0');
@@ -84,7 +87,7 @@ box(40, -26.5, 70, -25.5, 0.9, 3.4, '#a88a6a'); // station building at the back 
 // the school, its yard and wall; the park; the works
 box(-98, 10, -73, 40, 0, 8, '#a8745a'); for (let z = 12; z < 39; z += 3) box(-73.05, z, -72.95, z + 1.6, 1.2, 6.6, '#5a7288', false); flat(-70, 9, -30, 32, 0.03, '#8a8d90');
 box(-70, 8.4, -52, 8.8, 0, 1.2, '#9a6a4a'); box(-48, 8.4, -30, 8.8, 0, 1.2, '#9a6a4a');
-flat(-20, 9, 50, 60, 0.02, '#6f9a4a'); disc(25, 40, 7.2, 0.03, '#cfc7a8'); disc(25, 40, 6.4, 0.05, '#4f93c4');
+flat(-20, 9, 50, 60, 0.02, 'grass'); disc(25, 40, 7.2, 0.03, '#cfc7a8'); disc(25, 40, 6.4, 0.05, '#4f93c4');
 for (const [x, z] of [[-14, 20], [-12, 50], [4, 56], [44, 14], [46, 50], [10, 30], [36, 24], [-2, 38]]) tree(x, z, 0.9 + ((x * 7 + z) % 5) / 10);
 const pond = Array.from({ length: 12 }, (_, i) => ({ x: 25 + Math.cos((i / 12) * Math.PI * 2) * 7.4, z: 40 + Math.sin((i / 12) * Math.PI * 2) * 7.4 }));
 const BENCHES = [{ at: { x: 2, z: 14.5 }, facing: Math.PI / 2 }, { at: { x: 22, z: 14.5 }, facing: Math.PI / 2 }, { at: { x: 40, z: 31 }, facing: Math.PI }, { at: { x: 12, z: 50 }, facing: -Math.PI / 2 }];
@@ -92,7 +95,7 @@ for (const b of BENCHES) { const c = Math.cos(b.facing + Math.PI / 2) * 0.8, s =
 box(62, 14, 130, 70, 0, 0.02, '#8a8d90', false); box(90, 24, 130, 66, 0, 11, '#7a8a96'); box(64, 40, 86, 66, 0, 7, '#8a7a6a'); box(118, 26, 122, 30, 11, 26, '#6a5a50');
 box(62, 8.6, 76, 9.1, 0, 2, '#2b2b2b'); box(84, 8.6, 130, 9.1, 0, 2, '#2b2b2b'); box(75.6, 7.4, 76.2, 9.2, 0, 2.6, '#e0a526'); box(83.8, 7.4, 84.4, 9.2, 0, 2.6, '#e0a526');
 // fields with hedges, out west
-flat(-240, -60, -130, 70, 0.02, '#8ab35a'); for (const [x0, z0, x1, z1] of [[-240, -61, -130, -59], [-240, 69, -130, 71], [-241, -60, -239, 70], [-131, -60, -129, 70], [-240, 4, -130, 6]]) box(x0, z0, x1, z1, 0, 1.4, '#3f6a2e');
+flat(-240, -60, -130, 70, 0.02, 'grass'); for (const [x0, z0, x1, z1] of [[-240, -61, -130, -59], [-240, 69, -130, 71], [-241, -60, -239, 70], [-131, -60, -129, 70], [-240, 4, -130, 6]]) box(x0, z0, x1, z1, 0, 1.4, '#3f6a2e');
 
 // ---------------- people ----------------
 const store = new PeopleStore();
