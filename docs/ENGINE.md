@@ -78,6 +78,28 @@ doesn't simulate every person. Three ideas make that work.
 - **Precision.** A floating origin, re-centred on the camera, keeps positions accurate
   tens of kilometres out.
 
+## Keeping it smooth
+
+The rule is that **per-frame work depends only on what's near the camera. Work triggered
+by a change depends only on what the change touches.** Never "check everything against
+everything".
+
+- **Done.** Clearing trees used to test every tree against every road each time a
+  building went up. That caused a spike every third of a second. It now asks the land
+  registry and only looks at trees on the new plot.
+- **Done.** Adaptive quality watches frame times and steps down when frames run slow:
+  pixel ratio, then shadow-map size, then shadow refresh rate, then no shadows. It steps
+  back up when there's headroom. Tap the stats line to see fps, sim and draw time, draw
+  calls and the current tier.
+- **Next.**
+  - Move building generation and mesh merging into a Web Worker. They're the remaining
+    ~10 ms spikes.
+  - Put facade textures into an atlas, so each chunk is a few draw calls, not one per
+    material.
+  - Use cheaper building LODs past a few hundred metres.
+  - Run the traffic sim on a fixed timestep, decoupled from rendering, so a slow frame
+    never slows the simulation.
+
 ## Next steps, in order
 
 1. Move plots and buildings into the land registry as claims, not a separate list.

@@ -147,11 +147,13 @@ const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAXT);
 const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
 for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; scene.add(m); }
 
-function treeBlocked(t: Tree) {
-  for (const s of net.segs.values()) if (closestOnPath(t, net.path(s)).d < net.half(s) + 3) return true;
+// Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
+// registry (a spatial hash, so this looks only at claims near the tree); plots through `lots`.
+function treeBlocked(t: Tree, lots: Lot[]) {
+  if (!net.land.free([{ x: t.x - 3, z: t.z - 3 }, { x: t.x + 3, z: t.z - 3 }, { x: t.x + 3, z: t.z + 3 }, { x: t.x - 3, z: t.z + 3 }])) return true;
   // plots and parks have their own planting
   if (infillCells.has(cellKey(t.x, t.z))) return true;
-  for (const l of net.lots) {
+  for (const l of lots) {
     const c = net.parcelCentre(l);
     if (Math.hypot(t.x - c.x, t.z - c.z) > net.parcelR(l) + 3) continue;
     const dx = t.x - c.x, dz = t.z - c.z, co = Math.cos(l.rot), si = Math.sin(l.rot);
@@ -160,15 +162,22 @@ function treeBlocked(t: Tree) {
   return false;
 }
 
-function refreshTrees() {
-  trees = trees.filter((t) => !treeBlocked(t));
-  const m = new THREE.Matrix4();
+// Clear trees from where things now stand. Given a new plot, only trees on it are looked at
+// (a building going up shouldn't re-check the whole map); with nothing given, all of them are.
+function refreshTrees(only?: Lot) {
+  const before = trees.length;
+  if (only) {
+    const c = net.parcelCentre(only), r = net.parcelR(only) + 3;
+    trees = trees.filter((t) => Math.abs(t.x - c.x) > r || Math.abs(t.z - c.z) > r || !treeBlocked(t, [only]));
+    if (trees.length === before) return;
+  } else trees = trees.filter((t) => !treeBlocked(t, net.lots));
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
   let nc = 0, np = 0;
   trees.forEach((t, i) => {
-    m.compose(new THREE.Vector3(t.x, 1.75 * t.s, t.z), new THREE.Quaternion(), new THREE.Vector3(t.s, t.s, t.s));
+    m.compose(v.set(t.x, 1.75 * t.s, t.z), q, sc.set(t.s, t.s, t.s));
     trunks.setMatrixAt(i, m);
-    if (t.kind === 0) { m.compose(new THREE.Vector3(t.x, 5.6 * t.s, t.z), new THREE.Quaternion(), new THREE.Vector3(t.s, t.s * 1.1, t.s)); crowns.setMatrixAt(nc++, m); }
-    else { m.compose(new THREE.Vector3(t.x, 7 * t.s, t.z), new THREE.Quaternion(), new THREE.Vector3(t.s, t.s, t.s)); pines.setMatrixAt(np++, m); }
+    if (t.kind === 0) { m.compose(v.set(t.x, 5.6 * t.s, t.z), q, sc.set(t.s, t.s * 1.1, t.s)); crowns.setMatrixAt(nc++, m); }
+    else { m.compose(v.set(t.x, 7 * t.s, t.z), q, sc.set(t.s, t.s, t.s)); pines.setMatrixAt(np++, m); }
   });
   trunks.count = trees.length; crowns.count = nc; pines.count = np;
   for (const x of [trunks, crowns, pines]) x.instanceMatrix.needsUpdate = true;
@@ -411,7 +420,7 @@ const cls = () => (mode === 'rail' ? 'rail' : 'road') as 'road' | 'rail';
 const short = (id: string) => ({ street: 'Street', avenue: 'Avenue', dual: 'Dual', motorway: 'Motorway', 'rail-branch': 'Branch', 'rail-main': 'Main line', 'rail-hs': 'High speed', 'rail-light': 'Light rail', 'rail-rack': 'Rack' } as Record<string, string>)[id] ?? ROADS[id].family;
 
 $('#ui').innerHTML = `
-  <div id="info" class="glass"><b>Tracks &amp; Towns · 3D test</b><div id="stats"></div></div>
+  <div id="info" class="glass"><b>Tracks &amp; Towns · 3D test</b><div id="stats"></div><div id="perf" class="hidden">measuring…</div></div>
   <div id="side">
     <button id="compass" title="Reset north and tilt"><span id="needle">➤</span></button>
     <button id="rotL" title="Rotate left">⟲</button>
@@ -1281,9 +1290,43 @@ const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}
 let last = performance.now();
 let growAt = 0;
 let lastH = view.h;
+// ---------------- smoothness: adaptive quality and a performance readout ----------------
+// Phones differ enormously, so rather than guess, the game watches its own frame times: if
+// frames run slow it steps down (fewer pixels, then cheaper shadows, then none), and when
+// there's headroom it steps back up. A step down holds for a while so it doesn't flicker.
+const TIERS = [
+  { name: 'High', pr: Math.min(2, window.devicePixelRatio || 1), shadow: 2048, every: 1 },
+  { name: 'Good', pr: Math.min(1.5, window.devicePixelRatio || 1), shadow: 2048, every: 1 },
+  { name: 'Balanced', pr: Math.min(1.25, window.devicePixelRatio || 1), shadow: 1024, every: 1 },
+  { name: 'Fast', pr: 1, shadow: 1024, every: 3 },
+  { name: 'Fastest', pr: 1, shadow: 0, every: 0 },
+];
+declare global { interface Window { __perf: unknown } }
+let statsAt = 0, tier = 0, tierHeldUntil = 0, perfOn = false, frameNo = 0;
+const perf = { frames: 0, frameMs: 0, simMs: 0, drawMs: 0, since: 0, worst: 0, worstSim: 0 };
+renderer.shadowMap.autoUpdate = false;
+function setTier(t: number) {
+  tier = Math.max(0, Math.min(TIERS.length - 1, t));
+  const q = TIERS[tier];
+  renderer.setPixelRatio(q.pr);
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  sun.castShadow = q.shadow > 0;
+  if (q.shadow && sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
+  renderer.shadowMap.needsUpdate = true;
+}
+function judgeFrames(now: number) {
+  const avg = perf.frameMs / Math.max(1, perf.frames);
+  if (avg > 26 && tier < TIERS.length - 1) { setTier(tier + 1); tierHeldUntil = now + 30000; }
+  else if (avg < 17.5 && tier > 0 && now > tierHeldUntil) { setTier(tier - 1); tierHeldUntil = now + 8000; }
+}
+$('#stats').addEventListener('click', () => { perfOn = !perfOn; $('#perf').classList.toggle('hidden', !perfOn); });
+
 function frame(now: number) {
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const rawMs = now - last;
+  const dt = Math.min(0.1, rawMs / 1000);
   last = now;
+  const t0 = performance.now();
+  perf.frames++; perf.frameMs += rawMs; perf.worst = Math.max(perf.worst, rawMs);
   stepCamera(dt);
   placeCamera();
   // keep blueprint handles a finger's width wide at any zoom
@@ -1294,7 +1337,7 @@ function frame(now: number) {
   if (growAt <= 0 && queue.length) {
     growAt = 0.35;
     const l = queue.shift()!;
-    if (net.lotFree(l)) { spawnLot(l); refreshTrees(); }
+    if (net.lotFree(l)) { spawnLot(l); refreshTrees(l); }
   }
   for (let i = buildings.length - 1; i >= 0; i--) {
     const b = buildings[i];
@@ -1318,12 +1361,30 @@ function frame(now: number) {
   traffic.generate(getPlaces(), hour, LEVELS[level][1], now);
   traffic.update(dt, now);
   for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, now) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
+  // (the readout only changes a few times a second, so it isn't rebuilt every frame)
+  if (now - statsAt > 250) {
+  statsAt = now;
   const pop = buildings.reduce((s, b) => s + (USE[b.lot.kind].unit === 'jobs' ? 0 : USE[b.lot.kind].pop), 0);
   const rush = rushLabel(hour);
-  $('#stats').textContent = `🕗 ${hhmm(clock)}${rush ? ` ${rush}` : ''} · 🚗 ${traffic.live} · 🚌 ${traffic.buses} · 🚆 ${traffic.trains.length} · pop ${pop.toLocaleString('en-GB')}`;
+  $('#stats').textContent = `🕗 ${hhmm(clock)}${rush ? ` ${rush}` : ''} · 🚗 ${traffic.live} · 🚌 ${traffic.buses} · 🚆 ${traffic.trains.length} · pop ${pop.toLocaleString('en-GB')} · ⏱`;
+  }
+  const t1 = performance.now();
+  const q = TIERS[tier];
+  if (q.every && ++frameNo % q.every === 0) renderer.shadowMap.needsUpdate = true;
   renderer.render(scene, cam);
+  const t2 = performance.now();
+  perf.simMs += t1 - t0; perf.drawMs += t2 - t1; perf.worstSim = Math.max(perf.worstSim, t1 - t0);
+  if (now - perf.since > 2000) {
+    if (perf.since) judgeFrames(now);
+    if (perfOn) {
+      const n = Math.max(1, perf.frames), r = renderer.info.render;
+      $('#perf').textContent = `${Math.round(1000 / (perf.frameMs / n))} fps · frame ${(perf.frameMs / n).toFixed(1)} ms (worst ${perf.worst.toFixed(0)}) · sim ${(perf.simMs / n).toFixed(1)} (worst ${perf.worstSim.toFixed(0)}) · draw ${(perf.drawMs / n).toFixed(1)} ms · ${r.calls} calls · ${Math.round(r.triangles / 1000)}k tris · ${TIERS[tier].name}`;
+    }
+    window.__perf = { ...perf, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, tier: TIERS[tier].name };
+    Object.assign(perf, { frames: 0, frameMs: 0, simMs: 0, drawMs: 0, since: now, worst: 0, worstSim: 0 });
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, growAll: () => { for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, growAll: () => { for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
