@@ -109,7 +109,7 @@ input::placeholder { color: rgba(179, 203, 188, 0.85); font-weight: 400; }
 body[data-step='area'] .leaflet-bottom { bottom: var(--sheet-h, 250px); }
 .leaflet-container { font: 12px/1.4 var(--font-ui); }
 .leaflet-control-attribution { font-size: 11px; }
-.leaflet-touch .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; }
+#map.leaflet-touch .leaflet-bar a { width: 44px; height: 44px; line-height: 44px; font-size: 24px; }
 .area-handle { display: grid; place-items: center; background: var(--lime); color: var(--ink); border: 3px solid #fff; border-radius: 50%; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45); cursor: grab; touch-action: none; }
 .area-handle .ic { width: 24px; height: 24px; }
 .area-handle:focus-visible { outline: 3px solid var(--deep); outline-offset: 1px; box-shadow: 0 0 0 7px #fff, 0 2px 8px rgba(0, 0, 0, 0.45); }

@@ -8,10 +8,10 @@
 import '../proto/ui/fonts';
 import './places.css';
 import { markSvg } from '../proto/ui/brand';
-import { fixtureText, mergeTiles, trimJson } from '../proto/osm/fetch';
 import type { LatLon } from '../proto/osm/projection';
 import { SIZES_KM, areaId, bboxCentre, snapCentre, tilesOf } from './area';
 import type { Built } from './build';
+import type { Job, Reply } from './worker';
 import { icon } from './icons';
 import { AreaMap } from './map';
 import { FetchError, MIRRORS, fetchTiles, type Progress } from './overpass';
@@ -230,7 +230,7 @@ $('#saved').addEventListener('click', async (e) => {
 
 let areaMap: AreaMap | undefined;
 const sheet = $('#area .sheet');
-new ResizeObserver(() => document.body.style.setProperty('--sheet-h', `${sheet.offsetHeight}px`)).observe(sheet);
+new ResizeObserver(() => { document.body.style.setProperty('--sheet-h', `${sheet.offsetHeight}px`); if (at === 'area') areaMap?.keepInView(); }).observe(sheet);
 let sizeKm = 1.5;
 const nameInput = $<HTMLInputElement>('#area-name');
 
@@ -324,13 +324,12 @@ async function startBuild(bbox: ReturnType<AreaMap['bbox']>, size: number, name:
   try {
     const parts = await fetchTiles(tiles, { signal: ctl.signal, onProgress: progress, firstMirror: Math.floor(Math.random() * MIRRORS.length) });
     clearInterval(tick);
-    const trimmed = trimJson(mergeTiles(parts), bbox);
-    if (!trimmed.elements.length) throw new FetchError('OpenStreetMap has nothing to build in this square: no roads, buildings or land use. Try moving it onto a town.', 'gave-up');
-    const text = fixtureText(trimmed);
     $('#f-title').textContent = 'Building the plan';
-    $('#f-server').innerHTML = `${icon('spinner', 'ic sm spin')}Running the game’s importer on ${trimmed.elements.length.toLocaleString('en-GB')} map features…`;
-    const built = await runImport(text, ctl.signal);
-    const meta: AreaMeta = { id, name, bbox, sizeKm: size, savedAt: Date.now(), osmBase: trimmed.osm3s?.timestamp_osm_base, bytes: text.length, segments: built.stats.segments, plots: built.stats.plots };
+    $('#f-server').innerHTML = `${icon('spinner', 'ic sm spin')}Running the game’s importer on the map data…`;
+    const r = await runImport({ tiles: parts, bbox }, ctl.signal);
+    if (r.empty) throw new FetchError('OpenStreetMap has nothing to build in this square: no roads, buildings or land use. Try moving it onto a town.', 'gave-up');
+    const { text, built } = r;
+    const meta: AreaMeta = { id, name, bbox, sizeKm: size, savedAt: Date.now(), osmBase: r.osmBase, bytes: text.length, segments: built.stats.segments, plots: built.stats.plots };
     let saved = true;
     await saveArea(meta, { id, data: text, built }).catch(() => { saved = false; });
     showPlans(meta, text, built, saved);
@@ -346,18 +345,18 @@ async function startBuild(bbox: ReturnType<AreaMap['bbox']>, size: number, name:
   }
 }
 
-function runImport(text: string, signal: AbortSignal): Promise<Built> {
+function runImport(job: Job, signal: AbortSignal): Promise<Extract<Reply, { ok: true }>> {
   return new Promise((res, rej) => {
     const w = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     const stop = () => { w.terminate(); rej(new FetchError('Cancelled', 'cancelled')); };
     signal.addEventListener('abort', stop, { once: true });
-    w.onmessage = (e) => {
+    w.onmessage = (e: MessageEvent<Reply>) => {
       signal.removeEventListener('abort', stop);
       w.terminate();
-      if (e.data.ok) res(e.data.built); else rej(new Error(`The importer failed on this area: ${e.data.error}`));
+      if (e.data.ok) res(e.data); else rej(new Error(`The importer failed on this area: ${e.data.error}`));
     };
     w.onerror = (e) => { signal.removeEventListener('abort', stop); w.terminate(); rej(new Error(`The importer failed on this area: ${e.message || 'the worker stopped'}`)); };
-    w.postMessage({ json: JSON.parse(text) });
+    w.postMessage(job);
   });
 }
 
@@ -370,14 +369,15 @@ const viewer = new PlanViewer('Plan of the area');
 $('#p-view').prepend(viewer.el);
 let current: { meta: AreaMeta; text: string; built: Built } | undefined;
 
-function showTab(which: 'game' | 'raw') {
+// switching tabs keeps the zoom, so the same spot can be compared in both drawings
+function showTab(which: 'game' | 'raw', keep = true) {
   if (!current) return;
   $('#t-game').setAttribute('aria-selected', String(which === 'game'));
   $('#t-raw').setAttribute('aria-selected', String(which === 'raw'));
   $('#t-game').tabIndex = which === 'game' ? 0 : -1;
   $('#t-raw').tabIndex = which === 'raw' ? 0 : -1;
   viewer.el.setAttribute('aria-label', which === 'game' ? 'Plan: what the game built' : 'Plan: the raw OpenStreetMap data');
-  viewer.show(which === 'game' ? current.built.gameSvg : current.built.rawSvg);
+  viewer.show(which === 'game' ? current.built.gameSvg : current.built.rawSvg, keep);
 }
 $('#t-game').addEventListener('click', () => showTab('game'));
 $('#t-raw').addEventListener('click', () => showTab('raw'));
@@ -415,7 +415,7 @@ function showPlans(meta: AreaMeta, text: string, built: Built, saved = true) {
   const play = $<HTMLButtonElement>('#p-play');
   play.disabled = !GAME_READS_PLACES;
   $('#p-play-note').textContent = GAME_READS_PLACES ? 'Opens the game on this area.' : 'Coming soon: the game is learning to start from a real town.';
-  showTab('game');
+  showTab('game', false);
 }
 
 async function openSaved(id: string) {

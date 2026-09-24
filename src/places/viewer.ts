@@ -16,6 +16,7 @@ export class PlanViewer {
   private pts = new Map<number, { x: number; y: number }>();
   private start?: { pts: [number, number, number, number] | [number, number]; x: number; y: number };
   private lastTap = 0;
+  private tapAt = { x: 0, y: 0 };
 
   constructor(label: string) {
     this.el = document.createElement('div');
@@ -33,13 +34,14 @@ export class PlanViewer {
     new ResizeObserver(() => this.refit()).observe(this.el);
   }
 
-  show(svg: string) {
+  /** Shows a plan. `keepView` keeps the zoom and position, for another drawing of the same area. */
+  show(svg: string, keepView = false) {
     if (this.url) URL.revokeObjectURL(this.url);
     this.url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
     const m = /width="(\d+)" height="(\d+)"/.exec(svg);
     this.aspect = m ? +m[2] / +m[1] : 1;
     this.img.src = this.url;
-    this.reset();
+    if (keepView && this.w > this.fit + 0.5) this.apply(true); else this.reset();
   }
 
   dispose() { if (this.url) URL.revokeObjectURL(this.url); this.url = ''; this.img.removeAttribute('src'); }
@@ -99,9 +101,9 @@ export class PlanViewer {
     this.begin();
     this.img.style.transformOrigin = '0 0';
     if (this.pts.size === 1) {
-      const now = performance.now();
-      if (now - this.lastTap < 300) { const p = this.local(e); this.zoomAt(this.w >= this.fit * MAX_ZOOM * 0.99 ? 0 : 2, p.x, p.y); this.pts.clear(); this.start = undefined; this.lastTap = 0; return; }
-      this.lastTap = now;
+      const now = performance.now(), here = this.local(e);
+      if (now - this.lastTap < 300 && Math.hypot(here.x - this.tapAt.x, here.y - this.tapAt.y) < 30) { const p = this.local(e); this.zoomAt(this.w >= this.fit * MAX_ZOOM * 0.99 ? 0 : 2, p.x, p.y); this.pts.clear(); this.start = undefined; this.lastTap = 0; return; }
+      this.lastTap = now; this.tapAt = here;
     }
   }
 

@@ -3,7 +3,7 @@
 // time) or unreachable. Everything it touches the outside world with is passed in, so the tests
 // run it against a fake network and a fake clock.
 
-import { overpassQuery, type Bbox, type OverpassRaw } from '../proto/osm/fetch';
+import { overpassQuery, type Bbox } from '../proto/osm/fetch';
 
 export const MIRRORS = [
   { name: 'overpass-api.de', url: 'https://overpass-api.de/api/interpreter' },
@@ -40,18 +40,21 @@ export function backoffMs(attempt: number, random = Math.random, retryAfterS?: n
   return Math.round(Math.max(base, asked) + random() * 1000);
 }
 
-/** What an answer means: use it, try again (elsewhere, later), or stop. */
-export function judge(status: number, body: string): { ok: true; json: OverpassRaw } | { ok: false; retry: boolean; reason: string } {
+/**
+ * What an answer means: use it, try again (elsewhere, later), or stop. The body is checked, not
+ * parsed: a big tile takes a phone a noticeable moment to parse, so that happens in the worker.
+ */
+export function judge(status: number, body: string): { ok: true; text: string } | { ok: false; retry: boolean; reason: string } {
   if (status === 429) return { ok: false, retry: true, reason: 'too busy (429)' };
   if (status === 504) return { ok: false, retry: true, reason: 'timed out (504)' };
   if (status === 400) return { ok: false, retry: false, reason: 'rejected the query (400)' };
   if (status !== 200) return { ok: false, retry: true, reason: `answered ${status}` };
-  let json: OverpassRaw;
-  try { json = JSON.parse(body); } catch { return { ok: false, retry: true, reason: 'sent something that isn’t map data' }; }
-  if (!json || !Array.isArray(json.elements)) return { ok: false, retry: true, reason: 'sent something that isn’t map data' };
+  const t = body.trim();
+  if (!t.startsWith('{') || !t.endsWith('}') || !/"elements"\s*:\s*\[/.test(t.slice(0, 8000))) return { ok: false, retry: true, reason: 'sent something that isn’t map data' };
   // a query that runs out of time or memory still answers 200, with what it had and a remark
-  if (json.remark && /error|timed out|out of memory/i.test(json.remark)) return { ok: false, retry: true, reason: 'ran out of time on the server' };
-  return { ok: true, json };
+  // (Overpass puts the remark after the elements)
+  if (/"remark"\s*:\s*"[^"]*(error|timed out|out of memory)/i.test(t.slice(-4000))) return { ok: false, retry: true, reason: 'ran out of time on the server' };
+  return { ok: true, text: t };
 }
 
 export const browserDeps = (): Deps => ({
@@ -69,12 +72,12 @@ export const browserDeps = (): Deps => ({
 
 export interface FetchOpts { signal?: AbortSignal; onProgress?: (p: Progress) => void; deps?: Deps; timeoutMs?: number; maxAttempts?: number; firstMirror?: number }
 
-/** Every tile, one after another; each tile's answer in order. Throws FetchError when it can't. */
-export async function fetchTiles(tiles: Bbox[], opts: FetchOpts = {}): Promise<OverpassRaw[]> {
+/** Every tile, one after another; each tile's answer (Overpass JSON, as text) in order. Throws FetchError when it can't. */
+export async function fetchTiles(tiles: Bbox[], opts: FetchOpts = {}): Promise<string[]> {
   const d = opts.deps ?? browserDeps();
   const max = opts.maxAttempts ?? MAX_ATTEMPTS, timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
   let m = opts.firstMirror ?? 0; // stays on a mirror that's answering, moves on from one that isn't
-  const out: OverpassRaw[] = [];
+  const out: string[] = [];
   const cancelled = () => { if (opts.signal?.aborted) throw new FetchError('Cancelled', 'cancelled'); };
   for (let i = 0; i < tiles.length; i++) {
     let lastReason = '';
@@ -102,7 +105,7 @@ export async function fetchTiles(tiles: Bbox[], opts: FetchOpts = {}): Promise<O
         opts.signal?.removeEventListener('abort', onAbort);
       }
       if (verdict.ok) {
-        out.push(verdict.json);
+        out.push(verdict.text);
         opts.onProgress?.({ state: 'done', ...base, done: i + 1 });
         break;
       }

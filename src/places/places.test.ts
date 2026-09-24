@@ -93,6 +93,7 @@ describe('back-off', () => {
     expect(judge(200, '<html>busy</html>')).toMatchObject({ ok: false, retry: true });
     expect(judge(200, '{"elements":[],"remark":"runtime error: Query timed out in \\"query\\" at line 3"}')).toMatchObject({ ok: false, retry: true });
     expect(judge(200, '{"elements":[]}')).toMatchObject({ ok: true });
+    expect(judge(200, '{"elements":[')).toMatchObject({ ok: false, retry: true }); // cut off mid-answer
   });
 });
 

@@ -14,6 +14,9 @@ import type { Bbox } from '../proto/osm/fetch';
 export const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 export const TILE_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
 
+// the square stays clear of the poles and the antimeridian (none of which a UK postcode reaches)
+const clamp = (c: LatLon): LatLon => ({ lat: Math.max(-80, Math.min(80, c.lat)), lon: Math.max(-178, Math.min(178, c.lon)) });
+
 export class AreaMap {
   readonly map: L.Map;
   private square: L.Rectangle;
@@ -27,7 +30,7 @@ export class AreaMap {
   cover: () => { bottom: number; right: number } = () => ({ bottom: 0, right: 0 });
 
   constructor(el: HTMLElement, centre: LatLon, sizeKm: number) {
-    this.centre = centre; this.sizeKm = sizeKm;
+    this.centre = clamp(centre); this.sizeKm = sizeKm;
     this.map = L.map(el, { zoomControl: false, attributionControl: true, doubleClickZoom: false, tapTolerance: 12, worldCopyJump: false, maxBoundsViscosity: 1, maxBounds: [[-85, -180], [85, 180]] });
     this.map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
     L.tileLayer(TILE_URL, { maxZoom: 19, minZoom: 3, attribution: TILE_CREDIT, crossOrigin: false, referrerPolicy: 'strict-origin-when-cross-origin' } as L.TileLayerOptions).addTo(this.map);
@@ -40,7 +43,7 @@ export class AreaMap {
       icon: L.divIcon({ className: 'area-handle', html: icon('move'), iconSize: [44, 44], iconAnchor: [22, 22] }),
       keyboard: true, title: 'Drag, or use the arrow keys, to move the square', zIndexOffset: 1000, interactive: true, bubblingMouseEvents: false,
     }).addTo(this.map);
-    this.map.setView([centre.lat, centre.lon], 14);
+    this.map.setView([this.centre.lat, this.centre.lon], 14);
     this.makeDraggable(this.handle.getElement() ?? null);
     // arrow keys move the square when its handle has focus
     this.handle.getElement()?.addEventListener('keydown', (e) => {
@@ -52,7 +55,13 @@ export class AreaMap {
       this.map.panInside(this.handleAt(), { padding: [48, 48] });
       this.map.panInside([this.centre.lat, this.centre.lon], { padding: [48, 48] });
     });
-    this.map.on('click', (e: L.LeafletMouseEvent) => this.moveTo({ lat: e.latlng.lat, lon: e.latlng.lng }));
+    // a tap moves the square; a finger that moved at all was a pan, even one too small to pan
+    let down: { x: number; y: number } | undefined, moved = 0;
+    el.addEventListener('pointerdown', (e) => { if (e.isPrimary) { down = { x: e.clientX, y: e.clientY }; moved = 0; } }, true);
+    el.addEventListener('pointermove', (e) => { if (down && e.isPrimary) moved = Math.max(moved, Math.hypot(e.clientX - down.x, e.clientY - down.y)); }, true);
+    this.map.on('click', (e: L.LeafletMouseEvent) => { if (moved <= 4) this.moveTo({ lat: e.latlng.lat, lon: e.latlng.lng }); });
+    // turning the phone (or any resize) keeps the whole square in view and clear of the sheet
+    this.map.on('resize', () => this.keepInView());
     this.fit();
   }
 
@@ -68,7 +77,7 @@ export class AreaMap {
 
   setSize(km: number) { this.sizeKm = km; this.redraw(); this.fit(); }
   moveTo(c: LatLon) {
-    this.centre = { lat: Math.max(-84, Math.min(84, c.lat)), lon: Math.max(-179, Math.min(179, c.lon)) };
+    this.centre = clamp(c);
     this.redraw();
   }
   /** The square to the middle of what's on screen. */
@@ -79,7 +88,15 @@ export class AreaMap {
     this.moveTo({ lat: ll.lat, lon: ll.lng });
   }
   fit() { const c = this.cover(); this.map.fitBounds(this.bounds(), { paddingTopLeft: [20, 40], paddingBottomRight: [20 + c.right, 20 + c.bottom], maxZoom: 16, animate: false }); }
-  resize() { this.map.invalidateSize(); }
+  resize() { this.map.invalidateSize(); this.keepInView(); }
+  /** The part of the map not under the sheet, in container pixels. */
+  private open() { const c = this.cover(), s = this.map.getSize(); return { x0: 0, y0: 0, x1: s.x - c.right, y1: s.y - c.bottom }; }
+  /** Re-fits the map if any of the square, or its handle, is off screen or under the sheet. */
+  keepInView() {
+    const o = this.open(), b = this.bbox();
+    const nw = this.map.latLngToContainerPoint([b[2], b[1]]), se = this.map.latLngToContainerPoint([b[0], b[3]]);
+    if (nw.x < o.x0 || nw.y - 22 < o.y0 || se.x > o.x1 || se.y > o.y1) this.fit();
+  }
 
   private redraw() {
     this.square.setBounds(this.bounds() as L.LatLngBoundsLiteral);
@@ -108,7 +125,10 @@ export class AreaMap {
     el.addEventListener('pointermove', (e) => {
       if (!grab || e.pointerId !== grab.id) return;
       e.stopPropagation();
-      const p = at(e);
+      // the handle stays on the open map: never under the sheet or off an edge, where it can't be grabbed again
+      const o = this.open(), r = this.map.getContainer().getBoundingClientRect(), m = 26;
+      const x = Math.max(o.x0 + m, Math.min(o.x1 - m, e.clientX - r.left)), y = Math.max(o.y0 + m, Math.min(o.y1 - m, e.clientY - r.top));
+      const p = this.map.containerPointToLatLng([x, y]);
       this.moveTo({ lat: p.lat + grab.dLat, lon: p.lng + grab.dLon });
     });
     const end = (e: PointerEvent) => {
