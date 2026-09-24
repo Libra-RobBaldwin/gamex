@@ -111,6 +111,8 @@ const boxAt = (w: number, h: number, d: number, x: number, y: number) => new THR
 
 export class Traffic {
   cars: Car[] = [];
+  // the speed allowed at s (from seg.a, going in direction dir) on top of the road's own, e.g. on a bridge (m/s)
+  speedCap?: (seg: RSeg, s: number, dir: 1 | -1, ahead?: number) => number;
   private net: Network;
   private graph: Map<number, { seg: RSeg; to: number; len: number }[]> | null = null;
   private access = new Map<number, Access | null>();
@@ -1125,6 +1127,7 @@ export class Traffic {
     const last = !c.bus && !c.route.length;
     const at = net.other(c.seg, c.from);
     let v0 = Math.min(c.vmax, d.speed * (c.lorry || c.bus ? 0.8 : 1));
+    if (this.speedCap) v0 = Math.min(v0, c.from === c.seg.a ? this.speedCap(c.seg, c.s, 1) : this.speedCap(c.seg, L - c.s, -1)); // a bridge's own limit (game/bridges.ts)
     c.v0 = v0;
     this.laneChoice(c, this.planOf(c), now);
     const pl = this.planOf(c);
@@ -1368,7 +1371,9 @@ export class Traffic {
       if (!net.segs.has(tr.seg.id)) { tr.gone = true; continue; }
       const L = this.len(tr.seg), d = net.def(tr.seg);
       const q = pointAt(this.pathOf(tr.seg, tr.from), Math.min(tr.s, L));
-      const target = trainSpeed(tr.def, d, q.grade);
+      let target = trainSpeed(tr.def, d, q.grade);
+      // a bridge's own limit, braking for it in time (game/bridges.ts)
+      if (this.speedCap) target = Math.min(target, tr.from === tr.seg.a ? this.speedCap(tr.seg, tr.s, 1, tr.v * tr.v / 2.4 + 20) : this.speedCap(tr.seg, L - tr.s, -1, tr.v * tr.v / 2.4 + 20));
       tr.v += Math.max(-1.2 * dt, Math.min(0.7 * dt, target - tr.v));
       tr.s += tr.v * dt;
       if (tr.s >= L) {

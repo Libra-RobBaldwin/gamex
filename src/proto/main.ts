@@ -19,6 +19,7 @@ import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
 import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
 import { Industries, townWishes, type IndustrySite } from './game/industry'; // industrial sites (docs/industries.md)
 import { PLAIN_MAT } from './buildgen';
+import { BridgeLayer, type BuiltBridge } from './game/bridges';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -158,6 +159,9 @@ function refreshTrees(only?: Lot) {
 // ---------------- roads ----------------
 const roadGroup = new THREE.Group();
 scene.add(roadGroup);
+// every bridge in the town: one mesh per material (game/bridges.ts)
+const bridgeLayer = new BridgeLayer();
+scene.add(bridgeLayer.group);
 // ---------------- junctions ----------------
 // Every junction designs itself (see junction.ts) whenever the roads meeting there change; a
 // junction the player has customised keeps their choices as long as its roads stay the same.
@@ -188,6 +192,7 @@ function commitRoads(made: number[] = []) {
   redesignJunctions();
   claimJunctions();
   evictFromWorks();
+  bridgeLayer.sync(net); // lays out the bridges and stores their types on the segments, which drawRoads reads
   lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
@@ -856,10 +861,19 @@ function renderBar() {
   tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(c.cost)}</b></span></div>
     ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(n * 6000)} compensation included</div></div>` : ''}
     ${lift}
+    ${c.ok ? bridgeLines(c) : ''}
     ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
   tool.avoid(handles().map((h) => toScreen(h.p)));
   tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging), onClick: buildDraft });
+}
+// the bridges in a blueprint: the type the chooser picked, its price and what's worth knowing
+function bridgeLines(c: Check) {
+  return c.choices.map((ch) => {
+    const o = ch.options.find((x) => x.def.id === ch.chosen);
+    if (!o) return '';
+    return `<div class="lift">${icon('bridge')}<span><b>${o.def.label}</b> · ${Math.round(ch.s1 - ch.s0)} m · <b class="cost">${money(o.cost)}</b>${o.reasons.length ? ` · ${o.reasons.slice(0, 2).join(' · ')}` : ''}</span></div>`;
+  }).join('');
 }
 function buildDraft() {
   if (!draft || !draftCheck?.ok) return;
@@ -1014,6 +1028,59 @@ function showJunctionInfo(node: number) {
   });
 }
 
+// ---------------- bridges (game/bridges.ts) ----------------
+// the bridge drawn under a screen point: its deck, sampled along its length
+function bridgeAt(sx: number, sy: number) {
+  let best: BuiltBridge | null = null, bd = Infinity;
+  for (const b of bridgeLayer.list()) {
+    const hw = b.layout.width / 2;
+    for (let s = b.s0; s <= b.s1; s += 2) {
+      // within the deck's width as drawn on screen (and a finger's slack)
+      const p = pointAt(b.crossing.path, s), q = toScreen(p), e = toScreen({ x: p.x - p.uz * hw, z: p.z + p.ux * hw, y: p.y });
+      const d = Math.hypot(q.x - sx, q.y - sy);
+      if (d < Math.hypot(e.x - q.x, e.y - q.y) + 10 && d < bd) { bd = d; best = b; }
+    }
+  }
+  return best;
+}
+const bridgeKey = (b: BuiltBridge) => `${b.seg}:${b.idx}`;
+function showBridgeInfo(b: BuiltBridge) {
+  const L = b.layout, d = L.def, piers = L.supports.filter((q) => q.kind !== 'abutment').length;
+  const mph = net.segs.get(b.seg)?.type.startsWith('rail') ? d.railMph : d.roadMph;
+  const facts: [string, string][] = [['Length', `${Math.round(b.s1 - b.s0)} m`], ['Spans', `${L.spans.length}${piers ? ` on ${piers} support${piers > 1 ? 's' : ''}` : ''}`], ['Cost to build', money(L.cost)], ['Upkeep', `${money(L.maint)} a year`]];
+  if (mph) facts.push(['Speed limit', `${mph} mph`]);
+  const over = net.segs.get(b.seg)?.bridges?.[b.idx]?.override;
+  shell.openInfo({
+    key: `bridge-info:${bridgeKey(b)}`, title: d.label, sub: over ? 'Your choice of type' : 'Chosen for the lowest cost over its life', icon: 'bridge', tone: 'road',
+    facts, note: L.notes.join(' · ') || undefined,
+    actions: [{ label: 'Change bridge type', icon: 'bridge', kind: 'primary', onClick: () => openBridgeEditor(b) }],
+  });
+  const m = pointAt(b.crossing.path, (b.s0 + b.s1) / 2);
+  focusOn(m, Math.max(140, (b.s1 - b.s0) * 1.8), undefined, 0.9);
+}
+// every type that could stand here this year: price, a mark on the recommended one, and the
+// refused ones greyed with their reason. Picking one re-commits the town with it.
+function openBridgeEditor(b: BuiltBridge, fresh = true) {
+  const ch = bridgeLayer.options(b);
+  const el = shell.openSheet({
+    key: `bridge-edit:${bridgeKey(b)}`, title: 'Bridge type', sub: `${Math.round(b.s1 - b.s0)} m · now a ${b.layout.def.label.toLowerCase()}`, icon: 'bridge', tone: 'road', fresh,
+    back: () => showBridgeInfo(b),
+    body: `<div class="grp"><span class="tab">Types</span>${ch.options.map((o) => {
+      const on = o.def.id === b.layout.def.id, rec = o.def.id === ch.recommended;
+      const sub = o.ok ? `${money(o.cost)} · ${money(o.maint)} a year${o.reasons.length ? ` · ${o.reasons[0]}` : ''}` : o.reasons[0] ?? 'Can’t be built here';
+      return `<button data-type="${o.def.id}" class="${on ? 'on' : ''}" aria-pressed="${on}" ${o.ok ? '' : 'disabled'}><b>${rec ? icon('sparkles') : ''}${o.def.label}${rec ? ' · recommended' : ''}${on ? icon('check', 'tick') : ''}</b><small>${sub}</small></button>`;
+    }).join('')}</div>`,
+  });
+  el.querySelectorAll<HTMLButtonElement>('[data-type]').forEach((btn) => btn.addEventListener('click', () => {
+    const mid = (b.s0 + b.s1) / 2;
+    if (!bridgeLayer.setType(net, b, btn.dataset.type as BuiltBridge['layout']['def']['id'])) return;
+    rebuildRoads();
+    const nb = bridgeLayer.at(b.seg, mid);
+    if (nb) openBridgeEditor(nb, false);
+    hint(`Rebuilt as a ${nb?.layout.def.label.toLowerCase() ?? 'bridge'}`, 'check');
+  }));
+}
+
 // ---------------- bus stops ----------------
 let stopPreview: { seg: RSeg; t: number; side: 1 | -1 } | null = null;
 function stopAt(p: P) {
@@ -1115,6 +1182,8 @@ function tapMap(sx: number, sy: number): Mode {
   if (mode === 'stop') { stopTap(g); return mode; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
+  const br = st || jn !== null ? null : bridgeAt(sx, sy); // (a bridge is tapped where it's drawn, up in the air)
+  if (br) { showBridgeInfo(br); return 'look'; }
   const site = st || jn !== null ? null : siteUnder(sx, sy, g); // an industrial site (game/industry.ts)
   if (site) { showSite(site); return 'look'; }
   const b = st || jn !== null ? null : pickBuilding(sx, sy) ?? infillCells.get(cellKey(g.x, g.z)) ?? null;
@@ -1241,6 +1310,7 @@ refreshTrees();
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
+traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
 onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; };
@@ -1415,3 +1485,4 @@ requestAnimationFrame(frame);
 
 (window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
+Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
