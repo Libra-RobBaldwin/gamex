@@ -605,7 +605,7 @@ export function buildIndustry(id: IndustryId, plot: Plot, opts: BuildOpts): Indu
   group.position.set(frame.cx, 0, frame.cz);
   group.rotation.y = -frame.rot;
   group.userData.industry = { type: id, variant: variant.id, seed: opts.seed };
-  return { type: id, variant, name: variant.name, detail: s.notes.join(' · '), group, frame, dyn: s.dyn, anchors: s.anchors, tris: s.k.tris, height: s.k.top };
+  return { type: id, variant, name: variant.name, detail: [...new Set(s.notes)].join(' · '), group, frame, dyn: s.dyn, anchors: s.anchors, tris: s.k.tris, height: s.k.top };
 }
 
 // A plot of the type's preferred size (or a variant's), centred at a point, facing +z.

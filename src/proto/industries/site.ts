@@ -318,7 +318,7 @@ export class Site {
   floodlight(x: number, z: number, h = 12) {
     this.k.box(x, 0, z, 0.35, h, 0.35, '#5c6166');
     this.k.box(x, h, z, 1.4, 0.5, 0.8, '#3c4045');
-    this.dyn.lamps.push({ x, y: h - 0.1, z, glow: h * 1.1 });
+    this.dyn.lamps.push({ x, y: h - 0.1, z, glow: h * 0.7 });
   }
   tree(x: number, z: number, s: number, kind: 'conifer' | 'broadleaf' | 'young', hex?: string) {
     const k = this.k;
@@ -344,7 +344,7 @@ export class Site {
   }
   // Scatter weeds and rubble over the yards; they appear as the site is neglected.
   decay(n: number) {
-    for (let i = 0; i < n; i++) this.dyn.decay.push({ x: (this.r() - 0.5) * this.W * 0.9, z: (this.r() - 0.5) * this.D * 0.9, s: 0.6 + this.r() * 1.4 });
+    for (let i = 0; i < n * 2; i++) this.dyn.decay.push({ x: (this.r() - 0.5) * this.W * 0.9, z: (this.r() - 0.5) * this.D * 0.9, s: 1 + this.r() * 2.2 });
   }
   pile(p: Pile) { this.dyn.piles.push(p); }
 }

@@ -85,7 +85,7 @@ export function catchmentOverlay(type: IndustryId, frame: SiteFrame, site: WXZ[]
   const ins = t.inputs, outs = t.role === 'hub' ? [] : t.outputs; // a hub's outputs are its inputs; show them once
   const all = [...ins.map((f) => ({ f, role: 'in' as const })), ...outs.map((f) => ({ f, role: 'out' as const }))];
   // pin icons in a row just in front of the frontage: needs on the left, products on the right
-  const gap = Math.min(10, (frame.w * 0.8) / Math.max(1, all.length));
+  const gap = (frame.w * 0.8) / Math.max(1, all.length);
   all.forEach(({ f, role }, i) => {
     const lx = (i - (all.length - 1) / 2) * gap;
     const per = role === 'in' ? state?.inputs?.[f.cargo] : state?.outputs?.[f.cargo];

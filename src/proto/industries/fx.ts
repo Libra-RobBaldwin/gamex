@@ -48,7 +48,7 @@ const G = {
   }),
   blob: () => new THREE.IcosahedronGeometry(0.5, 0),
   puff: () => new THREE.IcosahedronGeometry(0.5, 1),
-  disc: () => new THREE.CircleGeometry(1, 12).rotateX(-Math.PI / 2),
+  disc: () => new THREE.CircleGeometry(1, 16).rotateX(-Math.PI / 2),
 };
 
 // ---------------- pools ----------------
@@ -146,7 +146,7 @@ export class IndustryFx {
     const lit = () => new THREE.MeshLambertMaterial({ color: 0xffffff });
     const puffMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.82, depthWrite: false });
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending });
     const P = (n: PoolName, g: THREE.BufferGeometry, m: THREE.Material, cap: number, shadow: boolean) => new Pool(n, g, m, cap, this.group, shadow);
     this.pools = {
       heap: P('heap', G.heap(), lit(), 64, true),
