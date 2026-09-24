@@ -3,7 +3,7 @@
 // of texels on its own, giving exactly what a full paint gives there: every texel depends only on
 // the world within a fixed margin of it, and the margin is painted too (then thrown away).
 import { CROP } from './covers';
-import { GRID, Layout, toGrid, type Cell, type ParcelInfo, type XZ } from './layout';
+import { bbox, GRID, Layout, toGrid, type Cell, type ParcelInfo, type XZ } from './layout';
 
 export interface Region { x0: number; z0: number; size: number; n: number } // n texels across
 export interface Rect { i0: number; j0: number; i1: number; j1: number } // texels, i1/j1 exclusive
@@ -34,11 +34,7 @@ function fill(poly: XZ[], x0: number, z0: number, t: number, W: number, H: numbe
     }
   }
 }
-function boxOf(poly: XZ[]) {
-  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-  for (const p of poly) { x0 = Math.min(x0, p.x); z0 = Math.min(z0, p.z); x1 = Math.max(x1, p.x); z1 = Math.max(z1, p.z); }
-  return { x0, z0, x1, z1 };
-}
+const boxOf = bbox;
 
 // Two-pass chamfer distance (in texels, 1 and √2 steps) from the set texels, capped at `cap`.
 // Returns false (and leaves `out` alone) if nothing is set.

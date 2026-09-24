@@ -187,6 +187,7 @@ export const TOWN = 1, INDUS = 2, WET = 4;
 export class Coarse {
   static C = 20;
   private blocks = new Map<number, Uint8Array>();
+  constructor(private under?: Coarse) {} // (flags of another grid, read through)
   mark(flag: number, x: number, z: number, r: number) {
     const C = Coarse.C;
     for (let i = Math.floor((x - r) / C); i <= Math.floor((x + r) / C); i++) for (let j = Math.floor((z - r) / C); j <= Math.floor((z + r) / C); j++) {
@@ -196,10 +197,10 @@ export class Coarse {
       b[(i & 15) * 16 + (j & 15)] |= flag;
     }
   }
-  at(x: number, z: number) {
+  at(x: number, z: number): number {
     const i = Math.floor(x / Coarse.C), j = Math.floor(z / Coarse.C);
     const b = this.blocks.get(((i >> 4) + 32768) * 65536 + ((j >> 4) + 32768));
-    return b ? b[(i & 15) * 16 + (j & 15)] : 0;
+    return (b ? b[(i & 15) * 16 + (j & 15)] : 0) | (this.under ? this.under.at(x, z) : 0);
   }
 }
 
@@ -211,6 +212,17 @@ function inPoly(x: number, z: number, poly: XZ[]) {
   }
   return inside;
 }
+// A polygon's bounding box, remembered per polygon (inputs keep their unchanged polygons between
+// repaints, so this is mostly a lookup).
+const boxes = new WeakMap<XZ[], { x0: number; z0: number; x1: number; z1: number }>();
+export function bbox(poly: XZ[]) {
+  let b = boxes.get(poly);
+  if (b) return b;
+  b = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
+  for (const q of poly) { if (q.x < b.x0) b.x0 = q.x; if (q.x > b.x1) b.x1 = q.x; if (q.z < b.z0) b.z0 = q.z; if (q.z > b.z1) b.z1 = q.z; }
+  boxes.set(poly, b);
+  return b;
+}
 export function centroid(poly: XZ[]): XZ {
   let x = 0, z = 0;
   for (const p of poly) { x += p.x; z += p.z; }
@@ -221,6 +233,7 @@ export class Layout {
   readonly seed: number;
   readonly parcels: Parcels;
   coarse = new Coarse();
+  private fixed: { parks: GroundInput['parks']; industrial: GroundInput['industrial']; water: GroundInput['water']; coarse: Coarse } | null = null;
   private info = new Map<number, ParcelInfo>();
   constructor(public input: GroundInput) {
     this.seed = input.seed ?? 1;
@@ -234,13 +247,18 @@ export class Layout {
     const old = this.info;
     this.info = new Map();
     if (near) for (const [id, v] of old) this.info.set(id, v);
-    const c = (this.coarse = new Coarse());
+    // the marks from parks, industry and water are kept while those arrays stay the same
+    if (!this.fixed || this.fixed.parks !== input.parks || this.fixed.industrial !== input.industrial || this.fixed.water !== input.water) {
+      const f = new Coarse();
+      for (const p of input.parks ?? []) { const b = bbox(p.poly); f.mark(TOWN, (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, 20); }
+      for (const p of input.industrial ?? []) f.mark(INDUS, p.x, p.z, 30);
+      for (const w of input.water ?? []) for (const q of w) f.mark(WET, q.x, q.z, 10);
+      this.fixed = { parks: input.parks, industrial: input.industrial, water: input.water, coarse: f };
+    }
+    const c = (this.coarse = new Coarse(this.fixed.coarse));
     // the town reaches 30 m past its plots and parks, the industrial estate likewise
     for (const p of input.plots ?? []) { const m = centroid(p.poly); c.mark(p.kind === 'yard' ? INDUS : TOWN, m.x, m.z, 30); }
-    for (const p of input.parks ?? []) { const m = centroid(p.poly); c.mark(TOWN, m.x, m.z, 20); }
     for (const p of input.town ?? []) c.mark(TOWN, p.x, p.z, 30);
-    for (const p of input.industrial ?? []) c.mark(INDUS, p.x, p.z, 30);
-    for (const w of input.water ?? []) for (const q of w) c.mark(WET, q.x, q.z, 10);
     const changed: { x0: number; z0: number; x1: number; z1: number }[] = [];
     if (!near) return changed;
     // every parcel with ground within 40 m of the box (a plot marks the town 30 m round it)

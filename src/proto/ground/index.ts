@@ -30,6 +30,22 @@ export interface GroundOptions {
   hedges?: boolean; // plant hedgerows (true)
 }
 type Box = { x0: number; z0: number; x1: number; z1: number };
+// Boxes that overlap or nearly touch become one (one repaint's margin costs more than a gap).
+function merge(boxes: Box[]) {
+  const out = boxes.map((b) => ({ ...b }));
+  for (let again = true; again;) {
+    again = false;
+    for (let i = 0; i < out.length && !again; i++) for (let j = i + 1; j < out.length; j++) {
+      const a = out[i], b = out[j];
+      if (a.x0 > b.x1 + 30 || b.x0 > a.x1 + 30 || a.z0 > b.z1 + 30 || b.z0 > a.z1 + 30) continue;
+      out[i] = { x0: Math.min(a.x0, b.x0), z0: Math.min(a.z0, b.z0), x1: Math.max(a.x1, b.x1), z1: Math.max(a.z1, b.z1) };
+      out.splice(j, 1);
+      again = true;
+      break;
+    }
+  }
+  return out;
+}
 // (hedge pieces, trees and gates are flat records of numbers)
 const same = <T extends object>(a: T[], b: T[]) => a.length === b.length && a.every((x, i) => Object.entries(x).every(([k, v]) => (b[i] as Record<string, unknown>)[k] === v));
 
@@ -93,8 +109,7 @@ export class Ground {
       // hedges within reach of the change (a hedge keeps 2 m off a plot), and wherever a gateway
       // (painted as worn earth) came or went
       const plan = dirty.map((b) => ({ x0: b.x0 - 8, z0: b.z0 - 8, x1: b.x1 + 8, z1: b.z1 + 8 }));
-      // hedges run on past the box, so the occupancy they check must reach well beyond it
-      const occ = new Occupancy(input, plan.map((b) => ({ x0: b.x0 - 260, z0: b.z0 - 260, x1: b.x1 + 260, z1: b.z1 + 260 })));
+      const occ = new Occupancy(input);
       const gateBoxes: Box[] = [];
       let moved = false;
       for (const b of plan) {
@@ -110,7 +125,7 @@ export class Ground {
       if (moved) this.plantAll();
     }
     const gates = this.gates();
-    for (const b of dirty) {
+    for (const b of merge(dirty)) {
       const r = this.cover.rectFor(b.x0 - 4, b.z0 - 4, b.x1 + 4, b.z1 + 4);
       if (!r) continue;
       this.cover.paint(this.layout, r, gates);

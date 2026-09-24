@@ -3,7 +3,7 @@
 // for a gateway in most of them and the odd hedgerow tree (oak, ash) standing out of the line.
 // Plain numbers, no three.js (hedges.ts turns this into instanced meshes).
 import { hash2 } from './noise';
-import { Layout, toGrid, type Cell, type GroundInput, type XZ } from './layout';
+import { bbox, Layout, toGrid, type Cell, type GroundInput, type XZ } from './layout';
 import type { Spot } from './paint';
 
 export interface Piece { x: number; z: number; a: number; len: number; h: number; w: number } // centre, angle, size
@@ -14,17 +14,28 @@ const STEP = 4; // metres per hedge piece
 const CLEAR = 2.2; // how far a hedge keeps from roads, plots, parks and water
 
 // Is a point clear of everything a hedge mustn't touch? Polygons are bucketed on a 40 m grid.
+// The roads, parks and water part is kept while those arrays stay the same (plots change often).
+const fixedOcc = new WeakMap<object, { parks: unknown; water: unknown; occ: Occupancy }>();
 export class Occupancy {
   private grid = new Map<number, XZ[][]>();
   private static C = 40;
   private key = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
-  // (with `near`, only polygons within reach of those boxes are kept: enough for replanning there)
-  constructor(input: GroundInput, near?: { x0: number; z0: number; x1: number; z1: number }[]) {
-    const all = [...(input.blocked ?? []), ...(input.plots ?? []).map((p) => p.poly), ...(input.parks ?? []).map((p) => p.poly), ...(input.water ?? [])];
+  private under: Occupancy | null = null;
+  constructor(input: GroundInput | null) {
+    if (!input) return; // (a bare one, for the fixed part)
+    const blocked = input.blocked ?? [];
+    let f = fixedOcc.get(blocked);
+    if (!f || f.parks !== input.parks || f.water !== input.water) {
+      f = { parks: input.parks, water: input.water, occ: new Occupancy(null) };
+      f.occ.add([...blocked, ...(input.parks ?? []).map((p) => p.poly), ...(input.water ?? [])]);
+      fixedOcc.set(blocked, f);
+    }
+    this.under = f.occ;
+    this.add((input.plots ?? []).map((p) => p.poly));
+  }
+  private add(all: XZ[][]) {
     for (const p of all) {
-      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-      for (const q of p) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z; }
-      if (near && !near.some((b) => x1 > b.x0 && x0 < b.x1 && z1 > b.z0 && z0 < b.z1)) continue;
+      const { x0, z0, x1, z1 } = bbox(p);
       const C = Occupancy.C, r = CLEAR + 1;
       for (let i = Math.floor((x0 - r) / C); i <= Math.floor((x1 + r) / C); i++) for (let j = Math.floor((z0 - r) / C); j <= Math.floor((z1 + r) / C); j++) {
         const k = this.key(i, j);
@@ -35,7 +46,8 @@ export class Occupancy {
     }
   }
   // clear by at least r metres?
-  free(x: number, z: number, r = CLEAR) {
+  free(x: number, z: number, r = CLEAR): boolean {
+    if (this.under && !this.under.free(x, z, r)) return false;
     const l = this.grid.get(this.key(Math.floor(x / Occupancy.C), Math.floor(z / Occupancy.C)));
     if (!l) return true;
     const r2 = r * r;
