@@ -17,6 +17,8 @@ import { patchGround, setGroundQuality } from './ground';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
 import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
+import { Industries, townWishes, type IndustrySite } from './game/industry'; // industrial sites (docs/industries.md)
+import { PLAIN_MAT } from './buildgen';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -252,6 +254,27 @@ function rebuildChunk(c: { members: Set<Built>; group: THREE.Group; dirty: boole
   c.dirty = false;
 }
 
+// ---------------- industries (game/industry.ts) ----------------
+// Library sites, baked into the chunks with buildgen's shared vertex-coloured material, so they add
+// no draw calls; their moving parts are one IndustryFx in the scene. They aren't in `buildings`:
+// the stand-in lot only keys the chunk (and gives traffic's lorries a gate to go to).
+const industries = new Industries(net, scene, PLAIN_MAT);
+const siteBuilt = new Map<IndustrySite, Built>();
+industries.onAdd = (s) => { const b: Built = { lot: s.lot, born: 0, height: s.model.height, name: s.model.name, detail: s.model.detail, parts: s.parts, solo: null, chunk: null }; siteBuilt.set(s, b); toChunk(b); placesDirty = true; };
+industries.onRemove = (s) => { const b = siteBuilt.get(s); if (b) fromChunk(b); siteBuilt.delete(s); if (selectedSite === s) closeSheet(); placesDirty = true; };
+let selectedSite: IndustrySite | null = null, siteRings = false, siteT = 0;
+function showSite(s: IndustrySite) {
+  industries.openInfo(s, shell, [{ label: 'Add a stop nearby', icon: 'busStop', onClick: () => startStopTool() }], () => { if (selectedSite === s) selectedSite = null; });
+  selectedSite = s;
+  focusOn({ x: s.model.frame.cx, z: s.model.frame.cz }, industries.frameHeight(s)); // with its catchment, in the clear map above the sheet
+}
+// the site under a tap: where the ray meets what's drawn (a tall building hides the ground behind it)
+function siteUnder(sx: number, sy: number, g: P) {
+  ray.setFromCamera(ndc(sx, sy), cam);
+  const hit = ray.intersectObjects(cityGroup.children, true)[0];
+  return industries.at(hit ? { x: hit.point.x, z: hit.point.z } : g);
+}
+
 let queue: Lot[] = [];
 let placesDirty = true;
 let onRoadsChanged = () => {};
@@ -285,6 +308,7 @@ const shortName = (b: Built) => b.name.split(' · ')[0];
 // its land are compulsorily purchased, gardens running into it are cut back, queued plots dropped.
 function evictFromWorks() {
   const works = (c: { owner: string }) => c.owner === 'road';
+  industries.evict(); // a road through an industrial site takes it
   for (const b of buildings) {
     if (b.dying || b.lot.id < 0) continue;
     const l = b.lot;
@@ -374,6 +398,10 @@ function seedTown() {
   road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
   // junctions are designed (and take their land) before any plot is laid out
   commitRoads([...net.segs.keys()]);
+  // industry: library sites on the estate and out of town claim their land before any plot is
+  // built; the estate's plots are theirs, so its buildgen sheds are dropped (game/industry.ts)
+  industries.placeAll(townWishes(INDUSTRIAL, (p) => !INDUSTRIAL(p) && Math.hypot(p.x, p.z) > 300));
+  queue = queue.filter((l) => !INDUSTRIAL(l) && net.lotFree(l));
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
   for (const l of queue.splice(0, now)) if (net.lotFree(l)) spawnLot(l, false);
@@ -556,6 +584,7 @@ shell.addLayer({ id: 'flow', label: 'Traffic flow', icon: 'lights', disabled: 'N
 shell.addLayer({ id: 'catchment', label: 'Stop catchments', icon: 'busStop', disabled: 'Not in the game yet' });
 shell.addLayer({ id: 'demand', label: 'Where people want to go', icon: 'users', disabled: 'Not in the game yet' });
 shell.addLayer({ id: 'landuse', label: 'Land use', icon: 'building', disabled: 'Not in the game yet' });
+shell.addLayer({ id: 'industry', label: 'Industry catchments', icon: 'warehouse', on: false, onToggle: (on) => { siteRings = on; } });
 const viewNow = () => { const el = nav.goal.el; return el > 1.2 ? 'plan' : el < 0.45 ? 'low' : '3d'; };
 shell.setViews({
   options: [{ id: '3d', label: '3D' }, { id: 'low', label: 'Low' }, { id: 'plan', label: 'Plan' }],
@@ -1046,6 +1075,7 @@ function stopTap(p: P) {
   const res = net.planStop(q.seg.id, q.s, side);
   stopPreview = { seg: q.seg, t: q.s, side };
   drawGhost();
+  const feeds = industries.servedFrom(industries.kerbPoint(q.seg, q.s, side)).map((x) => x.model.variant.name); // (game/industry.ts)
   let el: HTMLElement;
   if (res.reason) el = openPanel('stop', 'Can’t put a stop here', 'busStop', `<div class="bad">${icon('alert')}<span>${res.reason}</span></div>`, true);
   else {
@@ -1055,6 +1085,7 @@ function stopTap(p: P) {
         ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${icon('alert')}<span>${pl.blocked}</span></div>` : ''}
         <button class="act primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
   }
+  if (feeds.length) el.insertAdjacentHTML('afterbegin', `<p class="note">${icon('warehouse')} This stop would serve the ${esc(feeds.join(' and the '))} too, raising ${feeds.length > 1 ? 'their' : 'its'} production.</p>`);
   // turn the road to run up the screen in the clear map above the sheet, so the lay-by can be seen as it's chosen
   focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
   el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
@@ -1084,6 +1115,8 @@ function tapMap(sx: number, sy: number): Mode {
   if (mode === 'stop') { stopTap(g); return mode; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
+  const site = st || jn !== null ? null : siteUnder(sx, sy, g); // an industrial site (game/industry.ts)
+  if (site) { showSite(site); return 'look'; }
   const b = st || jn !== null ? null : pickBuilding(sx, sy) ?? infillCells.get(cellKey(g.x, g.z)) ?? null;
   if (st) showStopInfo(st.seg, st.stop);
   else if (jn !== null) showJunctionInfo(jn);
@@ -1222,9 +1255,9 @@ function getPlaces(): Places {
   const home = (l: Lot) => l.kind === 'house' || l.kind === 'terrace' || l.kind === 'flats' || l.kind === 'tower';
   return (places = {
     homes: live.filter(home),
-    jobs: live.filter((l) => l.kind === 'office' || l.kind === 'shop' || l.kind === 'industry' || l.kind === 'tower'),
+    jobs: live.filter((l) => l.kind === 'office' || l.kind === 'shop' || l.kind === 'industry' || l.kind === 'tower').concat(industries.works()),
     shops: live.filter((l) => l.kind === 'shop'),
-    works: live.filter((l) => l.kind === 'industry'),
+    works: live.filter((l) => l.kind === 'industry').concat(industries.works()),
     weight: (l) => USE[l.kind].pop,
   });
 }
@@ -1328,6 +1361,12 @@ function frame(now: number) {
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
   clock += gdt * GAME_MIN_PER_S;
   const hour = (clock / 60) % 24;
+  // industrial sites: state once a game minute, moving parts at their own low rate, lamps at night;
+  // catchment rings for the selected site, or for every site while a stop is placed
+  siteT += gdt;
+  industries.tick(clock);
+  industries.frame(siteT, hour, cam);
+  industries.showOverlay(selectedSite, mode === 'stop' ? (stopPreview ? industries.kerbPoint(stopPreview.seg, stopPreview.t, stopPreview.side) : null) : undefined, mode === 'stop' || siteRings);
   // At 1× traffic steps once a frame as it always has; faster, it's cut into steps of at most
   // 1/30 s so cars don't jump through each other or past their stop lines. Paused, it holds still.
   if (speed > 0) {
@@ -1375,3 +1414,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 (window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
