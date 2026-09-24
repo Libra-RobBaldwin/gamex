@@ -7,7 +7,24 @@ so it can run in a Web Worker. Import it from `./water` (`index.ts`); the three.
 in `./water/material` so a worker never pulls in three.
 
 It's new files only, plus a few small additions to `terrain/procedural.ts` (marked "for the
-water system"). The live game still has its circle lake until the integration steps below are done.
+water system").
+
+**In the game** (`src/proto/game/water.ts`, `GameWater`): steps 1, 2 and 5 below are done, on
+today's flat map.
+- **The lake:** a noise-warped hollow in an `FnHeight` (a 16 m beach falling 3% to the water, then
+  shelving to 4 m deep), filled by the water system at −0.3 m. No rivers or basins are worked out
+  from the flat.
+- **Roads:** `isWater` is the water system's, keeping 4 m off the waterline.
+- **Land:** the lake claims its land as `'water'`, 3 m past the waterline.
+- **Drawing:** the ground mesh dips into the bed with the shore colours, `patchGroundMaterial` is
+  chained after the ground's patch, and the water and reeds take two draw calls. The light blends
+  part way to dusk in the evening.
+- **For bridges:** `crossings`, `navLimits` and `pierBans` (step 3 and 4) are exposed on
+  `GameWater`, and `window.proto.water` gives it to tests.
+
+By still water the tile's shore distance is refined below the raster from the depth over the
+ground's slope, so the foam line and beaches are smooth. Still water in the game is drawn flat,
+10 cm under the level, so the ground cuts the waterline.
 
 ## Conventions
 
