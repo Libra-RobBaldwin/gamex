@@ -110,3 +110,187 @@ everything".
    it.
 4. Add terrain height tiles (the grade solver already takes limits from anything).
 5. Add streaming tiles and the middle and far levels of detail.
+
+## The economy layer
+
+`economy.ts` (with `econdefs.ts`, `econlines.ts`, `econaccess.ts`, `econtowns.ts`) is the
+**demand model** authority from the diagram above. It owns what buildings are *used for* and
+how full they are, each town's memory (what it's been fed, its hysteresis counters),
+industries' production, and the loads on your lines and stops. The game owns the geometry.
+Catchments, the transit skim, zone-pair times, reach and trip tables are derived, rebuilt at
+each monthly review or when service changes; catchments, zone pairs and trips are rebuilt too
+when buildings change (the review's own changes included, so what goes up at a review counts
+at once). Only the authority is saved (`save()` and `Economy.load()`), with the time of day
+and what the derived tables were last worked out from: each line's dwells when its ride times
+and fares were last timed (daily), and the ride times and headway the network was last planned
+on. A load rebuilds the tables from those, so a game loaded at any moment carries on exactly as
+the saved one would have (a test checks the whole save matches, months later).
+
+**Time.** It never runs per frame. `advance(gameMinutes)` steps it an hour at a time and
+reviews every town once a "month" (`tune.monthDays`, default 30). Rates are per hour and
+changes are per review, so the live game can make a month one game day without retuning.
+
+**Simulate flows, show agents.** A line is a flow: each step moves the capacity its fleet
+brings past each stop (vehicles × seats × step / cycle) round the loop once. People get off
+(or change lines), then others get on. The cycle comes from the game's journey times plus
+dwell, and dwell grows with the crowd. `vehicles()` places each vehicle a headway apart along
+its line, with the load on its leg, for drawing buses, trains and lorries. A step costs lines ×
+stops + stops + industries. Neither depends on population: a test counts the work.
+
+**Getting about.** Lines between the same two places are taken together, since people board
+whichever comes first: their frequencies add and each carries its share. That holds for lines
+from neighbouring stops too (within the 250 m that counts as one interchange, as when each route
+has its own pole), with the walk to the other stop added to that line's ride. Routes and modes are
+chosen on how long a journey *feels*: walking to and from a stop and waiting count double, as
+in WebTAG, walking all the way counts as it is, and taking a bus or train at all is worth a
+few minutes, so nobody rides 300 m. A journey on your lines counts towards reach only for the
+share of people who found room on board last month, so a full line can't feed a town like one
+with seats to spare. Fares have a fixed part that builds up over the first 2–3 km, so short
+hops earn next to nothing. The fixed part is paid once a journey: people changing from another
+line, and freight handed on at a transfer, pay only the part by distance, so splitting a route
+into short lines earns no more than running it as one. Money events are in whole pounds, with
+what's left over carried to the next, so they add up to the lines' books.
+
+**Pairs, not all pairs.** A zone pairs one to one with the zones within about a kilometre,
+then with blocks of zones, three times coarser at each step out to 25 km. A block is reached
+at its middle by car, and by your lines at its best stop, with the walk from there averaged
+over the places near it, as for a zone. Zones near a stop are blocked with their own town
+only, so a railway to one town doesn't bring the jobs of the unserved town 3 km on within
+reach. The pairs grow with the number of zones, not its square, and the transit skim keeps
+only the pairs of stops with a route between them, as each stop's list of the stops it has a
+route to and from, so pairing walks only those. Its search from each stop resets only the
+stops it touched, so towns far apart with their own buses cost in proportion to their stops. A
+review costs those pairs + the skim, plus one pass over the buildings. 50 towns, 500 stops,
+200 lines and 1,000 vehicles run a month in about 0.15 s in node on a quiet desktop (the first
+month after the lines are set, which builds the skim twice), and 144 towns of 2,300 zones in
+0.1–0.15 s.
+
+**Freight.** For each cargo the economy works out, back from every place that takes it, how
+long it takes to get there from each freight stop (riding, waiting and handling). A line only
+takes cargo to a stop nearer by that measure than the one it's leaving, so freight always gets
+closer, with any number of changes (lorry to railhead, train, lorry to the works). It can't be
+shuttled for fares, and an industry doesn't hand its output to a depot whose only route runs to
+another depot beside it. Production rises when most of it is collected and falls back to where
+it started when it isn't, as in 2D.
+
+Freight is only taken, and only paid for, where there's room for it, as in Transport Fever. An
+industry takes its input up to its store (a power station burns only so much coal); a town
+takes goods and materials only as fast as its shops and works can make use of them (up to
+twice what they would staff, less what the town finds for itself, and never less than the
+businesses standing use), with a store of two days' worth; a transfer stop takes only what fits
+in its yard. A line loads only what the stop it's heading for has room for, and anything that
+still isn't taken stays on board, unpaid, and goes round again. So feeding more than a place
+can use earns nothing more, the surplus waits at the pickup, and the industry making it no
+longer counts as collected and doesn't grow on it.
+
+**How towns change.** Each month, each use of building in each town gets a demand:
+
+| Use | Grows with | Capped by |
+|---|---|---|
+| Homes | reach: workers who can get to a job within 30 min, shops within 20, leisure within 30 (by car via the car oracle, on foot, or by your lines where there's room), shared out among everyone competing for them | — |
+| Shops | customers and workers who can reach them | goods delivered |
+| Offices | workers who can reach them | passengers arriving to visit a workplace (not those going home, nor workers going to their own jobs) |
+| Works | workers who can reach them | building materials delivered |
+
+Businesses open a little ahead of the workers they need, and further (up to about half again)
+when what they need is delivered to spare, so feeding a town draws jobs and the homes follow.
+What's to spare is judged on what actually came last month, and the jobs and shops a town's
+people see in reach are only those that this month's workers and last month's deliveries keep
+going. So when service is cut, the jobs it fed stop drawing people at once, and the town doesn't
+grow on jobs that are only fading out (the town's smoothed view of its supply still decides
+what its businesses keep standing).
+
+A town finds some of what it needs for itself (about half of what it started with, however
+big it has grown since), and half the homes it started with are wanted whatever its people can
+reach (the retired, those working from home), so an unserved town shrinks towards a floor
+rather than vanishing, and one that was fed and lost it shrinks back towards where it would
+have been. It is taken to be in balance when the map is made, within limits: one with more
+jobs than homes is held back (in proportion) so it doesn't grow on its own, and one far short
+(an estate with no jobs in reach) is only partly lifted, so it still shrinks towards its floor.
+The lift is for what the model doesn't see, so it doesn't multiply what service brings later:
+homes keep it as a fixed number of people, and jobs lose it once the model explains as much as
+they were lifted to. Otherwise a town short of jobs and one short of workers joined by one
+train would lift each other without end. A town added to a running game (the map streaming in,
+or the player founding one) is taken as it stands at its first review, as those there from the
+start are. Demand is smoothed, then set against capacity:
+
+- After two months above capacity it builds. It restores abandoned buildings first, then
+  uses a free plot in the zone where demand is keenest, or densifies (house → terrace →
+  flats → tower) where people most want to be and there's nowhere left to spread. The uses
+  share a zone's free plots: each goes to whichever use wants more most keenly just then, not
+  to whichever is looked at first, so how soon the game answers changes when things go up,
+  not what.
+- After three months well below capacity, people leave the emptiest, worst-placed
+  buildings. Those are abandoned, and cleared six months later. A cleared plot is kept for
+  the use it was cleared of while that use is wanted, as planning would, so a town doesn't
+  empty its homes, fill their land with offices and then want the homes back. Once it's wanted
+  no more than it stands, other uses may build there, so wanted offices don't wait for ever
+  beside empty housing land. And a use with nowhere to build may redevelop the emptiest
+  buildings of a use that is about to give some up (offices where homes are emptying), rather
+  than let the homes empty for want of the jobs.
+- Buildings come in lumps, so it never builds what it couldn't fill, or abandons what it
+  would want back: no oscillation. When what's left is too lumpy to give up any more, it has
+  settled.
+- A request the game declines rests that zone or building for six months, even when the game
+  sends the zone again, unless that brings it more free plots or changes what may go up.
+- Occupancy moves in quickly and out slowly, and only once low demand has lasted.
+
+Every town reports a status (growing, stable, stalling, declining), a headline, ranked
+reasons in plain words ("shops only 40% supplied with goods", "no bus or rail service",
+"buses on Line 1 are full: 40% of people waiting couldn't get on") and the numbers for a town
+panel. A town whose stops turned away a tenth or more of those who came to board last month is
+told so, naming the line that turned most away, since more vehicles there is what would help.
+How well supplied a town is follows its memory of deliveries, as its growth does, but what the
+panel says is arriving (goods and materials an hour, passengers a day) is what your lines
+brought last month alone: a town nothing is delivered to says so ("shops only 67% supplied with
+goods, no goods delivered"; "no passengers arriving by your lines"), even while it still lives
+on what it started with. "Homes near a stop" counts homes alone, not the offices and shops
+sharing their zone, and only those homes set out on trips by your lines; trips by your lines
+end at whatever in a zone is near a stop. Growing means something went up (and the game put it up) or
+people moved in; demand that nothing comes of isn't growth, and demand that has fallen and
+settled isn't stalling.
+
+**Known limits.**
+
+- The skim holds every pair of stops with a route between them (about 20 bytes a pair), so a
+  dense network where every stop reaches every other within the transit limit still costs the
+  square of its stops.
+- A review runs in one go: about 50 ms for the 50-town world in desktop node, so several
+  times that on a phone. The live game should run it in a worker or spread it over frames.
+- A block is one town's part of a cell, reached by your lines at its best stop, so the parts
+  of a big town far from that stop count as near it. Close by, where zones pair one to one,
+  that doesn't arise.
+- Lines are flows: passengers arrive in the hour they board, and there are no timetables by
+  time of day. Fares still use the true ride time.
+- Towns interact through the jobs, shops and visitors they share, so a town can shrink and
+  then grow back (or the reverse) as a neighbour on the same line grows, with no change in
+  service. It's uncommon in random worlds, but it happens.
+
+**Plugging it into the live game.**
+
+1. *World.* Towns from the town centres. Zones are blocks of lots (the lots along one street
+   `row`, or ~150 m cells), with the free plots the queue still holds (not the lots the
+   economy cleared: it keeps track of those itself). Re-sending a zone doesn't lift the rest
+   after a declined request unless its free plots go up. Buildings are `Lot`s,
+   with capacity from `USE`. Stops come from `seg.stops`, lines from a line editor, industries
+   from the map.
+2. *Oracles.* `travelTime(stop, stop, vehicle)` and `carTime(zone, zone)` come from the traffic
+   graph, as skims rebuilt when `commitRoads()` runs (then call `networkChanged()`), not a
+   search per call.
+3. *Clock.* Call `advance(dt × GAME_MIN_PER_S)` from the frame loop. It only does work on hour
+   boundaries.
+4. *Actions* (`takeActions()`):
+   - `add`: queue a plot in that zone, then `addBuilding(lot, req)`, or `decline(req)` if
+     none fits. It asks for the first kind of each use (house, shop, office, industry); the
+     game may put up a bigger building of the same use and pass its capacity. The game's own
+     growth from its plot queue must be switched off, since the economy asks for what the town
+     needs.
+   - `densify`: rebuild the lot as the next kind, then `updateBuilding`, or `decline(req)`
+     when the lot can't take it (roads.ts lots are sized by kind).
+   - `vacate`, `abandon`, `restore`: change how the building looks.
+   - `demolish`: remove it.
+5. *Show it.* `traffic.ts` draws buses and trains from `vehicles()`, mapping each leg to its
+   route. Money events feed the HUD, and `town(id)` fills the town panel.
+6. *Next.* Feed car trips from the trip tables into traffic spawning as link flows; let
+   passengers queue per stop pair rather than per line, so people left behind by a full bus
+   take the next one on another line.
