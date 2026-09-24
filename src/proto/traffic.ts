@@ -38,7 +38,9 @@ interface JPath {
 }
 // a junction, or a bend where two roads meet end to end and the road runs on round a curve
 interface JData { node: number; j: Junction | null; live: boolean; legs: Leg[]; paths: Map<string, JPath> }
-interface Plan { seg: number; from: number; lane: number; slip: boolean; bus: boolean; jd: JData; path: JPath; node: number; next: RSeg; noWay?: boolean }
+// wrong: heading for a slip road that's only reached from the nearside lane, from another lane (its path
+// is the slip road's course, which it may only take once it's moved over)
+interface Plan { seg: number; from: number; lane: number; slip: boolean; bus: boolean; jd: JData; path: JPath; node: number; next: RSeg; noWay?: boolean; wrong?: boolean }
 // someone in or near a junction, at t along their path through it; adm: their place in the order
 // the junction's users go in (Infinity until they commit to it)
 interface User { c: Car; path: JPath; t: number; adm: number; v: number; rank?: number }
@@ -748,7 +750,7 @@ export class Traffic {
         else c.after = undefined;
       }
       const pl = this.planOf(c);
-      if (pl && pl.path.lineS - c.s <= this.sphere(c)) {
+      if (pl && !pl.wrong && pl.path.lineS - c.s <= this.sphere(c)) {
         const adm = c.admNode === pl.node ? c.adm ?? Infinity : Infinity;
         this.addUser(pl.node, c, pl.path, pl.path.ext0 - (pl.path.lineS - c.s), adm);
         if (adm < Infinity) this.commit(pl.path.exitKey, c);
@@ -907,6 +909,8 @@ export class Traffic {
     const j = jd.j, node = jd.node, y = this.net.node(node).y;
     const inLeg = jd.legs.find((l) => l.seg.id === seg.id), outLeg = jd.legs.find((l) => l.seg.id === next.id);
     if (!inLeg || !outLeg || inLeg === outLeg) return null;
+    // (at a merge or diverge the slip road is only ever reached from the nearside lane, along its course)
+    if (!slip && this.slipOnly(j, seg, next)) return null;
     const move = j ? moveOf(inLeg, outLeg) : 'S';
     const exitLane = j ? this.exitLaneOf(j, seg, lane, next, move, bus) : this.mapLane(next, node, lane);
     const L = this.len(seg), Lo = this.len(next);
@@ -1015,9 +1019,10 @@ export class Traffic {
     const slip = !!jd.j?.slip && jd.j.slip.from === c.seg.id && jd.j.slip.to === next.id && lane === 0;
     const q = c.plan, bus = !!c.bus;
     if (q && q.jd === jd && q.seg === c.seg.id && q.from === c.from && q.lane === lane && q.next === next && q.slip === slip && q.bus === bus) return q;
-    const path = this.pathFor(jd, c.seg, c.from, lane, next, slip, bus);
+    let path = this.pathFor(jd, c.seg, c.from, lane, next, slip, bus), wrong = false;
+    if (!path && !slip && this.slipOnly(jd.j, c.seg, next)) { path = this.pathFor(jd, c.seg, c.from, 0, next, true, bus); wrong = true; }
     if (!path) return null;
-    return (c.plan = { seg: c.seg.id, from: c.from, lane, slip, bus, jd, path, node: at, next });
+    return (c.plan = { seg: c.seg.id, from: c.from, lane, slip, bus, jd, path, node: at, next, wrong });
   }
   private nextOf(c: Car, at: number): RSeg | undefined {
     if (c.nextSeg === undefined || !this.net.segs.has(c.nextSeg)) {
@@ -1169,6 +1174,7 @@ export class Traffic {
   // to wait.
   private admit(c: Car, pl: Plan, now: number): number | null {
     const P = pl.path, j = pl.jd.j, node = pl.node;
+    if (pl.wrong) return this.no(c, 'not in the lane for the slip road');
     if (!j) return this.leaderFirst(c, P, node) ? ++this.admSeq : this.no(c, 'queue'); // a bend: just the queue, in order
     if (!this.leaderFirst(c, P, node)) return this.no(c, 'queue');
     if (j.form === 'signals' && !P.slip) {
@@ -1352,7 +1358,7 @@ export class Traffic {
       if (c.s < last && this.canChange(c, want, true)) { this.change(c, want, now); return; }
       if (turn && !noWay && c.s >= by - 3 && this.reroute(c, pl!)) return;
       // (with no other way, and nobody letting us across, we go from the lane we're in in the end)
-      if (turn && noWay && end === Infinity && c.wait > KEEP && c.s >= last - 1.5) { c.keep = pl!.node; c.merge = undefined; c.mergeBy = undefined; return; }
+      if (turn && noWay && end === Infinity && c.wait > KEEP && c.s >= last - 1.5 && !this.slipOnly(pl!.jd.j, c.seg, pl!.next)) { c.keep = pl!.node; c.merge = undefined; c.mergeBy = undefined; return; }
       // (and one that finds itself past even that, say having started out there, turns from the lane it's in)
       if (c.s >= last) { c.merge = undefined; c.mergeBy = undefined; return; }
       // otherwise ask to be let in, and wait for it where we have to be across
@@ -1378,7 +1384,7 @@ export class Traffic {
     if (!marks || !inLeg || !c.dest) return null;
     let best: { seg: RSeg; route: number[]; goal: number; entry: number; cost: number } | null = null;
     for (const leg of pl.jd.legs) {
-      if (leg === inLeg || !marks.includes(moveOf(inLeg, leg)) || !this.leaves(leg.seg, pl.node)) continue;
+      if (leg === inLeg || !marks.includes(moveOf(inLeg, leg)) || !this.leaves(leg.seg, pl.node) || (c.lane !== 0 && this.slipOnly(j, c.seg, leg.seg))) continue;
       const r = this.planVia(pl.node, leg.seg, c.dest);
       if (r && (!best || r.cost < best.cost)) best = { seg: leg.seg, ...r };
     }
@@ -1421,7 +1427,10 @@ export class Traffic {
     this.takeRoute(c, best);
     return true;
   }
+  // a slip road that's only reached by its own course (a merge or diverge's)
+  private slipOnly(j: Junction | null, seg: RSeg, next: RSeg) { return !!j?.slip?.kind && j.slip.from === seg.id && j.slip.to === next.id; }
   // can traffic leave `node` along this road? (not the wrong way up a one-way road)
+
   private leaves(seg: RSeg, node: number) { return !seg.oneway || seg.a === node; }
   private mapLane(seg: RSeg, from: number, lane: number) {
     if (lane === BUSLANE) return this.net.def(seg).bus ? BUSLANE : 0;
@@ -1849,7 +1858,7 @@ export class Traffic {
         const off = c.off, s = c.s;
         // near a junction (or bend) the body follows the course through it, as its conflicts do;
         // elsewhere the lane, carried straight on past the road's ends
-        const pl = c.plan && c.plan.path.lineS - s < E_IN && c.plan.path.inSeg === c.seg.id ? c.plan.path : undefined;
+        const pl = c.plan && !c.plan.wrong && c.plan.path.lineS - s < E_IN && c.plan.path.inSeg === c.seg.id ? c.plan.path : undefined;
         const af = c.after && c.after.path.next === c.seg.id && c.after.path.exitLane === this.laneIdx(c) && c.s - c.after.path.outS < E_OUT ? c.after.path : undefined;
         const onCourse = Math.abs(off - want) < 0.3;
         if (onCourse && pl) { const tr = pl.track, t = pl.ext0 - (pl.lineS - s); at = (d) => tr.point(t + d); }
