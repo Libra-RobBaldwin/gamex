@@ -134,18 +134,24 @@ stops + stops + industries. Neither depends on population: a test counts the wor
 
 **Getting about.** Lines between the same two stops are taken together, since people board
 whichever comes first: their frequencies add and each carries its share. Routes and modes are
-chosen on how long a journey *feels*: walking and waiting count double, as in WebTAG, and taking
-a bus or train at all is worth a few minutes, so nobody rides 300 m. A journey on your lines
-counts towards reach only for the share of people who found room on board last month, so a
-full line can't feed a town like one with seats to spare. Fares have a fixed part that builds
-up over the first 2–3 km, so short hops earn next to nothing.
+chosen on how long a journey *feels*: walking to and from a stop and waiting count double, as
+in WebTAG, walking all the way counts as it is, and taking a bus or train at all is worth a
+few minutes, so nobody rides 300 m. A journey on your lines counts towards reach only for the
+share of people who found room on board last month, so a full line can't feed a town like one
+with seats to spare. Fares have a fixed part that builds up over the first 2–3 km, so short
+hops earn next to nothing.
 
 **Pairs, not all pairs.** A zone pairs one to one with the zones within about a kilometre,
-then with blocks of zones, three times coarser at each step out to 25 km (a block is reached
-at its middle by car and at its best stop by your lines). The pairs grow with the number of
-zones, not its square. A review costs those pairs + stops², plus one pass over the buildings:
-50 towns, 500 stops, 200 lines and 1,000 vehicles, or 144 towns of 2,300 zones, run a month in
-well under a second in node.
+then with blocks of zones, three times coarser at each step out to 25 km. A block is reached
+at its middle by car, and by your lines at its best stop, with the walk from there averaged
+over the places near it, as for a zone. Zones near a stop are blocked with their own town
+only, so a railway to one town doesn't bring the jobs of the unserved town 3 km on within
+reach. The pairs grow with the number of zones, not its square, and the transit skim keeps
+each stop's list of the stops it has a route to and from, so pairing walks only those. A
+review costs those pairs + the skim, plus one pass over the buildings. 50 towns, 500 stops,
+200 lines and 1,000 vehicles run a month in about 0.15 s in node on a quiet desktop (the first
+month after the lines are set, which builds the skim twice), and 144 towns of 2,300 zones in
+0.1–0.15 s.
 
 **Freight.** For each cargo the economy works out, back from every place that takes it, how
 long it takes to get there from each freight stop (riding, waiting and handling). A line only
@@ -193,6 +199,21 @@ reasons in plain words ("shops only 40% supplied with goods", "no bus or rail se
 the numbers for a town panel. Growing means something went up (and the game put it up) or
 people moved in; demand that nothing comes of isn't growth, and demand that has fallen and
 settled isn't stalling.
+
+**Known limits.**
+
+- The skim holds every pair of passenger stops (16 bytes a pair: 4 MB for 500 stops, 64 MB
+  for 2,000). Maps with thousands of stops need it kept sparse, as its route lists already are.
+- A review runs in one go: about 50 ms for the 50-town world in desktop node, so several
+  times that on a phone. The live game should run it in a worker or spread it over frames.
+- A block is one town's part of a cell, reached by your lines at its best stop, so the parts
+  of a big town far from that stop count as near it. Close by, where zones pair one to one,
+  that doesn't arise.
+- Lines are flows: passengers arrive in the hour they board, and there are no timetables by
+  time of day. Fares still use the true ride time.
+- Towns interact through the jobs, shops and visitors they share, so a town can shrink and
+  then grow back (or the reverse) as a neighbour on the same line grows, with no change in
+  service. It's uncommon in random worlds, but it happens.
 
 **Plugging it into the live game.**
 
