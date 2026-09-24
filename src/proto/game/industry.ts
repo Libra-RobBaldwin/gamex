@@ -70,6 +70,7 @@ export const standInFeed: IndustryFeed = {
 };
 
 // ---------------- sites ----------------
+export interface IndustriesSave { next: number; sites: { n: number; type: IndustryId; seed: number; variant: string; plot: Plot }[] }
 export interface IndustrySite {
   n: number;
   key: string; // its land claim, `industry:<n>`
@@ -209,6 +210,14 @@ export class Industries {
       if (s) out.push(s);
     });
     return out;
+  }
+  // ---------- saving (game/save.ts) ----------
+  // Each site's plot, type, seed and variant: rebuilt from those it's the same site again.
+  save(): IndustriesSave { return { next: this.next, sites: this.sites.map((x) => ({ n: x.n, type: x.type, seed: x.seed, variant: x.model.variant.id, plot: structuredClone(x.plot) })) }; }
+  // (onto the restored network, whose land claims leave out the sites', which these make again)
+  restore(s: IndustriesSave) {
+    for (const x of s.sites) { this.next = x.n; this.place(x.type, x.plot, x.seed, x.variant); }
+    this.next = s.next;
   }
   remove(s: IndustrySite) {
     const i = this.sites.indexOf(s);

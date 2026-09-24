@@ -57,6 +57,17 @@ export class Purse {
     for (const b of this.byLine.values()) { b.lastFares = b.fares; b.lastRunning = b.running; b.fares = 0; b.running = 0; }
   }
   line(id: number) { return this.byLine.get(id) ?? { fares: 0, running: 0, lastFares: 0, lastRunning: 0 }; }
+
+  // ---------- saving (game/save.ts) ----------
+  save(): PurseSave { return { balance: this.balance, today: { ...this.today }, yesterday: { ...this.yesterday }, byLine: [...this.byLine].map(([id, b]) => [id, { ...b }]) }; }
+  load(s: PurseSave) {
+    this.balance = s.balance;
+    this.today = { ...empty(), ...s.today };
+    this.yesterday = { ...empty(), ...s.yesterday };
+    this.byLine = new Map(s.byLine.map(([id, b]) => [id, { ...b }]));
+    this.changed();
+  }
 }
+export interface PurseSave { balance: number; today: Books; yesterday: Books; byLine: [number, { fares: number; running: number; lastFares: number; lastRunning: number }][] }
 
 export const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;

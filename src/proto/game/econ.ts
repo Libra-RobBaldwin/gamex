@@ -19,6 +19,7 @@ import { FARE, MONTH, RUNNING, type Purse } from './money';
 import type { Stations } from './rail';
 
 export const TOWN_ID = 1;
+export interface TownSave { econ: EconomySave; carried: [number, number][]; day: number; stats: TownEconomy['stats'] }
 export const TOWN_NAME = 'Ashcombe';
 const CELL = 160;
 const TOWN_KMH = 28; // cars across town, junctions and all
@@ -77,20 +78,23 @@ export class TownEconomy {
   private day = -1;
   stats = { builds: 0, densified: 0, cleared: 0, declined: 0, ms: 0 };
 
-  constructor(private h: TownHooks, seed = 1) {
-    const zones = this.zoneList();
-    const buildings = h.standing().map((l) => { this.lotById.set(l.id, l); return { id: l.id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) }; });
-    this.econ = new Economy(
-      { towns: [{ id: TOWN_ID, name: TOWN_NAME, x: 0, z: 0, carShare: 0.45 }], zones, buildings, stops: this.stopList(), lines: this.lineList() },
-      this.oracles(),
+  // `from`: a saved game's town (save() below), which carries on exactly where it was
+  constructor(private h: TownHooks, private seed = 1, from?: TownSave) {
+    if (from) this.econ = this.resume(from);
+    else {
+      const zones = this.zoneList();
+      const buildings = h.standing().map((l) => { this.lotById.set(l.id, l); return { id: l.id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) }; });
       // Until freight is in the game the town finds its own goods and building materials; and it
       // finds most of its visitors itself, so the starter line about holds it steady and more
       // service is what tips it into growth.
-      { seed, calibrate: true, clock: h.clock() % 1440, tune: GAME_TUNE },
-    );
+      this.econ = new Economy({ ...this.world(zones), buildings }, this.oracles(), this.opts());
+    }
     this.serviceSig = this.sig();
     this.report = this.econ.town(TOWN_ID);
   }
+
+  private world(zones: ZoneIn[]) { return { towns: [{ id: TOWN_ID, name: TOWN_NAME, x: 0, z: 0, carShare: 0.45 }], zones, stops: this.stopList(), lines: this.lineList() }; }
+  private opts() { return { seed: this.seed, calibrate: true, clock: this.h.clock() % 1440, tune: GAME_TUNE }; }
 
   // ---------- what the game tells the economy ----------
   // zones: the grid cells with a building or a free plot in them
@@ -249,7 +253,33 @@ export class TownEconomy {
   building(id: number) { return this.econ.buildingState(id); }
   stop(stopId: number) { return this.econ.stop(this.key(stopId)); }
   line(id: number) { return this.econ.line(id); }
-  save(): EconomySave { return this.econ.save(); }
+  // Everything to carry on from later: the library's own save, and what this glue remembers.
+  // A save is a round trip for the game that was saved too: its economy is made again from the
+  // save, as a loaded game's is. The library keeps some working figures it doesn't save (trip
+  // tables, catchments), rebuilt on load in a slightly different order, so otherwise the two
+  // would drift apart in the last digits; this way they carry on alike (game/save.test.ts).
+  save(): TownSave {
+    const s: TownSave = { econ: this.econ.save(), carried: [...this.carried], day: this.day, stats: { ...this.stats } };
+    this.econ = this.resume(s);
+    this.report = this.econ.town(TOWN_ID);
+    return s;
+  }
+  // the economy made from a save, onto the town as it stands (the same lots, plots, stops and lines)
+  private resume(from: TownSave) {
+    const zones = this.zoneList();
+    // (its zones are met in the order it first met them, so its sums add up in the same order)
+    const order = new Map((from.econ.towns[0]?.zoneOrder ?? []).map((id, i) => [id, i]));
+    zones.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+    const econ = Economy.load({ ...this.world(zones), buildings: [] }, this.oracles(), structuredClone(from.econ), this.opts());
+    // (the economy's buildings come from the save: the lots standing are the same ones)
+    const known = new Set(econ.buildingIds());
+    this.lotById = new Map(this.h.standing().filter((l) => known.has(l.id)).map((l) => [l.id, l]));
+    this.carried = new Map(from.carried);
+    this.day = from.day;
+    this.stats = { ...from.stats };
+    this.travel.clear();
+    return econ;
+  }
 
   // The crowds' numbers: people waiting at a stop come from the economy; the rest of the street
   // life (footways, parks, pubs) stays the town's own curve for now.

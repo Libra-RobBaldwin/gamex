@@ -1036,9 +1036,11 @@ export class Economy {
         id: t.id, base: { ...t.base }, cal: { ...t.cal }, at: { ...t.at }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, assessed: t.assessed, labour: t.labour, customers: t.customers,
         supply: { ...t.supply }, month: { ...t.month }, got: { ...t.got }, offmap: { ...t.offmap }, delivered: { ...t.delivered }, accept: { ...t.accept }, held: { ...t.held }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
         recent: structuredClone(t.recent), done: { ...t.done }, report: t.report ? structuredClone(t.report) : null,
+        zoneOrder: t.zones.map((z) => z.id), // (the order its zones are summed in)
       })),
-      zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared } })),
-      buildings: [...this.buildingMap.values()].map((b) => ({ id: b.id, zone: b.zone.id, x: b.x, z: b.z, kind: b.kind, cap: b.cap, occ: b.occ, abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest })),
+      // (with the last review's tallies, which steer the trips until the next review)
+      zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared }, cap: { ...z.cap }, occCap: { ...z.occCap }, pHome: z.pHome, labour: z.labour, customers: z.customers })),
+      buildings: [...this.buildingMap.values()].map((b) => ({ id: b.id, zone: b.zone.id, x: b.x, z: b.z, kind: b.kind, cap: b.cap, occ: b.occ, abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest, site: b.site })),
       industries: [...this.indMap.values()].map((i) => ({ id: i.id, rate: i.rate, stock: arr(i.stock), input: arr(i.input), produced: i.produced, moved: i.moved, received: i.received, converted: i.converted, last: { ...i.last } })),
       stops: [...this.stopMap.values()].map((s) => ({ id: s.id, pool: arr(s.pool), relayed: arr(s.relayed), fare: s.fare, month: { ...s.month }, last: { ...s.last } })),
       lines: this.lineList.map((L) => ({ id: L.id, ...L.save() })),
@@ -1060,11 +1062,14 @@ export class Economy {
     for (const b of s.buildings) {
       e.addBuilding({ id: b.id, zone: b.zone, x: b.x, z: b.z, kind: b.kind, capacity: b.cap, occupancy: b.occ });
       const q = e.buildingMap.get(b.id);
-      if (q) Object.assign(q, { abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest });
+      if (q) Object.assign(q, { abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest, site: b.site ?? q.site });
     }
-    for (const t of s.towns) {
+    for (const { zoneOrder, ...t } of s.towns) {
       const q = e.townMap.get(t.id);
-      if (q) Object.assign(q, structuredClone({ ...t, id: q.id, assessed: t.assessed ?? t.primed }));
+      if (!q) continue;
+      Object.assign(q, structuredClone({ ...t, id: q.id, assessed: t.assessed ?? t.primed }));
+      // (its zones in the order the saved game had them, so its sums come out the same to the last digit)
+      if (zoneOrder) { const at = new Map(zoneOrder.map((id, i) => [id, i])); q.zones.sort((a, b) => (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity)); }
     }
     for (const i of s.industries) {
       const q = e.indMap.get(i.id);

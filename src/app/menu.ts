@@ -1,4 +1,4 @@
-// The start menu's screens: home (Continue, New game, How to play, Settings, About) and one page
+// The start menu's screens: home (Continue, Saved towns, New game, How to play, Settings, About) and one page
 // for each. Plain DOM with no three.js, so it paints at once; the game loads only when a map is
 // picked (main.ts). Brand: docs/hud.md (forest, lime, gold; League Spartan and Archivo; Tabler icons).
 
@@ -7,6 +7,8 @@ import { NAME, markSvg, ridgeSvg } from '../proto/ui/brand';
 import { icon, type Icon } from '../proto/ui/icons';
 import { EXPLORERS, libraryHref } from './library';
 import { bindRegion, lastRegion, regionBody } from './regionsetup';
+import { describe, when } from '../proto/game/save';
+import type { SaveEntry } from '../proto/game/savedb';
 import type { Screen } from './route';
 import { TIER_NAMES, TIER_NOTES, guideSeen, quality, setGuideSeen, setQuality } from './store';
 
@@ -15,8 +17,10 @@ export interface MenuHost {
   back(): void;
   /** start a map; `query` is the whole address query when the map has options (the region's) */
   play(map: MapInfo, guide: boolean, query?: string): void;
-  /** the latest save, once the game can save (nothing saves yet) */
-  save: { name: string; when: string; open(): void } | null;
+  /** the towns saved on this device, newest first (game/savedb.ts); Continue opens the first */
+  saves: SaveEntry[];
+  open(save: SaveEntry): void;
+  remove(save: SaveEntry): void;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
@@ -27,7 +31,7 @@ function row(id: string, ic: Icon, label: string, sub: string, primary = false) 
 }
 
 function home(h: MenuHost) {
-  const s = h.save;
+  const s = h.saves[0];
   return `<div class="home">
     <header class="brand">
       ${markSvg('bigmark')}
@@ -35,7 +39,8 @@ function home(h: MenuHost) {
       <p>A transport game. Build the roads, buses and trains a town grows around.</p>
     </header>
     <nav class="rows" aria-label="Start">
-      ${s ? `<button class="mrow primary" data-continue>${icon('play')}<span class="t"><b>Continue</b><small>${esc(s.name)} · ${esc(s.when)}</small></span>${chev()}</button>` : ''}
+      ${s ? `<button class="mrow primary" data-continue>${icon('play')}<span class="t"><b>Continue</b><small>${esc(s.name)} · ${esc(describe(s.summary))} · saved ${esc(when(s.savedAt))}</small></span>${chev()}</button>` : ''}
+      ${h.saves.length > 1 ? row('saves', 'clock', 'Saved towns', `${h.saves.length} on this device`) : ''}
       ${row('new', s ? 'plus' : 'play', 'New game', 'Pick a map to start on', !s)}
       ${row('how', 'finger', 'How to play', 'The controls, and the guided start')}
       ${row('library', 'layers', 'Library', 'Every vehicle, bridge and building block')}
@@ -43,6 +48,17 @@ function home(h: MenuHost) {
       ${row('about', 'info', 'About', 'Credits and licences')}
     </nav>
   </div>`;
+}
+
+// every saved town: open it, or delete it (a second tap confirms)
+function saves(h: MenuHost) {
+  if (!h.saves.length) return `<p class="fine">No saved towns yet. A town saves itself as you play, every few game hours and when you leave it.</p>`;
+  return `<ul class="maps saves">${h.saves.map((e, i) => `<li class="map ready">
+      <i class="art">${icon('clock')}</i>
+      <div class="t"><b>${esc(e.name)}</b><small>${esc(describe(e.summary))}</small><small>Saved ${esc(when(e.savedAt))}</small></div>
+      <div class="go"><button class="act primary" data-open="${i}">${icon('play')}<span>Open</span></button><button class="act" data-del="${i}" aria-label="Delete ${esc(e.name)}, saved ${esc(when(e.savedAt))}">${icon('trash')}</button></div>
+    </li>`).join('')}</ul>
+    <p class="fine">Saved towns are kept in this browser on this device.</p>`;
 }
 
 // a map's card art: its icon on a faceted tile, over a strip of the ridge
@@ -117,6 +133,7 @@ function about() {
 }
 
 const TITLES: Record<Exclude<Screen, 'home'>, [string, Icon]> = {
+  saves: ['Saved towns', 'clock'],
   new: ['New game', 'play'],
   region: ['Region', 'map'],
   how: ['How to play', 'finger'],
@@ -127,7 +144,7 @@ const TITLES: Record<Exclude<Screen, 'home'>, [string, Icon]> = {
 
 /** Draw a screen into the menu's root, and wire it. */
 export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: string) {
-  const body = screen === 'home' ? home(h) : screen === 'new' ? newGame(notice) : screen === 'region' ? regionBody(lastRegion()) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
+  const body = screen === 'home' ? home(h) : screen === 'saves' ? saves(h) : screen === 'new' ? newGame(notice) : screen === 'region' ? regionBody(lastRegion()) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
   const [title, ic] = screen === 'home' ? ['', 'home' as Icon] : TITLES[screen];
   root.innerHTML = `<div class="scr scr-${screen}">
       ${screen === 'home' ? '' : `<header class="bar"><button class="back" data-back aria-label="Back">${icon('arrowLeft')}</button><h2 tabindex="-1">${icon(ic)}<span>${title}</span></h2></header>`}
@@ -136,7 +153,12 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
     </div>`;
   root.querySelectorAll<HTMLElement>('[data-go]').forEach((b) => b.addEventListener('click', () => h.go(b.dataset.go as Screen)));
   root.querySelector('[data-back]')?.addEventListener('click', () => h.back());
-  root.querySelector('[data-continue]')?.addEventListener('click', () => h.save?.open());
+  root.querySelector('[data-continue]')?.addEventListener('click', () => { if (h.saves[0]) h.open(h.saves[0]); });
+  root.querySelectorAll<HTMLElement>('[data-open]').forEach((b) => b.addEventListener('click', () => h.open(h.saves[+b.dataset.open!])));
+  root.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.innerHTML = `${icon('trash')}<span>Delete?</span>`; return; }
+    h.remove(h.saves[+b.dataset.del!]);
+  }));
   root.querySelectorAll<HTMLElement>('[data-play]').forEach((b) => b.addEventListener('click', () => h.play(MAPS.find((m) => m.id === b.dataset.play)!, false)));
   root.querySelector('[data-guide]')?.addEventListener('click', () => h.play(MAPS.find((m) => m.guide && m.ready)!, true));
   root.querySelectorAll<HTMLInputElement>('input[name="q"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) setQuality(r.value === 'auto' ? 'auto' : +r.value); }));

@@ -54,8 +54,8 @@ a stream with review and fixes takes 45–90 minutes, and a merge about 5.
   Then tune growth, money and decline on the region.
 - [ ] Growth and the town panel for each district and each town.
 - [ ] A "Stop catchments" layer that means something at region scale.
-- [ ] **Save and load:** versioned saves in IndexedDB, autosave, and the menu's Load. The
-  economy already has `save()`. Nothing in the game saves yet, and that blocks release.
+- [x] **Save and load:** versioned saves in IndexedDB with migrations, autosave, Menu > Save
+  town and Load town, and the start menu's Continue and Saved towns (docs/save.md).
 - [ ] Bulldoze and undo for roads, stops and stations.
 - [ ] Freight after passengers: industries in the economy, lorries, terminals (backlog C).
 

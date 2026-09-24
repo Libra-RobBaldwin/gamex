@@ -64,15 +64,19 @@ export interface End extends P { node?: number; seg?: number }
 
 const dist = (a: P, b: P) => Math.hypot(a.x - b.x, a.z - b.z);
 
-export function rng(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
+// A seeded stream of numbers in [0, 1). Its `state` can be read and set, so a saved game carries
+// on drawing exactly the numbers it would have (game/save.ts).
+export interface Rng { (): number; state: number }
+export function rng(seed: number): Rng {
+  const f = (() => {
+    f.state = (f.state + 0x6d2b79f5) >>> 0;
+    let t = f.state;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  }) as Rng;
+  f.state = seed >>> 0;
+  return f;
 }
 
 export function closestOnSeg(p: P, a: P, b: P) {
@@ -230,7 +234,7 @@ export class Network {
   bound: number;
   // where the ground ends (half its width): roads running off the map are drawn out to here
   edge: number;
-  private rand: () => number;
+  private rand: Rng;
   zoneAt: (p: P) => Zone = () => 'town';
   // lots whose plots the last build() cut into (their gardens get trimmed)
   touched: Lot[] = [];
@@ -244,6 +248,9 @@ export class Network {
     this.rand = rng(seed);
   }
 
+  // where its own random stream has got to (plots' sizes and seeds), for saving
+  get randState() { return this.rand.state; }
+  set randState(v: number) { this.rand.state = v; }
   node(id: number) { return this.nodes.get(id)!; }
   segEnds(s: RSeg) { return [this.node(s.a), this.node(s.b)] as const; }
   segsAt(n: number) { return [...this.segs.values()].filter((s) => s.a === n || s.b === n); }
