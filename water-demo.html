@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#12161e" />
+    <title>Water system demo</title>
+    <style>
+      :root { color-scheme: dark; --glass: rgba(18, 22, 30, 0.82); --line: rgba(255, 255, 255, 0.12); --muted: #9aa6b5; --accent: #4cc3ff; }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #12161e; font-family: Inter, system-ui, sans-serif; color: #eef2f7; user-select: none; }
+      /* a phone-sized viewport on a desktop; the whole screen on a phone */
+      #phone { position: absolute; left: 50%; top: 50%; width: 390px; height: 800px; max-width: 100vw; max-height: 100dvh; transform: translate(-50%, -50%); overflow: hidden; border-radius: 22px; box-shadow: 0 0 0 10px #05070a, 0 20px 60px rgba(0, 0, 0, 0.5); }
+      @media (max-width: 500px) { #phone { width: 100vw; height: 100dvh; border-radius: 0; box-shadow: none; } }
+      #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+      .glass { background: var(--glass); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+      #top { position: absolute; top: 8px; left: 8px; right: 8px; padding: 7px 10px; font-size: 12px; line-height: 1.35; }
+      #top b { font-size: 14px; }
+      #top .m { color: var(--muted); font-variant-numeric: tabular-nums; }
+      #probe { position: absolute; left: 8px; bottom: 64px; padding: 6px 9px; font-size: 11.5px; color: var(--muted); max-width: 70%; }
+      #probe:empty { display: none; }
+      #bar { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; gap: 4px; padding: 4px; }
+      button { flex: 1; font: inherit; font-size: 12px; font-weight: 600; color: #eef2f7; background: transparent; border: 0; border-radius: 9px; padding: 9px 0; cursor: pointer; }
+      button.on { background: rgba(76, 195, 255, 0.22); }
+    </style>
+  </head>
+  <body>
+    <div id="phone">
+      <canvas id="c"></canvas>
+      <div id="top" class="glass"><b id="title">Water</b><div id="desc" class="m"></div><div id="stats" class="m"></div></div>
+      <div id="probe" class="glass"></div>
+      <div id="bar" class="glass">
+        <button data-preset="coast">Coast</button>
+        <button data-preset="valley">Valley</button>
+        <button data-preset="lake">Lake</button>
+        <button data-preset="uplands">Uplands</button>
+        <button id="light">Dusk</button>
+        <button id="bench">Measure</button>
+      </div>
+    </div>
+    <script type="module" src="/src/proto/water/demo.ts"></script>
+  </body>
+</html>
