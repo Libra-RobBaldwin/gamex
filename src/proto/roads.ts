@@ -33,13 +33,15 @@ export interface StopPlan { kind: 'kerb' | 'layby'; ok: boolean; title: string; 
 export const CLEAR_COST = 6000; // compulsory purchase per building
 export const RAISE_COST = 170; // extra per metre of road, per metre it's raised (embankment low, viaduct high)
 
+import { crossingOf, priceBridges, storeBridges, type SegBridge } from './game/bridges';
+import type { BridgeChoice } from './bridges/choose';
 import { FLOOR, GRADES, heightAt, solveProfile, type CrossMode, type HeightMode, type Limit, type Profile, type Spec } from './grade';
 export const TUNNEL_COST = 450; // per metre, per metre below ground (cut and cover shallow, bored deep)
 export type { HeightMode } from './grade';
 
 export interface RNode { id: number; x: number; z: number; y: number }
 // `mid` holds the interior points of a curved road, in order from a to b (empty when straight)
-export interface RSeg { id: number; a: number; b: number; mid: P[]; type: RoadType; stops: Stop[] }
+export interface RSeg { id: number; a: number; b: number; mid: P[]; type: RoadType; stops: Stop[]; bridges?: SegBridge[] } // bridges: game/bridges.ts
 export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower' | 'industry' | 'civic';
 // `row` identifies the run of plots along one side of one street, so neighbours can share a style
 // The building sits at (x, z) facing the road; its plot (parcel) runs from the back of the pavement
@@ -210,7 +212,7 @@ const hitsBand = (band: ReturnType<typeof bandOf>, poly: P[], c: P, r: number) =
 
 export interface RoadOpts { height: HeightMode; grade: number; cross: CrossMode; spec: Spec; type: RoadType }
 export const DEFAULT_OPTS: RoadOpts = { height: 'auto', grade: 0.06, cross: 'junction', spec: GRADES.road, type: 'street' };
-export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; path: P[]; profile?: Profile; bridges: number; raised: number; tunnels: number; sunk: number }
+export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; path: P[]; profile?: Profile; bridges: number; raised: number; tunnels: number; sunk: number; choices: BridgeChoice[] }
 
 export class Network {
   nodes = new Map<number, RNode>();
@@ -438,8 +440,8 @@ export class Network {
     const def = ROADS[opts.type], half = halfOf(def);
     let cost = Math.round(length * def.cost);
     const clears: Lot[] = [];
-    let path = flat, profile: Profile | undefined, bridges = 0, raised = 0, tunnels = 0, sunk = 0;
-    const res = (reason?: string): Check => ({ ok: !reason, reason, length, cost: reason ? cost : cost + clears.length * CLEAR_COST, clears, path, profile, bridges, raised, tunnels, sunk });
+    let path = flat, profile: Profile | undefined, bridges = 0, raised = 0, tunnels = 0, sunk = 0, choices: BridgeChoice[] = [];
+    const res = (reason?: string): Check => ({ ok: !reason, reason, length, cost: reason ? cost : cost + clears.length * CLEAR_COST, clears, path, profile, bridges, raised, tunnels, sunk, choices });
     if (length < MIN_LEN) return res('Too short');
     if (minRadius(flat) < Math.max(MIN_RADIUS, def.minR)) return res(def.minR > MIN_RADIUS ? `Curve too tight for a ${def.label.toLowerCase()} (${def.minR} m radius at least)` : 'Curve too tight');
     // motorways only meet other roads where they end (at a roundabout, or running on as another
@@ -505,6 +507,25 @@ export class Network {
       up = p.y > 3;
       down = p.y < -3;
     });
+    // Bridges (game/bridges.ts, docs/bridges.md): the chooser types and prices each stretch that
+    // needs one, in place of RAISE_COST there. It may ask for the profile again with the deck
+    // raised (a deeper structure) or the ramps eased, so it gets a re-solve of this one.
+    {
+      const y0 = this.endHeight(a) ?? 0, yL = this.endHeight(b), me = (id: number) => id === a.seg || id === b.seg;
+      const shape = (pr: Profile) => densify(flat, 3).reduce<{ p: P[]; acc: number }>((o, q, i, all) => { if (i) o.acc += dist(all[i - 1], q); o.p.push({ ...q, y: heightAt(pr, o.acc) }); return o; }, { p: [], acc: 0 }).p;
+      const resolve = (need: { raise: number; grade?: number }) => {
+        const lim = limits.map((l) => (l.lo !== undefined && l.hi === undefined ? { ...l, lo: l.lo + need.raise } : l));
+        const pr = solveProfile(length, y0, yL, Math.min(G, need.grade ?? G), lim, opts.height, floor);
+        return pr.ok ? { ...crossingOf(this, shape(pr), def, me), profile: pr } : undefined;
+      };
+      const priced = priceBridges(crossingOf(this, path, def, me, resolve));
+      choices = priced.choices;
+      if (choices.length) {
+        bridges = choices.length;
+        cost += priced.cost - priced.raise;
+        if (priced.lifted) { path = priced.lifted.path.map((p) => ({ ...p })); profile = (priced.lifted as { profile?: Profile }).profile ?? profile; }
+      }
+    }
     cost = Math.round(cost);
     // buildings in the way are compulsorily purchased and demolished
     const band = bandOf(path, half);
@@ -529,7 +550,7 @@ export class Network {
   // Build a road; splits roads it starts/ends on, and those it crosses at the same height, into
   // junctions. Roads crossed at a different height stay as bridges and underpasses.
   build(a: End, b: End, ctrl?: P, opts: RoadOpts = DEFAULT_OPTS): number[] {
-    const path = this.check(a, b, ctrl, opts).path.map((p) => ({ ...p, y: p.y ?? 0 }));
+    const checked = this.check(a, b, ctrl, opts), path = checked.path.map((p) => ({ ...p, y: p.y ?? 0 }));
     const resolve = (e: End, y: number) => (e.node ?? (e.seg !== undefined && this.segs.has(e.seg) ? this.split(e.seg, e) : this.nearestNode(e, 0.5)?.id ?? this.addNode(e.x, e.z, y)));
     const na = resolve(a, path[0].y);
     const nb = resolve(b, path[path.length - 1].y);
@@ -552,6 +573,8 @@ export class Network {
     const chain = [{ s: 0, node: na }, ...cuts, { s: L, node: nb }];
     const made: number[] = [];
     for (let i = 0; i + 1 < chain.length; i++) made.push(this.addSeg(chain[i].node, chain[i + 1].node, subPath(path, chain[i].s, chain[i + 1].s).slice(1, -1), opts.type));
+    // each piece keeps the bridge types chosen for the blueprint (game/bridges.ts)
+    for (let i = 0; i + 1 < chain.length; i++) { const sg = this.segs.get(made[i]); if (sg) storeBridges(sg, checked.choices, chain[i].s, chain[i + 1].s); }
     // lots overlapping the new road (e.g. queued ones) are dropped
     const band = bandOf(path, halfOf(ROADS[opts.type]));
     this.lots = this.lots.filter((l) => !hitsBand(band, rectCorners(l.x, l.z, l.rot, l.w, l.d), l, Math.hypot(l.w, l.d) / 2));

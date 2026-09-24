@@ -111,6 +111,8 @@ const boxAt = (w: number, h: number, d: number, x: number, y: number) => new THR
 
 export class Traffic {
   cars: Car[] = [];
+  // the speed allowed at s (from seg.a) on top of the road's own, e.g. on a bridge (m/s)
+  speedCap?: (seg: RSeg, s: number) => number;
   private net: Network;
   private graph: Map<number, { seg: RSeg; to: number; len: number }[]> | null = null;
   private access = new Map<number, Access | null>();
@@ -1124,6 +1126,7 @@ export class Traffic {
     const last = !c.bus && !c.route.length;
     const at = net.other(c.seg, c.from);
     let v0 = Math.min(c.vmax, d.speed * (c.lorry || c.bus ? 0.8 : 1));
+    if (this.speedCap) v0 = Math.min(v0, this.speedCap(c.seg, c.from === c.seg.a ? c.s : L - c.s)); // a bridge's own limit (game/bridges.ts)
     c.v0 = v0;
     this.laneChoice(c, this.planOf(c), now);
     const pl = this.planOf(c);
