@@ -9,9 +9,10 @@
 // that stays put for a crossing and moves along behind it for a merge), and has either of them
 // already got past everything the other could hit?
 import type { P } from './roads';
-import { DIMS, bodyOf, rectsTouch, type Kind, type Rect } from './footprint';
+import { BODIES, bodiesAlong, rectsTouch, type Kind, type Rect } from './footprint';
 
-export type Cls = 0 | 1 | 2; // a car, a lorry, a bus
+// a body in footprint.BODIES: 0 a car, 1 a lorry, 2 a bus, then the real vehicles the fleet registers
+export type Cls = number;
 export const KINDS: Kind[] = ['car', 'lorry', 'bus'];
 export const STEP = 1;
 const MARGIN = 0.25; // clearance kept all round each footprint
@@ -47,11 +48,7 @@ export class Track {
   private bodies: (Rect[][] | undefined)[] = [];
   body(k: Cls) {
     let b = this.bodies[k];
-    if (!b) {
-      b = [];
-      for (let i = 0; i < this.n; i++) { const t = Math.min(i * STEP, this.len); b.push(bodyOf(KINDS[k], (d) => this.point(t + d))); }
-      this.bodies[k] = b;
-    }
+    if (!b) this.bodies[k] = b = bodiesAlong(k, this, STEP);
     return b;
   }
   // the point t along the course (carried straight on past either end, so a body near an end
@@ -91,7 +88,7 @@ function work(A: Track, ca: Cls, B: Track, cb: Cls): Table {
   const nA = A.n, nB = B.n;
   const lowB = new Float32Array(nA + 1).fill(Infinity), hiB = new Float32Array(nA + 1).fill(-Infinity);
   const lowA = new Float32Array(nB + 1).fill(Infinity), hiA = new Float32Array(nB + 1).fill(-Infinity);
-  const da = DIMS[KINDS[ca]], db = DIMS[KINDS[cb]];
+  const da = BODIES[ca], db = BODIES[cb];
   // (every part of a body is within this of its reference point)
   const reach = Math.max(da.front, da.back) + da.hw + Math.max(db.front, db.back) + db.hw + 2 * MARGIN;
   let empty = A.box[0] - reach > B.box[1] || B.box[0] - reach > A.box[1] || A.box[2] - reach > B.box[3] || B.box[2] - reach > A.box[3];

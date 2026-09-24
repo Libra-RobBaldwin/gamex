@@ -15,8 +15,9 @@ import { BAY, bayWeight, closestOnPath, HALF, pathLength, pointAt, type Lot, typ
 import { legsAt, moveOf, type Junction, type Leg, type Move } from './junction';
 import { TRAINS, trainSpeed, type TrainDef } from './catalog';
 import { courseOf, laneSpan, sectionAt, taperOf, type Course, type Ends2 } from './xsection';
-import { DIMS, bodyOf, overlapping, type Kind, type Pose, type Rect } from './footprint';
+import { BODIES, DIMS, bodyOf, overlapping, trailerOn, type Kind, type Pose } from './footprint';
 import { STEP, Track, View, table, tableStats, type Cls } from './conflicts';
+import { Fleet, type Dress, type Dressed } from './game/fleet';
 
 export interface Places { homes: Lot[]; jobs: Lot[]; shops: Lot[]; works: Lot[]; weight: (l: Lot) => number }
 
@@ -30,8 +31,8 @@ interface JPath {
   inKey: number; exitKey: number;
   env: Float32Array; // per metre along the track: the speed allowed, braking comfortably for the bends ahead
   // a slip road, for each size of vehicle: until where it's still in the lane it leaves, and where
-  // it has to have found a gap in the lane it joins
-  leave?: number[]; gate?: number[];
+  // it has to have found a gap in the lane it joins (worked out for each body as it's first needed)
+  leave?: number[]; gate?: number[]; lanes?: [P[], P[]];
 }
 // a junction, or a bend where two roads meet end to end and the road runs on round a curve
 interface JData { node: number; j: Junction | null; live: boolean; legs: Leg[]; paths: Map<string, JPath> }
@@ -49,7 +50,8 @@ interface Car {
   goal: number; // stop at this distance along the last seg
   away?: boolean; // the trip ends off the map: drive on out rather than pulling up
   dest?: Access;
-  lorry: boolean; bus?: boolean; col: THREE.Color; heading: number;
+  lorry: boolean; bus?: boolean; heading: number;
+  cls?: Cls; hw?: number; dress?: Dress; // the real vehicle (game/fleet.ts): its body for the conflict tables, half its width, its look
   born: number; gone?: number; wait: number;
   lane: number; off: number; // lane (0 = nearside) and current sideways position
   dwell?: number; served?: number; inBay?: boolean; bay?: Stop;
@@ -64,14 +66,12 @@ interface Car {
   why?: string; // why it isn't going into the junction yet (for debugging)
   pose?: Pose;
 }
-interface Train { def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; col: THREE.Color; gone?: boolean }
+interface Train { def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; dress: Dress; gone?: boolean }
 interface Access { seg: RSeg; s: number }
 interface SegInfo { L: number; fwd: P[]; rev: P[]; ends: Ends2; spans: Map<number, [number, number]>; course?: Course }
 type Obstacle = (gap: number, vl: number, s0?: number) => void;
 
 const MAX = 300;
-const CAR_COLS = ['#c9302c', '#2f6fb8', '#f2f2f2', '#2b2b2b', '#8d8f93', '#e0a526', '#5a8f4a', '#6b2f4a', '#b8bcbf', '#f2f2f2', '#1f3f6a'];
-const LORRY_COLS = ['#f2f2f2', '#b0463a', '#2f6f9e', '#d69a2d', '#3f7a4a'];
 // how each kind of vehicle drives: acceleration, comfortable braking, time gap, gap when stopped
 const DRIVE: Record<Kind, { a: number; b: number; T: number; s0: number }> = {
   car: { a: 2.0, b: 2.5, T: 1.1, s0: 2 },
@@ -81,7 +81,8 @@ const DRIVE: Record<Kind, { a: number; b: number; T: number; s0: number }> = {
 const BMAX = 9; // emergency stop
 const E_IN = 10, E_OUT = 10; // how far either side of a junction its paths are followed
 const BUSLANE = 8, BAYLANE = 9;
-const LONGEST = 7; // the furthest any vehicle reaches in front of or behind its centre (a lorry)
+const LONGEST = 10; // the furthest any vehicle reaches in front of or behind its centre (an 18.5 m bendy bus)
+const WIDEST = 1.3; // half the widest vehicle's width (2.55 m buses and trailers, as game/fleet.ts rounds it)
 const GIVE_UP = 90; // seconds stood still before a driver gives up and goes another way
 const AMBER = 3, ALLRED = 2;
 const LAT = 3; // m/s² sideways: how hard vehicles corner
@@ -90,7 +91,7 @@ const BEND = 0.1; // radians: a join sharper than this is driven round its curve
 // the speed allowed at t along a junction's path (for the bends at and beyond it)
 const spd = (P: JPath, t: number) => P.env[Math.max(0, Math.min(P.env.length - 1, Math.floor(t / STEP)))];
 const keyOf = (s: RSeg, from: number, lane: number) => s.id * 32 + (from === s.a ? 0 : 16) + lane;
-const clsOf = (c: Car): Cls => (c.lorry ? 1 : c.bus ? 2 : 0);
+const clsOf = (c: Car): Cls => c.cls ?? (c.lorry ? 1 : c.bus ? 2 : 0);
 
 // Intelligent Driver Model: the acceleration that keeps a safe, comfortable gap to what's ahead.
 function idm(v: number, v0: number, gap: number, vl: number, p: { a: number; b: number; T: number; s0: number }, s0 = p.s0) {
@@ -100,14 +101,6 @@ function idm(v: number, v0: number, gap: number, vl: number, p: { a: number; b: 
 }
 const idmFree = (v: number, v0: number, p: { a: number }) => { const r = Math.min(2, v / Math.max(0.5, v0)); return p.a * (1 - r * r * r * r); };
 
-function im(geo: THREE.BufferGeometry, color: string, n: number) {
-  const m = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color }), n);
-  m.castShadow = true;
-  m.count = 0;
-  m.frustumCulled = false;
-  return m;
-}
-const boxAt = (w: number, h: number, d: number, x: number, y: number) => new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, 0);
 
 export class Traffic {
   cars: Car[] = [];
@@ -129,7 +122,7 @@ export class Traffic {
   private legsC = new Map<number, Leg[]>();
   private halfC = new Map<number, number>();
   private jd = new Map<number, JData>();
-  private tables = new Map<number, { a: View; b: View }>();
+  private tables = new Map<number, Map<number, { a: View; b: View }>>(); // by the two courses, then the two bodies
   private edgeList: Access[] | null = null;
   private buckets = new Map<number, Entry[]>();
   private users = new Map<number, User[]>();
@@ -138,29 +131,15 @@ export class Traffic {
   private admSeq = 0;
   private ids = 1;
   private clock = 0;
-  // instanced bodies: one draw call per part for every car on the map
-  private carBody = im(boxAt(4.3, 0.72, 1.8, 0, 0.38), '#ffffff', MAX);
-  private carBase = im(boxAt(3.9, 0.3, 1.66, 0, 0.1), '#1c1d20', MAX);
-  private carCab = im(boxAt(2.2, 0.6, 1.6, -0.3, 1.1), '#2b3640', MAX);
-  private trailer = im(boxAt(11, 3.1, 2.5, -1.4, 1.0), '#ffffff', 80);
-  private cab = im(boxAt(2.4, 3, 2.5, 5.4, 0.3), '#e8e6e0', 80);
-  private busBody = im(boxAt(11, 2.6, 2.5, 0, 0.35), '#ffffff', 40);
-  private busWin = im(boxAt(10.4, 1.0, 2.56, 0, 1.55), '#26343f', 40);
-  private busRoof = im(boxAt(10.6, 0.22, 2.3, 0, 2.95), '#f2f2f2', 40);
-  private trainBody = im(boxAt(20, 3.3, 2.8, 0, 0.5), '#ffffff', 160);
-  private trainWin = im(boxAt(19.6, 1.0, 2.86, 0, 2.0), '#ffffff', 160);
-  private trainRoof = im(boxAt(19.8, 0.3, 2.5, 0, 3.8), '#9aa0a4', 160);
-  private stripe = new THREE.Color();
-  private v3 = new THREE.Vector3();
-  private sc = new THREE.Vector3();
-  private m4 = new THREE.Matrix4();
-  private q = new THREE.Quaternion();
-  private e = new THREE.Euler(0, 0, 0, 'YZX');
+  // the real vehicles (the vehicle library): what each one is, and drawing them all
+  readonly fleet: Fleet;
 
   constructor(net: Network, scene: THREE.Scene, rand: () => number) {
     this.net = net;
     this.rand = rand;
-    scene.add(this.carBody, this.carBase, this.carCab, this.trailer, this.cab, this.busBody, this.busWin, this.busRoof, this.trainBody, this.trainWin, this.trainRoof);
+    this.fleet = new Fleet(net);
+    this.fleet.formAt = (node) => this.junctions.get(node)?.form;
+    scene.add(this.fleet.group);
   }
 
   // the road network changed: routes, access points and anyone on a removed road are reset
@@ -335,7 +314,9 @@ export class Traffic {
   private spawn(o: Access, d: Access, lorry: boolean, now: number) {
     const p = this.plan(o, d);
     if (!p) return false;
-    const kind: Kind = lorry ? 'lorry' : 'car', dm = DIMS[kind];
+    // the real vehicle, at its true size: a mix for where the trip starts, a lorry or van from a
+    // works (game/fleet.ts, drawing its own random numbers, so the trips are the same as ever)
+    const dm = this.fleet.dress(o.seg, lorry), kind = dm.kind, heavy = dm.heavy;
     const lo = this.startGuard(o.seg, p.from) + dm.back, hi = this.endGuard(o.seg, p.from) - dm.front;
     if (hi < lo) return false;
     const s = Math.max(lo, Math.min(hi, p.s));
@@ -345,13 +326,15 @@ export class Traffic {
     if (!p.route.length && goal < s + 8) { if (s + 8 > hi) return false; goal = s + 8; }
     const n = this.net.def(o.seg).lanes;
     const lanes = lorry || n === 1 ? [0] : [...Array(n).keys()].sort(() => this.rand() - 0.5);
-    for (const lane of lanes) {
+    for (const lane of heavy ? [0] : lanes) {
       const sp = this.span(o.seg, p.from, lane);
-      if (s - dm.back < sp[0] || s + dm.front + 10 > sp[1] || !this.canPlace(o.seg, p.from, s, lane, kind)) continue;
-      const col = new THREE.Color(lorry ? LORRY_COLS[Math.floor(this.rand() * LORRY_COLS.length)] : CAR_COLS[Math.floor(this.rand() * CAR_COLS.length)]);
+      if (s - dm.back < sp[0] || s + dm.front + 10 > sp[1] || !this.canPlace(o.seg, p.from, s, lane, dm)) continue;
+      dm.dress.lampAt = (this.rand() - 0.5) * 0.7; // (this number once chose the box's paint: now when the driver's lamps go on)
+      const cruise = lorry ? 25 : 28 + this.rand() * 5;
       const c: Car = {
-        id: this.ids++, kind, front: dm.front, back: dm.back, seg: o.seg, from: p.from, s, v: 0, vmax: lorry ? 25 : 28 + this.rand() * 5, route: p.route, goal, dest: d,
-        away: this.offMap(d.seg, p.entry, goal), lorry, col, heading: 0, born: now, wait: 0, lane, off: this.laneOff(o.seg, p.from, s, lane), uref: [],
+        id: this.ids++, kind, front: dm.front, back: dm.back, seg: o.seg, from: p.from, s, v: 0, vmax: Math.min(heavy ? 25 : cruise, dm.top * 0.95), route: p.route, goal, dest: d,
+        away: this.offMap(d.seg, p.entry, goal), lorry: heavy, heading: 0, born: now, wait: 0, lane, off: this.laneOff(o.seg, p.from, s, lane), uref: [],
+        cls: dm.cls, hw: dm.hw, dress: dm.dress,
       };
       this.cars.push(c);
       c.entry = this.put(keyOf(o.seg, p.from, lane), c, s, 0, true);
@@ -366,11 +349,10 @@ export class Traffic {
     return goal > this.len(seg) - 3 && (this.adj().get(far)?.length ?? 0) === 1 && this.edges().some((e) => e.seg === seg);
   }
   // Is there room to put a vehicle here, clear of the ones in the lane and of any coming up behind?
-  private canPlace(seg: RSeg, from: number, s: number, lane: number, kind: Kind) {
-    const dm = DIMS[kind];
+  private canPlace(seg: RSeg, from: number, s: number, lane: number, dm: { front: number; back: number; hw: number }) {
     // (where a road narrows, the lane beside may be too close to be alongside anything in it)
     const lanes = [lane];
-    if (lane !== BUSLANE) for (const l of [lane - 1, lane + 1]) if (l >= 0 && l < this.net.def(seg).lanes && Math.abs(this.laneOff(seg, from, s, l) - this.laneOff(seg, from, s, lane)) < dm.hw + DIMS.bus.hw + 0.4) lanes.push(l);
+    if (lane !== BUSLANE) for (const l of [lane - 1, lane + 1]) if (l >= 0 && l < this.net.def(seg).lanes && Math.abs(this.laneOff(seg, from, s, l) - this.laneOff(seg, from, s, lane)) < dm.hw + WIDEST + 0.4) lanes.push(l);
     for (const l of lanes) for (const e of this.buckets.get(keyOf(seg, from, l)) ?? []) {
       const pos = e.kind === 0 && e.c.seg === seg && e.c.from === from && !e.c.turn ? e.c.s : e.pos;
       if (pos >= s) { if (pos - e.c.back - (s + dm.front) < 3) return false; }
@@ -411,23 +393,28 @@ export class Traffic {
     if (o && d && !(o.seg.id === d.seg.id && Math.abs(o.s - d.s) < 8)) this.spawn(o, d, lorry, now);
   }
 
-  // A bus that tours the network, calling at every stop on its side of the road.
-  addBus() {
+  // A bus that tours the network, calling at every stop on its side of the road: one of the
+  // player's, in the company livery with a fleet number (offer: which model, from the Vehicles panel).
+  addBus(offer?: string): Car | undefined {
     const segs = [...this.net.segs.values()].filter((s) => this.net.def(s).cls === 'road' && this.net.def(s).family !== 'Motorway');
+    let dm: Dressed | undefined;
     for (let tries = 0; tries < 30 && segs.length; tries++) {
       const seg = segs[Math.floor(this.rand() * segs.length)], from = this.rand() < 0.5 ? seg.a : seg.b;
-      const lo = this.startGuard(seg, from) + DIMS.bus.back, hi = this.endGuard(seg, from) - DIMS.bus.front;
+      const bd = (dm ??= this.fleet.dressBus(offer));
+      const lo = this.startGuard(seg, from) + bd.back, hi = this.endGuard(seg, from) - bd.front;
       if (hi < lo) continue;
       const s = lo + this.rand() * (hi - lo), lane = this.net.def(seg).bus ? BUSLANE : 0;
-      if (!this.canPlace(seg, from, s, lane, 'bus')) continue;
+      if (!this.canPlace(seg, from, s, lane, bd)) continue;
+      bd.dress.lampAt = (this.rand() - 0.5) * 0.7;
       const c: Car = {
-        id: this.ids++, kind: 'bus', front: DIMS.bus.front, back: DIMS.bus.back, seg, from, s, v: 0, vmax: 11, route: [], goal: Infinity, lorry: false, bus: true,
-        col: new THREE.Color(this.rand() < 0.5 ? '#c9302c' : '#e8a21f'), heading: 0, born: this.clock, wait: 0, lane: 0, off: this.laneOff(seg, from, s, lane), uref: [],
+        id: this.ids++, kind: 'bus', front: bd.front, back: bd.back, seg, from, s, v: 0, vmax: 11, route: [], goal: Infinity, lorry: false, bus: true,
+        heading: 0, born: this.clock, wait: 0, lane: 0, off: this.laneOff(seg, from, s, lane), uref: [], cls: bd.cls, hw: bd.hw, dress: bd.dress,
       };
       this.cars.push(c);
       c.entry = this.put(keyOf(seg, from, lane), c, s, 0, true);
-      return;
+      return c;
     }
+    return undefined;
   }
   private nextStop(c: Car) {
     const L = this.len(c.seg), side = c.from === c.seg.a ? 1 : -1;
@@ -522,7 +509,7 @@ export class Traffic {
         const T = c.turn, P = T.path;
         this.addUser(P.node, c, P, T.t, c.adm ?? Infinity);
         // its tail is still in the lane it came from; its nose is already in the one it's going to
-        if (P.leave ? T.t < P.leave[clsOf(c)] : T.t - P.ext0 < c.back + 1) this.put(P.inKey, c, P.lineS + (T.t - P.ext0), 1);
+        if (P.leave ? T.t < this.slipFor(P, clsOf(c))[0] : T.t - P.ext0 < c.back + 1) this.put(P.inKey, c, P.lineS + (T.t - P.ext0), 1);
         if (P.gate === undefined ? P.ext1 - T.t < E_OUT + 8 : c.merged) this.put(P.exitKey, c, P.outS - (P.ext1 - T.t), 2);
         if (c.gone === undefined) this.commit(P.exitKey, c);
         continue;
@@ -650,7 +637,7 @@ export class Traffic {
     if (j.form === 'roundabout' || j.form === 'mini') {
       // round the island (increasing angle keeps it on our right), easing on to and off the ring
       const multi = this.net.def(seg).lanes > 1 && lane > 0 && lane !== BUSLANE;
-      const rr = Math.max(3.5, j.R - (multi ? 5 : 2.6));
+      const rr = Math.max(3.5, j.R - (multi ? 6.5 : 2.6));
       const t0 = Math.atan2(A.z - n.z, A.x - n.x);
       let t1 = Math.atan2(B.z - n.z, B.x - n.x);
       while (t1 <= t0 + 0.3) t1 += Math.PI * 2;
@@ -746,15 +733,22 @@ export class Traffic {
       const inPts: P[] = [], outPts: P[] = [];
       for (let s = Math.max(0, lineS - 5); s <= Math.min(L, lineS + 45); s += 1) inPts.push(this.lanePoint(seg, from, s, lane));
       for (let s = Math.max(0, outS - 45); s <= Math.min(Lo, outS + 5); s += 1) outPts.push(this.lanePoint(next, node, s, exitLane));
-      const leave = [ext1, ext1, ext1], gate = [ext0, ext0, ext0];
-      for (const k of [0, 1, 2] as Cls[]) {
-        for (let t = ext0; t <= ext1; t += 0.5) if (this.clearOfLane2(track, t, k, inPts)) { leave[k] = t; break; }
-        for (let t = ext1; t >= ext0; t -= 0.5) if (this.clearOfLane2(track, t, k, outPts)) { gate[k] = t; break; }
-      }
-      P.leave = leave; P.gate = gate;
+      P.leave = []; P.gate = []; P.lanes = [inPts, outPts];
     }
     jd.paths.set(key, P);
     return P;
+  }
+  // where a vehicle of this body on a slip road is clear of the lane it leaves, and where it has
+  // to have found a gap in the lane it joins
+  private slipFor(P: JPath, k: Cls): [number, number] {
+    const lv = P.leave!, gt = P.gate!;
+    if (lv[k] === undefined) {
+      const { track, ext0, ext1 } = P, [inPts, outPts] = P.lanes!;
+      lv[k] = ext1; gt[k] = ext0;
+      for (let t = ext0; t <= ext1; t += 0.5) if (this.clearOfLane2(track, t, k, inPts)) { lv[k] = t; break; }
+      for (let t = ext1; t >= ext0; t -= 0.5) if (this.clearOfLane2(track, t, k, outPts)) { gt[k] = t; break; }
+    }
+    return [lv[k], gt[k]];
   }
   // Is a vehicle of class k at t along a course wholly to one side of a lane's traffic (anything
   // in that lane, of any size, with a little room to spare)?
@@ -764,7 +758,7 @@ export class Traffic {
       for (const [f, w] of [[r.hl, r.hw], [r.hl, -r.hw], [-r.hl, r.hw], [-r.hl, -r.hw]]) {
         const p = { x: r.x + r.hx * f - r.hz * w, z: r.z + r.hz * f + r.hx * w }, c = closestOnPath(p, lane);
         const sd = Math.sign((p.x - c.x) * c.uz - (p.z - c.z) * c.ux) * c.d;
-        if (Math.abs(sd) < DIMS.bus.hw + 0.35 || (side && Math.sign(sd) !== side)) return false;
+        if (Math.abs(sd) < WIDEST + 0.35 || (side && Math.sign(sd) !== side)) return false;
         side = Math.sign(sd);
       }
     }
@@ -775,9 +769,11 @@ export class Traffic {
     const a = mine.track, b = its.track;
     const meA = a.id < b.id || (a.id === b.id && cm <= ci);
     const [A, ca, B, cb] = meA ? [a, cm, b, ci] : [b, ci, a, cm];
-    const k = (A.id * 1048576 + B.id) * 9 + ca * 3 + cb;
-    let t = this.tables.get(k);
-    if (!t) { const tb = table(A, ca, B, cb); t = { a: new View(tb, true), b: new View(tb, false) }; this.tables.set(k, t); }
+    const k = A.id * 1048576 + B.id, kb = ca * 65536 + cb;
+    let byBody = this.tables.get(k);
+    if (!byBody) this.tables.set(k, (byBody = new Map()));
+    let t = byBody.get(kb);
+    if (!t) { const tb = table(A, ca, B, cb); t = { a: new View(tb, true), b: new View(tb, false) }; byBody.set(kb, t); }
     return meA ? t.a : t.b;
   }
   // the vehicle's way through the junction at the end of its road, if there is one
@@ -926,6 +922,13 @@ export class Traffic {
     for (const o of this.committed.get(P.exitKey) ?? []) if (o !== c) free -= o.front + o.back + 2;
     return free >= c.front + c.back + 1;
   }
+  // A roundabout's ring holds only so many vehicles: nobody else commits while those already
+  // committed to it would fill its nearside lane end to end at their true lengths, or it locks solid.
+  private ringRoom(c: Car, node: number, j: Junction) {
+    let used = c.front + c.back;
+    for (const x of this.users.get(node) ?? []) if (x.c !== c && x.adm !== Infinity && x.t < x.path.ext1) used += x.c.front + x.c.back + 1;
+    return used <= 2 * Math.PI * Math.max(3.5, j.R - 2.6);
+  }
   // May this vehicle commit to the junction now? Returns who it goes ahead of, or null to wait.
   private admit(c: Car, pl: Plan, now: number): number[] | null {
     const P = pl.path, j = pl.jd.j, node = pl.node;
@@ -937,6 +940,7 @@ export class Traffic {
       if (st.state === 'amber' && P.lineS - c.s - c.front > (c.v * c.v) / 7 + 1) return this.no(c, 'amber'); // stop if you can
     }
     if (!this.exitRoom(c, P)) return this.no(c, 'no room beyond');
+    if ((j.form === 'mini' || j.form === 'roundabout') && !this.ringRoom(c, node, j)) return this.no(c, 'ring full');
     const me = c.uref.find((u) => u.path === P);
     if (!me) return this.no(c, 'not near');
     if (P.rank === 0) return [];
@@ -1026,7 +1030,7 @@ export class Traffic {
     const n = this.net.def(c.seg).lanes, L = this.len(c.seg);
     // finish moving across before thinking again
     if (c.oldLane !== undefined) {
-      if (Math.abs(c.off - this.laneOff(c.seg, c.from, c.s, c.lane)) < 1.0) c.oldLane = undefined;
+      if (Math.abs(c.off - this.laneOff(c.seg, c.from, c.s, c.lane)) < 1.0 && this.tailIn(c)) c.oldLane = undefined;
       else return;
     }
     if (n < 2) { c.merge = undefined; return; }
@@ -1063,6 +1067,15 @@ export class Traffic {
     const here = this.laneAcc(c, c.lane), open = idmFree(c.v, c.v0 ?? c.vmax, DRIVE[c.kind]);
     if (ok(c.lane - 1) && this.laneAcc(c, c.lane - 1) >= Math.max(here, open) - 0.2 && this.canChange(c, c.lane - 1, false)) this.change(c, c.lane - 1, now);
     else if (ok(c.lane + 1) && here < open - 1 && this.laneAcc(c, c.lane + 1) > here + 0.8 && this.canChange(c, c.lane + 1, false)) this.change(c, c.lane + 1, now);
+  }
+  // An artic's trailer (or a bendy bus's rear) swings across after the front: until its tail is
+  // in the new lane too, the vehicle keeps its place in the old one.
+  private tailIn(c: Car) {
+    const ps = c.pose?.parts, r = ps && c.cls !== undefined && BODIES[c.cls].trailer ? ps[ps.length - 1] : undefined;
+    if (!r) return true;
+    const at = Math.max(0, c.s - c.back), q = pointAt(this.pathOf(c.seg, c.from), at), off = this.laneOff(c.seg, c.from, at, c.lane);
+    const dx = r.x - r.hx * r.hl - (q.x + q.uz * off), dz = r.z - r.hz * r.hl - (q.z - q.ux * off);
+    return Math.abs(dx * q.uz - dz * q.ux) < 1.0;
   }
   // Missed the lane for our turn: take a way this lane does go, and find a new route from there.
   private reroute(c: Car, pl: Plan) {
@@ -1190,7 +1203,7 @@ export class Traffic {
   private squeezed(c: Car, ob: Obstacle) {
     const x = this.info(c.seg);
     if ((!x.ends.A && !x.ends.B) || this.laneIdx(c) === BUSLANE) return;
-    const me = DIMS[c.kind].hw;
+    const me = c.hw ?? DIMS[c.kind].hw;
     for (const l of [c.lane - 1, c.lane + 1]) {
       if (l < 0 || l >= this.net.def(c.seg).lanes) continue;
       const e = this.leader(keyOf(c.seg, c.from, l), c.s - c.back, c);
@@ -1198,7 +1211,7 @@ export class Traffic {
       // how far apart the two lanes are where we'd be alongside
       const at = Math.max(c.s + c.front, e.pos - e.c.back);
       const apart = Math.abs(this.laneOff(c.seg, c.from, at, l) - this.laneOff(c.seg, c.from, at, c.lane));
-      if (apart < me + DIMS[e.c.kind].hw + 0.4) ob(e.pos - e.c.back - c.s - c.front, e.c.v);
+      if (apart < me + (e.c.hw ?? DIMS[e.c.kind].hw) + 0.4) ob(e.pos - e.c.back - c.s - c.front, e.c.v);
     }
   }
   // Buses call at their stops; at a lay-by they pull right out of the traffic, and wait for a gap to rejoin it.
@@ -1286,13 +1299,13 @@ export class Traffic {
     const ob: Obstacle = (g, vl, s0 = dr.s0) => { acc = Math.min(acc, idm(c.v, v0, g, vl, dr, s0)); gmin = Math.min(gmin, g); };
     for (const u of c.uref) this.junctionLimits(u, ob);
     // a slip road: until it's clear of the lane it's leaving, it follows the traffic in that lane
-    if (P.leave && T.t < P.leave[clsOf(c)]) {
+    if (P.leave && T.t < this.slipFor(P, clsOf(c))[0]) {
       const here = P.lineS + (T.t - P.ext0), e = this.aheadIn(this.buckets.get(P.inKey), here, c);
       if (e) ob(e.pos - e.c.back - here - c.front, e.c.v);
     }
     // and gives way to the road it joins
     if (P.gate && !c.merged) {
-      const g = P.gate[clsOf(c)];
+      const g = this.slipFor(P, clsOf(c))[1];
       if (T.t >= g - 1 && this.mayMerge(c, P)) {
         c.merged = true;
         this.put(P.exitKey, c, P.outS - (P.ext1 - T.t), 2, true);
@@ -1335,12 +1348,14 @@ export class Traffic {
   }
 
   // ---------- trains ----------
-  addTrain(kind: string) {
-    const def = TRAINS[kind];
+  // a train of one of the game's kinds (catalog.ts), or a set bought from the vehicle library
+  // (game/fleet.ts defFor), made up of the year's real rolling stock
+  addTrain(kind: string | TrainDef) {
+    const def = typeof kind === 'string' ? TRAINS[kind] : kind;
     const segs = [...this.net.segs.values()].filter((s) => this.trackOk(def, s));
     if (!segs.length) return false;
-    const seg = segs[Math.floor(this.rand() * segs.length)];
-    this.trains.push({ def, seg, from: seg.a, s: Math.min(this.len(seg) - 1, def.cars * (def.carLen + 1)), v: 0, trail: [], col: new THREE.Color(def.color) });
+    const seg = segs[Math.floor(this.rand() * segs.length)], dress = this.fleet.dressTrain(def);
+    this.trains.push({ def, seg, from: seg.a, s: Math.min(this.len(seg) - 1, dress.length + 1), v: 0, trail: [], dress });
     return true;
   }
   private steepest(s: RSeg) {
@@ -1398,22 +1413,18 @@ export class Traffic {
     return { q: pointAt(this.pathOf(seg, from), Math.max(0, s)), seg };
   }
 
-  private place(x: number, y: number, z: number, heading: number, pitch: number, k = 1) {
-    this.e.set(0, -heading, pitch);
-    this.q.setFromEuler(this.e);
-    this.m4.compose(this.v3.set(x, y, z), this.q, this.sc.set(Math.max(0.01, k), Math.max(0.01, k), Math.max(0.01, k)));
-    return this.m4;
-  }
   private draw(dt: number, now: number) {
     const net = this.net;
-    let nc = 0, nl = 0, nb = 0;
+    this.fleet.begin();
     for (const c of this.cars) {
       let x: number, z: number, y: number, grade = 0, at: (d: number) => { x: number; z: number };
+      let on: { tr: Track; t: number } | undefined; // the course it's on, near or in a junction
       if (c.turn) {
         // in a junction the vehicle sits exactly where its conflicts were worked out
         const tr = c.turn.path.track, t = c.turn.t, q = tr.at(t);
         x = q.x; z = q.z; y = q.y;
         at = (d) => tr.point(t + d);
+        on = { tr, t };
       } else {
         const L = this.len(c.seg), path = this.pathOf(c.seg, c.from), q = pointAt(path, Math.min(c.s, L));
         // lane position, easing across on lane changes; buses swing into lay-bys
@@ -1427,41 +1438,34 @@ export class Traffic {
         const pl = c.plan && c.plan.path.lineS - s < E_IN && c.plan.path.inSeg === c.seg.id ? c.plan.path : undefined;
         const af = c.after && c.after.path.next === c.seg.id && c.after.path.exitLane === this.laneIdx(c) && c.s - c.after.path.outS < E_OUT ? c.after.path : undefined;
         const onCourse = Math.abs(off - want) < 0.3;
-        if (onCourse && pl) { const tr = pl.track, t = pl.ext0 - (pl.lineS - s); at = (d) => tr.point(t + d); }
-        else if (onCourse && af) { const tr = af.track, t = af.ext1 + (s - af.outS); at = (d) => tr.point(t + d); }
+        if (onCourse && pl) { const tr = pl.track, t = pl.ext0 - (pl.lineS - s); at = (d) => tr.point(t + d); on = { tr, t }; }
+        else if (onCourse && af) { const tr = af.track, t = af.ext1 + (s - af.outS); at = (d) => tr.point(t + d); on = { tr, t }; }
         else at = (d) => {
           const r = s + d, p = pointAt(path, Math.max(0, Math.min(L, r))), o = r < 0 ? r : r > L ? r - L : 0;
           return { x: p.x + p.uz * off + p.ux * o, z: p.z - p.ux * off + p.uz * o };
         };
       }
       const k = Math.min(1, Math.max(0, (now - c.born) / 500), c.gone !== undefined ? 1 - (now - c.gone) / 600 : 1);
-      const pose = (c.pose ??= { x, z, y, k, kind: c.kind, id: c.id, parts: [] }), parts = bodyOf(c.kind, at, k, pose.parts);
+      // each part lies along its own chord; an artic's trailer or a bendy bus's rear swings round
+      // on its hitch from where it was last frame, and on a junction's course exactly as the
+      // course's conflict tables have it (see footprint.ts)
+      const pose = (c.pose ??= { x, z, y, k, kind: c.kind, id: c.id, parts: [] }), parts = bodyOf(c.cls ?? c.kind, at, k, pose.parts, pose.parts[1]);
+      if (on && c.cls !== undefined && BODIES[c.cls].trailer) trailerOn(on.tr, c.cls, on.t, k, parts[parts.length - 1]);
       pose.x = x; pose.z = z; pose.y = y; pose.k = k;
       c.heading = Math.atan2(parts[0].hz, parts[0].hx);
-      // each part is placed along its own chord (a lorry's trailer follows its cab round a bend)
-      const put = (r: Rect, local: number) => this.place(r.x - r.hx * local * k, y + 0.25, r.z - r.hz * local * k, Math.atan2(r.hz, r.hx), Math.atan(grade), k);
-      if (c.bus && nb < 40) { const m = put(parts[0], 0); for (const i of [this.busBody, this.busWin, this.busRoof]) i.setMatrixAt(nb, m); this.busBody.setColorAt(nb, c.col); nb++; }
-      else if (c.lorry && nl < 80) { this.trailer.setMatrixAt(nl, put(parts[0], -1.4)); this.trailer.setColorAt(nl, c.col); this.cab.setMatrixAt(nl, put(parts[1], 5.4)); nl++; }
-      else if (!c.lorry && !c.bus && nc < MAX) { const m = put(parts[0], 0); for (const i of [this.carBody, this.carBase, this.carCab]) i.setMatrixAt(nc, m); this.carBody.setColorAt(nc, c.col); nc++; }
+      this.fleet.drawCar(c, parts, y, Math.atan(grade), k, dt);
     }
-    // trains: carriages spaced along the track behind the front
-    let nt = 0;
-    for (const tr of this.trains) for (let i = 0; i < tr.def.cars && nt < 160; i++) {
-      const back = i * (tr.def.carLen + 1) + tr.def.carLen / 2;
-      const { q, seg } = this.along(tr, back);
-      const off = net.def(seg).tracks === 2 ? 2 : 0;
-      const m = this.place(q.x + q.uz * off, q.y + 0.6, q.z - q.ux * off, Math.atan2(q.uz, q.ux), Math.atan(q.grade));
-      m.scale(this.sc.set(tr.def.carLen / 20, 1, 1));
-      for (const im of [this.trainBody, this.trainWin, this.trainRoof]) im.setMatrixAt(nt, m);
-      this.trainBody.setColorAt(nt, tr.col);
-      this.trainWin.setColorAt(nt, this.stripe.set(tr.def.stripe));
-      nt++;
+    // trains: each car on its bogies, spaced along the track behind the front
+    for (const tr of this.trains) {
+      const d = tr.dress;
+      for (let i = 0; i < d.chain.length; i++) {
+        const half = Math.min(d.chain[i].dims.length * 0.35, 12), f = this.along(tr, d.offs![i] - half), b = this.along(tr, d.offs![i] + half);
+        const of = net.def(f.seg).tracks === 2 ? 2 : 0, ob = net.def(b.seg).tracks === 2 ? 2 : 0;
+        const fx = f.q.x + f.q.uz * of, fz = f.q.z - f.q.ux * of, bx = b.q.x + b.q.uz * ob, bz = b.q.z - b.q.ux * ob;
+        this.fleet.drawRail(d, i, (fx + bx) / 2, (f.q.y + b.q.y) / 2, (fz + bz) / 2, Math.atan2(fz - bz, fx - bx), Math.atan((f.q.grade + b.q.grade) / 2), tr.v, dt);
+      }
     }
-    this.carBody.count = this.carBase.count = this.carCab.count = nc;
-    this.trailer.count = this.cab.count = nl;
-    this.busBody.count = this.busWin.count = this.busRoof.count = nb;
-    this.trainBody.count = this.trainWin.count = this.trainRoof.count = nt;
-    for (const i of [this.carBody, this.carBase, this.carCab, this.trailer, this.cab, this.busBody, this.busWin, this.busRoof, this.trainBody, this.trainWin, this.trainRoof]) { i.instanceMatrix.needsUpdate = true; if (i.instanceColor) i.instanceColor.needsUpdate = true; }
+    this.fleet.end(now);
   }
 
   // where every vehicle was last drawn, and which of them overlap (see footprint.ts)
