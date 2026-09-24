@@ -3,7 +3,7 @@
 // add-ons (src/proto/terminals/panel.ts). Open /industries-demo.html on the Vite dev server.
 // Query parameters (for screenshots): ?focus=<type>&variant=<id>&prod=&in=&out=&neglect=&year=&night=1&ring=1&zoom=
 // and for terminals: &terminals=1&tset=road:lorry_depot:conveyor,rail:rail_terminal:rapid_loader&rail=0&water=1
-// &level=&fill=&service=&crowded=1&reviews=<n>&idle=<days>
+// &level=&fill=&service=&crowded=1&reviews=<n>&idle=<days>&anchors=1&zoomk=<scale on the fitted zoom>
 import * as THREE from 'three';
 import { INDUSTRY_IDS, INDUSTRY_TYPES, type IndustryId } from './catalogue';
 import { IndustryFx, type FxHandle } from './fx';
@@ -61,12 +61,34 @@ const state: IndustryVisualState = {
 // own) and the panel draws the terminals bought for it; `tvis` is the panel's visual state.
 let panel: TerminalsPanel;
 let tvis: Partial<IndustryVisualState> = {};
+// ?anchors=1 marks the site's anchors in magenta, above everything, so screenshots show whether
+// the terminals sit on them: a post at the gate, a pin per lorry bay, a line per siding or quay.
+const showAnchors = q.get('anchors') === '1';
+function anchorMarks(m: IndustryModel) {
+  const pos: number[] = [], H = 0.8;
+  const quad = (x0: number, z0: number, x1: number, z1: number, w: number) => {
+    const L = Math.hypot(x1 - x0, z1 - z0) || 1, nx = (-(z1 - z0) / L) * w, nz = ((x1 - x0) / L) * w;
+    pos.push(x0 - nx, H, z0 - nz, x1 - nx, H, z1 - nz, x1 + nx, H, z1 + nz, x0 - nx, H, z0 - nz, x1 + nx, H, z1 + nz, x0 + nx, H, z0 + nz);
+  };
+  const pin = (x: number, z: number, r: number) => { quad(x - r, z, x + r, z, r); };
+  const a = m.anchors;
+  pin(a.gate.x, a.gate.z, 2.2);
+  for (const l of a.lorry) pin(l.x, l.z, 1.4);
+  for (const r of a.rail) quad(r.x0, r.z, r.x1, r.z, 0.5);
+  for (const w of a.quay) quad(w.x0, w.z, w.x1, w.z, 0.7);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: '#ff2bd6', depthTest: false, side: THREE.DoubleSide }));
+  mesh.renderOrder = 10;
+  return mesh;
+}
 const stateFor = (i: number) => ({ ...state, ...(panel?.on && i === focus ? tvis : {}) });
 function place(i: number, id: IndustryId, variant: number, seed: number) {
   const t = INDUSTRY_TYPES[id], v = t.variants[variant];
   const { w, d } = v.size ?? t.size, c = cellOf(i);
   // sit each site's frontage on the road in front of its cell
   const model = buildIndustry(id, plotRect(c.x, c.z + 80 - d / 2, 0, w, d), { seed, variant: v.id, year, bare: !!panel?.on && i === focus });
+  if (showAnchors) model.group.add(anchorMarks(model));
   scene.add(model.group);
   const handle = fx.add(model, stateFor(i));
   return { id, variant, seed, model, handle };
@@ -267,7 +289,7 @@ panel = new TerminalsPanel({
     const w = b.x1 - b.x0, d = b.z1 - b.z0, a = innerWidth / innerHeight;
     view.x = (b.x0 + b.x1) / 2; view.z = (b.z0 + b.z1) / 2; view.tall = q.get('ui') !== '0';
     // an isometric box w x d is 0.71 (w + d) across the screen and about 0.45 (w + d) high
-    view.zoom = Number(q.get('zoom') ?? 0) || Math.max((0.74 * (w + d)) / a, 0.5 * (w + d) * (view.tall ? 2.1 : 1.1), 120);
+    view.zoom = Number(q.get('zoom') ?? 0) || Number(q.get('zoomk') ?? 1) * Math.max((0.74 * (w + d)) / a, 0.5 * (w + d) * (view.tall ? 2.1 : 1.1), 120);
   },
 });
 $('terms').addEventListener('click', () => {

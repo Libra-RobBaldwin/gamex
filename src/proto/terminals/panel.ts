@@ -44,7 +44,7 @@ interface SiteSim {
   note: string; // a reason shown after tapping something that can't be bought
 }
 
-const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.abs(Math.round(n)).toLocaleString('en-GB')}`;
 const t_h = (n: number) => `${Math.round(n).toLocaleString('en-GB')} t/h`;
 
 export class TerminalsPanel {
@@ -218,7 +218,7 @@ export class TerminalsPanel {
     el.innerHTML = `
       <div class="thead"><b>${levelTxt}</b><span>${capTxt}</span></div>
       <div class="bar" title="production against what the terminals can move"><i style="width:${Math.min(100, (need / scale) * 100)}%"></i><b style="left:${Math.min(100, (can / scale) * 100)}%"></b></div>
-      <div class="tline">${pills}<span class="money">Day ${x.day} · ${money(x.spent)} spent · ${money(x.upkeep)}/day</span></div>
+      <div class="tline">${pills}<span class="money">Day ${x.day} · ${x.spent < 0 ? `${money(-x.spent)} back` : `${money(x.spent)} spent`} · ${money(x.upkeep)}/day</span></div>
       <div class="suggest">${say}</div>
       ${rows}
       <div class="row tog">
