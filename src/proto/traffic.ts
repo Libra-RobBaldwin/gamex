@@ -118,6 +118,9 @@ export class Traffic {
   // turning counts seen at each junction: "from>to" seg ids
   seen = new Map<number, Map<string, number>>();
   trains: Train[] = [];
+  // How long a bus stands at a stop (seconds). Without it, 7; the crowds (game/crowds.ts) make it
+  // wait while the people at the stop walk to its door. `bus` is the bus's id.
+  onBusStop?: (seg: RSeg, st: Stop, bus: number) => number;
   stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0 };
   // how many junction conflict tables have been worked out, and how long they took (ms)
   readonly conflictStats = tableStats;
@@ -1127,7 +1130,9 @@ export class Traffic {
     c.v0 = v0;
     this.laneChoice(c, this.planOf(c), now);
     const pl = this.planOf(c);
-    if (!last && this.jdata(at) && !pl) { c.gone = now; this.stats.gaveUp++; return; } // nowhere to go from here
+    // nowhere to go from here (a bus pulled into a lay-by has no way through the junction until it
+    // pulls out again, which isn't the same thing: without this it vanished at its first lay-by)
+    if (!last && this.jdata(at) && !pl && !c.inBay) { c.gone = now; this.stats.gaveUp++; return; }
     // commit to the junction ahead when it's our turn; don't go in without room beyond
     let admitted = !!pl && c.admNode === pl.node, hold = false;
     if (pl && pl.path.lineS - c.s <= this.sphere(c)) {
@@ -1213,7 +1218,7 @@ export class Traffic {
         // still pulling up to the stand
         const at = c.bay ? (c.from === c.seg.a ? c.bay.s : this.len(c.seg) - c.bay.s) : c.s;
         ob(at - c.s, 0, 0.2);
-        if (at - c.s < 0.8 && c.v < 0.6) c.dwell = 7;
+        if (at - c.s < 0.8 && c.v < 0.6) c.dwell = c.bay && this.onBusStop ? this.onBusStop(c.seg, c.bay, c.id) : 7;
         return false;
       }
       if (!this.canChange(c, this.laneIdx(c), true) || !this.clearOfLane(c)) return true;
@@ -1235,7 +1240,7 @@ export class Traffic {
       if (c.off - this.laneOff(c.seg, c.from, c.s, this.laneIdx(c)) >= 2.6) { c.inBay = true; if (c.entry) c.entry.kind = 3; }
     }
     if (togo < 60) ob(togo, 0, 0.2);
-    if (togo < 0.8 && c.v < 0.6) c.dwell = 7;
+    if (togo < 0.8 && c.v < 0.6) c.dwell = this.onBusStop?.(c.seg, ns.st, c.id) ?? 7;
     return false;
   }
   // nothing in the lane right alongside a bus waiting to pull out of a lay-by
