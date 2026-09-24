@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   build: {
@@ -10,4 +10,6 @@ export default defineConfig({
       },
     },
   },
+  // Agents' git worktrees live under .claude/ and parked tests under docs/; neither is this checkout's suite.
+  test: { exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', 'docs/**'] },
 });
