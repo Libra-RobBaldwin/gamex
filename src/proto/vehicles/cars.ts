@@ -152,7 +152,9 @@ export function buildCar(k: Kit, m: Model) {
   if (bumper === 'body') k.edgeDecal(P, hw, iTail, 0.55, 0.9, -0.28, 0.28, C.plateR, 0.016);
   if (m.from >= 1986 && !open) k.edgeDecal(G, hg, 3, 0.03, 0.1, -0.2, 0.2, C.brake, 0.014);
 
-  mirrors(k, X(ws) - 0.02, belt + 0.02, hw, flag(g, 'trimMirrors') ? C.trim : body);
+  // mirrors where the A-pillar crosses the belt line, not at the foot of a raked screen
+  const ax = X(ws) + (X(roofF) - X(ws)) * clampT((belt - bonH) / Math.max(0.05, H - bonH), 0, 1);
+  mirrors(k, ax + 0.06, belt + 0.02, hw, flag(g, 'trimMirrors') ? C.trim : body);
   extras(k, m, X, hw, H, belt, bonH, ws, cB);
 }
 
@@ -211,7 +213,7 @@ function extras(k: Kit, m: Model, X: (f: number) => number, hw: number, H: numbe
     else { k.box(x, x + 0.25, y + 0.2, y + 0.26, -hw + 0.1, hw - 0.1, paint(1)); for (const s of [1, -1]) k.box(x + 0.08, x + 0.16, y, y + 0.2, s * (hw - 0.3) - 0.03, s * (hw - 0.3) + 0.03, C.trim); }
   }
   if (flag(g, 'scoop')) { const x = X(ws) + (X(0) - X(ws)) * 0.45; k.box(x - 0.35, x + 0.25, bonH - 0.02, bonH + 0.1, -0.25, 0.25, C.trim, { px: C.grille }); }
-  if (flag(g, 'sunroof')) k.top(mid - len * 0.15, mid + len * 0.25, -top + 0.25, top - 0.25, H, C.glassDark);
+  if (flag(g, 'sunroof')) k.top(mid - len * 0.15, mid + len * 0.25, -top + 0.25, top - 0.25, H, C.glassPlain);
   if (m.style === 'pickup') {
     // an open load bed behind the cab, with a load sometimes
     const x0 = -m.dims.length / 2 + 0.12, x1 = X(cB) - 0.08;

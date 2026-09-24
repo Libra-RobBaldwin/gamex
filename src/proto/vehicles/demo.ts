@@ -25,7 +25,7 @@ const S = {
   cat: q.get('cat') ?? 'all', brand: q.get('brand') ?? 'all', op: q.get('op') ?? 'all',
   year: +(q.get('year') ?? 2000), night: q.get('night') === '1', count: +(q.get('n') ?? 300),
   area: (q.get('area') ?? 'centre') as Area, lod: q.get('lod') ?? 'auto', model: q.get('model') ?? '',
-  variety: +(q.get('variety') ?? 60), seed: +(q.get('seed') ?? 1), zoom: +(q.get('zoom') ?? 0), shadows: q.get('shadows') !== '0',
+  variety: +(q.get('variety') ?? 60), fit: +(q.get('fit') ?? 1), seed: +(q.get('seed') ?? 1), zoom: +(q.get('zoom') ?? 0), shadows: q.get('shadows') !== '0',
   spin: q.get('spin') !== '0', angle: +(q.get('angle') ?? 0.6), ui: q.get('ui') !== '0', card: q.get('card') !== '0', filters: q.get('filters') === '1',
 };
 function saveUrl() {
@@ -127,7 +127,10 @@ function ribbon(off0: number, off1: number, y: number, m: THREE.Material, rr = R
 const world = new THREE.Group();
 scene.add(world);
 const grass = mat('#7c9a5e', '#2a3a2e'), asphalt = mat('#4a4d52', '#2a2d33'), white = mat('#e8e8e2', '#9a9a96'), ballast = mat('#8a8074', '#3a3834'), railM = mat('#5b5e62', '#4a4c50'), water = mat('#3f6f8a', '#16283a'), pave = mat('#b3aea3', '#4a4a48');
-const lanes = [-5.25, -1.75, 1.75, 5.25];
+// four lanes, or eight (a motorway) when the count needs them; outer lanes run +s (UK: keep left)
+let lanes = [-5.25, -1.75, 1.75, 5.25];
+const setLanes = (n: number) => { lanes = n > 800 ? [-12.25, -8.75, -5.25, -1.75, 1.75, 5.25, 8.75, 12.25] : [-5.25, -1.75, 1.75, 5.25]; };
+const laneSpeed = (off: number) => [11, 13, 15, 17][Math.min(3, Math.floor(Math.abs(off) / 3.5))];
 let streetLamps: { x: number; z: number }[] = [];
 const RAIL = [26, 30.5];
 function buildWorld(lake: boolean) {
@@ -135,9 +138,10 @@ function buildWorld(lake: boolean) {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), grass);
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; world.add(ground);
   if (lake) world.add(ribbon(-R + 1, -12, 0.02, S.cat === 'air' ? pave : water));
-  world.add(ribbon(-7.2, 7.2, 0.03, asphalt), ribbon(-9.5, -7.2, 0.05, pave), ribbon(7.2, 9.5, 0.05, pave));
-  world.add(ribbon(-0.2, -0.08, 0.06, white), ribbon(0.08, 0.2, 0.06, white), ribbon(-3.55, -3.45, 0.06, white, R, SL, 1), ribbon(3.45, 3.55, 0.06, white, R, SL, 1));
-  world.add(ribbon(-6.95, -6.85, 0.06, white), ribbon(6.85, 6.95, 0.06, white));
+  const edge = Math.abs(lanes[0]) + 1.95;
+  world.add(ribbon(-edge, edge, 0.03, asphalt), ribbon(-edge - 2.3, -edge, 0.05, pave), ribbon(edge, edge + 2.3, 0.05, pave));
+  world.add(ribbon(-0.2, -0.08, 0.06, white), ribbon(0.08, 0.2, 0.06, white), ribbon(-edge + 0.25, -edge + 0.35, 0.06, white), ribbon(edge - 0.35, edge - 0.25, 0.06, white));
+  for (let o = 3.5; o < edge - 1; o += 3.5) world.add(ribbon(-o - 0.05, -o + 0.05, 0.06, white, R, SL, 1), ribbon(o - 0.05, o + 0.05, 0.06, white, R, SL, 1));
   for (const t of RAIL) {
     world.add(ribbon(t - 2, t + 2, 0.06, ballast));
     world.add(ribbon(t - 0.78, t - 0.7, 0.28, railM), ribbon(t + 0.7, t + 0.78, 0.28, railM));
@@ -159,7 +163,7 @@ function buildWorld(lake: boolean) {
   const sl = new THREE.Mesh(sg, sm); sl.receiveShadow = true; world.add(sl);
   // street lamps along the road: a post, a glowing head, and a pool of light at night
   const lamps: { x: number; z: number }[] = [];
-  for (let s0 = 0; s0 < P0; s0 += 36) for (const side of [-1, 1]) { const p = oval(s0 + (side > 0 ? 18 : 0), side * 8.6); lamps.push({ x: p.x, z: p.z }); }
+  for (let s0 = 0; s0 < P0; s0 += 36) for (const side of [-1, 1]) { const p = oval(s0 + (side > 0 ? 18 : 0), side * (Math.abs(lanes[0]) + 3.4)); lamps.push({ x: p.x, z: p.z }); }
   const post = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 8, 0.2).translate(0, 4, 0), mat('#6a6e72', '#3a3e44'), lamps.length);
   const head = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.25, 0.5).translate(0, 8, 0), new THREE.MeshBasicMaterial({ color: '#ffe0a8' }), lamps.length);
   const m4 = new THREE.Matrix4();
@@ -210,7 +214,7 @@ function spawnParade() {
   }
   const lookOf = (lead: Model, seed: number) => lookFor(lead, S.year, seed, S.op !== 'all' && OPERATOR[S.op]?.fleet.includes(lead.style) ? S.op : undefined);
   if ((road || lake) && pool.length) {
-    const lanesUsed = lake ? [0, 1] : [0, 1, 2, 3];
+    const lanesUsed = lake ? [0, 1] : lanes.map((_, i) => i);
     const perLane = Math.ceil(S.count / lanesUsed.length);
     const loopLen = lake ? 4 * (SL - 30) + 2 * Math.PI * (R - 60) : P0;
     for (const lane of lanesUsed) {
@@ -231,7 +235,7 @@ function spawnParade() {
         const look = lookOf(p.lead, seed);
         const st = p.lead.style;
         movers.push({
-          chain: p.chain, look, cols: liveryColours(look.livery), lane, s, v: lake ? 8 : [14, 11, 11, 14][lane] ?? 12, poses: [], rail: false, odo: r() * 100, brake: 0, ind: 0,
+          chain: p.chain, look, cols: liveryColours(look.livery), lane, s, v: lake ? 8 : laneSpeed(lanes[lane]), poses: [], rail: false, odo: r() * 100, brake: 0, ind: 0,
           emergency: st === 'police' || st === 'ambulance' || st === 'refuse' || st === 'gritter' || st === 'recovery', lit: p.lead.category === 'bus' || st === 'taxi' || st === 'ice-cream', lake,
         });
         s += (lake ? 30 : 4) + spare * (0.5 + r());
@@ -242,7 +246,10 @@ function spawnParade() {
     const trains = S.cat === 'rail' ? railTrains(r) : [0, 1, 2, 3].map(() => pickTrain(r, S.year)).filter(Boolean) as { chain: Model[]; look: Look }[];
     for (let t = 0; t < trains.length; t++) {
       const tr = trains[t];
-      movers.push({ chain: tr.chain, look: tr.look, cols: liveryColours(tr.look.livery), lane: t % 2, s: (t * P0) / trains.length + (t % 2) * 200, v: t % 2 ? 22 : 30, poses: [], rail: true, odo: 0, brake: 0, ind: 0, emergency: false, lit: true });
+      // the first two trains start just short of the camera, so there's something to see at once
+      const { len } = offsetsOf(tr.chain);
+      const s0 = t < 2 ? SL - 150 + t * 70 + Math.min(40, len * 0.2) : (t * P0) / trains.length;
+      movers.push({ chain: tr.chain, look: tr.look, cols: liveryColours(tr.look.livery), lane: t % 2, s: s0, v: t % 2 ? 14 : 18, poses: [], rail: true, odo: 0, brake: 0, ind: 0, emergency: false, lit: true });
     }
   }
 }
@@ -299,7 +306,9 @@ function openTurntable(m?: Model) {
   const seed = hash(`${m.id}-${S.seed}`);
   const look = lookFor(m, Math.max(m.from, Math.min(S.year, m.to)), seed, S.op !== 'all' && OPERATOR[S.op]?.fleet.includes(m.style) ? S.op : undefined);
   tt = { m, look, cols: liveryColours(look.livery), seed, a: S.angle, flags: S.night ? FLAGS.lights | FLAGS.interior | FLAGS.sign | FLAGS.beacons : 0 };
-  view.h = S.zoom || Math.max(m.dims.length, m.dims.width) * 1.25 + 1.5;
+  // fit the longest side across the screen, whichever way up the phone is
+  const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
+  view.h = S.zoom || ((Math.max(m.dims.length, m.dims.width) * 1.1 + 1.5) / Math.min(1, aspect)) * S.fit;
   // sit the vehicle in the upper half of the screen, clear of the spec card
   const k = S.ui ? view.h * 0.16 : 0;
   view.x = Math.sin(view.az) * k; view.z = Math.cos(view.az) * k;
@@ -311,7 +320,8 @@ function showCard() {
   if (S.mode !== 'turntable' || !tt) { card.style.display = 'none'; return; }
   const { m, look } = tt, b = BRAND[m.brand];
   const d = m.dims, st = m.stats;
-  const pl = plateCanvas(look.plate, true).toDataURL();
+  const road = m.category !== 'rail' && m.category !== 'boat' && m.category !== 'air';
+  const pl = road ? plateCanvas(look.plate, true).toDataURL() : '';
   const tris = [0, 1, 2].map((l) => triangles(m, l as Lod));
   card.style.display = S.ui ? 'block' : 'none';
   card.innerHTML = `
@@ -324,7 +334,7 @@ function showCard() {
       <tr><td>Price · running</td><td>£${fmt(st.cost)} · £${fmt(st.running)}/yr</td></tr>
       <tr><td>Triangles near · mid · far</td><td>${tris.join(' · ')} (budget ${BUDGET[m.category].join(' · ')})</td></tr>
       <tr><td>${look.operator ? look.operator.name : 'Private'}${look.liveryName ? ` · ${look.liveryName}` : ''}</td><td>${look.livery.map((c) => `<span class="sw" style="background:${c}"></span>`).join('')}</td></tr>
-      <tr><td>${look.fleet ? `Fleet no. ${look.fleet}` : 'Registration'}</td><td><img class="plate" src="${pl}" alt="${look.plate}"></td></tr>
+      <tr><td>${look.fleet ? `Fleet no. ${look.fleet}` : 'Registration'}</td><td>${road ? `<img class="plate" src="${pl}" alt="${look.plate}">` : look.fleet ?? '—'}</td></tr>
     </table>`;
   document.getElementById('cardh')!.onclick = () => { S.card = !S.card; showCard(); saveUrl(); };
 }
@@ -376,15 +386,16 @@ function ui() {
 function rebuild() {
   saveUrl();
   ui();
+  setLanes(S.mode === 'parade' ? S.count : 0);
   buildWorld(S.cat === 'boat' || S.cat === 'air');
   const floor = world.getObjectByName('floor')!;
   floor.visible = false;
   tt = null; parked = []; movers = [];
-  if (S.mode === 'parade') { spawnParade(); view.x = S.cat === 'boat' || S.cat === 'air' ? -150 : -120; view.z = S.cat === 'boat' || S.cat === 'air' ? -20 : -R - 4; view.h = S.zoom || 140; }
+  if (S.mode === 'parade') { spawnParade(); view.x = S.cat === 'boat' || S.cat === 'air' ? -150 : -120; view.z = S.cat === 'boat' || S.cat === 'air' ? -20 : -R - 14; view.h = S.zoom || 140; }
   else if (S.mode === 'showroom') layoutShowroom();
   else openTurntable();
   world.visible = S.mode !== 'turntable';
-  if (S.mode === 'turntable') { floor.visible = true; const tm = ttModel(), fs = Math.max(80, (tm?.dims.length ?? 0) * 2.5, (tm?.dims.width ?? 0) * 2.5); floor.scale.set(fs, fs, 1); world.visible = true; for (const c of world.children) c.visible = c === floor; }
+  if (S.mode === 'turntable') { floor.visible = true; const tm = ttModel(), fs = Math.max(240, (tm?.dims.length ?? 0) * 8, (tm?.dims.width ?? 0) * 8); floor.scale.set(fs, fs, 1); world.visible = true; for (const c of world.children) c.visible = c === floor; }
   else for (const c of world.children) c.visible = c.name !== 'floor' || S.mode === 'showroom';
   showCard();
   place();
@@ -439,11 +450,12 @@ const matrix = (x: number, y: number, z: number, heading: number) => m4.compose(
 const onScreen = (x: number, z: number, pad: number) => { v3.set(x, 0, z).project(cam); const p = 1 + pad / view.h * 2; return Math.abs(v3.x) < p * 1.2 && Math.abs(v3.y) < p; };
 const lodOf = (m: Model): Lod => (S.lod === 'auto' ? lodFor(m.dims.length, canvas.clientHeight / view.h) : (+S.lod as Lod));
 
-let last = performance.now(), fpsT = 0, frames = 0, fps = 0;
+let last = performance.now(), fpsT = 0, frames = 0, fps = 0, cpuSum = 0;
 function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   const t = now / 1000;
+  const t0 = performance.now();
   vr.begin(); beams.begin(); pools.begin();
   if (S.night && S.mode !== 'turntable') for (const l of streetLamps) if (onScreen(l.x, l.z, 20)) pools.add(l.x, 0.08, l.z, 0, 18, 18);
   const nightFlags = S.night ? FLAGS.lights : 0;
@@ -454,7 +466,7 @@ function frame(now: number) {
       // now and then someone brakes or signals, to show the lamps working
       if (mv.brake > 0) mv.brake -= dt; else if (Math.random() < dt * 0.08) mv.brake = 1.2;
       if (mv.ind > 0) mv.ind -= dt; else if (Math.random() < dt * 0.03) mv.ind = 3 * (Math.random() < 0.5 ? 1 : -1) || 3;
-      const dirSign = mv.rail || mv.lake ? 1 : mv.lane >= 2 ? 1 : -1;
+      const dirSign = mv.rail || mv.lake ? 1 : lanes[mv.lane] > 0 ? 1 : -1;
       const off = mv.rail ? RAIL[mv.lane] : mv.lake ? mv.lane * 18 - 9 : lanes[mv.lane];
       let flags = nightFlags | (mv.brake > 0 ? FLAGS.brake : 0) | (mv.ind > 2 ? FLAGS.indL : mv.ind > 0 && mv.ind <= 2 ? FLAGS.indR : 0);
       if (mv.emergency) flags |= FLAGS.beacons;
@@ -493,14 +505,16 @@ function frame(now: number) {
     vr.add(tt.m, (S.lod === 'auto' ? 0 : +S.lod) as Lod, matrix(0, 0, 0, tt.a), tt.cols, tt.flags | (Math.floor(t / 4) % 3 === 1 ? FLAGS.brake : 0) | (Math.floor(t / 4) % 3 === 2 ? FLAGS.hazard : 0), t * 3);
   }
   vr.end(t); beams.end(); pools.end();
+  const cpu = performance.now() - t0;
   renderer.render(scene, cam);
-  frames++; fpsT += dt;
+  frames++; fpsT += dt; cpuSum += cpu;
   if (fpsT > 0.5) {
-    fps = Math.round(frames / fpsT); frames = 0; fpsT = 0;
+    fps = Math.round(frames / fpsT);
+    const cpuMs = cpuSum / frames; frames = 0; fpsT = 0; cpuSum = 0;
     const s = vr.stats, info = renderer.info.render;
     const el = document.getElementById('stats');
-    if (el) el.textContent = `${fps} fps · ${info.calls} calls (${s.calls} vehicle) · ${fmt(Math.round(info.triangles / 1000))}k tris · ${fmt(s.instances)} vehicles`;
-    (window as unknown as { __stats: unknown }).__stats = { fps, calls: info.calls, vehicleCalls: s.calls, tris: info.triangles, instances: s.instances, models: MODELS.length };
+    if (el) el.textContent = `${fps} fps · ${info.calls} calls (${s.calls} vehicle) · ${info.triangles < 10000 ? fmt(info.triangles) : `${fmt(Math.round(info.triangles / 1000))}k`} tris · ${fmt(s.instances)} drawn of ${fmt(movers.reduce((n, m) => n + m.chain.length, 0) || parked.length || 1)} · ${cpuMs.toFixed(2)} ms JS`;
+    (window as unknown as { __stats: unknown }).__stats = { fps, calls: info.calls, vehicleCalls: s.calls, tris: info.triangles, instances: s.instances, total: movers.reduce((n, m) => n + m.chain.length, 0) || parked.length, cpuMs: +cpuMs.toFixed(3), models: MODELS.length };
   }
   requestAnimationFrame(frame);
 }
