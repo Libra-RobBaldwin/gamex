@@ -282,6 +282,7 @@ let selectedSite: IndustrySite | null = null, siteRings = false, siteT = 0;
 function showSite(s: IndustrySite) {
   industries.openInfo(s, shell, [{ label: 'Add a stop nearby', icon: 'busStop', onClick: () => startStopTool() }], () => { if (selectedSite === s) selectedSite = null; });
   selectedSite = s;
+  focusOn({ x: s.model.frame.cx, z: s.model.frame.cz }, Math.max(140, (s.model.frame.w + s.model.frame.d) * 1.3)); // in the clear map above the sheet
 }
 
 let queue: Lot[] = [];
