@@ -3,7 +3,9 @@
 // Output is one flat-shaded, non-indexed BufferGeometry per model and level of detail, with:
 //   color – baked colour, or a tint multiplied by the instance's livery colour for paint zones
 //   vk    – (paint zone, light code, wheel-centre x, wheel-centre y); the centre lets the shader
-//           spin wheels, and a wheel's centre height equals its radius because it sits on the ground.
+//           spin wheels, and a wheel's centre height equals its radius because it sits on the ground;
+//   vd    – a motion tag (kind, a, b, c) for the parts that move on their own: door leaves, bogies,
+//           steered wheels, coupling rods and pantographs. See motion.ts for the kinds.
 import * as THREE from 'three';
 import type { Lod, Zone } from './types';
 
@@ -42,7 +44,16 @@ export class Kit {
   pos: number[] = [];
   col: number[] = [];
   key: number[] = [];
+  mot: number[] = [];
+  // the motion tag given to every triangle added while it's set (see motion.ts)
+  motion: readonly [number, number, number, number] | null = null;
   constructor(public lod: Lod = 0) {}
+  // run f with every triangle it adds tagged to move with `tag`
+  moving(tag: readonly [number, number, number, number], f: () => void) {
+    const prev = this.motion;
+    this.motion = tag;
+    try { f(); } finally { this.motion = prev; }
+  }
 
   get tris() { return this.pos.length / 9; }
 
@@ -51,6 +62,8 @@ export class Kit {
     for (let i = 0; i < 3; i++) {
       this.col.push(st.c[0], st.c[1], st.c[2]);
       this.key.push(st.zone, st.light, st.wheel ? st.wheel[0] : 0, st.wheel ? st.wheel[1] : 0);
+      const m = this.motion;
+      if (m) this.mot.push(m[0], m[1], m[2], m[3]); else this.mot.push(0, 0, 0, 0);
     }
   }
 
@@ -259,8 +272,8 @@ export class Kit {
     };
   }
 
-  // Copy another kit in, moved by (dx, dy, dz) and optionally turned end for end. Wheel spin is
-  // dropped: the copied parts are a load (cars on a transporter), not running gear.
+  // Copy another kit in, moved by (dx, dy, dz) and optionally turned end for end. Wheel spin and
+  // motion are dropped: the copied parts are a load (cars on a transporter), not running gear.
   add(k: Kit, dx: number, dy: number, dz: number, flip = false, scale = 1) {
     for (let i = 0; i < k.pos.length; i += 9) {
       const v: V3[] = [];
@@ -271,7 +284,7 @@ export class Kit {
       this.pos.push(...v[0], ...v[1], ...v[2]);
     }
     this.col.push(...k.col);
-    for (let i = 0; i < k.key.length; i += 4) this.key.push(k.key[i], k.key[i + 1], 0, 0);
+    for (let i = 0; i < k.key.length; i += 4) { this.key.push(k.key[i], k.key[i + 1], 0, 0); this.mot.push(0, 0, 0, 0); }
   }
 
   geometry() {
@@ -287,6 +300,7 @@ export class Kit {
     g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.col), 3));
     g.setAttribute('vk', new THREE.BufferAttribute(new Float32Array(this.key), 4));
+    g.setAttribute('vd', new THREE.BufferAttribute(new Float32Array(this.mot), 4));
     g.computeBoundingBox();
     g.computeBoundingSphere();
     return g;

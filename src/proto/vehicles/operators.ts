@@ -95,6 +95,15 @@ export const OPERATORS: Operator[] = [
     liveries: [{ name: 'Metro plum', from: 1995, to: 2030, colours: ['#b9bdc0', '#5a2a7a', '#6e7378', Y] }],
     blurb: 'The trams came back in 1995: low-floor cars on-street and on old railway lines.',
   },
+  {
+    id: 'oakport-deep', name: 'Oakport Undercroft Railway', kind: 'rail', code: 'OUR', from: 1960, to: 2030, area: 'city',
+    fleet: ['metro-car'],
+    liveries: [
+      { name: 'Oxblood', from: 1960, to: 1994, colours: ['#7e1f1c', '#7e1f1c', '#5e6266', '#e8e4d8'] },
+      { name: 'Silver and crimson', from: 1995, to: 2030, colours: ['#c3c7ca', '#1f3b7a', '#6e7378', '#b5262b'] },
+    ],
+    blurb: 'The city line under Oakport: short cars, wide doors and three of them a side, every two minutes.',
+  },
   // ---------------- railways ----------------
   {
     id: 'southmoor-cotswold', name: 'Southmoor & Cotswold Railway', kind: 'rail', code: 'SCR', from: 1900, to: 1947, area: 'national',
