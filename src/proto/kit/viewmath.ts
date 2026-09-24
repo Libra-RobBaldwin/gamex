@@ -1,15 +1,16 @@
 // The view maths behind the shared camera (kit/camera.ts): pure functions, no three.js, no DOM.
 //
-// A view is a point on the ground plane the camera looks at (x, z), how much of the world is
-// visible top to bottom (h, in metres), which way round the camera stands (az) and how steeply
-// it looks down (el: 0 is the horizon, π/2 straight down). The camera stands at
+// A view is the point the camera looks at (x, z, and y, the height of that point: 0 on flat
+// ground, the terrain's height on hills), how much of the world is visible top to bottom (h, in
+// metres), which way round the camera stands (az) and how steeply it looks down (el: 0 is the
+// horizon, π/2 straight down). The camera stands at
 //   target + (sin az·cos el, sin el, cos az·cos el) · distance
 // looking back at the target, so at az = 0 north (-z) is up the screen.
 //
 // Everything is worked out relative to the view target and only added back on at the end,
 // so a view 100 km from the origin is exactly as precise as one at the origin.
 
-export interface View { x: number; z: number; h: number; az: number; el: number }
+export interface View { x: number; z: number; h: number; az: number; el: number; y?: number }
 export interface V3 { x: number; y: number; z: number }
 export interface GroundPoint { x: number; z: number; y?: number }
 /** What the screen looks like: its size in CSS pixels and the kind of camera. */
@@ -54,7 +55,7 @@ export function eyeDistance(v: View, lens: Lens) {
 }
 
 interface Ray { o: V3; d: V3 }
-// the ray through a screen point, with its origin relative to the view target (x, 0, z)
+// the ray through a screen point, with its origin relative to the view target (x, y, z)
 function rayRel(v: View, lens: Lens, sx: number, sy: number): Ray {
   const { back, right, up } = basis(v.az, v.el);
   const D = eyeDistance(v, lens);
@@ -76,7 +77,7 @@ function rayRel(v: View, lens: Lens, sx: number, sy: number): Ray {
 /** The ray through a screen point, in world coordinates. */
 export function screenRay(v: View, lens: Lens, sx: number, sy: number) {
   const r = rayRel(v, lens, sx, sy);
-  return { origin: { x: v.x + r.o.x, y: r.o.y, z: v.z + r.o.z }, dir: r.d };
+  return { origin: { x: v.x + r.o.x, y: (v.y ?? 0) + r.o.y, z: v.z + r.o.z }, dir: r.d };
 }
 
 // where a relative ray reaches height y (relative x/z), or null if it never does
@@ -93,30 +94,31 @@ function atHeight(r: Ray, y: number): V3 | null {
 /** The ground under a screen point: the flat plane y = 0, or the terrain if there is one.
  * Returns null only when the ray misses the ground altogether (a perspective ray above the horizon). */
 export function screenToGround(v: View, lens: Lens, sx: number, sy: number, ground?: Ground): V3 | null {
-  const r = rayRel(v, lens, sx, sy);
+  const r = rayRel(v, lens, sx, sy), vy = v.y ?? 0;
   if (!ground?.heightAt) {
-    const p = atHeight(r, 0);
+    const p = atHeight(r, -vy);
     return p && { x: v.x + p.x, y: 0, z: v.z + p.z };
   }
   const H = ground.heightAt, [lo, hi] = ground.range ?? [-100, 600];
   if (r.d.y > -1e-9) return null;
   // march down the ray from where it enters the height range to where it leaves it, then bisect
-  const tTop = Math.max(0, (r.o.y - hi) / -r.d.y), tBot = (r.o.y - lo) / -r.d.y;
+  // (heights here are relative to the view target, like the ray)
+  const tTop = Math.max(0, (r.o.y + vy - hi) / -r.d.y), tBot = (r.o.y + vy - lo) / -r.d.y;
   if (tBot <= tTop) return null;
-  const f = (t: number) => r.o.y + r.d.y * t - H(v.x + r.o.x + r.d.x * t, v.z + r.o.z + r.d.z * t);
-  const at = (t: number): V3 => ({ x: v.x + r.o.x + r.d.x * t, y: r.o.y + r.d.y * t, z: v.z + r.o.z + r.d.z * t });
+  const f = (t: number) => vy + r.o.y + r.d.y * t - H(v.x + r.o.x + r.d.x * t, v.z + r.o.z + r.d.z * t);
+  const at = (t: number): V3 => ({ x: v.x + r.o.x + r.d.x * t, y: vy + r.o.y + r.d.y * t, z: v.z + r.o.z + r.d.z * t });
   const horiz = Math.hypot(r.d.x, r.d.z) * (tBot - tTop);
   const n = clamp(Math.ceil(horiz / Math.max(0.5, v.h / 200)), 8, 400);
-  let t0 = tTop, f0 = f(t0);
-  if (f0 <= 0) return at(t0);
+  let t0 = tTop;
+  if (f(t0) <= 0) return at(t0);
   for (let i = 1; i <= n; i++) {
-    const t1 = tTop + ((tBot - tTop) * i) / n, f1 = f(t1);
-    if (f1 <= 0) {
+    const t1 = tTop + ((tBot - tTop) * i) / n;
+    if (f(t1) <= 0) {
       let a = t0, b = t1;
       for (let j = 0; j < 40 && b - a > 1e-7; j++) { const m = (a + b) / 2; if (f(m) > 0) a = m; else b = m; }
       return at(b);
     }
-    t0 = t1; f0 = f1;
+    t0 = t1;
   }
   return at(tBot);
 }
@@ -126,7 +128,7 @@ export function groundToScreen(v: View, lens: Lens, p: GroundPoint): { x: number
   const { back, right, up } = basis(v.az, v.el);
   const D = eyeDistance(v, lens);
   // relative to the target first, then to the eye
-  const qx = p.x - v.x, qy = p.y ?? 0, qz = p.z - v.z;
+  const qx = p.x - v.x, qy = (p.y ?? 0) - (v.y ?? 0), qz = p.z - v.z;
   const ex = qx - back.x * D, ey = qy - back.y * D, ez = qz - back.z * D;
   const cx = ex * right.x + ey * right.y + ez * right.z;
   const cy = ex * up.x + ey * up.y + ez * up.z;
@@ -143,7 +145,7 @@ export function groundToScreen(v: View, lens: Lens, p: GroundPoint): { x: number
 /** Move the view (x, z only) so world point w sits under screen point (sx, sy). Exact in one step
  * for both kinds of camera: sliding the camera across the ground slides the whole picture. */
 export function keepUnder(v: View, lens: Lens, w: GroundPoint, sx: number, sy: number): View {
-  const p = atHeight(rayRel(v, lens, sx, sy), w.y ?? 0);
+  const p = atHeight(rayRel(v, lens, sx, sy), (w.y ?? 0) - (v.y ?? 0));
   if (!p) return { ...v };
   return { ...v, x: v.x + ((w.x - v.x) - p.x), z: v.z + ((w.z - v.z) - p.z) };
 }
@@ -176,17 +178,57 @@ export const easeInOutCubic = (t: number) => { t = clamp(t, 0, 1); return t < 0.
 export function lerpView(a: View, b: View, k: number): View {
   if (k >= 1) return { ...b };
   if (k <= 0) return { ...a };
-  return {
+  const o: View = {
     x: a.x + (b.x - a.x) * k,
     z: a.z + (b.z - a.z) * k,
     h: a.h * Math.pow(b.h / a.h, k),
     az: a.az + (b.az - a.az) * k,
     el: a.el + (b.el - a.el) * k,
   };
+  if (a.y !== undefined || b.y !== undefined) o.y = (a.y ?? 0) + ((b.y ?? 0) - (a.y ?? 0)) * k;
+  return o;
 }
 
 /** The nearest azimuth to `from` that faces the same way as `to`. */
 export const nearestAz = (from: number, to: number) => from + wrapAngle(to - from);
+
+/** The same picture, but with the target moved down the line of sight onto the ground (terrain),
+ * so the camera turns and tilts about what's in the middle of the screen and stands clear of hills.
+ * Orthographic: nothing on screen moves. Perspective: the eye stays put and h changes to match. */
+export function reseat(v: View, lens: Lens, ground?: Ground): View {
+  const g = screenToGround(v, lens, lens.width / 2, lens.height / 2, ground);
+  if (!g) return { ...v };
+  const o: View = { ...v, x: g.x, y: g.y, z: g.z };
+  if (lens.fov) {
+    // the eye is target + back·D; the new target is on the centre line, so D' = D + (target - g)·back
+    const { back } = basis(v.az, v.el), D = eyeDistance(v, lens);
+    const D2 = D + (v.x - g.x) * back.x + ((v.y ?? 0) - g.y) * back.y + (v.z - g.z) * back.z;
+    o.h = v.h * (D2 / D);
+  }
+  return o;
+}
+
+export interface Box { min: V3; max: V3 }
+/** Space to keep clear at each edge of the screen, in CSS pixels (panels, buttons). */
+export interface Pad { top?: number; bottom?: number; left?: number; right?: number }
+/** The view, facing az and tilted el, that shows the whole box in the part of the screen the
+ * padding leaves clear, with a margin round it. Exact for orthographic cameras; near enough for
+ * perspective ones (the near side of the box looks a little bigger). */
+export function fitView(box: Box, lens: Lens, az: number, el: number, pad: Pad = {}, margin = 1.1): View {
+  const { right, up } = basis(az, el);
+  const c = { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
+  let ex = 0, ey = 0;
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+    const dx = x - c.x, dy = y - c.y, dz = z - c.z;
+    ex = Math.max(ex, Math.abs(dx * right.x + dy * right.y + dz * right.z));
+    ey = Math.max(ey, Math.abs(dx * up.x + dy * up.y + dz * up.z));
+  }
+  const l = pad.left ?? 0, t = pad.top ?? 0;
+  const fw = Math.max(1, lens.width - l - (pad.right ?? 0)), fh = Math.max(1, lens.height - t - (pad.bottom ?? 0));
+  // on screen the box is 2·ex by 2·ey metres at lens.height / h pixels a metre
+  const h = Math.max((2 * ey * lens.height) / fh, (2 * ex * lens.height) / fw, 1e-3) * margin;
+  return keepUnder({ x: c.x, y: c.y, z: c.z, h, az, el }, lens, c, l + fw / 2, t + fh / 2);
+}
 
 // ---------------- the sun's shadow following the view ----------------
 export interface ShadowOpts {
@@ -216,7 +258,8 @@ export function shadowFrame(v: View, o: ShadowOpts, mapSize: number) {
   const r = r0 * Math.pow(g, Math.max(0, Math.ceil(Math.log((v.h * cover) / r0) / Math.log(g))));
   const texel = (2 * r) / mapSize;
   const { d, X, Y } = sunAxes(o.dir);
-  const u = v.x * X.x + v.z * X.z, w = v.x * Y.x + v.z * Y.z;
+  const vy = v.y ?? 0;
+  const u = v.x * X.x + v.z * X.z, w = v.x * Y.x + vy * Y.y + v.z * Y.z;
   const du = Math.round(u / texel) * texel - u, dw = Math.round(w / texel) * texel - w;
-  return { r, texel, dir: d, centre: { x: v.x + X.x * du + Y.x * dw, y: X.y * du + Y.y * dw, z: v.z + X.z * du + Y.z * dw } };
+  return { r, texel, dir: d, centre: { x: v.x + X.x * du + Y.x * dw, y: vy + X.y * du + Y.y * dw, z: v.z + X.z * du + Y.z * dw } };
 }

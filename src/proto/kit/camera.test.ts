@@ -98,7 +98,8 @@ describe('one finger', () => {
       const s = new Script(nav);
       s.down(1, 200, 700); s.drag([[1, 200, 700, 200, 400]], 6); s.up(1, 200, 400);
       const at = { ...nav.view };
-      s.settle(1500);
+      // (the game's glide: it decays by e^-4 a second from ~1.8 km/s here, so it takes ~1.7 s)
+      s.settle(2500);
       const moved = dist(nav.view, at);
       if (fling) expect(moved).toBeGreaterThan(20); else expect(moved).toBe(0);
       expect(nav.busy).toBe(false); // it comes to rest
@@ -322,7 +323,8 @@ describe('limits and animation', () => {
   });
 
   it('reset north goes the short way round and back to the home tilt, about the centre', async () => {
-    const nav = make({ view: { ...START, az: START.az + 2 * Math.PI - 0.3, el: 1.3 } });
+    // (home defaults to the starting view, so name it: the game's usual angle and tilt)
+    const nav = make({ view: { ...START, az: START.az + 2 * Math.PI - 0.3, el: 1.3 }, home: { az: START.az, el: START.el } });
     const c = nav.screenToGround(206, 457.5)!;
     const p = nav.resetNorth(400);
     nav.update(0.2); nav.update(0.2);
