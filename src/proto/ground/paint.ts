@@ -201,7 +201,7 @@ export class CoverMap {
             rough[k] = 0.85;
             break;
           case 'town':
-            lawn[k] = 0.7; town[k] = 1;
+            lawn[k] = 0.5; town[k] = 1; // amenity grass: mown, but not a lawn
             break;
         }
       }

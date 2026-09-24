@@ -162,11 +162,12 @@ const FRAG_BODY = `
   vec3 grass = mix( uPal[${P('pasture')}], uPal[${P('pastureDry')}], smoothstep( 0.3, 0.75, mac.r * 0.65 + mac.b * 0.35 ) );
   grass = mix( grass, uPal[${P('pastureCool')}], smoothstep( 0.45, 0.8, mac.a ) * 0.8 );
   grass = mix( grass, uPal[${P('wet')}], wet );
+  grass *= 1.0 + ( mac.b - 0.5 ) * 0.3 + ( d2.g - 0.5 ) * 0.16; // patches a few metres to tens of metres across
   // tussocky patches here and there in the pasture, and wherever painted rough
   float tuss = smoothstep( 0.6, 0.8, mac.g * 0.55 + mac.b * 0.2 + d2.g * 0.35 ) * 0.55 * ( 1.0 - wet );
   float rgh = clamp( max( rough, tuss ) * ( 1.0 - lawn ), 0.0, 1.0 );
   vec3 roughC = mix( uPal[${P('rough')}], uPal[${P('pastureDry')}], d2.b ) * ( 1.0 + tuft * 0.7 + ( d2.g - 0.5 ) * 0.35 );
-  vec3 pasture = grass * ( 1.0 + tuft * 0.38 + clump * 0.32 );
+  vec3 pasture = grass * ( 1.0 + tuft * 0.4 + clump * 0.42 );
   pasture = mix( pasture, roughC, rgh );
 
   vec3 lawnC = mix( uPal[${P('lawn')}], grass, 0.3 ) * ( 1.0 + tuft * 0.2 + clump * 0.12 );
@@ -190,11 +191,11 @@ const FRAG_BODY = `
     float t = gPulse( u, 0.5 / 24.0, fw ) + gPulse( u - 2.0 / 24.0, 0.5 / 24.0, fw );
     fieldC *= 1.0 - t * 0.2 * ( 1.0 - smoothstep( 0.03, 0.08, fw ) );
   }
-  fieldC *= 1.0 + tuft * 0.25 + clump * 0.18 + grain * ( ci == 4 ? 0.5 : 0.08 );
+  fieldC *= 1.0 + tuft * 0.45 + clump * 0.28 + grain * ( ci == 4 ? 0.5 : 0.08 );
   // mown stripes on the bigger lawns
   if ( ci == 7 ) lawnC *= 1.0 + ( 1.0 - 2.0 * gPulse( ac / row.x, 0.5, fwidth( ac / row.x ) ) ) * row.y;
 
-  vec3 woodC = mix( uPal[${P('wood')}], uPal[${P('litter')}], smoothstep( 0.35, 0.65, d1.g * 0.6 + d2.g * 0.4 ) ) * ( 1.0 + tuft * 0.3 );
+  vec3 woodC = mix( uPal[${P('wood')}], uPal[${P('litter')}], smoothstep( 0.45, 0.75, d1.g * 0.5 + d2.g * 0.5 ) ) * ( 1.0 + tuft * 0.3 + ( d2.b - 0.5 ) * 0.3 );
   vec3 bareC = mix( uPal[${P('bare')}], uPal[${P('bareDark')}], smoothstep( 0.3, 0.7, d2.b * 0.6 + mac.b * 0.4 ) ) * ( 1.0 + grain * 0.45 + tuft * 0.15 );
 
   vec3 col = pasture * past + lawnC * lawn + fieldC * fld + woodC * wood + bareC * bare;

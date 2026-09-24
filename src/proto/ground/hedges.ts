@@ -6,35 +6,36 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { hash2 } from './noise';
 import type { HedgeTree, Piece } from './hedgerows';
 
-// A unit hedge piece (1 long, 1 high, 1 wide), its top and sides bulging irregularly. The bulges
-// depend only on position, so neighbouring faces share their corners.
+// A unit hedge piece (1 long, 1 high, 1 wide): a cross-section of a flat foot, sloping sides and
+// a rounded crown, drawn along x, with its two ends closed. 14 triangles, so thousands of metres
+// of hedge stay cheap; the variety comes from each piece's own size, lean and shade.
 function hedgeGeometry() {
-  const g = new THREE.BoxGeometry(1, 1, 1, 4, 2, 2);
-  g.translate(0, 0.5, 0);
-  const p = g.getAttribute('position') as THREE.BufferAttribute;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    const h = hash2(Math.round(x * 8), Math.round(y * 4) * 7 + Math.round(z * 4), 5);
-    if (y < 0.01) { p.setY(i, -0.2); p.setZ(i, z * 0.8); continue; } // the foot, narrower, below ground
-    // the ends stay put so pieces join; the rest billows
-    const end = Math.abs(x) > 0.49 ? 0.3 : 1;
-    p.setY(i, y * (0.85 + h * 0.3 * end));
-    p.setZ(i, z * (0.9 + (h - 0.3) * 0.35 * end) * (y > 0.9 ? 0.7 : 1));
-  }
-  const n = g.toNonIndexed();
-  n.computeVertexNormals();
-  // darker in the bottom and the inside of the hedge
-  const q = n.getAttribute('position') as THREE.BufferAttribute, col = new Float32Array(q.count * 3);
+  // cross-section (z, y), foot to foot over the top; the foot sinks below the ground
+  const sec: [number, number][] = [[-0.42, -0.2], [-0.5, 0.45], [-0.3, 0.92], [0.3, 0.92], [0.5, 0.45], [0.42, -0.2]];
+  const pos: number[] = [], col: number[] = [];
   const lo = new THREE.Color('#2f4a24'), hi = new THREE.Color('#4f7337'), c = new THREE.Color();
-  for (let i = 0; i < q.count; i++) { c.lerpColors(lo, hi, Math.min(1, Math.max(0, q.getY(i) * 1.1))); col.set([c.r, c.g, c.b], i * 3); }
-  n.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  return n;
+  const put = (x: number, [z, y]: [number, number]) => { pos.push(x, y, z); c.lerpColors(lo, hi, Math.min(1, Math.max(0, y * 1.1))); col.push(c.r, c.g, c.b); };
+  for (let i = 0; i + 1 < sec.length; i++) {
+    const a = sec[i], b = sec[i + 1];
+    put(-0.5, a); put(0.5, b); put(0.5, a);
+    put(-0.5, a); put(-0.5, b); put(0.5, b);
+  }
+  // the ends: a fan over the section (facing out along ±x)
+  for (const x of [-0.5, 0.5]) for (let i = 1; i + 1 < sec.length; i++) {
+    const [p, q] = x > 0 ? [sec[i], sec[i + 1]] : [sec[i + 1], sec[i]];
+    put(x, sec[0]); put(x, p); put(x, q);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
 }
 
 // A hedgerow tree: a round crown on a trunk (kind 1: taller and narrower, an ash), one geometry.
 function treeGeometry() {
   const crown = new THREE.IcosahedronGeometry(3.6, 1); crown.translate(0, 6.4, 0);
-  const trunk = new THREE.CylinderGeometry(0.35, 0.55, 5, 6); trunk.translate(0, 2.3, 0);
+  const trunk = new THREE.CylinderGeometry(0.35, 0.55, 5, 5, 1, true); trunk.translate(0, 2.3, 0); // (open: its ends are hidden)
   const paint = (g: THREE.BufferGeometry, hex: string) => {
     const n = g.index ? g.toNonIndexed() : g, c = new THREE.Color(hex), a = new Float32Array(n.getAttribute('position').count * 3);
     for (let i = 0; i < a.length; i += 3) a.set([c.r, c.g, c.b], i);

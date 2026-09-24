@@ -27,11 +27,11 @@ export interface CropLook { a: string; b: string; rows: number; row: number; tra
 export const CROPS: Record<CropName, CropLook> = {
   grass: { a: '#6b8a47', b: '#7a914e', rows: 0, row: 0, tram: false }, // a grass field grazed or cut for hay
   ley: { a: '#628d45', b: '#6f9a4c', rows: 1.2, row: 0.05, tram: false }, // sown grass, lusher, faint drill rows
-  wheat: { a: '#b99f5c', b: '#c8ad69', rows: 0.9, row: 0.07, tram: true },
-  barley: { a: '#c4b57f', b: '#cdbf8e', rows: 0.9, row: 0.06, tram: true },
-  plough: { a: '#7c6249', b: '#8a6f52', rows: 1.1, row: 0.16, tram: false }, // furrows
-  rape: { a: '#c9b84a', b: '#b7ae4c', rows: 0, row: 0, tram: true }, // oilseed rape in flower, toned down
-  stubble: { a: '#b3a275', b: '#a79a70', rows: 0.9, row: 0.08, tram: true },
+  wheat: { a: '#b69d5d', b: '#c4aa68', rows: 0.6, row: 0.05, tram: true },
+  barley: { a: '#bfb17f', b: '#c9bb8b', rows: 0.6, row: 0.045, tram: true },
+  plough: { a: '#7a6650', b: '#86715a', rows: 1.1, row: 0.14, tram: false }, // furrows
+  rape: { a: '#c3b54e', b: '#b1a94e', rows: 0, row: 0, tram: true }, // oilseed rape in flower, toned down
+  stubble: { a: '#b0a077', b: '#a49871', rows: 0.6, row: 0.06, tram: true },
   stripes: { a: '#6e9449', b: '#76994e', rows: 7, row: 0.045, tram: false }, // mown lawn: stripes, not a crop
 };
 
@@ -41,15 +41,15 @@ export const PALETTE = {
   pastureDry: '#7e9150', // yellower patches (drier, thinner soil)
   pastureCool: '#5c7f4a', // bluer patches (damper, shaded)
   rough: '#83845a', // tussocks with straw in them
-  lawn: '#6c9248',
-  wood: '#4f5634', // moss and ivy
-  litter: '#6a563a', // last year's leaves
+  lawn: '#72994b', // a touch brighter and finer than pasture
+  wood: '#44502f', // moss, ivy and bramble under the canopy
+  litter: '#5d4f35', // last year's leaves
   bare: '#86705a',
   bareDark: '#6d5a45',
   wet: '#547c45',
   rock: '#83827a',
   scree: '#9b978b',
-  heather: '#6d5961',
+  heather: '#695a5c',
   moor: '#747449', // bleached moor grass between the heather
   daisy: '#e9e6d6',
   buttercup: '#d7c04a',

@@ -10,7 +10,7 @@ export interface Piece { x: number; z: number; a: number; len: number; h: number
 export interface HedgeTree { x: number; z: number; s: number; kind: number }
 export interface HedgeGroup { key: string; pieces: Piece[]; trees: HedgeTree[]; gates: Spot[] }
 
-const STEP = 4; // metres per hedge piece
+const STEP = 8; // metres per hedge piece
 const CLEAR = 2.2; // how far a hedge keeps from roads, plots, parks and water
 
 // Is a point clear of everything a hedge mustn't touch? Polygons are bucketed on a 40 m grid.
@@ -74,23 +74,22 @@ function walk(g: HedgeGroup, a: XZ, b: XZ, seed: number, occ: Occupancy, want: (
   if (L < STEP) return;
   const n = Math.floor(L / STEP), ux = (b.x - a.x) / L, uz = (b.z - a.z) / L, ang = Math.atan2(uz, ux);
   const step = L / n;
-  // one gap of two pieces (8 m, a field gate and its splay), not too near either end
-  const gap = gate && n >= 10 && hash2(n, seed, 71) < 0.8 ? 2 + Math.floor(hash2(seed, n, 72) * (n - 5)) : -9;
+  // one gap of a piece (8 m, a field gate and its splay), not too near either end
+  const gap = gate && n >= 5 && hash2(n, seed, 71) < 0.8 ? 1 + Math.floor(hash2(seed, n, 72) * (n - 2)) : -9;
   for (let k = 0; k < n; k++) {
     const x = a.x + ux * step * (k + 0.5), z = a.z + uz * step * (k + 0.5);
-    if (k === gap || k === gap + 1) {
-      if (k === gap) {
-        const gx = x + ux * step * 0.5, gz = z + uz * step * 0.5;
-        // worn earth where the stock and the tractors go through, on both sides
-        g.gates.push({ x: gx - uz * 3, z: gz + ux * 3, r: 5, v: 0.75 }, { x: gx + uz * 3, z: gz - ux * 3, r: 5, v: 0.75 });
-      }
+    // (a piece's ends reach half a step either way, so they must be clear too)
+    const h = (step + 0.8) / 2, ok = want(x, z) && occ.free(x, z) && occ.free(x - ux * h, z - uz * h, 1) && occ.free(x + ux * h, z + uz * h, 1);
+    if (k === gap) {
+      // worn earth where the stock and the tractors go through, on both sides
+      if (ok) g.gates.push({ x: x - uz * 3, z: z + ux * 3, r: 5, v: 0.75 }, { x: x + uz * 3, z: z - ux * 3, r: 5, v: 0.75 });
       continue;
     }
-    if (!want(x, z) || !occ.free(x, z)) continue;
+    if (!ok) continue;
     const r1 = hash2(k, seed, 73), r2 = hash2(k, seed, 74);
     // each piece a little longer than its step, so the line reads as continuous
-    g.pieces.push({ x, z, a: ang + (r1 - 0.5) * 0.06, len: step + 0.9, h: 1.5 + r2 * 0.6, w: 1.4 + r1 * 0.5 });
-    if (hash2(k, seed, 75) < 0.055 && occ.free(x, z, CLEAR + 2)) g.trees.push({ x: x + (r2 - 0.5) * 1.2, z: z + (r1 - 0.5) * 1.2, s: 0.95 + r2 * 0.5, kind: r1 < 0.15 ? 1 : 0 });
+    g.pieces.push({ x, z, a: ang + (r1 - 0.5) * 0.03, len: step + 0.8, h: 1.5 + r2 * 0.6, w: 1.4 + r1 * 0.5 });
+    if (hash2(k, seed, 75) < 0.11 && occ.free(x, z, CLEAR + 2)) g.trees.push({ x: x + (r2 - 0.5) * 1.2, z: z + (r1 - 0.5) * 1.2, s: 0.95 + r2 * 0.5, kind: r1 < 0.15 ? 1 : 0 });
   }
 }
 

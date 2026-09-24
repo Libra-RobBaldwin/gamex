@@ -150,6 +150,20 @@ export class Ground {
     this.stats.pieces = pieces.length; this.stats.trees = trees.length;
   }
   private gates() { const s = []; for (const g of this.groups.values()) s.push(...g.gates); return s; }
+  // Paint the cover map from a function of the texel's centre, writing its 8 bytes (A then B; see
+  // covers.ts) straight into `out`. For swatches and tests that want exact covers.
+  paintWith(f: (x: number, z: number, out: Uint8Array) => void) {
+    if (!this.cover) return;
+    const { region: R, texel: t, a, b } = this.cover, out = new Uint8Array(8);
+    for (let j = 0; j < R.n; j++) for (let i = 0; i < R.n; i++) {
+      out.fill(0); out[4] = 16;
+      f(R.x0 + (i + 0.5) * t, R.z0 + (j + 0.5) * t, out);
+      const o = (j * R.n + i) * 4;
+      a.set(out.subarray(0, 4), o); b.set(out.subarray(4, 8), o);
+    }
+    this.texA.updateRanges.length = this.texB.updateRanges.length = 0;
+    this.texA.needsUpdate = this.texB.needsUpdate = true;
+  }
   // every hedge piece and hedgerow tree (for tests and for anything placing things near hedges)
   hedgeList() { const p = [], t = []; for (const g of this.groups.values()) { p.push(...g.pieces); t.push(...g.trees); } return { pieces: p, trees: t }; }
 

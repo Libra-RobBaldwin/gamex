@@ -318,7 +318,7 @@ export class Layout {
       // woods come in clumps at the landscape scale; arable and grass in broad swathes too
       const wood = worldNoise(mid.x, mid.z, 520, this.seed + 7) + (r(1) - 0.5) * 0.25;
       const arable = worldNoise(mid.x, mid.z, 700, this.seed + 8) + (r(2) - 0.5) * 0.5;
-      kind = wood > 0.66 ? 'wood' : arable > 0.45 ? 'arable' : r(3) < 0.12 ? 'rough' : 'grass';
+      kind = wood > 0.7 ? 'wood' : arable > 0.52 ? 'arable' : r(3) < 0.12 ? 'rough' : 'grass';
     }
     let crop: number = CROP.grass;
     if (kind === 'arable') {
