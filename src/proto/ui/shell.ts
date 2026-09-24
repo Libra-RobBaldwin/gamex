@@ -65,8 +65,11 @@ export interface ToolSpec {
   spec?: string;
   icon?: Icon;
   tone?: Tone;
-  /** HTML for the options row (height, grade, crossing...). Wire it up in `bind`. */
+  /** HTML for the options drawer (type, shape, height, crossing...), folded away behind one
+   *  button until wanted. Wire it up in `bind`. */
   options?: string;
+  /** What the drawer's button says it holds (the name and spec also open it). */
+  optionsLabel?: string;
   bind?: (el: HTMLElement) => void;
   /** Undo is shown when given; enable it with setUndo. */
   onUndo?: () => void;
@@ -78,6 +81,8 @@ export interface ToolHandle {
   /** Change the name, spec, icon or options (options are re-bound). */
   set(p: Partial<Pick<ToolSpec, 'name' | 'spec' | 'icon' | 'tone' | 'options'>>): void;
   setUndo(enabled: boolean): void;
+  /** Open or fold away the options drawer. */
+  setOpen(open: boolean): void;
   /** Replace the Done button (e.g. with Build while a blueprint waits); null puts Done back. */
   setPrimary(a: Action | null): void;
   /** A card above the strip, for the blueprint and its warnings; null hides it. */
@@ -136,7 +141,7 @@ export class Shell {
   private views: ViewPicker | null = null;
   private menu: MenuItem[] = [];
   private sheet: SheetSpec | null = null;
-  private tool: (ToolSpec & { primary: Action | null; undo: boolean }) | null = null;
+  private tool: (ToolSpec & { primary: Action | null; undo: boolean; open: boolean }) | null = null;
   private hintTimer = 0;
   private firstRunKey = '';
   private viewShown = '';
@@ -170,6 +175,7 @@ export class Shell {
         <button id="compass" aria-label="Face north and reset the tilt" title="Face north"><span id="needle">${needleSvg()}</span></button>
         <button id="viewbtn" class="round" hidden aria-label="View" title="View">${icon('map')}<span></span></button>
         <div id="firstrun" role="status" hidden></div>
+        <button id="goal" hidden></button>
       </div>
       <section id="sheet" class="sheet facet" role="dialog" hidden></section>
       <div id="layers" class="facet" role="dialog" aria-label="Map layers" hidden></div>
@@ -271,6 +277,16 @@ export class Shell {
     html(el, `${icon('finger')}<span>${esc(text)}</span>`);
     el.hidden = false;
     requestAnimationFrame(() => window.setTimeout(() => { if (this.firstRunKey === key) this.dismissFirstRun(); }, 15000));
+  }
+  /** The next thing to do, as a small card under the status strip: tapping it gets on with it
+   *  (null hides it). It stays out of the way while a tool is in use. */
+  goal(g: { step: string; text: string; icon: Icon; onClick: () => void } | null) {
+    const el = this.$('#goal') as HTMLButtonElement;
+    if (!g) { if (!el.hidden) { el.hidden = true; html(el, ''); } return; }
+    const h = `${icon(g.icon)}<span><small>${esc(g.step)}</small>${esc(g.text)}</span>${icon('chevronDown', 'go')}`;
+    if (el.innerHTML !== h) html(el, h);
+    el.onclick = g.onClick;
+    el.hidden = false;
   }
   dismissFirstRun() {
     if (!this.firstRunKey) return;
@@ -485,7 +501,7 @@ export class Shell {
     this.dismissFirstRun();
     this.closeSheet();
     this.closeLayers();
-    this.tool = { ...spec, primary: null, undo: false };
+    this.tool = { ...spec, primary: null, undo: false, open: false };
     const el = this.$('#tool');
     const t = this.tool;
     const draw = () => {
@@ -493,19 +509,26 @@ export class Shell {
       el.className = `tone-${t.tone ?? 'look'}`;
       el.setAttribute('role', 'toolbar');
       el.setAttribute('aria-label', t.name);
-      html(el, `<div class="what">${t.icon ? `<i class="badge">${icon(t.icon)}</i>` : ''}<div class="tw"><b>${esc(t.name)}</b>${t.spec ? `<span>${esc(t.spec)}</span>` : ''}</div></div>
-        <div class="opts">${t.options ?? ''}</div>
+      const hasOpts = !!t.options;
+      el.classList.toggle('open', hasOpts && t.open);
+      const what = `${t.icon ? `<i class="badge">${icon(t.icon)}</i>` : ''}<div class="tw"><b>${esc(t.name)}${hasOpts ? icon('chevronDown') : ''}</b>${t.spec ? `<span>${esc(t.spec)}</span>` : ''}</div>`;
+      html(el, `${hasOpts ? `<button class="what" id="t-what" aria-expanded="${t.open}" aria-label="${esc(t.name)}: ${esc(t.optionsLabel ?? 'options')}">${what}</button>` : `<div class="what">${what}</div>`}
+        <div class="opts"${hasOpts && t.open ? '' : ' hidden'}>${t.open ? t.options ?? '' : ''}</div>
         <div class="acts">
+          ${hasOpts ? `<button class="act" id="t-opts" aria-label="${esc(t.optionsLabel ?? 'Options')}" title="${esc(t.optionsLabel ?? 'Options')}" aria-pressed="${t.open}">${icon('adjustments')}</button>` : ''}
           ${t.onUndo ? `<button class="act" id="t-undo" aria-label="Undo" title="Undo" ${t.undo ? '' : 'disabled'}>${icon('undo')}</button>` : ''}
           <button class="act" id="t-cancel" aria-label="Cancel" title="Cancel">${icon('x')}</button>
           <span id="t-prim"></span>
         </div>`);
+      const flip = () => { t.open = !t.open; draw(); this.layout(); };
+      el.querySelector('#t-what')?.addEventListener('click', flip);
+      el.querySelector('#t-opts')?.addEventListener('click', flip);
       el.querySelector('#t-undo')?.addEventListener('click', () => t.onUndo?.());
       el.querySelector('#t-cancel')!.addEventListener('click', () => { this.stopTool(); t.onCancel?.(); });
       drawPrimary();
       const o = el.querySelector('.opts') as HTMLElement;
       o.scrollLeft = was;
-      t.bind?.(o);
+      if (t.open) t.bind?.(o);
       // fade the edge while there are options scrolled out of sight
       const more = () => fade(o);
       o.addEventListener('scroll', more, { passive: true });
@@ -530,6 +553,7 @@ export class Shell {
       el,
       set: (p) => { if (this.tool !== t) return; Object.assign(t, p); draw(); },
       setUndo: (on) => { if (this.tool !== t) return; t.undo = on; const u = el.querySelector<HTMLButtonElement>('#t-undo'); if (u) u.disabled = !on; },
+      setOpen: (on) => { if (this.tool !== t || t.open === on) return; t.open = on; draw(); this.layout(); },
       setPrimary: (a) => { if (this.tool !== t) return; t.primary = a; drawPrimary(); },
       setPanel: (h, bind) => {
         if (this.tool !== t) return;
