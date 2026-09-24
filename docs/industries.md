@@ -173,6 +173,39 @@ planning hints.
 7. **UI.** The catchment ring and icons are drawn by the UI layer from `overlayFor`, only for the
    selected site or while placing a station.
 
+## In the game now
+
+`src/proto/game/industry.ts` (`Industries`) does steps 2, 3, 4, 5 and 7 for the seed town.
+
+- **Placing.** `findPlot(wish)` walks the roads near a point and fits the largest rectangle
+  (preferred size down to `minSize`) set back 5 m from the kerb. The plot must be clear of every
+  land claim and every site, and on land the wish accepts. `place()` claims it as `industry:<n>`.
+  `townWishes()` is the British market town now:
+  - on the estate: a distribution centre, a factory, a sawmill, a brewery and a food plant;
+  - out of town: a farm, a forest and a quarry.
+
+  The estate's buildgen industry plots are dropped. A road built through a site takes it
+  (`evict()`, called from `evictFromWorks`).
+- **Drawing.** Each site's mesh is baked to world space with a blank `uv`. `main.ts` merges it
+  into its chunk with buildgen's shared vertex-coloured material (`PLAIN_MAT`), so it adds no
+  draw calls. The moving parts are one `IndustryFx` (up to nine instanced draws). Lamps follow
+  `nightAt(hour)`, and the animation runs on game time, so it stops when the game is paused.
+- **State.** `IndustryFeed.visual(site, ctx)` is what the economy will provide. For now,
+  `standInFeed` gives production 1 with nothing calling, and one level more for each stop in the
+  catchment, up to 4. Served sites have lorries in their bays and moving stock. `tick(clock)`
+  refreshes once a game minute (and after any road change) and calls `fx.setState` only on a
+  real change.
+- **UI.**
+  - Tapping a site opens its info sheet: `shell.openInfo`, with cargo chips using Tabler icons
+    from `game/icons`.
+  - The selected site shows its ring and cargo badges on the map.
+  - While the stop tool is in use, every ring shows, and it's lit if the previewed stop would
+    serve that site.
+  - Layers has an "Industry catchments" toggle.
+- **Hook for terminals.** Push a function onto `siteActions` to add an action ("Buy a terminal")
+  to every site's sheet.
+- **Traffic.** Each site gives traffic a stand-in lot at its gate, so lorries come and go there.
+
 ## Viewing
 
 `npx vite --port 5173`, then open `/industries-demo.html`. Parameters help with screenshots:
