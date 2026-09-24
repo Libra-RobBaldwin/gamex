@@ -114,3 +114,25 @@ export function seamStats(t: DetailTexture, ch: number) {
   }
   return { wrap: wrap / (2 * n), inner: inner / (2 * n) };
 }
+
+// The macro texture: gentle patches at landscape scales, so that the far view is never one flat
+// colour and the detail texture's repeat is broken up. It tiles every MACRO_PERIOD metres, far
+// larger than any view, and holds smooth noise only (no sharp detail), so it can't shimmer:
+//   R  ~400 m patches (soil and drainage)
+//   G  ~120 m patches (how a field was grazed, fertilised or cut)
+//   B  ~60 m patches
+//   A  ~190 m patches, a different pattern for hue (yellower here, bluer there)
+export const MACRO_PERIOD = 2048;
+export function makeMacro(seed = 1, n = 256): DetailTexture {
+  const t0 = performance.now();
+  const N = n * n, ch = [new Float32Array(N), new Float32Array(N), new Float32Array(N), new Float32Array(N)];
+  const cells = (m: number) => Math.max(1, Math.round(MACRO_PERIOD / m));
+  addWrappedNoise(ch[0], n, cells(400), 0.5, seed + 11); addWrappedNoise(ch[0], n, cells(200), 0.2, seed + 12);
+  addWrappedNoise(ch[1], n, cells(120), 0.5, seed + 13); addWrappedNoise(ch[1], n, cells(60), 0.18, seed + 14);
+  addWrappedNoise(ch[2], n, cells(60), 0.5, seed + 15); addWrappedNoise(ch[2], n, cells(30), 0.2, seed + 16);
+  addWrappedNoise(ch[3], n, cells(190), 0.5, seed + 17); addWrappedNoise(ch[3], n, cells(90), 0.2, seed + 18);
+  for (const c of ch) level(c, 0.2);
+  const data = new Uint8Array(N * 4);
+  for (let i = 0, o = 0; i < N; i++, o += 4) for (let k = 0; k < 4; k++) data[o + k] = (ch[k][i] * 255 + 0.5) | 0;
+  return { size: n, data, ms: performance.now() - t0 };
+}
