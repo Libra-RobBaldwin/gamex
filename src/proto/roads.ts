@@ -33,7 +33,7 @@ export interface StopPlan { kind: 'kerb' | 'layby'; ok: boolean; title: string; 
 export const CLEAR_COST = 6000; // compulsory purchase per building
 export const RAISE_COST = 170; // extra per metre of road, per metre it's raised (embankment low, viaduct high)
 
-import { crossingOf, priceBridges, storeBridges, type SegBridge } from './game/bridges';
+import { clipBridges, crossingOf, priceBridges, storeBridges, type SegBridge } from './game/bridges';
 import type { BridgeChoice } from './bridges/choose';
 import { FLOOR, GRADES, heightAt, solveProfile, type CrossMode, type HeightMode, type Limit, type Profile, type Spec } from './grade';
 export const TUNNEL_COST = 450; // per metre, per metre below ground (cut and cover shallow, bored deep)
@@ -315,8 +315,10 @@ export class Network {
     const L = pathLength(path);
     // stops go with whichever half they're on; one the split runs through is lost
     const keepA = s.stops.filter((st) => stopSpan(st)[1] < c.s - 1), keepB = s.stops.filter((st) => stopSpan(st)[0] > c.s + 1).map((st) => ({ ...st, s: st.s - c.s }));
-    this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1), s.type, keepA);
-    this.addSeg(n, s.b, subPath(path, c.s, L).slice(1, -1), s.type, keepB);
+    const sa = this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1), s.type, keepA);
+    const sb = this.addSeg(n, s.b, subPath(path, c.s, L).slice(1, -1), s.type, keepB);
+    // bridges (and the player's choice of type) go with whichever half they're on
+    for (const [id, from, to] of [[sa, 0, c.s], [sb, c.s, L]]) { const x = this.segs.get(id); if (x && s.bridges) x.bridges = clipBridges(s.bridges, from, to); }
     return n;
   }
 

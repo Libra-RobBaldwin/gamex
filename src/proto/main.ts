@@ -1044,7 +1044,7 @@ function showBridgeInfo(b: BuiltBridge) {
     actions: [{ label: 'Change bridge type', icon: 'bridge', kind: 'primary', onClick: () => openBridgeEditor(b) }],
   });
   const m = pointAt(b.crossing.path, (b.s0 + b.s1) / 2);
-  focusOn(m, Math.max(80, (b.s1 - b.s0) * 1.4), undefined, 1.0);
+  focusOn(m, Math.max(140, (b.s1 - b.s0) * 1.8), undefined, 0.9);
 }
 // every type that could stand here this year: price, a mark on the recommended one, and the
 // refused ones greyed with their reason. Picking one re-commits the town with it.

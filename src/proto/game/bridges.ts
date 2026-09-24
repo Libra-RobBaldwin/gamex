@@ -112,8 +112,13 @@ function raiseCost(path: P[], s0: number, s1: number) {
 // Carry a blueprint's bridges onto the segments build() made from it: `from` is where each
 // segment starts along the blueprint's path.
 export function storeBridges(seg: RSeg, choices: BridgeChoice[], from: number, to: number) {
-  const mine = choices.filter((ch) => ch.chosen && ch.s1 > from + 1 && ch.s0 < to - 1);
-  seg.bridges = mine.length ? mine.map((ch) => ({ s0: Math.max(0, ch.s0 - from), s1: Math.min(to, ch.s1) - from, type: ch.chosen!, override: false })) : undefined;
+  seg.bridges = clipBridges(choices.filter((ch) => ch.chosen).map((ch) => ({ s0: ch.s0, s1: ch.s1, type: ch.chosen!, override: false })), from, to);
+}
+
+// The part of a segment's bridges between from and to, measured from `from` (for a split).
+export function clipBridges(list: SegBridge[], from: number, to: number) {
+  const out = list.filter((b) => b.s1 > from + 1 && b.s0 < to - 1).map((b) => ({ ...b, s0: Math.max(0, b.s0 - from), s1: Math.min(to, b.s1) - from }));
+  return out.length ? out : undefined;
 }
 
 // ---------- the built bridges ----------
