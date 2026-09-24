@@ -284,6 +284,7 @@ interface Box { x0: number; z0: number; x1: number; z1: number }
 let segSigs = new Map<number, { sig: string; box: Box }>(), legSigs = new Map<number, string>();
 const claimed = new Map<number, Junction>();
 let editBoxes: Box[] = []; // what the last commit touched
+const bridgesWere = new Map<number, string>(); // (each road's bridges as the last commit left them)
 const inBoxes = (p: P, boxes: Box[], pad = 0) => boxes.some((b) => p.x >= b.x0 - pad && p.x <= b.x1 + pad && p.z >= b.z0 - pad && p.z <= b.z1 + pad);
 const boxOfClaim = (key: string): Box | null => { const c = net.land.get(key); return c ? { x0: c.box[0], z0: c.box[1], x1: c.box[2], z1: c.box[3] } : null; };
 function commitTouched(): Box[] {
@@ -363,7 +364,9 @@ function commitRoads(made: number[] = []) {
   // lays out the bridges (short of the junctions at their ends) and stores their types on the
   // segments, which drawRoads reads
   const reach = (s: RSeg, node: number) => (net.segsAt(node).length > 2 ? (junctions.get(node)?.shape?.mouth[s.id] ?? 0) + 2 : 0);
-  bridgeLayer.sync(net, (s) => [reach(s, s.a), reach(s, s.b)], regionView ? (s) => { const e = segSigs.get(s.id); return !e || editBoxes.some((b) => e.box.x0 <= b.x1 && e.box.x1 >= b.x0 && e.box.z0 <= b.z1 && e.box.z1 >= b.z0); } : undefined);
+  // (a big map's: only the roads round what changed, or whose bridges were changed in the bridge editor)
+  bridgeLayer.sync(net, (s) => [reach(s, s.a), reach(s, s.b)], regionView ? (s) => { const e = segSigs.get(s.id); return !e || (bridgesWere.get(s.id) ?? '0') !== JSON.stringify(s.bridges ?? 0) || editBoxes.some((b) => e.box.x0 <= b.x1 && e.box.x1 >= b.x0 && e.box.z0 <= b.z1 && e.box.z1 >= b.z0); } : undefined);
+  if (regionView) { bridgesWere.clear(); for (const sg of net.segs.values()) if (sg.bridges) bridgesWere.set(sg.id, JSON.stringify(sg.bridges)); }
   railway.rebuild(); // (its stations tell drawRoads where they lay their own track)
   // (a big map redraws only the tiles whose roads or junctions changed, as they're shown)
   if (regionView) regionView.roadsChanged();
