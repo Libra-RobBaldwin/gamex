@@ -112,6 +112,24 @@ export function pairToNode(net: Network, mw: P[], type: string, end: End, splay 
   if (!B.ok) return B;
   return { ok: true as const, ab: A.segs, ba: B.segs };
 }
+// Every two-way motorway that runs from a dead end (off the map, say) to a junction, rebuilt as a
+// pair of one-way carriageways splaying into that junction (the starter town's, laid out as the
+// map's streets: src/proto/region/town.ts). Anything that can't be is left as it was.
+export function pairUpMotorways(net: Network) {
+  for (const s of [...net.segs.values()]) {
+    if (s.oneway || s.type !== 'motorway' || s.mid.length) continue;
+    const ends = [s.a, s.b].map((n) => net.segsAt(n).length);
+    const [dead, jn] = ends[0] === 1 && ends[1] >= 3 ? [s.a, s.b] : ends[1] === 1 && ends[0] >= 3 ? [s.b, s.a] : [-1, -1];
+    if (dead < 0) continue;
+    const A = net.node(dead), J = net.node(jn), type = s.type;
+    const trial = scratch(net);
+    trial.removeSeg(s.id);
+    if (!pairToNode(trial, [{ x: A.x, z: A.z }, { x: J.x, z: J.z }], type, { x: J.x, z: J.z, node: jn }).ok) continue;
+    net.removeSeg(s.id);
+    pairToNode(net, [{ x: A.x, z: A.z }, { x: J.x, z: J.z }], type, { x: J.x, z: J.z, node: jn });
+  }
+}
+
 // the part of a path between two distances along it
 function subPathOf(path: P[], s0: number, s1: number): P[] {
   const out: P[] = [pointAt(path, s0)];

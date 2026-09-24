@@ -4,6 +4,7 @@ import { ROADS } from '../catalog';
 import { circlePoly } from '../land';
 import type { Lot, Network } from '../roads';
 import { Ground, type GroundInput, type XZ } from './index';
+import { CROP_NAMES, PALETTE, type CropName } from './covers';
 
 export interface GameWorld {
   net: Network;
@@ -22,9 +23,18 @@ export class GameGround {
   readonly ground: Ground;
   private sites = new Set<Lot>();
   private full = true;
-  constructor(private w: GameWorld, bound: number) {
+  private reach: number; // how far out industrial land is looked for
+  // (`texel`: metres per cover texel, coarser on a big map so its covers stay a sensible size; `hedges`: plant hedgerows)
+  constructor(private w: GameWorld, bound: number, texel?: number, hedges = true) {
     const size = Math.ceil((bound * 2 + 160) / 10) * 10;
-    this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed: 11 });
+    this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed: 11, texel, hedges });
+    this.reach = Math.max(600, Math.ceil((bound * 1.15) / 40) * 40);
+  }
+  // A map's style: its palette and crops over the British ones (region/styles.ts). Nothing given, nothing changes.
+  setStyle(s: { palette: Partial<Record<keyof typeof PALETTE, string>>; crops: Partial<Record<CropName, { a: string; b: string }>> }) {
+    const u = this.ground.uniforms, keys = Object.keys(PALETTE) as (keyof typeof PALETTE)[];
+    for (const [k, hex] of Object.entries(s.palette)) { const i = keys.indexOf(k as keyof typeof PALETTE); if (i >= 0 && hex) u.uPal.value[i].set(hex); }
+    for (const [k, c] of Object.entries(s.crops)) { const i = CROP_NAMES.indexOf(k as CropName); if (i >= 0 && c) { u.uCropA.value[i].set(c.a); u.uCropB.value[i].set(c.b); } }
   }
   // what only changes with the roads or the landscaping (kept between plots going up)
   private fixed: Pick<GroundInput, 'blocked' | 'lanes' | 'parks' | 'industrial' | 'water'> | null = null;
@@ -52,9 +62,10 @@ export class GameGround {
     const parks: GroundInput['parks'] = [];
     for (const r of this.w.parks?.() ?? []) for (const c of r.cells) { const h = r.size / 2; parks.push({ poly: [{ x: c.x - h, z: c.z - h }, { x: c.x + h, z: c.z - h }, { x: c.x + h, z: c.z + h }, { x: c.x - h, z: c.z + h }] }); }
     const industrial: XZ[] = [];
-    for (let x = -600; x <= 600; x += 40) for (let z = -600; z <= 600; z += 40) if (this.w.industrial({ x, z })) industrial.push({ x, z });
+    const R = this.reach;
+    for (let x = -R; x <= R; x += 40) for (let z = -R; z <= R; z += 40) if (this.w.industrial({ x, z })) industrial.push({ x, z });
     const L = this.w.lake;
-    return { blocked, lanes, parks, industrial, water: this.w.water?.() ?? [circlePoly(L, L.r + 6, 48)] };
+    return { blocked, lanes, parks, industrial, water: this.w.water?.() ?? [circlePoly(L, L.r + 9, 48)] /* (the beach reaches r + 7) */ };
   }
   // The roads or the landscaping changed: repaint everything (next time `sync` runs).
   invalidate() { this.full = true; this.fixed = null; }

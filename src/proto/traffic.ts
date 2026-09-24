@@ -78,7 +78,14 @@ interface Car {
   readmit?: number; // when it last asked, standing at the line, whether it could go ahead of whoever it waits for
   pose?: Pose;
 }
-interface Train { def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; dress: Dress; gone?: boolean }
+interface Train {
+  def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; dress: Dress; gone?: boolean;
+  id: number; line?: RailLine; leg?: number; dwell?: number; sold?: boolean; // on a line: which call it's making, how long it still stands
+}
+// A rail line: the stations its trains call at, in order, over and over (A, B, C, B for A-B-C and
+// back); trains reverse at the ends. `stationAt` (set by the game) says where a station is.
+export interface RailLine { id: number; seq: number[] }
+export interface StationSpot { seg: RSeg; s: number; len: number }
 interface Access { seg: RSeg; s: number }
 // A bus line: the stops its buses call at, in order, over and over (A, B, C, B for A-B-C and
 // back). Each call is at the stop or at any stop facing it across the road, whichever side the
@@ -100,6 +107,7 @@ const E_IN = 10, E_OUT = 10; // how far either side of a junction its paths are 
 const BUSLANE = 8, BAYLANE = 9;
 const LONGEST = 10; // the furthest any vehicle reaches in front of or behind its centre (an 18.5 m bendy bus)
 const WIDEST = 1.3; // half the widest vehicle's width (2.55 m buses and trailers, as game/fleet.ts rounds it)
+const SAFE_GAP = 25; // metres a train stands behind another in its way (until there are signals)
 const GIVE_UP = 90; // seconds stood still before a driver gives up and goes another way
 const DIVERT = 15; // seconds stood at a junction with no room beyond before trying another way out of it
 const STARVE = 20; // seconds waiting in a junction after which nobody else may go ahead of you
@@ -144,6 +152,8 @@ export class Traffic {
   // How long a bus stands at a stop (seconds). Without it, 7; the crowds (game/crowds.ts) make it
   // wait while the people at the stop walk to its door. `bus` is the bus's id.
   onBusStop?: (seg: RSeg, st: Stop, bus: number) => number;
+  stationAt?: (id: number) => StationSpot | null; // where a railway station stands (game/rail.ts)
+  onTrainStop?: (station: number, train: number) => number; // a train has drawn up: how long it stands (s)
   // People on a crossing now (game/crowds.ts), as points on each road, by the road's id. Vehicles
   // that haven't reached one stop short of it.
   crossing = new Map<number, P[]>();
@@ -1771,9 +1781,95 @@ export class Traffic {
     const def = typeof kind === 'string' ? TRAINS[kind] : kind;
     const segs = [...this.net.segs.values()].filter((s) => this.trackOk(def, s));
     if (!segs.length) return false;
-    const seg = segs[Math.floor(this.rand() * segs.length)], dress = this.fleet.dressTrain(def);
-    this.trains.push({ def, seg, from: seg.a, s: Math.min(this.len(seg) - 1, dress.length + 1), v: 0, trail: [], dress });
-    return true;
+    const dress = this.fleet.dressTrain(def);
+    // somewhere clear of the trains already running (either way along the track)
+    for (let tries = 0; tries < 40; tries++) {
+      const seg = segs[Math.floor(this.rand() * segs.length)], L = this.len(seg), from = this.rand() < 0.5 ? seg.a : seg.b;
+      if (L < dress.length + 2) continue;
+      const s = dress.length + 1 + this.rand() * (L - dress.length - 2);
+      if (!this.clearAt(seg, from, s, dress.length)) continue;
+      this.trains.push({ id: this.ids++, def, seg, from, s, v: 0, trail: [], dress });
+      return true;
+    }
+    return false;
+  }
+  // A train for a rail line, standing at the platform of the call it starts from (`leg`), facing
+  // its next call. Null when there's no track it can use there.
+  addLineTrain(def: TrainDef, line: RailLine, leg = 0) {
+    const q = line.seq, n = q.length;
+    if (n < 2) return null;
+    leg %= n;
+    const here = this.stationAt?.(q[leg]), next = this.stationAt?.(q[(leg + 1) % n]);
+    if (!here || !this.trackOk(def, here.seg)) return null;
+    const dress = this.fleet.dressTrain(def), len = dress.length, L = this.len(here.seg);
+    // face the next call: along the road from a if it's that way
+    const pn = next ? pointAt(this.net.path(next.seg), next.s) : null, p0 = pointAt(this.net.path(here.seg), 0), p1 = pointAt(this.net.path(here.seg), L);
+    const fromA = !pn || Math.hypot(pn.x - p1.x, pn.z - p1.z) <= Math.hypot(pn.x - p0.x, pn.z - p0.z);
+    const from = fromA ? here.seg.a : here.seg.b, at = fromA ? here.s : L - here.s;
+    const s = Math.min(L - 1, Math.max(len + 1, at + Math.min(len, here.len) / 2));
+    if (!this.clearAt(here.seg, from, s, len)) return null; // (another train stands there)
+    const tr: Train = { id: this.ids++, def, seg: here.seg, from, s, v: 0, trail: [], dress, line, leg: (leg + 1) % n };
+    this.trains.push(tr);
+    return tr;
+  }
+  trainsOn(line: number) { return this.trains.filter((t) => !t.gone && !t.sold && t.line?.id === line).map((t) => t.id); }
+  removeTrain(id: number) { const t = this.trains.find((x) => x.id === id); if (t) t.sold = true; }
+  train(id: number) {
+    const t = this.trains.find((x) => x.id === id && !x.gone);
+    if (!t) return null;
+    const q = pointAt(this.pathOf(t.seg, t.from), Math.min(t.s, this.len(t.seg)));
+    return { id: t.id, line: t.line?.id, next: t.line ? t.line.seq[(t.leg ?? 0) % t.line.seq.length] : undefined, dwelling: t.dwell !== undefined, speed: t.v, x: q.x, z: q.z, model: t.dress.chain[0]?.name ?? t.def.label };
+  }
+  // withdraw the trains that aren't the player's (the old operator's, which wander the line)
+  clearOtherTrains() { for (const t of this.trains) if (!t.line) t.gone = true; this.trains = this.trains.filter((t) => !t.gone); }
+  trainNear(p: P, r = 12) {
+    let best: Train | null = null, bd = r;
+    for (const t of this.trains) {
+      if (t.gone || !t.line) continue;
+      for (let back = 0; back <= t.dress.length; back += 8) {
+        const q = this.along(t, back).q, d = Math.hypot(q.x - p.x, q.z - p.z);
+        if (d < bd) { bd = d; best = t; }
+      }
+    }
+    return best?.id ?? null;
+  }
+  // how far along the track, in the direction it faces, the train's front is from where it
+  // should stop for a station (its front at the platform's far end), and the first road of the
+  // way there at the next junction; Infinity when the station isn't ahead
+  private toStation(tr: Train, st: StationSpot) {
+    const stopAt = (seg: RSeg, from: number) => (from === seg.a ? st.s : this.len(seg) - st.s) + Math.min(tr.dress.length, st.len) / 2;
+    if (st.seg === tr.seg) { const d = stopAt(tr.seg, tr.from) - tr.s; if (d > -1) return { d, first: undefined as RSeg | undefined }; }
+    // breadth-first over track the train can use, never turning back at a junction
+    const start = this.net.other(tr.seg, tr.from), L0 = this.len(tr.seg) - tr.s;
+    const seen = new Set<number>([tr.seg.id]);
+    let frontier: { node: number; d: number; first?: RSeg; via: RSeg }[] = [{ node: start, d: L0, via: tr.seg }];
+    for (let depth = 0; depth < 40 && frontier.length; depth++) {
+      const next: typeof frontier = [];
+      for (const f of frontier) for (const s of this.net.segsAt(f.node)) {
+        if (s === f.via || seen.has(s.id) || !this.trackOk(tr.def, s)) continue;
+        // (only onward, not back the way it came: the angle between the two must be gentle)
+        const a = this.pathOf(f.via, this.net.other(f.via, f.node)), b = this.pathOf(s, f.node);
+        const u = { x: a[a.length - 1].x - a[a.length - 2].x, z: a[a.length - 1].z - a[a.length - 2].z }, v = { x: b[1].x - b[0].x, z: b[1].z - b[0].z };
+        if ((u.x * v.x + u.z * v.z) / ((Math.hypot(u.x, u.z) || 1) * (Math.hypot(v.x, v.z) || 1)) < 0.5) continue;
+        seen.add(s.id);
+        const first = f.first ?? s;
+        if (s === st.seg) return { d: f.d + stopAt(s, f.node), first };
+        next.push({ node: this.net.other(s, f.node), d: f.d + this.len(s), first, via: s });
+      }
+      frontier = next;
+    }
+    return { d: Infinity, first: undefined as RSeg | undefined };
+  }
+  // turn a standing train round: its rear becomes its front
+  private reverse(tr: Train) {
+    const pieces = [{ seg: tr.seg, from: tr.from, len: tr.s }, ...tr.trail.map((t) => ({ ...t, len: this.len(t.seg) }))];
+    let left = tr.dress.length, k = 0;
+    while (k < pieces.length - 1 && left > pieces[k].len) { left -= pieces[k].len; k++; }
+    const r = pieces[k], sRear = Math.max(0, r.len - left); // distance from r.from along r.seg
+    const Lr = this.len(r.seg);
+    // behind the new front, nearest first: the pieces it came along, driven the other way
+    tr.trail = pieces.slice(0, k).reverse().map((p) => ({ seg: p.seg, from: this.net.other(p.seg, p.from) }));
+    tr.seg = r.seg; tr.from = this.net.other(r.seg, r.from); tr.s = Lr - sRear; tr.v = 0;
   }
   private steepest(s: RSeg) {
     let g = this.gradeCache.get(s.id);
@@ -1795,34 +1891,139 @@ export class Traffic {
   }
   private moveTrains(dt: number) {
     const net = this.net;
+    const bodies = this.bodies();
     for (const tr of this.trains) {
       if (!net.segs.has(tr.seg.id)) { tr.gone = true; continue; }
+      if (tr.sold && tr.v < 0.5) { tr.gone = true; continue; }
       const L = this.len(tr.seg), d = net.def(tr.seg);
+      // on a line: stand at the platform, then on to the next call, braking to stop at it
+      let cap = Infinity, first: RSeg | undefined;
+      if (tr.line && tr.line.seq.length >= 2) {
+        const q = tr.line.seq;
+        if (tr.dwell !== undefined) {
+          tr.dwell -= dt; tr.v = 0;
+          if (tr.dwell > 0) continue;
+          tr.dwell = undefined;
+          tr.leg = ((tr.leg ?? 0) + 1) % q.length;
+        }
+        const st = this.stationAt?.(q[(tr.leg ?? 0) % q.length]);
+        if (st) {
+          let w = this.toStation(tr, st);
+          if (w.d === Infinity && tr.v < 0.3 && this.clearToReverse(tr, bodies)) { this.reverse(tr); w = this.toStation(tr, st); }
+          if (w.d === Infinity) cap = 0; // stop, then turn round
+          else {
+            first = w.first;
+            cap = Math.sqrt(2 * 0.9 * Math.max(0, w.d - 0.5));
+            if (w.d < 1.5 && tr.v < 0.4) { tr.v = 0; tr.dwell = this.onTrainStop?.(q[(tr.leg ?? 0) % q.length], tr.id) ?? 30; continue; }
+          }
+        }
+      }
       const q = pointAt(this.pathOf(tr.seg, tr.from), Math.min(tr.s, L));
       let target = trainSpeed(tr.def, d, q.grade);
       // a bridge's own limit, braking for it in time (game/bridges.ts)
       if (this.speedCap) target = Math.min(target, tr.from === tr.seg.a ? this.speedCap(tr.seg, tr.s, 1, tr.v * tr.v / 2.4 + 20) : this.speedCap(tr.seg, L - tr.s, -1, tr.v * tr.v / 2.4 + 20));
+      // keep clear of any train ahead on the same track (see gapAhead)
+      cap = Math.min(cap, Math.sqrt(2 * 0.9 * Math.max(0, this.gapAhead(tr, bodies, first) - SAFE_GAP)));
+      target = Math.min(target, cap);
       tr.v += Math.max(-1.2 * dt, Math.min(0.7 * dt, target - tr.v));
       tr.s += tr.v * dt;
       if (tr.s >= L) {
         const at = net.other(tr.seg, tr.from);
-        // the most nearly straight-on track it's allowed to use; at a dead end it reverses
-        const here = this.pathOf(tr.seg, tr.from), a = here[here.length - 2], b = here[here.length - 1];
-        const u = { x: b.x - a.x, z: b.z - a.z }, ul = Math.hypot(u.x, u.z) || 1;
-        let best: RSeg | null = null, bd = -2;
-        for (const s of net.segsAt(at)) {
-          if (s.id === tr.seg.id || !this.trackOk(tr.def, s)) continue;
-          const p = this.pathOf(s, at), v = { x: p[1].x - p[0].x, z: p[1].z - p[0].z }, vl = Math.hypot(v.x, v.z) || 1;
-          const dot = (u.x * v.x + u.z * v.z) / (ul * vl);
-          if (dot > bd) { bd = dot; best = s; }
-        }
+        // on to the next track (the way to its next call, or straight on); at a dead end it reverses
+        const best = this.nextTrack(tr, at, first);
+        // (turning round at the end of the track waits until the other track beside it is clear)
+        if (!best && !this.clearToReverse(tr, bodies)) { tr.s = L; tr.v = 0; continue; }
         tr.trail.unshift({ seg: tr.seg, from: tr.from });
         tr.trail.length = Math.min(tr.trail.length, 6);
-        if (best && bd > 0.5) { tr.s -= L; tr.seg = best; tr.from = at; }
+        if (best) { tr.s -= L; tr.seg = best; tr.from = at; }
+        else if (tr.line) { tr.trail.shift(); tr.s = L; tr.v = 0; this.reverse(tr); } // a line's train turns round at the end of the track
         else { tr.s = 0.5; tr.from = at; tr.v = 0; tr.trail = []; } // reverse out
       }
     }
     this.trains = this.trains.filter((t) => !t.gone);
+  }
+  // The track a train goes on to at the end of the one it's on: the way to its next call, or else
+  // the most nearly straight-on track it may use; null at a dead end.
+  private nextTrack(tr: Train, at: number, first?: RSeg): RSeg | null {
+    if (first && (first.a === at || first.b === at)) return first;
+    const here = this.pathOf(tr.seg, tr.from), a = here[here.length - 2], b = here[here.length - 1];
+    const u = { x: b.x - a.x, z: b.z - a.z }, ul = Math.hypot(u.x, u.z) || 1;
+    let best: RSeg | null = null, bd = 0.5;
+    for (const s of this.net.segsAt(at)) {
+      if (s.id === tr.seg.id || !this.trackOk(tr.def, s)) continue;
+      const p = this.pathOf(s, at), v = { x: p[1].x - p[0].x, z: p[1].z - p[0].z }, vl = Math.hypot(v.x, v.z) || 1;
+      const dot = (u.x * v.x + u.z * v.z) / (ul * vl);
+      if (dot > bd) { bd = dot; best = s; }
+    }
+    return best;
+  }
+  // ---------- keeping trains apart ----------
+  // Until the track is signalled in blocks (docs/region.md, R3), every train keeps its distance:
+  // it brakes to stand SAFE_GAP behind any train ahead of it on the same track, this section or
+  // the next, and never enters a single-track section another train is on. On double track each
+  // direction has its own track; on single track every train on it is in the way.
+  // Where each train is: the stretches of track it covers, as metres from each road's a end.
+  private bodies() {
+    const out = new Map<Train, { seg: RSeg; dir: 1 | -1; x0: number; x1: number }[]>();
+    for (const tr of this.trains) {
+      if (tr.gone) continue;
+      const list: { seg: RSeg; dir: 1 | -1; x0: number; x1: number }[] = [];
+      let left = tr.dress.length;
+      const pieces = [{ seg: tr.seg, from: tr.from, end: Math.min(tr.s, this.len(tr.seg)) }, ...tr.trail.map((t) => ({ ...t, end: this.len(t.seg) }))];
+      for (const p of pieces) {
+        if (left <= 0 || !this.net.segs.has(p.seg.id)) break;
+        const L = this.len(p.seg), b = p.end, a = Math.max(0, b - left);
+        left -= b - a;
+        const dir = p.from === p.seg.a ? 1 : -1;
+        list.push(dir === 1 ? { seg: p.seg, dir, x0: a, x1: b } : { seg: p.seg, dir, x0: L - b, x1: L - a });
+      }
+      out.set(tr, list);
+    }
+    return out;
+  }
+  // is a train of length len, its front s along seg from `from`, clear of every other train?
+  private clearAt(seg: RSeg, from: number, s: number, len: number) {
+    const L = this.len(seg), dir = from === seg.a ? 1 : -1, x0 = dir === 1 ? s - len : L - s, x1 = dir === 1 ? s : L - s + len;
+    for (const list of this.bodies().values()) for (const b of list)
+      if (b.seg === seg && this.sameTrack(seg, dir, b.dir) && b.x0 < x1 + SAFE_GAP && b.x1 > x0 - SAFE_GAP) return false;
+    return true;
+  }
+  private sameTrack(seg: RSeg, d1: number, d2: number) { return this.net.def(seg).tracks !== 2 || d1 === d2; }
+  // metres from the train's front to the nearest train in its way ahead (Infinity if none near)
+  private gapAhead(tr: Train, bodies: Map<Train, { seg: RSeg; dir: 1 | -1; x0: number; x1: number }[]>, first?: RSeg) {
+    const L = this.len(tr.seg), dir = tr.from === tr.seg.a ? 1 : -1, p = dir === 1 ? tr.s : L - tr.s;
+    const at = this.net.other(tr.seg, tr.from), next = tr.s > L - 400 ? this.nextTrack(tr, at, first) : null;
+    const ndir = next ? (next.a === at ? 1 : -1) : 1, nL = next ? this.len(next) : 0, rest = L - tr.s;
+    let gap = Infinity;
+    for (const [o, list] of bodies) {
+      if (o === tr) continue;
+      for (const b of list) {
+        if (b.seg === tr.seg && this.sameTrack(b.seg, dir, b.dir)) {
+          // (one coming the other way on single track closes the gap from its side too: each takes half)
+          const k = b.dir === dir ? 1 : 0.5;
+          if (dir === 1 && b.x1 >= p) gap = Math.min(gap, Math.max(0, b.x0 - p) * k);
+          if (dir === -1 && b.x0 <= p) gap = Math.min(gap, Math.max(0, p - b.x1) * k);
+        }
+        if (next && b.seg === next) {
+          if (this.net.def(next).tracks !== 2 && b.dir !== ndir) gap = Math.min(gap, rest); // (single track held by a train coming the other way)
+          else if (this.sameTrack(next, ndir, b.dir)) gap = Math.min(gap, rest + (ndir === 1 ? b.x0 : nL - b.x1));
+        }
+      }
+    }
+    return gap;
+  }
+  // may this train turn round where it stands? Not while a train is beside it on the track it
+  // would turn onto (on single track, on the same track), within SAFE_GAP
+  private clearToReverse(tr: Train, bodies: Map<Train, { seg: RSeg; dir: 1 | -1; x0: number; x1: number }[]>) {
+    const mine = bodies.get(tr) ?? [];
+    for (const [o, list] of bodies) {
+      if (o === tr) continue;
+      for (const b of list) for (const m of mine) {
+        if (b.seg !== m.seg || !this.sameTrack(b.seg, -m.dir, b.dir)) continue;
+        if (b.x0 < m.x1 + SAFE_GAP && b.x1 > m.x0 - SAFE_GAP) return false;
+      }
+    }
+    return true;
   }
   // position a distance back along a train from its front
   private along(tr: Train, back: number) {

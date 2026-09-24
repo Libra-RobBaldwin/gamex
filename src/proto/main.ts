@@ -25,26 +25,47 @@ import { PLAIN_MAT } from './buildgen';
 import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
+import { TownEconomy, TOWN_NAME } from './game/econ';
+import { Purse, PRICE_SHARE } from './game/money';
+import { Stations, STATION_LIST_PRICE } from './game/rail';
+import type { TrainDef } from './catalog';
 import { starterStops } from './game/crowdsites';
-import { IX_BLURB, IX_FORMS, IX_NAME, motorwayWithJunction, pairToNode, type Interchange, type IxForm, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
+import { IX_BLURB, IX_FORMS, IX_NAME, motorwayWithJunction, pairUpMotorways, type Interchange, type IxForm, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
 import { planJunction, roadCrossed, type IxPlan } from './interchange/plan';
+import { Loading } from './loading';
+import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
-const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
+// the purse (game/money.ts): prices are the game's share of list prices, charged when built
+const purse = new Purse();
+const price = (list: number) => purse.price(list);
+const perM = (list: number) => `£${Math.round(list * PRICE_SHARE).toLocaleString('en-GB')}/m`;
+const short = (need: number) => `Not enough money · ${money(need)} needed, ${money(purse.balance)} in the bank`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // ---------------- world ----------------
-// the lake: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
-const gameWater = new GameWater(520 * 1.3); // (the ground's half-width, BOUND * 1.3)
+// The map is data (region/mapspec.ts): ?map= picks it (a region with its options), the invented town by default.
+const MAP = mapFromQuery(new URLSearchParams(location.search));
+const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
+// the loading screen, while the map is built (it goes once the first frame is drawn)
+const loading = new Loading(MAP.name, mapLine());
+function mapLine() {
+  const o = MAP.options, n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  if (!o) return '';
+  return [`seed ${o.seed}`, n(MAP.settlements.length, 'place', 'places'), n(MAP.water.rivers.length, 'river', 'rivers'), n(MAP.water.lakes.length, 'lake', 'lakes'), o.style].join(' · ');
+}
+await loading.stage(MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
+const BOUND = MAP.bound;
+// the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
+const gameWater = new GameWater(BOUND * (BOUND > 520 ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
 const isWater = (p: P) => gameWater.isWater(p);
-const BOUND = 520;
 const net = new Network(isWater, BOUND, 11);
-gameWater.claim(net.land); // the lake's land ('water', 3 m past the waterline): plots and parks keep off it
-// an industrial estate south of the centre
-const INDUSTRIAL = (p: P) => p.z < -215 && Math.abs(p.x) < 280;
+gameWater.claim(net.land); // the water's land ('water', 3 m past the waterline): plots and parks keep off it
+// the map's industrial estates (the town's is south of the centre)
+const INDUSTRIAL = (p: P) => zoneOf(MAP, p) === 'industrial';
 net.zoneAt = (p) => (INDUSTRIAL(p) ? 'industrial' : 'town');
-const CENTRE = { x: 0, z: 0 };
-const rand = rng(99);
+const rand = rng(MAP.seed);
 
 // ---------------- three setup ----------------
 const canvas = $<HTMLCanvasElement>('#c');
@@ -53,7 +74,7 @@ renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#a9cbe3');
+scene.background = new THREE.Color(LOOK.sky);
 
 scene.add(new THREE.HemisphereLight('#e8f3ff', '#5d7040', 1.25));
 const sun = new THREE.DirectionalLight('#fff3dc', 2.3);
@@ -64,6 +85,7 @@ sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
+const SCALE = BOUND / 520; // (a bigger map: the camera stands further back and can zoom further out)
 const HOME = { az: Math.PI / 4, el: 0.6 };
 const EL_MIN = 0.35, EL_MAX = 1.52;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -72,11 +94,14 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 // its shadow area only changes size in big steps and slides in whole shadow-map texels, so edges
 // don't shimmer. The game's own input hooks are set with the rest of the input code below.
 const nav = new NavRig(cam, canvas, {
-  view: { x: 0, z: 20, h: 300, ...HOME },
-  limits: { hMin: 35, hMax: 900, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
+  view: { ...MAP.view, ...HOME },
+  distance: 1200 * SCALE,
+  limits: { hMin: 35, hMax: 900 * SCALE, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
   shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
 });
 const view = nav.view;
+// (and its depth range follows the zoom, so depth stays as fine as the town's)
+if (SCALE > 1) { const fit = () => { const r = (2 * view.h) / Math.sin(view.el) + 600; cam.near = Math.max(1, 1200 * SCALE - r); cam.far = 1200 * SCALE + r; cam.updateProjectionMatrix(); }; nav.onChange(fit); fit(); }
 
 function resize() {
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
@@ -86,9 +111,10 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND);
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, SCALE > 1 ? 4 : undefined, SCALE === 1); // (no 3D hedgerows on a big map until it streams: docs/region.md R4)
+gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
-const ground = new THREE.Mesh(gameWater.groundGeometry(BOUND * 2.6), gameGround.ground.material);
+const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 // Grass drawn on top of the ground (verges, roundabout islands, cutting slopes, gardens, parks)
@@ -103,25 +129,26 @@ scene.add(ground);
 gameWater.patch(gameGround.ground.material);
 scene.add(gameWater.group);
 gameWater.light(scene, sun); // (evening light: the sun, sky and water change together)
+// rivers' beds, in a ground material of their own (the flat ground leaves out what they cover)
+for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshLambertMaterial(), gameGround.ground.uniforms)))) scene.add(m);
 
 // ---------------- trees (instanced) ----------------
 interface Tree { x: number; z: number; s: number; kind: number }
 let trees: Tree[] = [];
-for (let i = 0; i < 1400; i++) {
+for (let i = 0; i < MAP.trees.count; i++) {
   const p = { x: (rand() * 2 - 1) * BOUND, z: (rand() * 2 - 1) * BOUND };
   // woods on the outskirts, a few in town
-  const dc = Math.hypot(p.x, p.z);
-  if (dc < 140 && rand() < 0.85) continue;
+  if (inCentre(MAP, p) && rand() < 0.85) continue;
   if (isWater(p) || gameWater.near(p, 10)) continue;
-  trees.push({ ...p, s: 0.8 + rand() * 0.7, kind: rand() < 0.3 ? 1 : 0 });
+  trees.push({ ...p, s: 0.8 + rand() * 0.7, kind: rand() < LOOK.trees.pines ? 1 : 0 });
 }
 const crownGeo = new THREE.IcosahedronGeometry(3.4, 1);
 const pineGeo = new THREE.ConeGeometry(3, 9, 7);
 const trunkGeo = new THREE.CylinderGeometry(0.35, 0.5, 3.5, 6);
-const crownMat = new THREE.MeshLambertMaterial({ color: '#4f8a36', flatShading: true });
-const pineMat = new THREE.MeshLambertMaterial({ color: '#2f6b35', flatShading: true });
+const crownMat = new THREE.MeshLambertMaterial({ color: LOOK.trees.crown, flatShading: true });
+const pineMat = new THREE.MeshLambertMaterial({ color: LOOK.trees.pine, flatShading: true });
 const trunkMat = new THREE.MeshLambertMaterial({ color: '#6b4a2f' });
-const MAXT = 1600;
+const MAXT = Math.max(1600, MAP.trees.count + 200);
 const crowns = new THREE.InstancedMesh(crownGeo, crownMat, MAXT);
 const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAXT);
 const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
@@ -150,7 +177,18 @@ function refreshTrees(only?: Lot) {
     const c = net.parcelCentre(only), r = net.parcelR(only) + 3;
     trees = trees.filter((t) => Math.abs(t.x - c.x) > r || Math.abs(t.z - c.z) > r || !treeBlocked(t, [only]));
     if (trees.length === before) return;
-  } else trees = trees.filter((t) => !treeBlocked(t, net.lots));
+  } else {
+    // (plots bucketed by where they stand, so each tree looks only at those near it)
+    const B = 60, near = new Map<string, Lot[]>();
+    for (const l of net.lots) {
+      const c = net.parcelCentre(l), r = net.parcelR(l) + 3;
+      for (let i = Math.floor((c.x - r) / B); i <= Math.floor((c.x + r) / B); i++) for (let j = Math.floor((c.z - r) / B); j <= Math.floor((c.z + r) / B); j++) {
+        const k = `${i},${j}`, a = near.get(k);
+        if (a) a.push(l); else near.set(k, [l]);
+      }
+    }
+    trees = trees.filter((t) => !treeBlocked(t, near.get(`${Math.floor(t.x / B)},${Math.floor(t.z / B)}`) ?? []));
+  }
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
   let nc = 0, np = 0;
   trees.forEach((t, i) => {
@@ -222,7 +260,7 @@ interface Built { lot: Lot; born: number; height: number; name: string; detail: 
 const buildings: Built[] = [];
 const cityGroup = new THREE.Group();
 scene.add(cityGroup);
-const CH = 120;
+const CH = BOUND > 520 ? 240 : 120; // (bigger on a big map: fewer draw calls when it's all in view)
 const chunks = new Map<string, { members: Set<Built>; group: THREE.Group; dirty: boolean }>();
 
 function bakeGroup(group: THREE.Group) {
@@ -295,6 +333,7 @@ function siteUnder(sx: number, sy: number, g: P) {
 let queue: Lot[] = [];
 let placesDirty = true;
 let onRoadsChanged = () => {};
+let townRef: TownEconomy | null = null; // (made once the town is laid out, below)
 const LEVELS = [['Traffic', 1], ['Busy', 2], ['Quiet', 0.4]] as const;
 let level = 0;
 function spawnLot(l: Lot, animate = true) {
@@ -361,11 +400,14 @@ function refreshInfill() {
   gameGround.invalidate();
 }
 
+// the centre to lay a road's plots out from: its settlement's, as central as its size says (region/mapspec.ts)
+const centreFor = (a: P, b: P = { x: a.x + 1, z: a.z }) => plotCentre(MAP, a, b);
 function queuePlots(segs: number[]) {
   for (const id of segs) {
-    const plots = net.plotsFor(id, CENTRE);
+    const sg = net.segs.get(id);
+    const plots = sg ? net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))) : [];
     // denser, taller near the centre; a few gaps elsewhere
-    for (const p of plots) if (Math.hypot(p.x, p.z) < 200 || rand() < 0.75) queue.push(p);
+    for (const p of plots) if (centrality(MAP, p) < 200 || rand() < 0.75) queue.push(p);
   }
   // and around any roundabout these roads meet at
   const nodes = new Set(segs.flatMap((id) => { const s = net.segs.get(id); return s ? [s.a, s.b] : []; }));
@@ -373,61 +415,47 @@ function queuePlots(segs: number[]) {
     const j = junctions.get(id);
     if (!j || j.form !== 'roundabout' || !j.shape) continue;
     const legs = legsAt(net, id).map((l) => ({ seg: l.seg.id, ang: l.ang, half: net.half(l.seg) }));
-    queue.push(...net.plotsAround(id, j.R + 3, legs, CENTRE));
+    queue.push(...net.plotsAround(id, j.R + 3, legs, centreFor(net.node(id))));
   }
-  queue.sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+  // nearest a settlement's centre first
+  queue.sort((a, b) => centreDistance(MAP, a) - centreDistance(MAP, b));
 }
 
-// ---------------- starter town ----------------
-function seedTown() {
-  const road = (a: P, b: P, c?: P, o = DEFAULT_OPTS) => net.build(net.snapStart(a, 3), net.snapStart(b, 3), c, o);
-  const as = (type: RoadType, o = DEFAULT_OPTS) => ({ ...o, type });
-  // the high street is a tree-lined avenue, from under the flyover to a roundabout on the bypass
-  // (it ends exactly where the bypass's curve will cross it, so the two meet there)
-  const bypass = net.makePath({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 });
-  const cross = bypass.findIndex((p) => p.z < 0), [p0, p1] = [bypass[cross - 1], bypass[cross]];
-  road({ x: -230, z: 0 }, { x: p0.x + ((p1.x - p0.x) * p0.z) / (p0.z - p1.z), z: 0 }, undefined, as('avenue'));
-  road({ x: 0, z: -200 }, { x: 0, z: 200 });
-  road({ x: 0, z: 0 }, { x: 170, z: -98 }); // a 30° diagonal
-  road({ x: -185, z: -96 }, { x: 0, z: -96 }); // (a cul-de-sac, its turning head clear of the flyover's ramp)
-  road({ x: -110, z: -96 }, { x: -170, z: 0 }); // a slanting link
-  road({ x: 0, z: 70 }, { x: -80, z: 150 }, { x: -80, z: 70 }); // a crescent
-  road({ x: 60, z: 0 }, { x: 60, z: 110 });
-  road({ x: 0, z: 110 }, { x: 110, z: 110 });
-  road({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 }, as('dual')); // a sweeping dual-carriageway bypass
-  const over = { ...DEFAULT_OPTS, cross: 'bridge' as const };
-  road({ x: -215, z: -150 }, { x: -215, z: 150 }, undefined, over); // a flyover across the main road
-  road({ x: 0, z: -150 }, { x: 510, z: -200 }, undefined, over); // a bridge over the lake, and on out of town to the east
-  // the industrial estate
-  road({ x: 0, z: -200 }, { x: 0, z: -380 });
-  road({ x: -190, z: -290 }, { x: 150, z: -290 });
-  road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 });
-  // a motorway along the south edge, reached from the estate by a dual carriageway
-  // the motorway ends at a roundabout, where it carries on east as a fast dual carriageway
-  // (as a pair of one-way carriageways, splaying into the roundabout: interchange/build.ts)
-  const pair = pairToNode(net, [{ x: -510, z: -470 }, { x: 0, z: -470 }], 'motorway', { x: 0, z: -470 });
-  if (!pair.ok) { console.warn(pair.reason); road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway')); }
-  road({ x: 0, z: -470 }, { x: 510, z: -470 }, undefined, as('dual-2-70-0'));
-  road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
-  // a main line railway along the north, lifted over the high road, and a road tunnel under the lake
-  net.build({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
-  road({ x: 250, z: -470 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 }); // from the dual carriageway
-  // roads out of town: west from the end of the high street, north under the railway (both run off the map)
-  road({ x: -230, z: 0 }, { x: -510, z: 0 }, undefined, as('rural-60'));
-  road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
+// ---------------- the map's roads and towns ----------------
+async function seedTown() {
+  // the map's streets (region/: the town's hand-drawn roads, or each of a generated region's settlements in turn)
+  if (MAP.generated) {
+    for (const [i, st] of MAP.settlements.entries()) {
+      await loading.stage(i ? `Laying out ${st.name}` : `Laying out ${st.name}'s streets`, 0.06 / MAP.settlements.length);
+      buildStreets(net, MAP.streets.filter((x) => x.settlement === st.id), DEFAULT_OPTS, true);
+    }
+  } else {
+    await loading.stage('Laying out the streets', 0.06);
+    buildStreets(net, MAP.streets, DEFAULT_OPTS, false);
+    // (the town's motorway as a pair of one-way carriageways, splaying into the roundabout at its end: interchange/build.ts)
+    pairUpMotorways(net);
+  }
   // junctions are designed (and take their land) before any plot is laid out
+  await loading.stage('Designing the junctions', 0.05);
   commitRoads([...net.segs.keys()]);
   // industry: library sites on the estate and out of town claim their land before any plot is
   // built; the estate's plots are theirs, so its buildgen sheds are dropped (game/industry.ts)
-  industries.placeAll(townWishes(INDUSTRIAL, (p) => !INDUSTRIAL(p) && Math.hypot(p.x, p.z) > 300));
-  queue = queue.filter((l) => !INDUSTRIAL(l) && net.lotFree(l));
+  if (MAP.industries) {
+    industries.placeAll(townWishes(INDUSTRIAL, (p) => !INDUSTRIAL(p) && Math.hypot(p.x, p.z) > 300));
+    queue = queue.filter((l) => !INDUSTRIAL(l) && net.lotFree(l));
+  }
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
-  for (const l of queue.splice(0, now)) if (net.lotFree(l)) spawnLot(l, false);
+  const start = queue.splice(0, now);
+  await loading.stage(`Putting up ${start.length.toLocaleString('en-GB')} buildings`, 0.22);
+  for (const [i, l] of start.entries()) {
+    if (net.lotFree(l)) spawnLot(l, false);
+    if (i % 16 === 0) await loading.tick(i / start.length);
+  }
 }
 
 // ---------------- UI ----------------
-type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line';
+type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line' | 'station';
 type RoadKind = 'straight' | 'curve' | 'smooth';
 let mode: Mode = 'look';
 let roadKind: RoadKind = 'straight';
@@ -452,6 +480,7 @@ const shell = new Shell($('#ui'), {
   onPause: () => togglePause(),
   onRate: () => cycleRate(),
   onPerf: () => togglePerf(),
+  onTown: () => showTown(),
 });
 // the tool in use (a road or rail type, or bus stops), if any
 let tool: ToolHandle | null = null;
@@ -477,7 +506,7 @@ function setMode(m: Mode) {
   if (building && (mode === 'road' || mode === 'rail') && m !== mode) lastType[mode] = opts.type;
   mode = m;
   // each mode has its colourway (green roads, blue rail, orange stops); the HUD reads it from here
-  document.body.dataset.mode = m === 'line' ? 'stop' : m;
+  document.body.dataset.mode = m === 'line' ? 'stop' : m === 'station' ? 'rail' : m;
   if (m === 'rail' && opts.cross === 'junction') opts.cross = 'bridge';
   clearDraft();
 }
@@ -488,12 +517,13 @@ function setKind(k: RoadKind) {
 }
 // The hint over the map. It leads with the current tool's icon unless given its own. With a tool
 // in use it stays until replaced; otherwise it's a short message that clears itself.
-const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop', line: 'transport' };
+const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop', line: 'transport', station: 'train' };
 function hint(text?: string, ic?: Icon) {
   let t = text;
   if (t === undefined) {
     if (!tool) return shell.hint(null);
     if (mode === 'stop') t = 'Tap a road, on the side you want the stop · the bus will call there';
+    else if (mode === 'station') t = 'Tap a straight, level stretch of railway · platforms go either side';
     else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : lineDraft.length === 1 ? 'Tap the next stop' : 'Tap more stops, or the first again for a circular line · then Create';
     else if (draft) t = 'Drag the white handles to adjust, then Build';
     else if (roadKind === 'straight') t = mode === 'rail' ? 'Drag to lay track · tap a junction to see how it works' : 'Drag to draw a road · tap a junction to redesign it';
@@ -505,7 +535,7 @@ function hint(text?: string, ic?: Icon) {
 }
 
 // ---- tools: picking a card in the Build sheet swaps the bar for a tool strip ----
-const typeSpec = (t: RoadType) => { const d = ROADS[t]; return `${Math.round(halfOfType(t) * 2)} m wide · ${d.mph} mph · £${d.cost.toLocaleString('en-GB')}/m`; };
+const typeSpec = (t: RoadType) => { const d = ROADS[t]; return `${Math.round(halfOfType(t) * 2)} m wide · ${d.mph} mph · ${perM(d.cost)}`; };
 function endTool() {
   tool = null;
   shell.endTool();
@@ -530,10 +560,52 @@ function startStopTool() {
   setMode('stop');
   hint();
 }
+// ---- railway stations (game/rail.ts): tap the track ----
+function startStationTool() {
+  tool = shell.startTool({ name: 'Railway station', spec: `Platforms either side of the track · ${money(price(STATION_LIST_PRICE))}`, icon: 'train', tone: 'rail', onDone: endTool, onCancel: endTool });
+  setMode('station');
+  hint();
+}
+function stationTap(g: P) {
+  const pl = stations.plan(g), cost = price(STATION_LIST_PRICE), afford = purse.can(cost);
+  focusOn({ x: pl.x, z: pl.z }, 160);
+  const el = openPanel('station', pl.ok ? 'Railway station here' : 'Can’t put a station here', 'train', pl.ok
+    ? `<div class="plan"><div class="row"><span class="tab">Two side platforms</span><span class="cost">${money(cost)}</span></div>
+        <ul><li>110 m platforms, long enough for a four-car train</li><li>Trains on your rail lines draw up here</li></ul>
+        ${afford ? '' : `<div class="bad">${icon('alert')}<span>${short(cost)}</span></div>`}
+        <button class="act primary" data-build="1" ${afford ? '' : 'disabled'}>${icon('check')}<span>Build station</span></button></div>`
+    : `<div class="bad">${icon('alert')}<span>${esc(pl.reason ?? '')}</span></div>`, true);
+  el.querySelector('[data-build]')?.addEventListener('click', () => {
+    if (!purse.spend(cost, 'building')) { hint(short(cost), 'alert'); return; }
+    const st = stations.add(pl);
+    closeSheet();
+    if (!st) return;
+    town.sync();
+    hint(`${st.name} station built for ${money(cost)} · draw a rail line from Transport > Lines`, 'train');
+  });
+}
+function showStationInfo(id: number) {
+  const st = stations.byId(id);
+  if (!st) return;
+  const on = lines.list.filter((l) => l.stops.includes(id)), e = townRef?.stop(id);
+  shell.openInfo({
+    key: `station:${id}`, title: st.name, sub: 'Railway station', icon: 'train', tone: 'rail',
+    facts: [['Lines', on.map((l) => `${l.num}`).join(', ') || 'None yet'], ['Waiting', `${Math.round(e?.waiting ?? 0)}`], ['Boarded this month', `${Math.round((e?.boarded ?? 0) * 30).toLocaleString('en-GB')}`]],
+    actions: on.slice(0, 3).map((l) => ({ label: `Line ${l.num}`, icon: 'transport' as Icon, onClick: () => showLineInfo(l) })),
+  });
+}
+
 // ---- the line tool: tap stops in the order the buses call; the first again makes it circular ----
 let lineDraft: number[] = [];
 let lineLoop = false;
 let busOffer: string | undefined; // the bus model new lines get (picked in Transport > Buy vehicles)
+let trainChoice: (TrainDef & { offer: string }) | undefined; // the trains new rail lines get
+const NEW_LINE_TRAINS = 1;
+function defaultTrain() { const o = traffic.fleet.offerFor('dmu'); return trainChoice ?? (o ? traffic.fleet.defFor(o) : undefined); }
+function trainPrice(t?: TrainDef & { offer?: string }) { const f = traffic.fleet, o = t?.offer ? f.trainOffers().find((x) => x.id === t.offer) : undefined; return price(o?.cost ?? 1_200_000); }
+const draftRail = () => lineDraft.length > 0 && lines.isStation(lineDraft[0]);
+// what the line being drawn will cost: its buses, or its train
+function draftCost() { return draftRail() ? trainPrice(defaultTrain()) * NEW_LINE_TRAINS : busPrice(busOffer) * NEW_LINE_BUSES; }
 function startLineTool() {
   lineDraft = []; lineLoop = false;
   tool = shell.startTool({ name: 'New line', spec: 'Buses call only at the stops you tap', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
@@ -544,13 +616,15 @@ function lineChanged() {
   const n = lineDraft.length;
   showLine(n ? callOrder(lineDraft, lineLoop) : [], lineDraft);
   tool?.setUndo(n > 0);
-  tool?.setPrimary({ label: 'Create', icon: 'check', kind: 'primary', disabled: n < 2, onClick: finishLine });
+  const cost = draftCost();
+  tool?.setPrimary({ label: n < 2 ? 'Create' : `Create · ${money(cost)}`, icon: 'check', kind: 'primary', disabled: n < 2 || !purse.can(cost), title: purse.can(cost) ? (draftRail() ? `${NEW_LINE_TRAINS} train` : `${NEW_LINE_BUSES} buses`) : short(cost), onClick: finishLine });
   tool?.setPanel(n ? `<div class="what">${icon('transport')}<span>${lineDraft.map((id, i) => `<b>${i + 1}</b> ${esc(lines.name(id))}`).join(' · ')}${lineLoop ? ' · <b>back to 1</b>' : n > 2 ? ' · and back' : ''}</span></div>` : null);
   hint();
 }
 function lineTap(sx: number, sy: number) {
   const id = stopNear(sx, sy);
-  if (id === null) { hint(allStops().length ? 'Tap one of the orange stop badges' : 'There are no stops yet · add them from Build > Stops', 'alert'); return; }
+  if (id === null) { hint(allStops().length || stations.list.length ? 'Tap one of the stop or station badges' : 'There are no stops yet · add them from Build > Stops', 'alert'); return; }
+  if (lineDraft.length && lines.isStation(id) !== draftRail()) { hint('A line calls at bus stops or at stations, not both', 'alert'); return; }
   if (lineDraft.length && lines.same(lineDraft[lineDraft.length - 1], id)) return;
   if (lineDraft.length >= 2 && lines.same(lineDraft[0], id)) { lineLoop = !lineLoop; lineChanged(); return; }
   if (lineDraft.some((x) => lines.same(x, id))) { hint('That stop is on the line already · a line calls at each stop once each way', 'alert'); return; }
@@ -560,16 +634,36 @@ function lineTap(sx: number, sy: number) {
 }
 function finishLine() {
   if (lineDraft.length < 2) return;
-  const l = lines.add(lineDraft, lineLoop, 2, busOffer);
+  const rail = draftRail(), cost = draftCost();
+  if (!purse.can(cost)) { hint(short(cost), 'alert'); return; }
+  // (the old operator's trains are withdrawn once you run your own: nothing signals them apart)
+  if (rail && !lines.list.some((x) => x.mode === 'rail')) traffic.clearOtherTrains();
+  const l = rail ? lines.add(lineDraft, lineLoop, NEW_LINE_TRAINS, undefined, defaultTrain()) : lines.add(lineDraft, lineLoop, NEW_LINE_BUSES, busOffer);
+  const each = rail ? trainPrice(l.train as TrainDef & { offer?: string }) : busPrice(busOffer), k = lines.buses(l).length;
+  purse.spend(each * k, 'vehicles');
   lineDraft = [];
   endTool();
   showLineInfo(l);
-  hint(`Line ${l.num} is running · ${lines.buses(l).length} buses`, 'bus');
+  hint(`Line ${l.num} is running · ${k} ${rail ? (k === 1 ? 'train' : 'trains') : 'buses'} · ${money(each * k)}`, rail ? 'train' : 'bus');
+}
+// what a bus costs (the model the line runs, or the default one)
+function busPrice(offer?: string) { const f = traffic.fleet, o = (offer && f.busOffers().find((x) => x.id === offer)) || f.defaultBus(); return price(o?.cost ?? 180_000); }
+const NEW_LINE_BUSES = 2;
+// buy a bus for a line: false if there isn't the money or the room
+function vehiclePrice(l: Line) { return l.mode === 'rail' ? trainPrice(l.train as TrainDef & { offer?: string }) : busPrice(l.offer); }
+function buyBus(l: Line) {
+  const cost = vehiclePrice(l);
+  if (!purse.can(cost)) { hint(short(cost), 'alert'); return false; }
+  const c = lines.addBus(l);
+  if (!c) { hint(l.mode === 'rail' ? 'No track there the train can use' : 'No room on the roads for a bus just now', 'alert'); return false; }
+  purse.spend(cost, 'vehicles');
+  hint(l.mode === 'rail' ? `A train joins line ${l.num} · ${money(cost)}` : `Bus ${c.dress?.fleetNo ?? ''} joins line ${l.num} · ${money(cost)}`, l.mode === 'rail' ? 'train' : 'bus');
+  return true;
 }
 // the stop badge nearest a tap, within a finger's width
 function stopNear(sx: number, sy: number): number | null {
   let best: number | null = null, bd = 30;
-  for (const { id, p } of markers.places()) {
+  for (const { id, p } of [...markers.places(), ...markers.stationPlaces()]) {
     const q = toScreen(p), d = Math.hypot(q.x - sx, q.y - sy);
     if (d < bd) { bd = d; best = id; }
   }
@@ -580,7 +674,7 @@ function stopNear(sx: number, sy: number): number | null {
 let routeShown: ReturnType<typeof routeMesh> = null;
 function showLine(seq: number[] | null, stops: number[] = []) {
   if (routeShown) { scene.remove(routeShown); routeShown.geometry.dispose(); routeShown.material.dispose(); routeShown = null; }
-  if (seq && seq.length > 1) { routeShown = routeMesh(net, traffic, seq); if (routeShown) scene.add(routeShown); }
+  if (seq && seq.length > 1) { routeShown = routeMesh(net, traffic, seq, '#5cb83a', stations); if (routeShown) scene.add(routeShown); }
   markers.show(seq ? new Map(stops.map((id, i) => [id, String(i + 1)])) : null);
 }
 
@@ -647,7 +741,7 @@ function setType(t: RoadType) {
 shell.addBuildCategory({ id: 'roads', label: 'Roads', icon: 'road' });
 // (the small card's name and line: "Dual 2+2" over "50 mph · £950/m")
 const cardName = (t: RoadType) => ROADS[t].label.split(' · ')[0];
-const cardSpec = (t: RoadType) => `${ROADS[t].mph} mph · £${ROADS[t].cost.toLocaleString('en-GB')}/m`;
+const cardSpec = (t: RoadType) => `${ROADS[t].mph} mph · ${perM(ROADS[t].cost)}`;
 for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: `${ROADS[id].blurb} · ${typeSpec(id)}`, name: cardName(id), short: cardSpec(id), icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
 shell.addBuildItem('roads', { id: 'more', label: 'More road types', spec: 'Filter by lanes, speed, trees, bus and cycle lanes', short: 'Lanes, speed, trees…', icon: 'adjustments', tone: 'road', on: () => !PRESETS.includes(lastType.road), onPick: () => { openRoadPicker(true); return false; } });
 shell.addBuildCategory({ id: 'rail', label: 'Rail', icon: 'train' });
@@ -655,7 +749,7 @@ for (const id of RAIL_PRESETS) shell.addBuildItem('rail', { id, label: ROADS[id]
 shell.addBuildCategory({ id: 'stops', label: 'Stops', icon: 'busStop' });
 shell.addBuildItem('stops', { id: 'bus-stop', label: 'Bus stop', spec: 'On any road; a lay-by where there is room', short: 'On any road', icon: 'busStop', tone: 'stop', onPick: () => startStopTool() });
 shell.addBuildItem('stops', { id: 'bus-station', label: 'Bus station', spec: 'Several bays, for busy routes', icon: 'bus', locked: 'Not in the game yet' });
-shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight run of track', icon: 'train', locked: 'Not in the game yet' });
+shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight run of track', icon: 'train', tone: 'rail', onPick: () => startStationTool() });
 shell.addBuildItem('stops', { id: 'depot', label: 'Lorry depot', spec: 'Where your lorries start and are kept', icon: 'warehouse', locked: 'Not in the game yet' });
 shell.addBuildCategory({ id: 'freight', label: 'Freight', icon: 'warehouse', note: 'Terminals are bought for an industry; better ones unlock as it grows.' });
 shell.addBuildItem('freight', { id: 'terminals', label: 'Freight terminals', name: 'Terminals', spec: 'Loading bays, sidings and jetties for industries', icon: 'warehouse', locked: 'Come with the terminals update' });
@@ -681,9 +775,9 @@ shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it �
 // ---------------- sheets ----------------
 // Detail opens in a bottom sheet (a panel down the right in landscape); the camera turns so the
 // thing you picked sits in the clear map left above or beside it, so you can see what each choice does.
-type PanelKind = 'junction' | 'stop' | 'roads' | 'reset' | 'quality';
+type PanelKind = 'junction' | 'stop' | 'station' | 'roads' | 'reset' | 'quality';
 // the colourway a sheet wears: stops are orange, road work green, the rest the house green
-const TONE = { junction: 'road', roads: 'road', stop: 'stop', reset: 'look', quality: 'look' } as const;
+const TONE = { junction: 'road', roads: 'road', stop: 'stop', station: 'rail', reset: 'look', quality: 'look' } as const;
 // what closing each kind of sheet undoes: a junction being edited, a stop being planned
 const leaveJunction = () => { if (editJ !== null) { editJ = null; rebuildRoads(); } };
 const ON_CLOSE: Partial<Record<PanelKind, () => void>> = { junction: leaveJunction, stop: () => { stopPreview = null; drawGhost(); } };
@@ -740,7 +834,7 @@ function openRoadPicker(fresh = false) {
     <div class="fl" role="group" aria-label="With"><span class="lbl">With</span>${tri('trees', 'trees', 'Trees')}${tri('bus', 'bus', 'Bus lanes')}${tri('cycle', 'bike', 'Cycle lanes')}${tri('parking', 'parking', 'Parking')}</div>
     <div class="cnt">${list.length} of ${Object.values(ROADS).filter((d) => d.cls === 'road').length} road types</div>
     ${list.length ? '' : '<small>No road type has all of these. Set a filter back to Any, or tap a With chip until it’s plain.</small>'}
-    <div class="rl">${list.map((d) => `<button data-pick="${d.id}" class="${d.id === lastType.road ? 'on' : ''}"><b>${icon(roadIcon(d))}${d.label}</b>${roadSvg(d)}<small>${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost.toLocaleString('en-GB')}/m · ${d.blurb}</small></button>`).join('')}</div>`,
+    <div class="rl">${list.map((d) => `<button data-pick="${d.id}" class="${d.id === lastType.road ? 'on' : ''}"><b>${icon(roadIcon(d))}${d.label}</b>${roadSvg(d)}<small>${Math.round(halfOfType(d.id) * 2)} m wide · ${perM(d.cost)} · ${d.blurb}</small></button>`).join('')}</div>`,
   fresh, { from: 'build', back: () => shell.openBuild('roads') });
   el.querySelectorAll<HTMLButtonElement>('[data-f]').forEach((b) => b.addEventListener('click', () => {
     const k = b.dataset.f as keyof RoadFilter, v = b.dataset.v!;
@@ -755,7 +849,7 @@ function openRoadPicker(fresh = false) {
   el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => b.addEventListener('click', () => {
     startRoadTool(b.dataset.pick!);
     const d = ROADS[opts.type];
-    hint(`${d.label} · ${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost}/m · drag to draw it`);
+    hint(`${d.label} · ${Math.round(halfOfType(d.id) * 2)} m wide · ${perM(d.cost)} · drag to draw it`);
   }));
 }
 
@@ -766,8 +860,8 @@ shell.addTransportTab({
   render: (el) => {
     const stops = markers.places().map(({ id }) => { const pl = traffic.place(id)!; return { seg: pl.seg, stop: pl.stops[0], sides: pl.stops.length }; });
     el.innerHTML = `<p class="note">${lines.list.length ? 'Buses call only at their line’s stops. Tap a line to see its route.' : 'No lines yet. A line is stops in order; its buses call at those and nothing else.'}</p>
-      ${lines.list.map((l, i) => `<button class="lrow tone-stop" data-line="${i}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${l.stops.length} stops · ${lines.buses(l).length} bus${lines.buses(l).length === 1 ? '' : 'es'} · ${l.loop ? 'circular' : 'there and back'}</span></button>`).join('')}
-      <div class="acts"><button class="act primary tone-stop" data-newline="1" ${stops.length < 2 ? 'disabled' : ''}>${icon('transport')}<span>New line</span></button><button class="act" data-addstop="1">${icon('plus')}<span>Add a bus stop</span></button></div>
+      ${lines.list.map((l, i) => `<button class="lrow tone-stop" data-line="${i}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${l.stops.length} ${l.mode === 'rail' ? 'stations' : 'stops'} · ${lines.buses(l).length} ${l.mode === 'rail' ? 'train' : 'bus'}${lines.buses(l).length === 1 ? '' : l.mode === 'rail' ? 's' : 'es'} · ${l.loop ? 'circular' : 'there and back'}</span></button>`).join('')}
+      <div class="acts"><button class="act primary tone-stop" data-newline="1" ${stops.length < 2 && stations.list.length < 2 ? 'disabled' : ''}>${icon('transport')}<span>New line</span></button><button class="act" data-addstop="1">${icon('plus')}<span>Add a bus stop</span></button></div>
       <div class="grp"><span class="tab">Stops</span><small>${stops.length ? `${stops.length} stop${stops.length === 1 ? '' : 's'}, tap one to show it` : 'There are no stops yet.'}</small>
       ${stops.map(({ seg, stop, sides }, i) => `<button class="lrow tone-stop" data-stop="${i}"><span class="num">${icon('busStop')}</span><b>${esc(lines.name(stop.id))}</b><span>${sides > 1 ? 'Both sides' : 'One side'} · ${stop.kind === 'kerb' ? 'kerbside' : 'lay-by'} · ${esc(net.def(seg).label)}</span></button>`).join('')}</div>`;
     el.querySelector('[data-addstop]')!.addEventListener('click', () => startStopTool());
@@ -784,22 +878,42 @@ shell.addTransportTab({
 // A line's sheet: its stops, its buses, and its route on the map while the sheet is open.
 function showLineInfo(l: Line) {
   if (!lines.list.includes(l)) { closeSheet(); return; }
-  const n = lines.buses(l).length;
+  const n = lines.buses(l).length, st = townRef?.line(l.id), books = purse.line(l.id);
   lastLine = l;
+  const profit = books.lastFares - books.lastRunning, sell = Math.round(vehiclePrice(l) / 2), rail = l.mode === 'rail', veh = rail ? 'train' : 'bus';
   showLine(l.bus.seq, l.stops);
   shell.openInfo({
-    key: `line:${l.id}`, title: `Line ${l.num}`, sub: lines.title(l), icon: 'transport', tone: 'stop',
-    facts: [['Stops', l.stops.map((id) => lines.name(id)).join(' · ')], ['Runs', l.loop ? 'Circular, round and round' : 'There and back'], ['Buses', `${n}`]],
-    note: 'Buses take the quickest way between stops, and call on whichever side of the road they come along.',
+    key: `line:${l.id}`, title: `Line ${l.num}`, sub: lines.title(l), icon: l.mode === 'rail' ? 'train' : 'transport', tone: l.mode === 'rail' ? 'rail' : 'stop',
+    facts: [
+      [rail ? 'Stations' : 'Stops', l.stops.map((id) => lines.name(id)).join(' · ')], ['Runs', l.loop ? 'Circular, round and round' : 'There and back'], [rail ? 'Trains' : 'Buses', `${n}`],
+      ['Passengers last month', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'],
+      ['Fares last month', money(books.lastFares)], ['Running costs', money(-books.lastRunning)], ['Profit', money(profit)],
+    ],
+    note: rail ? `Trains call at each station and turn round at the ends of the line. Each passenger pays £2. A day here is a month in the town's life.` : `Buses take the quickest way between stops, and call on whichever side of the road they come along. Each passenger pays £2. A day here is a month in the town's life.`,
     actions: [
-      { label: 'Add a bus', icon: 'plus', kind: 'primary', onClick: () => { const c = lines.addBus(l); hint(c ? `Bus ${c.dress?.fleetNo ?? ''} joins line ${l.num}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert'); showLineInfo(l); } },
-      { label: 'Remove a bus', icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); setTimeout(() => showLineInfo(l), 50); } },
-      { label: 'Delete line', icon: 'trash', kind: 'danger', onClick: () => { lines.remove(l); closeSheet(); hint(`Line ${l.num} withdrawn`, 'transport'); } },
+      { label: `Add a ${veh} · ${money(vehiclePrice(l))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(vehiclePrice(l)), onClick: () => { buyBus(l); showLineInfo(l); } },
+      { label: `Sell a ${veh} · ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`${rail ? 'Train' : 'Bus'} sold for ${money(sell)}`, rail ? 'train' : 'bus'); setTimeout(() => showLineInfo(l), 50); } },
+      { label: 'Withdraw line', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} ${veh}${k === 1 ? '' : rail ? 's' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
     ],
     onClose: () => { if (mode !== 'line') showLine(null); },
   });
 }
 let lastLine: Line | null = null;
+// A train's sheet, when one of your trains is tapped.
+function showTrainInfo(id: number) {
+  const t = traffic.train(id);
+  if (!t) return;
+  const l = lines.of(id);
+  const facts: [string, string][] = [['Line', l ? `${l.num} · ${lines.title(l)}` : 'Not on a line'], ['Model', t.model]];
+  if (t.next !== undefined) facts.push([t.dwelling ? 'At' : 'Next station', lines.name(t.next)]);
+  facts.push(['Speed', `${Math.round(t.speed * 2.237)} mph`]);
+  if (l) showLine(l.bus.seq, l.stops);
+  shell.openInfo({
+    key: `train:${id}`, title: t.model, sub: l ? `Line ${l.num}` : 'Train', icon: 'train', tone: 'rail', facts,
+    actions: l ? [{ label: `Line ${l.num}`, icon: 'train', onClick: () => showLineInfo(l) }] : [],
+    onClose: () => { if (mode !== 'line') showLine(null); },
+  });
+}
 // A bus's sheet, when it's tapped on the map.
 function showBusInfo(id: number) {
   const b = traffic.bus(id);
@@ -820,8 +934,7 @@ shell.addTransportTab({
   render: (el) => {
     // the vehicle library's fleet for the game year (game/fleet.ts); buses and trains run now
     const year = gameYear(), list = purchaseList(year), fleet = traffic.fleet;
-    const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
-    const facts = (o: Offer) => `${o.capacity ? `${o.capacity} ${o.unit === 'pax' ? 'seats' : 't'} · ` : ''}${Math.round(o.speedKmh / 1.609)} mph · ${money(o.cost)} · ${money(o.running)} a year to run`;
+    const facts = (o: Offer) => `${o.capacity ? `${o.capacity} ${o.unit === 'pax' ? 'seats' : 't'} · ` : ''}${Math.round(o.speedKmh / 1.609)} mph · ${money(price(o.cost))}`;
     const row = (o: Offer, attr: string, ic: Icon, off = false) => `<button ${attr}${off ? ' disabled' : ''}><b>${icon(ic)}${esc(o.name)}</b><small>${facts(o)}</small></button>`;
     const trainKind = (o: Offer) => (o.kind === 'tram' ? 'tram' : MODEL[o.models[0]].style === 'rack-car' ? 'rack' : MODEL[o.models[0]].stats.power === 'electric' ? 'hs' : 'dmu');
     const buses = list.filter((o) => o.kind === 'bus' || o.kind === 'coach'), trains = list.filter((o) => o.kind === 'train' || o.kind === 'tram');
@@ -840,21 +953,56 @@ shell.addTransportTab({
       busOffer = o.id;
       if (!l) { hint(`New lines will run the ${o.name}`, 'bus'); return; }
       l.offer = o.id;
-      const c = lines.addBus(l);
-      hint(c ? `${o.name} joins line ${l.num} · fleet number ${c.dress?.fleetNo ?? ''}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert');
+      buyBus(l);
     }));
     el.querySelectorAll<HTMLButtonElement>('[data-set]').forEach((b) => b.addEventListener('click', () => {
       const o = trains.find((x) => x.id === b.dataset.set)!, t = fleet.defFor(o);
-      const ok = traffic.addTrain(t);
-      hint(ok ? `${o.name} added` : `No track the ${o.name} can use${t.needsWires ? ' — it needs electrified line' : t.rack ? '' : ' — too steep, or rack only'}`, ok ? trainIcon(trainKind(o)) : 'alert');
+      trainChoice = t;
+      const l = [...lines.list].reverse().find((x) => x.mode === 'rail');
+      if (!l) { hint(`New rail lines will run the ${o.name}`, trainIcon(trainKind(o))); return; }
+      l.train = t;
+      buyBus(l);
     }));
     el.querySelectorAll<HTMLButtonElement>('[data-lvl]').forEach((b) => b.addEventListener('click', () => { level = +b.dataset.lvl!; shell.refreshTransport(); }));
   },
 });
 
+// ---- the town panel: how the town is doing, and why (game/econ.ts) ----
+const STATUS_WORD = { growing: 'Growing', stable: 'Steady', stalling: 'Stalling', declining: 'Declining' } as const;
+function showTown() {
+  const r = townRef?.report;
+  if (!r) return;
+  const n = (x: number) => Math.round(x).toLocaleString('en-GB');
+  const hist = [...r.history, r.residents], lo = Math.min(...hist), hi = Math.max(...hist), span = Math.max(1, hi - lo);
+  const pts = hist.map((v, i) => `${hist.length > 1 ? (i / (hist.length - 1)) * 100 : 100},${40 - ((v - lo) / span) * 34}`);
+  const spark = hist.length > 1 ? `<svg class="spark" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true"><path class="area" d="M0,44 L${pts.join(' L')} L100,44 Z"/><path d="M${pts.join(' L')}"/></svg>
+    <div class="spark-cap"><span>${hist.length - 1} days ago · ${n(hist[0])}</span><span>now · ${n(r.residents)}</span></div>` : '';
+  const reasons = r.reasons.slice(0, 5).map((x) => `<li class="${x.good ? 'good' : 'bad'}">${icon(x.good ? 'check' : 'alert')}<span>${esc(x.text.charAt(0).toUpperCase() + x.text.slice(1))}</span></li>`).join('');
+  const lineRows = lines.list.map((l) => { const s = townRef!.line(l.id); return s ? `<button class="lrow tone-stop" data-tl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${n(s.carriedLastMonth || s.carried)} carried a day · ${Math.round(s.loadFactor * 100)}% full · ${n(s.waiting)} waiting</span></button>` : ''; }).join('');
+  const el = shell.openInfo({
+    key: 'town', title: TOWN_NAME, sub: `${n(r.residents)} people · ${n(r.jobs)} jobs`, icon: 'building',
+    html: `<div class="townhead"><span class="pill ${r.status}">${STATUS_WORD[r.status]}</span></div>
+      <p class="note">${esc(r.headline.replace(/^\w+: /, ''))}</p>${spark}
+      <dl class="facts" style="margin-top:10px">
+        <dt>In the bank</dt><dd>${money(purse.balance)}</dd>
+        <dt>Fares yesterday</dt><dd>${money(purse.yesterday.fares)}</dd>
+        <dt>Running costs yesterday</dt><dd>${money(-purse.yesterday.running)}</dd>
+        <dt>Homes</dt><dd>${n(r.homes)}${r.vacancy > 0.02 ? ` · ${Math.round(r.vacancy * 100)}% empty` : ''}</dd>
+        <dt>Homes near a stop</dt><dd>${Math.round(r.service.homesNearStop * 100)}%</dd>
+        <dt>Workers who can reach a job</dt><dd>${Math.round(r.reach.work * 100)}%</dd>
+        <dt>Free plots</dt><dd>${n(r.service.plots)}</dd>
+      </dl>
+      <ul class="why">${reasons}</ul>
+      <p class="note" style="margin-top:10px">A day here is a month in the town's life: it reviews how it's doing each day, and fares and running costs come and go at a month's pace.</p>
+      ${lineRows ? `<div class="grp" style="margin-top:12px"><span class="tab">Your lines</span>${lineRows}</div>` : ''}`,
+  });
+  el.querySelectorAll<HTMLButtonElement>('[data-tl]').forEach((b) => b.addEventListener('click', () => { const l = lines.list.find((x) => x.id === +b.dataset.tl!); if (l) showLineInfo(l); }));
+}
+
 // ---- Menu: quality, the performance readout, a new town ----
 shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
 shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
+shell.addMenuItem({ id: 'town', label: TOWN_NAME, icon: 'building', sub: () => (townRef?.report ? `${STATUS_WORD[townRef.report.status]} · ${Math.round(townRef.report.residents).toLocaleString('en-GB')} people` : 'The town panel'), onClick: () => showTown() });
 shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
 shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
 shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
@@ -868,6 +1016,7 @@ function openQuality() {
     const q = b.dataset.q!;
     tierAuto = q === 'auto';
     if (!tierAuto) setTier(+q);
+    menuLink?.onQuality(tierAuto ? 'auto' : tier);
     openQuality();
   }));
 }
@@ -1004,49 +1153,56 @@ function renderBar() {
   };
   if (ixPick && ixPlan) {
     const p = ixPlan, nd = p.clears.length, dm = nd ? demolitionSummary(p.clears) : null;
-    tool.setPanel(`<div class="what">${icon('ruler')}<span>Motorway and ${IX_NAME[ixPick.form].toLowerCase()} · <b class="cost">${p.ok ? `about ${money(p.cost)}` : '—'}</b></span></div>
+    tool.setPanel(`<div class="what">${icon('ruler')}<span>Motorway and ${IX_NAME[ixPick.form].toLowerCase()} · <b class="cost">${p.ok ? `about ${money(price(p.cost))}` : '—'}</b></span></div>
+      ${p.ok && !purse.can(price(p.cost)) ? `<div class="bad">${icon('alert')}<span>${short(price(p.cost))}</span></div>` : ''}
       ${dm ? `<div class="demo">${icon('alert')}<div><b>It demolishes ${nd} building${nd > 1 ? 's' : ''}</b> (flashing red): ${dm.list}.<br>${dm.people}</div></div>` : ''}
       ${ix}
       ${p.ok ? '' : `<div class="bad">${icon('alert')}<span>${esc(p.reason ?? '')}</span></div>`}`, bindIx);
     tool.avoid(handles().map((h) => toScreen(h.p)));
-    tool.setPrimary({ label: 'Build', title: 'Build the motorway and its junction', icon: nd ? 'bulldozer' : 'check', kind: nd ? 'danger' : 'primary', disabled: !(p.ok && !dragging), onClick: buildDraft });
+    tool.setPrimary({ label: 'Build', title: 'Build the motorway and its junction', icon: nd ? 'bulldozer' : 'check', kind: nd ? 'danger' : 'primary', disabled: !(p.ok && !dragging && purse.can(price(p.cost))), onClick: buildDraft });
     return;
   }
-  tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(c.cost)}</b></span></div>
+  const cost = price(c.cost), afford = purse.can(cost);
+  tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(cost)}</b></span></div>
     ${ix}
-    ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(n * 6000)} compensation included</div></div>` : ''}
+    ${afford ? '' : `<div class="bad">${icon('alert')}<span>${short(cost)}</span></div>`}
+    ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(price(n * 6000))} compensation included</div></div>` : ''}
     ${lift}
     ${c.ok ? bridgeLines(c) : ''}
     ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`, bindIx);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
   tool.avoid(handles().map((h) => toScreen(h.p)));
-  tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging), onClick: buildDraft });
+  tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging && afford), onClick: buildDraft });
 }
 // the bridges in a blueprint: the type the chooser picked, its price and what's worth knowing
 function bridgeLines(c: Check) {
   return c.choices.map((ch) => {
     const o = ch.options.find((x) => x.def.id === ch.chosen);
     if (!o) return '';
-    return `<div class="lift">${icon('bridge')}<span><b>${o.def.label}</b> · ${Math.round(ch.s1 - ch.s0)} m · <b class="cost">${money(o.cost)}</b>${o.reasons.length ? ` · ${o.reasons.slice(0, 2).join(' · ')}` : ''}</span></div>`;
+    return `<div class="lift">${icon('bridge')}<span><b>${o.def.label}</b> · ${Math.round(ch.s1 - ch.s0)} m · <b class="cost">${money(price(o.cost))}</b>${o.reasons.length ? ` · ${o.reasons.slice(0, 2).join(' · ')}` : ''}</span></div>`;
   }).join('');
 }
 function buildDraft() {
   if (draft && ixPick && ixRoad && ixPlan?.ok) { buildJunctionDraft(draft, ixPick, ixRoad); return; }
   if (!draft || !draftCheck?.ok) return;
+  const cost = price(draftCheck.cost);
+  if (!purse.spend(cost, 'building')) { hint(short(cost), 'alert'); return; }
   const doomed = new Set(draftCheck.clears);
   const summary = doomed.size ? demolitionSummary([...doomed]) : null;
   buildRoad(draft.a, draft.b, ctrlOf(draft), opts);
   draft = null;
   draftChanged();
-  hint(summary ? `Demolished ${doomed.size}: ${summary.list}` : 'Built. New plots will fill in along it.', summary ? 'bulldozer' : 'check');
+  hint(summary ? `Demolished ${doomed.size}: ${summary.list} · ${money(cost)}` : `Built for ${money(cost)} · the town builds along it as it needs`, summary ? 'bulldozer' : 'check');
 }
 
 // The motorway blueprint with its junction, built (interchange/build.ts): both carriageways, the
 // slip roads, the bridge or ring, the junction's roundabouts or give-ways; one junction to the player.
 function buildJunctionDraft(d: Draft, pick: { form: IxForm; style: SlipStyle }, road: RSeg) {
-  const had = new Set(net.segs.keys());
+  const had = new Set(net.segs.keys()), cost = price(ixPlan?.cost ?? 0);
+  if (!purse.can(cost)) { hint(short(cost), 'alert'); return; }
   const r = motorwayWithJunction(net, pick.form, net.makePath(d.a, d.b, ctrlOf(d)), opts.type, road, interchanges.length + 1, pick.style);
   if (!r.ok) { hint(r.reason, 'alert'); return; }
+  purse.spend(cost, 'building');
   interchanges.push(r.ix);
   for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
   commitRoads([...net.segs.keys()].filter((id) => !had.has(id)));
@@ -1054,7 +1210,7 @@ function buildJunctionDraft(d: Draft, pick: { form: IxForm; style: SlipStyle }, 
   infillDue = true;
   draft = null; ixPick = null;
   draftChanged();
-  hint(`Built: the motorway and a ${IX_NAME[pick.form].toLowerCase()}. Tap the junction to see how it's working.`, 'check');
+  hint(`Built for ${money(cost)}: the motorway and a ${IX_NAME[pick.form].toLowerCase()}. Tap the junction to see how it's working.`, 'check');
 }
 
 function buildRoad(a: End, b: End, ctrl: P | undefined, o: RoadOpts) {
@@ -1198,7 +1354,7 @@ function showBuildingInfo(b: Built) {
   if (u.pop) facts.push([u.unit.charAt(0).toUpperCase() + u.unit.slice(1), String(u.pop)]);
   shell.openInfo({
     key: `building:${b.lot.x},${b.lot.z}`, title: b.name, sub: b.detail, icon: b.region ? 'trees' : 'building', facts,
-    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }],
+    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }, { label: TOWN_NAME, icon: 'building', onClick: () => showTown() }],
   });
 }
 // a junction: how busy it is, and the way into its editor
@@ -1254,7 +1410,7 @@ const bridgeKey = (b: BuiltBridge) => `${b.seg}:${b.idx}`;
 function showBridgeInfo(b: BuiltBridge) {
   const L = b.layout, d = L.def, piers = L.supports.filter((q) => q.kind !== 'abutment').length;
   const mph = net.segs.get(b.seg)?.type.startsWith('rail') ? d.railMph : d.roadMph;
-  const facts: [string, string][] = [['Length', `${Math.round(b.s1 - b.s0)} m`], ['Spans', `${L.spans.length}${piers ? ` on ${piers} support${piers > 1 ? 's' : ''}` : ''}`], ['Cost to build', money(L.cost)], ['Upkeep', `${money(L.maint)} a year`]];
+  const facts: [string, string][] = [['Length', `${Math.round(b.s1 - b.s0)} m`], ['Spans', `${L.spans.length}${piers ? ` on ${piers} support${piers > 1 ? 's' : ''}` : ''}`], ['Cost to build', money(price(L.cost))]];
   if (mph) facts.push(['Speed limit', `${mph} mph`]);
   const over = net.segs.get(b.seg)?.bridges?.[b.idx]?.override;
   shell.openInfo({
@@ -1274,13 +1430,16 @@ function openBridgeEditor(b: BuiltBridge, fresh = true) {
     back: () => showBridgeInfo(b),
     body: `<div class="grp"><span class="tab">Types</span>${ch.options.map((o) => {
       const on = o.def.id === b.layout.def.id, rec = o.def.id === ch.recommended;
-      const sub = o.ok ? `${money(o.cost)} · ${money(o.maint)} a year${o.reasons.length ? ` · ${o.reasons[0]}` : ''}` : o.reasons[0] ?? 'Can’t be built here';
+      const sub = o.ok ? `${on ? 'built' : `${money(price(o.cost))} to rebuild`}${o.reasons.length ? ` · ${o.reasons[0]}` : ''}` : o.reasons[0] ?? 'Can’t be built here';
       return `<button data-type="${o.def.id}" class="${on ? 'on' : ''}" aria-pressed="${on}" ${o.ok ? '' : 'disabled'}><b>${rec ? icon('sparkles') : ''}${o.def.label}${rec ? ' · recommended' : ''}${on ? icon('check', 'tick') : ''}</b><small>${sub}</small></button>`;
     }).join('')}</div>`,
   });
   el.querySelectorAll<HTMLButtonElement>('[data-type]').forEach((btn) => btn.addEventListener('click', () => {
-    const mid = (b.s0 + b.s1) / 2;
+    const mid = (b.s0 + b.s1) / 2, o = ch.options.find((x) => x.def.id === btn.dataset.type);
+    if (!o || o.def.id === b.layout.def.id) return;
+    if (!purse.can(price(o.cost))) { hint(short(price(o.cost)), 'alert'); return; }
     if (!bridgeLayer.setType(net, b, btn.dataset.type as BuiltBridge['layout']['def']['id'])) return;
+    purse.spend(price(o.cost), 'building');
     rebuildRoads();
     const nb = bridgeLayer.at(b.seg, mid);
     if (nb) openBridgeEditor(nb, false);
@@ -1298,6 +1457,13 @@ function stopAt(p: P) {
   }
   return null;
 }
+// a stop's figures from the economy (both sides of the road together), a month being a game day
+function stopFigures(st: Stop): [string, string][] {
+  const e = townRef?.stop(st.id);
+  if (!e || !e.lines.length) return [['Waiting', '0 (no line calls here yet)']];
+  const n = (x: number) => Math.round(x).toLocaleString('en-GB');
+  return [['Waiting', n(e.waiting)], ['Boarded this month', n(e.boarded * 30)], ['Got off this month', n(e.alighted * 30)]];
+}
 function showStopInfo(seg: RSeg, st: Stop) {
   const d = net.def(seg), t = st.take;
   const bits = st.kind === 'kerb' ? ['buses stop in the lane'] : [
@@ -1307,7 +1473,7 @@ function showStopInfo(seg: RSeg, st: Stop) {
   ].filter(Boolean);
   shell.openInfo({
     key: `stop:${seg.id}:${st.id}`, title: lines.name(st.id), sub: `${st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by'} · ${d.label}`, icon: 'busStop', tone: 'stop',
-    facts: [['Lines', lines.list.filter((l) => l.stops.some((x) => lines.same(x, st.id))).map((l) => `${l.num}`).join(', ') || 'None yet'], ...people.stopFacts(seg, st)], note: bits.join(' · '),
+    facts: [['Lines', lines.list.filter((l) => l.stops.some((x) => lines.same(x, st.id))).map((l) => `${l.num}`).join(', ') || 'None yet'], ...stopFigures(st)], note: bits.join(' · '),
     actions: lines.list.filter((l) => l.stops.some((x) => lines.same(x, st.id))).slice(0, 3).map((l) => ({ label: `Line ${l.num}`, icon: 'transport' as Icon, onClick: () => showLineInfo(l) })),
   });
 }
@@ -1356,20 +1522,21 @@ function stopTap(p: P) {
   else {
     const d = net.def(q.seg);
     el = openPanel('stop', `Stop on this ${d.family.toLowerCase()}`, 'busStop',
-      res.plans.map((pl, i) => `<div class="plan${pl.ok ? '' : ' no'}"><div class="row"><span class="tab">${pl.title}</span><span class="cost">${money(pl.cost)}</span></div>
+      res.plans.map((pl, i) => `<div class="plan${pl.ok ? '' : ' no'}"><div class="row"><span class="tab">${pl.title}</span><span class="cost">${money(price(pl.cost))}</span></div>
         ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${icon('alert')}<span>${pl.blocked}</span></div>` : ''}
-        <button class="act primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
+        <button class="act primary" data-plan="${i}" ${pl.ok && purse.can(price(pl.cost)) ? '' : 'disabled'} ${purse.can(price(pl.cost)) ? '' : `title="${esc(short(price(pl.cost)))}"`}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
   }
   if (feeds.length) el.insertAdjacentHTML('afterbegin', `<p class="note">${icon('warehouse')} This stop would serve the ${esc(feeds.join(' and the '))} too, raising ${feeds.length > 1 ? 'their' : 'its'} production.</p>`);
   // turn the road to run up the screen in the clear map above the sheet, so the lay-by can be seen as it's chosen
   focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
   el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
     const pl = res.plans[+b.dataset.plan!];
+    if (!purse.spend(price(pl.cost), 'building')) { hint(short(price(pl.cost)), 'alert'); return; }
     net.addStop(q.seg.id, q.s, side, pl);
     for (const l of net.touched) { const bb = buildings.find((x) => x.lot === l); if (bb && !bb.dying) regenerate(bb); }
     closeSheet();
     rebuildRoads();
-    hint(`${pl.title} built${pl.take.land ? ` · ${pl.lots.length} front garden${pl.lots.length === 1 ? '' : 's'} trimmed` : ''}`, 'check');
+    hint(`${pl.title} built for ${money(price(pl.cost))}${pl.take.land ? ` · ${pl.lots.length} front garden${pl.lots.length === 1 ? '' : 's'} trimmed` : ''}`, 'check');
   }));
 }
 
@@ -1389,10 +1556,15 @@ function tapMap(sx: number, sy: number): Mode {
   }
   if (mode === 'stop') { stopTap(g); return mode; }
   if (mode === 'line') { lineTap(sx, sy); return mode; }
+  if (mode === 'station') { stationTap(g); return mode; }
   const bus = traffic.busNear(g);
   if (bus !== null) { showBusInfo(bus); return 'look'; }
   const ixAt = interchangeAt(g); // (a motorway junction is one junction, whichever part of it is tapped)
   if (ixAt) { showInterchangeInfo(ixAt); return 'look'; }
+  const train = traffic.trainNear(g);
+  if (train !== null) { showTrainInfo(train); return 'look'; }
+  const sta = stations.near(g, 60);
+  if (sta) { showStationInfo(sta.id); return 'look'; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
   const br = st || jn !== null ? null : bridgeAt(sx, sy); // (a bridge is tapped where it's drawn, up in the air)
@@ -1523,34 +1695,48 @@ function seedJunctionDemo(form: IxForm | null, style: SlipStyle) {
 }
 
 // ---------------- loop ----------------
+// the map is `?map=<id>` (maps.ts); the sandbox is the same land with nothing built on it yet
+const sandbox = new URLSearchParams(location.search).get('map') === 'sandbox';
+// (or a motorway junction on its own, to look at: /proto.html?junction=dumbbell, see seedJunctionDemo)
 const demoJunction = new URLSearchParams(location.search).get('junction');
-if (demoJunction === 'blank') seedJunctionDemo(null, 'taper');
-else if (demoJunction === 'dumbbell' || demoJunction === 'gsr' || demoJunction === 'diamond') seedJunctionDemo(demoJunction, new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper');
-else seedTown();
-starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
+const demo = demoJunction === 'blank' || demoJunction === 'dumbbell' || demoJunction === 'gsr' || demoJunction === 'diamond';
+if (demo) seedJunctionDemo(demoJunction === 'blank' ? null : (demoJunction as IxForm), new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper');
+else if (!sandbox) await seedTown();
+await loading.stage('Adding bus stops and drawing the roads', 0.1);
+if (!sandbox && !demo) starterStops(net, MAP.stops); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
 rebuildRoads();
 refreshTrees();
 setMode('look');
 setKind('straight');
 setType('street');
 resize();
+await loading.stage('Parks, playgrounds and car parks', 0.14);
 refreshInfill();
+await loading.stage(MAP.style === 'arctic' ? 'Laying the snow' : MAP.style === 'desert' ? 'Spreading the sand' : 'Painting the fields and woods', 0.07);
 gameGround.start(trees);
 refreshTrees();
+// every building merged into its chunk before the first frame (not two a frame as it plays)
+await loading.stage('Finishing the buildings', 0.03);
+{ const dirty = [...chunks.values()].filter((c) => c.dirty); for (const [i, c] of dirty.entries()) { rebuildChunk(c); await loading.tick(i / dirty.length); } }
+await loading.stage('Starting the traffic and the town', 0.15);
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
 traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
-onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); };
-const lines = new Lines(traffic);
-const markers = new StopMarkers(net, traffic);
+onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); townRef?.networkChanged(); };
+const stations = new Stations(net);
+scene.add(stations.group);
+traffic.stationAt = (id) => stations.spot(id);
+traffic.onTrainStop = () => 30; // seconds at the platform
+const lines = new Lines(traffic, stations);
+const markers = new StopMarkers(net, traffic, stations);
 scene.add(markers.group);
 // the starter line: the high street's west end, its east end, and up the road north
 {
   const near = (q: P) => allStops().map(({ seg, stop }) => ({ id: stop.id, d: Math.hypot(pointAt(net.path(seg), stop.s).x - q.x, pointAt(net.path(seg), stop.s).z - q.z) })).sort((a, b) => a.d - b.d)[0]?.id;
-  const ids = [{ x: -85, z: 0 }, { x: 120, z: 0 }, { x: 0, z: 150 }].map(near).filter((x): x is number => x !== undefined);
+  const ids = MAP.line.map(near).filter((x): x is number => x !== undefined);
   if (ids.length >= 2) lines.add(ids, false, 3);
 }
 for (const t of ['intercity', 'dmu']) traffic.addTrain(t);
@@ -1576,7 +1762,6 @@ const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}
 const count = (n: number) => (n < 1e4 ? n.toLocaleString('en-GB') : n < 1e5 ? `${Math.floor(n / 100) / 10}k` : n < 1e6 ? `${Math.floor(n / 1e3)}k` : `${Math.floor(n / 1e5) / 10}m`);
 
 let last = performance.now();
-let growAt = 0; // game minutes until the next building
 const GAME_MIN_PER_S = 4; // how fast the clock runs: game minutes per real second
 // Game speed (pause, 1×, 2×, 4×) scales the clock, the town's growth and the traffic together.
 // Traffic keeps its own time base, which only ever runs ahead of real time: vehicles stamp some
@@ -1602,6 +1787,19 @@ let lastH = view.h;
 // the town's people: on the footways, at the stops, in the parks (see game/crowds.ts)
 const people = new TownCrowds({ scene, net, junctions, traffic, regions: () => infill }, GAME_MIN_PER_S);
 (window as unknown as { people: TownCrowds }).people = people;
+// the economy runs the town from here on (game/econ.ts): it decides what gets built, and how
+// many wait at the stops
+const town = new TownEconomy({
+  net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, stations,
+  standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
+  free: () => queue,
+  build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); },
+  rebuild: (l, kind) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; l.kind = kind; regenerate(b); placesDirty = true; },
+  clear: (l) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; net.lots = net.lots.filter((x) => x !== l); demolish(b); queue.push(l); },
+});
+townRef = town;
+people.numbers = town.numbers();
+let syncAt = 2;
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
 // Phones differ enormously, so rather than guess, the game watches its own frame times: if
 // frames run slow it steps down (fewer pixels, then cheaper shadows, then none), and when
@@ -1625,7 +1823,7 @@ function setTier(t: number) {
   sun.castShadow = q.shadow > 0;
   if (q.shadow && sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
   renderer.shadowMap.needsUpdate = true;
-  setGroundQuality(tier >= 3 ? 'low' : tier === 2 ? 'medium' : 'high');
+  setGroundQuality(tier >= 3 ? 'low' : tier >= 1 ? 'medium' : 'high');
   people.setTier(tier); // fewer, simpler figures on the lower tiers, and no shadows from them
 }
 function judgeFrames(now: number) {
@@ -1648,14 +1846,10 @@ function frame(now: number) {
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
   doomMat.opacity = 0.3 + 0.25 * Math.sin(now / 160);
   const gdt = dt * speed; // game seconds this frame
-  // the town grows at a town's pace: about one new building every 20 minutes of game time
-  // (so it speeds up and slows down with the clock), with some randomness so it doesn't tick
-  growAt -= gdt * GAME_MIN_PER_S;
-  if (growAt <= 0 && queue.length) {
-    growAt = 12 + rand() * 16;
-    const l = queue.shift()!;
-    if (net.lotFree(l)) { spawnLot(l); refreshTrees(l); gameGround.built(l); }
-  }
+  // the town grows and shrinks with how well it's served: the economy decides (game/econ.ts)
+  town.advance(gdt * GAME_MIN_PER_S);
+  syncAt -= dt;
+  if (syncAt <= 0) { syncAt = 2; town.sync(); if (shell.sheetKey === 'town') showTown(); }
   for (let i = buildings.length - 1; i >= 0; i--) {
     const b = buildings[i];
     if (!b.solo) continue;
@@ -1668,7 +1862,7 @@ function frame(now: number) {
       if (b.solo.scale.y >= 1) toChunk(b); // settled: merge into its chunk
     }
   }
-  if (infillDue && !queue.length && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
+  if (infillDue && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
   // merge at most a couple of changed chunks a frame
   let merged = 0;
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
@@ -1702,7 +1896,7 @@ function frame(now: number) {
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
   if (now - statsAt > 250) {
     statsAt = now;
-    const pop = buildings.reduce((s, b) => s + (USE[b.lot.kind].unit === 'jobs' ? 0 : USE[b.lot.kind].pop), 0);
+    const pop = town.report?.residents ?? 0;
     $('#st-clock').textContent = hhmm(clock);
     // (the rush hours in the short form timetables use, so the line fits a phone)
     const rush = speed ? rushLabel(hour) : 'paused';
@@ -1712,11 +1906,13 @@ function frame(now: number) {
     $('#st-buses').textContent = String(traffic.buses);
     $('#st-trains').textContent = String(traffic.trains.length);
     $('#st-pop').textContent = count(pop);
+    shell.setMoney(money(purse.balance));
   }
   const t1 = performance.now();
   const q = TIERS[tier];
   if (q.every && ++frameNo % q.every === 0) renderer.shadowMap.needsUpdate = true;
   renderer.render(scene, cam);
+  if (!loaded) { loaded = true; loading.done(); } // (the first frame is drawn: the loading screen goes)
   const t2 = performance.now();
   perf.simMs += t1 - t0; perf.drawMs += t2 - t1; perf.worstSim = Math.max(perf.worstSim, t1 - t0);
   if (now - perf.since > 2000) {
@@ -1731,16 +1927,32 @@ function frame(now: number) {
   }
   requestAnimationFrame(frame);
 }
+// the shaders compile before the first frame, not during it (where the screen would sit still)
+await loading.stage('Getting ready to draw', 0.1);
+await renderer.compileAsync(scene, cam).catch(() => {});
+loading.finish();
+let loaded = false;
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
 Object.assign((window as unknown as { proto: object }).proto, { interchanges, blueprint: (a: P, b: P) => { draft = { a: net.snapStart(a, 4), b: net.snapEnd(net.snapStart(a, 4), b, 4, true) }; draftChanged(); } });
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+// ---- the start menu (src/app/main.ts) loads this module, then links it: the quality set on the
+// menu, the Menu sheet's way back to it, and quality picked here remembered for next time ----
+export interface MenuLink { quality: number | 'auto'; onQuality: (q: number | 'auto') => void; onMenu: () => void }
+let menuLink: MenuLink | null = null;
+export function linkMenu(link: MenuLink) {
+  menuLink = link;
+  if (link.quality !== 'auto') { tierAuto = false; setTier(link.quality); }
+  shell.addMenuItem({ id: 'home', label: 'Main menu', icon: 'home', sub: 'Leave this town for the start menu', onClick: () => link.onMenu() });
 }

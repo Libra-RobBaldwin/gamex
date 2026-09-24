@@ -110,6 +110,8 @@ export interface ShellOptions {
   onPause: () => void;
   onRate: () => void;
   onPerf: () => void;
+  /** The town panel, from the drawer's button. */
+  onTown?: () => void;
 }
 export interface Rect { left: number; top: number; right: number; bottom: number }
 
@@ -161,6 +163,7 @@ export class Shell {
             <span class="st">${said('bus', 'buses')}<b id="st-buses">0</b> buses</span>
             <span class="st">${said('train', 'trains')}<b id="st-trains">0</b> trains</span>
           </div>
+          <button id="townbtn">${icon('building')}<span>Town panel</span></button>
           <button id="perfbtn" aria-expanded="false" aria-controls="perf">${icon('activity')}<span>Performance</span></button>
           <div id="perf" role="status" hidden><span id="perf-t">measuring…</span></div>
         </div>
@@ -184,6 +187,7 @@ export class Shell {
     this.$('#sp-pause').addEventListener('click', () => opts.onPause());
     this.$('#sp-rate').addEventListener('click', () => opts.onRate());
     this.$('#perfbtn').addEventListener('click', () => opts.onPerf());
+    this.$('#townbtn').addEventListener('click', () => { this.toggleDrawer(false); opts.onTown?.(); });
     this.$('#clockbtn').addEventListener('click', () => this.toggleDrawer());
     // while a tool hides the bar (and with it Layers), this cycles 3D, Low and Plan
     this.$('#viewbtn').addEventListener('click', () => {

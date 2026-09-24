@@ -9,6 +9,7 @@
 // buses pull into the lay-by, and their doors open on the platform or kerb side while they stand.
 // The URL holds the state (?mode=parade&cat=car&year=1975&night=1…) so screenshots are repeatable.
 import * as THREE from 'three';
+import { Ground } from '../ground';
 import { MODELS, MODEL, STYLE_LABEL } from './models';
 import { BRANDS, BRAND } from './brands';
 import { OPERATORS, OPERATOR } from './operators';
@@ -157,7 +158,10 @@ function ribbon(off0: number, off1: number, y: number, m: THREE.Material, rr = R
 }
 const world = new THREE.Group();
 scene.add(world);
-const grass = mat('#7c9a5e', '#2a3a2e'), asphalt = mat('#4a4d52', '#2a2d33'), white = mat('#e8e8e2', '#9a9a96'), ballast = mat('#8a8074', '#3a3834'), railM = mat('#5b5e62', '#4a4c50'), water = mat('#3f6f8a', '#16283a'), pave = mat('#b3aea3', '#4a4a48');
+// the shared ground, tinted grey at night
+const grass = new Ground().material;
+Object.assign(grass.userData, { day: '#ffffff', night: '#595959' }); worldMats.push(grass);
+const asphalt = mat('#4a4d52', '#2a2d33'), white = mat('#e8e8e2', '#9a9a96'), ballast = mat('#8a8074', '#3a3834'), railM = mat('#5b5e62', '#4a4c50'), water = mat('#3f6f8a', '#16283a'), pave = mat('#b3aea3', '#4a4a48');
 // four lanes, or eight (a motorway) when the count needs them; outer lanes run +s (UK: keep left)
 let lanes = [-5.25, -1.75, 1.75, 5.25];
 const setLanes = (n: number) => { lanes = n > 800 ? [-12.25, -8.75, -5.25, -1.75, 1.75, 5.25, 8.75, 12.25] : [-5.25, -1.75, 1.75, 5.25]; };

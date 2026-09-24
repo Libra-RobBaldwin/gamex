@@ -7,6 +7,7 @@
 // &t=seconds (fix the animation time) &bench=1 (measure on load).
 
 import * as THREE from 'three';
+import { Ground, groundTile } from '../ground';
 import { CachedHeight, ProceduralTerrain, TERRAIN_PRESETS, tileMesh, type HeightSource } from '../terrain';
 import { Coastal } from './coast';
 import { patchGroundMaterial, reedGeometry, reedMaterial, reedMesh, rippleTexture, setWaterLight, waterGeometry, waterMaterial, WATER_LIGHT, type WaterLight } from './material';
@@ -65,20 +66,10 @@ mountNavControls(nav, { parent: $('#phone'), below: $('#top') });
 function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); nav.apply(); }
 window.addEventListener('resize', resize);
 
-// grass, as in the game (a speckled canvas texture)
-function grass() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const x = c.getContext('2d')!;
-  x.fillStyle = '#6f9e48'; x.fillRect(0, 0, 256, 256);
-  let s = 3;
-  const r = () => ((s = (Math.imul(s ^ (s >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0) / 4294967296);
-  for (let i = 0; i < 5000; i++) { x.fillStyle = `rgba(${60 + r() * 40},${120 + r() * 60},${40 + r() * 30},0.35)`; x.fillRect(r() * 256, r() * 256, 2, 2); }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
-  return t;
-}
-const groundMat = patchGroundMaterial(new THREE.MeshLambertMaterial({ map: grass() }));
+// the shared ground, with the water system's shore colours over it; heather only on the fells
+const land = new Ground({ terrain: true });
+land.uniforms.uSlope.value.set(0.2, 0.34, 180, 270);
+const groundMat = patchGroundMaterial(land.material);
 const ripple = rippleTexture(128);
 const waterMat = waterMaterial(ripple);
 const reedMat = reedMaterial(), reedGeo = reedGeometry();
@@ -117,15 +108,8 @@ function build(key: string) {
     const m = tileMesh(water.terrain, ti, tj, { cells: 400, skirt: 6, uvScale: 16 });
     timings.mesh += performance.now() - t0;
     const col = shoreColours(wt, m);
-    uplandColours(m.normals, m.positions, col);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3));
-    g.setAttribute('normal', new THREE.BufferAttribute(m.normals, 3));
-    g.setAttribute('uv', new THREE.BufferAttribute(m.uvs, 2));
-    g.setAttribute('color', new THREE.BufferAttribute(col, 4));
-    g.setIndex(new THREE.BufferAttribute(m.indices, 1));
-    const gm = new THREE.Mesh(g, groundMat);
-    gm.position.set(m.offset[0], 0, m.offset[1]); gm.userData.own = true;
+    const gm = groundTile(m, groundMat, undefined, col);
+    gm.userData.own = true;
     world.add(gm);
     if (ws) {
       const wm = new THREE.Mesh(waterGeometry(ws), waterMat);
@@ -144,20 +128,6 @@ function build(key: string) {
   nav.setLimits({ bounds: { minX: at[0] - 700, maxX: at[0] + 700, minZ: at[1] - 700, maxZ: at[1] + 700 } });
   $('#title').textContent = P.name; $('#desc').textContent = P.desc;
   document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((b) => b.classList.toggle('on', b.dataset.preset === key));
-}
-
-// Bare rock and heather on steep upland slopes, so fells read as fells (demo only: the water
-// system only colours the shore). Leaves the shore colours alone.
-function uplandColours(nor: Float32Array, pos: Float32Array, col: Float32Array) {
-  const rock = [0.33, 0.32, 0.29], heath = [0.22, 0.2, 0.12];
-  for (let v = 0; v < nor.length / 3; v++) {
-    if (col[v * 4 + 3] > 0.05) continue;
-    const s = 1 - nor[v * 3 + 1], y = pos[v * 3 + 1];
-    const r = Math.min(1, Math.max(0, (s - 0.22) / 0.15)), h = Math.min(1, Math.max(0, (y - 200) / 150)) * 0.5;
-    if (r < 0.02 && h < 0.02) continue;
-    const c = r > h ? rock : heath, a = Math.max(r, h);
-    col[v * 4] = c[0]; col[v * 4 + 1] = c[1]; col[v * 4 + 2] = c[2]; col[v * 4 + 3] = a * 0.85;
-  }
 }
 
 // Scattered trees for scale, kept off water and its banks by the water system's shore distance.

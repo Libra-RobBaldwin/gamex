@@ -2,7 +2,9 @@
 // region of the world, from the parcel layout and the input shapes. It can repaint any rectangle
 // of texels on its own, giving exactly what a full paint gives there: every texel depends only on
 // the world within a fixed margin of it, and the margin is painted too (then thrown away).
-import { CROP } from './covers';
+import { CROP, DIRS } from './covers';
+
+const DPI = DIRS / Math.PI;
 import { bbox, GRID, Layout, toGrid, type Cell, type ParcelInfo, type XZ } from './layout';
 
 export interface Region { x0: number; z0: number; size: number; n: number } // n texels across
@@ -80,15 +82,54 @@ function blur(a: Float32Array, W: number, H: number, tmp: Float32Array) {
 
 export interface Spot { x: number; z: number; r: number; v: number } // a dab: bare earth at gateways
 
+// The items of a long list whose boxes come near a window, in the list's order (later shapes paint
+// over earlier ones). A small repaint shouldn't walk every road, park and tree on the map, so each
+// list gets a coarse grid of its boxes, built the first time it's seen: the game keeps its roads,
+// parks, water and trees lists between repaints, so that's once (and again if one grows in place,
+// as the game's trees do). Short lists are just walked.
+type Box = { x0: number; z0: number; x1: number; z1: number };
+const IC = 64; // metres per index cell
+interface Index { cells: Map<number, number[]>; big: number[]; n: number }
+const indexes = new WeakMap<readonly unknown[], Index>();
+const ckey = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
+let stamp = new Uint32Array(0), stampNo = 0;
+function near<T>(list: readonly T[] | undefined, boxOfItem: (v: T) => Box, w: Box): readonly T[] {
+  if (!list) return [];
+  // (a short list, or a big window that would take most of it anyway, is just walked)
+  if (list.length < 64 || (w.x1 - w.x0) * (w.z1 - w.z0) > 256 * IC * IC) return list;
+  let ix = indexes.get(list);
+  if (!ix || ix.n !== list.length) {
+    ix = { cells: new Map(), big: [], n: list.length };
+    for (let n = 0; n < list.length; n++) {
+      const b = boxOfItem(list[n]);
+      const i0 = Math.floor(b.x0 / IC), i1 = Math.floor(b.x1 / IC), j0 = Math.floor(b.z0 / IC), j1 = Math.floor(b.z1 / IC);
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) > 64 || !Number.isFinite(i0 + i1 + j0 + j1)) { ix.big.push(n); continue; } // (huge ones are always checked)
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        const k = ckey(i, j), c = ix.cells.get(k);
+        if (c) c.push(n); else ix.cells.set(k, [n]);
+      }
+    }
+    indexes.set(list, ix);
+  }
+  if (stamp.length < list.length) stamp = new Uint32Array(list.length);
+  if (++stampNo === 0xffffffff) { stamp.fill(0); stampNo = 1; }
+  const hits: number[] = [...ix.big];
+  for (const n of ix.big) stamp[n] = stampNo;
+  for (let i = Math.floor(w.x0 / IC); i <= Math.floor(w.x1 / IC); i++) for (let j = Math.floor(w.z0 / IC); j <= Math.floor(w.z1 / IC); j++) {
+    const c = ix.cells.get(ckey(i, j));
+    if (c) for (const n of c) if (stamp[n] !== stampNo) { stamp[n] = stampNo; hits.push(n); }
+  }
+  hits.sort((a, b) => a - b);
+  return hits.map((n) => list[n]);
+}
+
 export class CoverMap {
-  readonly a: Uint8Array;
-  readonly b: Uint8Array;
+  readonly a: Uint8Array; // (see packCover in covers.ts)
   readonly texel: number;
   // how long the last paint spent on each step (ms)
   times = { parcels: 0, shapes: 0, distances: 0, write: 0 };
   constructor(readonly region: Region) {
     this.a = new Uint8Array(region.n * region.n * 4);
-    this.b = new Uint8Array(region.n * region.n * 4);
     this.texel = region.size / region.n;
   }
   // scratch layers, kept between paints (zeroed for each)
@@ -132,8 +173,9 @@ export class CoverMap {
     // to it, so field margins and wood edges follow the hedges to the centimetre
     const P = layout.parcels;
     const corners = [toGrid(x0, z0), toGrid(x1, z0), toGrid(x0, z1), toGrid(x1, z1)];
-    const gi0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 1, gi1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 1;
-    const gj0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 1, gj1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 1;
+    // (the grid bends up to a cell and a half from where it would be)
+    const gi0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 3, gi1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 3;
+    const gj0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 3, gj1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 3;
     const cellOf: Cell[] = [], own: number[] = [];
     const CA = Math.cos(GRID.angle), SA = Math.sin(GRID.angle), SX = GRID.sx, SZ = GRID.sz;
     edge.fill(1e9);
@@ -207,14 +249,15 @@ export class CoverMap {
       }
     }
     lap('parcels');
-    // 2. shapes
-    for (const p of inp.blocked ?? []) if (inWin(boxOf(p), 10)) fill(p, x0, z0, t, W, H, (a, b) => blocked.fill(1, a, b + 1));
-    for (const p of inp.water ?? []) if (inWin(boxOf(p), DT * t)) fill(p, x0, z0, t, W, H, (a, b) => water.fill(1, a, b + 1));
+    // 2. shapes (only those near the window: see `near`; each is still tested exactly as before)
+    const pad = Math.max(10, DT * t, 5.5), win = { x0: x0 - pad, z0: z0 - pad, x1: x1 + pad, z1: z1 + pad };
+    for (const p of near(inp.blocked, boxOf, win)) if (inWin(boxOf(p), 10)) fill(p, x0, z0, t, W, H, (a, b) => blocked.fill(1, a, b + 1));
+    for (const p of near(inp.water, boxOf, win)) if (inWin(boxOf(p), DT * t)) fill(p, x0, z0, t, W, H, (a, b) => water.fill(1, a, b + 1));
     for (const p of inp.plots ?? []) if (inWin(boxOf(p.poly))) {
       const [l, b, r] = p.kind === 'garden' ? [1, 0, 0] : p.kind === 'site' ? [0, 0.9, 0.1] : [0, 0.45, 0.55];
       fill(p.poly, x0, z0, t, W, H, (a, e) => { e++; field.fill(0, a, e); wood.fill(0, a, e); town.fill(1, a, e); lawn.fill(l, a, e); bare.fill(b, a, e); rough.fill(r, a, e); });
     }
-    for (const p of inp.parks ?? []) if (inWin(boxOf(p.poly))) {
+    for (const p of near(inp.parks, (q) => boxOf(q.poly), win)) if (inWin(boxOf(p.poly))) {
       const st = p.stripes !== undefined, a0 = st ? ((p.stripes! % Math.PI) + Math.PI) % Math.PI : 0;
       fill(p.poly, x0, z0, t, W, H, (a, e) => {
         e++; field.fill(0, a, e); wood.fill(0, a, e); bare.fill(0, a, e); rough.fill(0, a, e); lawn.fill(1, a, e); town.fill(1, a, e);
@@ -227,11 +270,11 @@ export class CoverMap {
       const ia = Math.max(0, Math.floor((x - r - x0) / t)), ib = Math.min(W - 1, Math.floor((x + r - x0) / t));
       const ja = Math.max(0, Math.floor((z - r - z0) / t)), jb = Math.min(H - 1, Math.floor((z + r - z0) / t));
       for (let j = ja; j <= jb; j++) for (let i = ia; i <= ib; i++) {
-        const k = j * W + i, d = Math.hypot(x0 + (i + 0.5) * t - x, z0 + (j + 0.5) * t - z) / r;
-        if (d < 1 && !town[k]) layer[k] = Math.max(layer[k], v * (1 - d * d));
+        const k = j * W + i, dx = x0 + (i + 0.5) * t - x, dz = z0 + (j + 0.5) * t - z, d2 = (dx * dx + dz * dz) / (r * r);
+        if (d2 < 1 && !town[k]) { const u = v * (1 - d2); if (u > layer[k]) layer[k] = u; }
       }
     };
-    for (const p of inp.trees ?? []) dab(wood, p.x, p.z, 5.5, 0.75);
+    for (const p of near(inp.trees, (q) => ({ x0: q.x - 5.5, z0: q.z - 5.5, x1: q.x + 5.5, z1: q.z + 5.5 }), win)) dab(wood, p.x, p.z, 5.5, 0.75);
     for (const s of spots) dab(bare, s.x, s.z, s.r, s.v);
 
     lap('shapes');
@@ -255,14 +298,16 @@ export class CoverMap {
     lap('distances');
     // 5. soften, keep the four weights summing to at most one, and write the rectangle out
     for (const l of [lawn, field, bare]) blur(l, W, H, tmp); // (wood and field edges are already soft)
-    const n = R.n, A = this.a, B = this.b;
+    const n = R.n, A = this.a;
     for (let j = rect.j0; j < rect.j1; j++) {
       let k = (j - ej0) * W + (rect.i0 - ei0), o = (j * n + rect.i0) * 4;
       for (let i = rect.i0; i < rect.i1; i++, k++, o += 4) {
-        const s = lawn[k] + field[k] + wood[k] + bare[k], f = (s > 1 ? 255 / s : 255);
-        A[o] = lawn[k] * f + 0.5; A[o + 1] = field[k] * f + 0.5; A[o + 2] = wood[k] * f + 0.5; A[o + 3] = bare[k] * f + 0.5;
-        const r = rough[k], w = wet[k];
-        B[o] = crop[k] * 32 + 16; B[o + 1] = dir[k] * (255.9 / Math.PI); B[o + 2] = (r > 1 ? 1 : r) * 255 + 0.5; B[o + 3] = (w > 1 ? 1 : w) * 255 + 0.5;
+        // (packCover, inlined: this runs for every texel)
+        const s = lawn[k] + field[k] + wood[k] + bare[k], f = s > 1 ? 127.5 / s : 127.5, r = rough[k], w = wet[k];
+        A[o] = 128 + (field[k] - lawn[k]) * f;
+        A[o + 1] = crop[k] * DIRS + (((dir[k] * DPI + 0.5) | 0) % DIRS);
+        A[o + 2] = 128 + (wood[k] - bare[k]) * f;
+        A[o + 3] = 128 + ((r > 1 ? 1 : r) - (w > 1 ? 1 : w)) * 127.5;
       }
     }
     lap('write');
