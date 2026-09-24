@@ -36,6 +36,7 @@ const MAX_EVENTS = 10000;
 interface SState extends StopPos {
   def: StopDef; radius: number;
   pool: Float64Array; // freight waiting, by FREIGHT index
+  relayed: Float64Array; // of that, what came off another line (its fixed fare is paid)
   slots: { line: LineState; slot: number }[];
   served: boolean; skim: number; // has a running passenger line; index in the skim
   consumes: (IState | TState | null)[]; // who takes each freight cargo delivered here
@@ -153,6 +154,7 @@ export class Economy {
         for (const x of st.visit) x.town.month.visitors += v * x.w;
       },
       pool: (L, slot) => site(L, slot)?.pool ?? none,
+      relayed: (L, slot) => site(L, slot)?.relayed ?? none,
       room: (L, slot, c) => this.freightRoom(site(L, slot), c),
       freight: (L, slot, c, amount) => this.freightArrives(site(L, slot), c, amount),
     };
@@ -301,7 +303,7 @@ export class Economy {
       if (cur && cur.kind === s.kind) { Object.assign(cur, { x: s.x, z: s.z, name: s.name ?? cur.name, radius: s.radius ?? def.radius }); keep.set(s.id, cur); continue; }
       keep.set(s.id, {
         id: s.id, kind: s.kind as StopKind, x: s.x, z: s.z, name: s.name ?? `${def.name} ${s.id}`, def, radius: s.radius ?? def.radius,
-        pool: new Float64Array(NC), slots: [], served: false, skim: -1, consumes: FREIGHT.map(() => null), carries: new Uint8Array(NC),
+        pool: new Float64Array(NC), relayed: new Float64Array(NC), slots: [], served: false, skim: -1, consumes: FREIGHT.map(() => null), carries: new Uint8Array(NC),
         fArrive: new Float64Array(NC).fill(Infinity), fPool: new Float64Array(NC).fill(Infinity), drop: FREIGHT.map(() => null), next: FREIGHT.map(() => null),
         visit: [], inds: [], near: [], fare: 0, fareListed: false,
         month: { boarded: 0, alighted: 0, overflow: 0 }, last: { boarded: 0, alighted: 0, overflow: 0 },
@@ -500,9 +502,10 @@ export class Economy {
       return take;
     }
     // nobody takes it here: it waits for the best line on (a transfer), here or at a freight stop
-    // next door (lorries bringing coal to a railhead, say)
+    // next door (lorries bringing coal to a railhead, say); its journey's fixed fare is paid
     const to = st.drop[c] ?? st;
     to.pool[c] += take;
+    to.relayed[c] += take;
     return take;
   }
 
@@ -996,7 +999,7 @@ export class Economy {
       zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared } })),
       buildings: [...this.buildingMap.values()].map((b) => ({ id: b.id, zone: b.zone.id, x: b.x, z: b.z, kind: b.kind, cap: b.cap, occ: b.occ, abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest })),
       industries: [...this.indMap.values()].map((i) => ({ id: i.id, rate: i.rate, stock: arr(i.stock), input: arr(i.input), produced: i.produced, moved: i.moved, received: i.received, converted: i.converted, last: { ...i.last } })),
-      stops: [...this.stopMap.values()].map((s) => ({ id: s.id, pool: arr(s.pool), fare: s.fare, month: { ...s.month }, last: { ...s.last } })),
+      stops: [...this.stopMap.values()].map((s) => ({ id: s.id, pool: arr(s.pool), relayed: arr(s.relayed), fare: s.fare, month: { ...s.month }, last: { ...s.last } })),
       lines: this.lineList.map((L) => ({ id: L.id, ...L.save() })),
       pending: [...this.pending.values()].map((p) => ({ req: p.req, t: p.t, zone: p.zone.id, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building?.id, cleared: !!p.cleared })),
     };
@@ -1027,7 +1030,7 @@ export class Economy {
       Object.assign(q, { rate: i.rate, produced: i.produced, moved: i.moved, received: i.received, converted: i.converted, last: { ...i.last } });
       q.stock.set(i.stock); q.input.set(i.input);
     }
-    for (const st of s.stops) { const q = e.stopMap.get(st.id); if (q) { q.pool.set(st.pool); if (st.fare) { q.fare = st.fare; q.fareListed = true; e.fareStops.push(q); } q.month = { ...st.month }; q.last = { ...st.last }; } }
+    for (const st of s.stops) { const q = e.stopMap.get(st.id); if (q) { q.pool.set(st.pool); if (st.relayed) q.relayed.set(st.relayed); if (st.fare) { q.fare = st.fare; q.fareListed = true; e.fareStops.push(q); } q.month = { ...st.month }; q.last = { ...st.last }; } }
     for (const l of s.lines) e.lineMap.get(l.id)?.restore(l);
     for (const p of s.pending) {
       const zone = e.zoneMap.get(p.zone);

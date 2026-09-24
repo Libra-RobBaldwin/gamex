@@ -21,6 +21,8 @@ export interface LineCtx {
   fare(line: LineState, slot: number, amount: number): void;
   arrive(line: LineState, slot: number, people: number): void;
   pool(line: LineState, slot: number): Float64Array; // freight waiting at a slot's stop, by FREIGHT index
+  // of that, what came off another line (its journey's fixed fare is paid already)
+  relayed(line: LineState, slot: number): Float64Array;
   // how much of a cargo the stop at a slot could still take (for its consumer or to wait there)
   room(line: LineState, slot: number, cargo: number): number;
   // returns how much of it was taken
@@ -43,12 +45,15 @@ export class LineState {
   phase = 0; // how far round the loop vehicle 0 is, 0..1
   readonly km: Float64Array; // straight-line km, slot i to slot j
   readonly ride: Float64Array; // minutes on board, slot i to slot j (downstream)
-  // passengers: waiting by (board slot, alight slot), on board by alight slot, fares owed
+  // passengers: waiting by (board slot, alight slot), of them those changing from another line,
+  // on board by alight slot, fares owed
   readonly q: Float64Array;
+  readonly qx: Float64Array;
   readonly qsum: Float64Array;
   readonly onboard: Float64Array;
   readonly owed: Float64Array;
   readonly fare: Float64Array;
+  readonly fixed: Float64Array; // the fixed part of `fare`, paid once a journey
   genIdx = new Int32Array(0);
   genRate = new Float64Array(0);
   onward: Onward[][];
@@ -94,10 +99,12 @@ export class LineState {
     this.km = new Float64Array(k * k);
     this.ride = new Float64Array(k * k);
     this.q = new Float64Array(this.def.pax ? k * k : 0);
+    this.qx = new Float64Array(this.def.pax ? k * k : 0);
     this.qsum = new Float64Array(k);
     this.onboard = new Float64Array(k);
     this.owed = new Float64Array(k);
     this.fare = new Float64Array(this.def.pax ? k * k : 0);
+    this.fixed = new Float64Array(this.def.pax ? k * k : 0);
     this.onward = Array.from({ length: k }, () => []);
     this.visitShare = new Float64Array(k);
     this.room = new Float64Array(k).fill(1);
@@ -163,28 +170,41 @@ export class LineState {
         this.ride[i * k + ((i + d) % k)] = t;
       }
     }
-    if (this.pax) for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) this.fare[i * k + j] = i === j ? 0 : this.unitFare(0, i, j);
+    if (this.pax)
+      for (let i = 0; i < k; i++)
+        for (let j = 0; j < k; j++) {
+          this.fare[i * k + j] = i === j ? 0 : this.unitFare(0, i, j);
+          this.fixed[i * k + j] = i === j ? 0 : this.fixedFare(0, i, j);
+        }
   }
 
   // £ per unit carried from slot i to slot j: a fixed part (in full from `fullKm`) and a part by
   // distance, more for getting there faster than the reference speed (and less for dawdling),
-  // like the 2D game.
+  // like the 2D game. The fixed part is paid once a journey: those changing from another line (or
+  // freight handed on from one) pay only the part by distance, so splitting a route into short
+  // lines earns no more than running it as one.
   unitFare(cargo: number, i: number, j: number) {
     const c = CARGO[this.pax ? 'pax' : FREIGHT[cargo]];
     const km = this.km[i * this.k + j], t = this.ride[i * this.k + j];
     const speed = Math.max(0.6, Math.min(1.6, ((km / c.refKmh) * 60) / Math.max(0.5, t)));
-    return c.base * Math.min(1, km / c.fullKm) + c.perKm * km * speed;
+    return this.fixedFare(cargo, i, j) + c.perKm * km * speed;
+  }
+  fixedFare(cargo: number, i: number, j: number) {
+    const c = CARGO[this.pax ? 'pax' : FREIGHT[cargo]];
+    return c.base * Math.min(1, this.km[i * this.k + j] / c.fullKm);
   }
 
+  // people changing onto this line (their journey's fixed fare is paid)
   addWaiting(board: number, alight: number, n: number) {
     this.q[board * this.k + alight] += n;
+    this.qx[board * this.k + alight] += n;
     this.qsum[board] += n;
     this.want[board] += n;
   }
   // some of those waiting at a slot give up (the stop is full)
   scaleWaiting(slot: number, f: number) {
     const row = slot * this.k;
-    for (let j = 0; j < this.k; j++) this.q[row + j] *= f;
+    for (let j = 0; j < this.k; j++) { this.q[row + j] *= f; this.qx[row + j] *= f; }
     this.qsum[slot] *= f;
   }
 
@@ -252,10 +272,11 @@ export class LineState {
         for (let j = 0; j < k; j++) {
           const v = q[row + j];
           if (v <= 0) continue;
-          const m = v * f;
+          const m = v * f, x = this.qx[row + j] * f;
           q[row + j] = v - m;
           this.onboard[j] += m;
-          this.owed[j] += m * this.fare[row + j];
+          this.owed[j] += m * this.fare[row + j] - x * this.fixed[row + j];
+          if (x > 0) this.qx[row + j] -= x;
         }
         this.qsum[i] = Q - take;
         this.load += take;
@@ -298,13 +319,14 @@ export class LineState {
           total += avail[c];
         }
         if (total > 1e-9) {
-          const take = Math.min(room, total), f = take / total;
+          const take = Math.min(room, total), f = take / total, relayed = ctx.relayed(this, i);
           for (let c = 0; c < NC; c++) {
             if (avail[c] <= 0) continue;
-            const j = this.dest[c * k + i], m = avail[c] * f;
+            const j = this.dest[c * k + i], m = avail[c] * f, x = relayed[c] * (m / pool[c]);
             pool[c] -= m;
+            relayed[c] -= x;
             this.fonb[c * k + j] += m;
-            this.fowed[c * k + j] += m * this.unitFare(c, i, j);
+            this.fowed[c * k + j] += m * this.unitFare(c, i, j) - x * this.fixedFare(c, i, j);
           }
           this.load += take;
           this.boarded[i] = take;
@@ -360,7 +382,7 @@ export class LineState {
   // What's saved: the queues and loads, so a loaded game carries on where it stopped.
   save() {
     return {
-      phase: this.phase, dwell: [...this.dwell], q: [...this.q], onboard: [...this.onboard], owed: [...this.owed],
+      phase: this.phase, dwell: [...this.dwell], q: [...this.q], qx: [...this.qx], onboard: [...this.onboard], owed: [...this.owed],
       fonb: [...this.fonb], fowed: [...this.fowed], load: this.load, month: { ...this.month }, last: { ...this.last },
       room: [...this.room], want: [...this.want], got: [...this.got], judged: [...this.judged],
       lastWant: [...this.lastWant], lastGot: [...this.lastGot],
@@ -370,6 +392,7 @@ export class LineState {
     this.phase = s.phase;
     s.dwell.forEach((v, i) => (this.dwell[i] = v));
     s.q.forEach((v, i) => (this.q[i] = v));
+    s.qx?.forEach((v, i) => (this.qx[i] = v));
     for (let i = 0; i < this.k; i++) { let t = 0; for (let j = 0; j < this.k; j++) t += this.q[i * this.k + j] ?? 0; this.qsum[i] = t; }
     s.onboard.forEach((v, i) => (this.onboard[i] = v));
     s.owed.forEach((v, i) => (this.owed[i] = v));

@@ -141,7 +141,9 @@ in WebTAG, walking all the way counts as it is, and taking a bus or train at all
 few minutes, so nobody rides 300 m. A journey on your lines counts towards reach only for the
 share of people who found room on board last month, so a full line can't feed a town like one
 with seats to spare. Fares have a fixed part that builds up over the first 2–3 km, so short
-hops earn next to nothing. Money events are in whole pounds, with
+hops earn next to nothing. The fixed part is paid once a journey: people changing from another
+line, and freight handed on at a transfer, pay only the part by distance, so splitting a route
+into short lines earns no more than running it as one. Money events are in whole pounds, with
 what's left over carried to the next, so they add up to the lines' books.
 
 **Pairs, not all pairs.** A zone pairs one to one with the zones within about a kilometre,
