@@ -170,3 +170,51 @@ These are from headless Chromium (SwiftShader) at 390 × 844, the default iPhone
   couldn't be edited. Reason strings are English literals.
 - **The figures.** They are informed estimates for a game, not engineering. Loads are
   single-number capacities with no dynamic or fatigue checks.
+
+## Earthworks and track
+
+The user's feedback on the demo: the rebuilt ground at the bridge ends had no texture, so you
+couldn't see the grass had been moved; on the steel bridge the rail and its foundations
+flickered against the grass; and the track was plain, with no sleepers.
+
+- **Earthworks.** The ground, the embankments and cuttings, spill slopes under the first span,
+  benches for the roads underneath and the map's cut edges are now one mesh with one material
+  (`earthMaterial()`): a world-space grass texture, slopes shaded from their real normals with
+  rougher grass, a pale crest and a lush toe, a ditch at the foot, bare soil or rock in deep
+  cuts.
+- **Z-fighting.** Fixed at the source, not with offsets: the ballast is a real 0.3 m bed on a
+  formation, roads stand on their own pavement, markings are part of the road's surface, and
+  structural members run into what they bear on. `findFights()` checks every gallery type, the
+  chooser and curved railways, near and far, for faces within 4 cm of each other. The demo's
+  camera also keeps its depth range to the scene.
+- **Track.** `track.ts`: ballast with shoulders, timber sleepers in chairs (before 1960) or
+  concrete on baseplates, rails with head and foot, open timber decks with guard rails on steel
+  and timber bridges. From the game's camera the bed is one textured mesh; zoomed in, instanced
+  sleepers and real rails replace their painted twins.
+
+Draw calls and triangles per frame (shadow pass included), at 412×915 @2×, before and after.
+"Near" is zoomed in on the first abutment, where real sleepers and rails show on rail types.
+
+| Type | Iso before | Iso after | Near before | Near after |
+|---|---|---|---|---|
+| Timber trestle | 39 · 18.6k | 16 · 17.9k | 21 · 18.5k | 18 · 36.5k |
+| Masonry arch viaduct | 59 · 27.1k | 26 · 24.2k | 20 · 26.7k | 17 · 60.1k |
+| Steel girder | 54 · 22.0k | 25 · 19.2k | 22 · 21.7k | 19 · 56.9k |
+| Steel truss (through) | 82 · 49.8k | 34 · 42.8k | 21 · 49.2k | 18 · 80.5k |
+| Steel truss (deck) | 41 · 29.0k | 31 · 33.5k | 25 · 28.5k | 15 · 33.1k |
+| Concrete beam | 52 · 21.0k | 25 · 25.3k | 21 · 20.7k | 16 · 25.0k |
+| Concrete box girder | 53 · 31.8k | 43 · 39.8k | 24 · 30.9k | 14 · 38.9k |
+| Concrete arch | 55 · 23.1k | 14 · 30.1k | 21 · 23.0k | 14 · 30.1k |
+| Steel tied arch | 63 · 27.7k | 32 · 39.3k | 21 · 24.2k | 16 · 35.9k |
+| Cable-stayed | 199 · 48.5k | 72 · 64.9k | 22 · 46.6k | 17 · 63.2k |
+| Suspension | 368 · 107.2k | 123 · 124.1k | 23 · 103.3k | 16 · 120.7k |
+| Bascule | 54 · 16.5k | 36 · 22.5k | 24 · 15.3k | 20 · 21.2k |
+
+Draw calls fall everywhere: the old scene drew every dash of the roads underneath as its own
+mesh, and the route's grass, surface and ballast separately. The budget for the far view is
+at most about 130k triangles for the whole scene (the 3.5 km suspension bridge); the near view
+adds at most about 60k for track on screen, drawn in 120 m chunks so off-screen ones are culled.
+Nothing new runs per frame.
+
+![Rail types, before and after](bridges/track-rail.jpg)
+![Other types, before and after](bridges/track-other.jpg)
