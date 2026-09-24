@@ -28,7 +28,7 @@ export const STD = {
   // the "give way ahead" triangle (TSRGD diagram 1023) in each approach lane: an outline triangle
   // with its point towards the approaching driver (who sees it as the inverted give-way sign), its
   // base nearest the line and `back` metres short of it
-  giveWayTriangle(mph: number) { return mph <= 40 ? { length: 3.75, width: 1.25, back: mph <= 30 ? 4 : 9 } : { length: 6, width: 2, back: 15 }; },
+  giveWayTriangle(mph: number) { return mph <= 40 ? { length: 3.75, width: 1.25, back: 2 } : { length: 6, width: 2, back: 3 }; },
   // how far back from the edge of a junction's land a building's plot must stay
   junctionSetback: 0.5,
   // where a road changes to a narrower one (a dual carriageway ending, say), how long the

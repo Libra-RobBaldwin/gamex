@@ -265,6 +265,47 @@ const chevronMat = () => (chevrons ??= (() => {
   t.colorSpace = THREE.SRGBColorSpace;
   return lit('#ffffff', { map: t, side: THREE.DoubleSide });
 })());
+// The give-way line's paint: a strip laid along the line carrying a texture of its dashes (two rows,
+// or one at a mini-roundabout), so it's filtered like any texture. Drawn dash by dash the dashes are
+// a pixel or two across at an ordinary zoom and break up into dots of every shape and size; this
+// way they stay even at every zoom, and fade into a plain line when they're too small to see.
+// One period of the texture along the line is a dash and a gap; across it, the rows and the space.
+let giveWayTex: THREE.Material | null = null;
+const giveWayMat = () => (giveWayTex ??= (() => {
+  const base = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 };
+  if (typeof document === 'undefined') return lit('#f1f1f1', base);
+  const G = STD.giveWay, P = G.dash + G.gap, H = 2 * G.width + G.apart;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 64;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#f1f1f1';
+  const dw = (128 * G.dash) / P, rh = (64 * G.width) / H;
+  x.fillRect(0, 0, dw, rh); x.fillRect(0, 64 - rh, dw, rh);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+  t.anisotropy = 8;
+  return lit('#ffffff', { map: t, ...base });
+})());
+class Painted {
+  pos: number[] = []; uv: number[] = [];
+  quad(a: number[], b: number[], c: number[], d: number[], ua: number[], ub: number[], uc: number[], ud: number[]) {
+    // (kept facing up)
+    const up = (b[0] - a[0]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[0] - a[0]) < 0;
+    if (up) { this.pos.push(...a, ...b, ...c, ...a, ...c, ...d); this.uv.push(...ua, ...ub, ...uc, ...ua, ...uc, ...ud); }
+    else { this.pos.push(...a, ...c, ...b, ...a, ...d, ...c); this.uv.push(...ua, ...uc, ...ub, ...ua, ...ud, ...uc); }
+  }
+  mesh(m: THREE.Material) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    g.computeVertexNormals();
+    const mesh = new THREE.Mesh(g, m);
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 1;
+    return mesh;
+  }
+}
 class Boards {
   pos: number[] = []; uv: number[] = [];
   quad(a: number[], b: number[], c: number[], d: number[]) {
@@ -410,6 +451,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   const boards = new Boards();
   const trees: THREE.BufferGeometry[] = [];
   const lamps: Lamp[] = [];
+  const giveWay = new Painted(); // (give-way lines: see giveWayMat)
   const tree = (x: number, y: number, z: number, s = 1) => trees.push(new THREE.CylinderGeometry(0.18 * s, 0.25 * s, 3 * s, 5).translate(x, y + 1.5 * s, z), new THREE.IcosahedronGeometry(2.2 * s, 0).translate(x, y + 4.4 * s, z));
   const courses = new Map<number, Course>();
 
@@ -800,29 +842,36 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       // from the splitter island (or the centre) to the kerb, whole dashes only
       if (j.form === 'signals') rect(mk, lineAt, lineAt + 0.3, d.median / 2 + 0.2, kIn - 0.1, 0.36);
       else if (approaches) {
-        const G = STD.giveWay, rows = j.form === 'mini' ? [0] : [0, G.width + G.apart];
+        const G = STD.giveWay, P = G.dash + G.gap, H = 2 * G.width + G.apart, single = j.form === 'mini';
+        const wide = single ? G.width : H, v1 = single ? G.width / H : 1; // (the strip's width, and how much of the texture across)
         const b0 = Math.max(d.median / 2, sh.splitter[leg.seg.id] ? STD.splitter.width / 2 : 0) + 0.15;
-        const quad = (q: (readonly [number, number])[]) => { mk.tri(q[0][0], q[0][1], q[1][0], q[1][1], q[2][0], q[2][1], y + 0.36); mk.tri(q[0][0], q[0][1], q[2][0], q[2][1], q[3][0], q[3][1], y + 0.36); };
-        const on = (q: (readonly [number, number])[]) => q.every((p) => onRoad(p[0], p[1]));
+        // the line's k-th period, as the four corners of its dash across the strip's width: [near start,
+        // near end, far end, far start] in (x, z); a dash is painted where it lies wholly on the carriageway
+        let corners: (k: number, f: number) => (readonly [number, number])[];
         if (ring) {
-          // at a roundabout it's an arc round the ring's edge, so its dashes are laid by angle
+          // at a roundabout it's an arc round the ring's edge
           const Rg = sh.R + 0.3, at = (r: number, t: number) => [n.x + Math.cos(t) * r, n.z + Math.sin(t) * r] as const;
           const p0 = legAt(n, fl, lineAtB(b0), b0), p1 = legAt(n, fl, lineAtB(b0 + 1), b0 + 1);
           const t0 = Math.atan2(p0.z - n.z, p0.x - n.x), dir = Math.sign(Math.sin(Math.atan2(p1.z - n.z, p1.x - n.x) - t0)) || 1;
-          const dt = (G.dash + G.gap) / Rg, dd = G.dash / Rg;
-          for (let k = 0; k * (G.dash + G.gap) < kIn + 15; k++) {
-            const ta = t0 + dir * k * dt, tb = ta + dir * dd;
-            const qs = rows.map((off) => [at(Rg + off, ta), at(Rg + off, tb), at(Rg + off + G.width, tb), at(Rg + off + G.width, ta)]);
-            if (!qs.every(on)) { if (k * (G.dash + G.gap) > kIn - b0) break; continue; }
-            qs.forEach(quad);
-          }
+          corners = (k, f) => { const ta = t0 + (dir * k * P) / Rg, tb = ta + (dir * f * P) / Rg; return [at(Rg, ta), at(Rg, tb), at(Rg + wide, tb), at(Rg + wide, ta)]; };
         } else {
           // elsewhere straight across the road, where its line is
-          for (let b = b0; b < kIn + 15; b += G.dash + G.gap) {
-            const b1 = b + G.dash, la = lineAtB(b);
-            const qs = rows.map((off) => [W(la + off, b), W(la + off, b1), W(la + off + G.width, b1), W(la + off + G.width, b)]);
-            if (!qs.every(on)) { if (b > kIn) break; continue; }
-            qs.forEach(quad);
+          corners = (k, f) => { const b = b0 + k * P, b1 = b + f * P, la = lineAtB(b); return [W(la, b), W(la, b1), W(la + wide, b1), W(la + wide, b)]; };
+        }
+        const good: number[] = [];
+        for (let k = 0; k * P < kIn + 15; k++) {
+          if (corners(k, G.dash / P).every((q) => onRoad(q[0], q[1]))) good.push(k);
+          else if (k * P > kIn - b0) break;
+        }
+        // each period from its dash to the next dash (the last ends with its dash), the texture's
+        // u running on continuously; in pieces a few tenths of a metre long, to follow the ring and
+        // any slope
+        for (const k of good) {
+          const f = good.includes(k + 1) ? 1 : G.dash / P, m = Math.max(1, Math.ceil((f * P) / 0.3));
+          for (let i = 0; i < m; i++) {
+            const fa = (f * i) / m, fb = (f * (i + 1)) / m, A = corners(k + fa, 0)[0], A2 = corners(k + fa, 0)[3], B = corners(k + fb, 0)[0], B2 = corners(k + fb, 0)[3];
+            const Y = (q: readonly [number, number]) => [q[0], y + 0.365 + up(q[0], q[1]), q[1]];
+            giveWay.quad(Y(A), Y(B), Y(B2), Y(A2), [k + fa, 0], [k + fb, 0], [k + fb, v1], [k + fa, v1]);
           }
         }
       }
@@ -967,6 +1016,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   const hm = add(holes, holeMat, -10);
   if (hm) { hm.receiveShadow = false; hm.castShadow = false; }
   if (boards.pos.length) group.add(boards.mesh(chevronMat()));
+  if (giveWay.pos.length) group.add(giveWay.mesh(giveWayMat()));
   if (trees.length) {
     const trunk = mergeGeometries(trees.filter((_, i) => i % 2 === 0).map((g) => g.toNonIndexed())), crown = mergeGeometries(trees.filter((_, i) => i % 2 === 1).map((g) => g.toNonIndexed()));
     for (const [g, m] of [[trunk, trunkMat], [crown, crownMat]] as const) if (g) { const mesh = new THREE.Mesh(g, m); mesh.castShadow = true; group.add(mesh); }
