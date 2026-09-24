@@ -435,6 +435,28 @@ export class Network {
     return (c.s < d && this.segsAt(s.a).length > 1) || (L - c.s < d && this.segsAt(s.b).length > 1);
   }
 
+  // Does this road cross a railway on the level within `d` of a point on it?
+  levelCrossingNear(s: RSeg, p: P, d: number) {
+    if (this.def(s).cls !== 'road') return false;
+    const sp = this.path(s), at = closestOnPath(p, sp).s;
+    for (const r of this.segs.values()) {
+      if (this.def(r).cls !== 'rail') continue;
+      const rp = this.path(r);
+      let acc = 0;
+      for (let j = 1; j < sp.length; j++) {
+        const L = dist(sp[j - 1], sp[j]);
+        for (let i = 1; i < rp.length; i++) {
+          const h = intersect(sp[j - 1], sp[j], rp[i - 1], rp[i], true);
+          if (!h) continue;
+          const yr = (rp[i - 1].y ?? 0) + ((rp[i].y ?? 0) - (rp[i - 1].y ?? 0)) * h.u, ys = (sp[j - 1].y ?? 0) + ((sp[j].y ?? 0) - (sp[j - 1].y ?? 0)) * h.t;
+          if (Math.abs(yr - ys) < 0.5 && Math.abs(acc + h.t * L - at) < d) return true;
+        }
+        acc += L;
+      }
+    }
+    return false;
+  }
+
   // Height of the road an end joins, if it joins one.
   endHeight(e: End) {
     if (e.node !== undefined && this.nodes.has(e.node)) return this.node(e.node).y;
@@ -461,6 +483,7 @@ export class Network {
       const on = e.seg !== undefined ? this.segs.get(e.seg) : undefined;
       const at = e.node !== undefined ? this.segsAt(e.node) : [];
       if ([on, ...at].some((x) => x && this.def(x).cls !== def.cls)) return res('Roads and railways can’t join each other');
+      if (def.cls === 'road' && [on, ...at].some((x) => x && this.levelCrossingNear(x, e, CROSSING_CLEAR))) return res('Too close to a level crossing: queues at the junction would stand on the track');
       if (def.family !== 'Motorway' && ((on && isMotorway(on)) || at.filter(isMotorway).length > 1))
         return res('Roads can’t join a motorway part-way along — cross it with Over or Under, or join it where it ends');
     }
@@ -483,7 +506,10 @@ export class Network {
       }
     }
     // every road crossed: join it, go over it, or pass under it if it's already up high enough
-    for (const c of this.crossings(flat)) {
+    const allX = this.crossings(flat);
+    // (the junctions this road will make with other roads, which a level crossing must keep clear of)
+    const roadAt = (x: (typeof allX)[number]) => { const o = x.seg !== undefined ? this.segs.get(x.seg) : x.node !== undefined ? this.segsAt(x.node)[0] : undefined; return !!o && this.def(o).cls === 'road'; };
+    for (const c of allX) {
       const other = c.seg !== undefined ? this.segs.get(c.seg) : undefined;
       const oh = other ? this.half(other) : c.node !== undefined ? this.nodeHalf(c.node) : HALF;
       const span = Math.min(60, (oh + 1.5) / Math.max(0.25, c.sin));
@@ -495,7 +521,7 @@ export class Network {
       // junctions); otherwise it's the player's call
       const level = opts.cross === 'junction' && oDef.cls !== def.cls && !!other && Math.abs(c.e) < 0.3 && !crossed.some(isMotorway) && !levelCrossingOk(
         (def.cls === 'road' ? def : oDef).family, (def.cls === 'road' ? def : oDef).lanes, (def.cls === 'rail' ? def : oDef).mph, c.sin,
-        (def.cls === 'road' && (c.s < CROSSING_CLEAR || length - c.s < CROSSING_CLEAR)) || (oDef.cls === 'road' && this.nearEnds(other!, c, CROSSING_CLEAR)));
+        (def.cls === 'road' && (c.s < CROSSING_CLEAR || length - c.s < CROSSING_CLEAR || allX.some((x) => x !== c && roadAt(x) && Math.abs(x.s - c.s) < CROSSING_CLEAR))) || (oDef.cls === 'road' && this.nearEnds(other!, c, CROSSING_CLEAR)));
       const separate = !level && (opts.cross !== 'junction' || def.family === 'Motorway' || crossed.some(isMotorway) || oDef.cls !== def.cls);
       // (over a railway, its headroom for the wires, whatever crosses it: the bridges need it too)
       const over = { s0: c.s - span, s1: c.s + span, lo: c.e + (oDef.cls === 'rail' ? Math.max(spec.clear, GRADES.rail.clear) : spec.clear), why: c.e > 0.5 ? `the raised ${name.slice(4)}` : name };

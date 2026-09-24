@@ -14,12 +14,19 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
   - The blueprint shows green, or red where something is in the way.
   - Buildings on the site are bought and cleared.
   - Roads, junctions, industrial sites and other stations block it.
-- **Layouts:**
-  - On a double line: two side platforms, or an island, with the tracks spread round it.
-  - On a single line: a passing loop with an island or two platforms (so trains can cross there),
-    or one platform and no loop.
-  - Each station gets a booking hall from the building kit (`buildgen.ts`, civic `station`), a
-    footbridge where there are two platforms, and canopies.
+- **Choosing a station:**
+  - The sheet opens on **quick picks** that suit the line:
+    - on a double line: two side platforms, or an island;
+    - on a single line: a passing loop with an island or two platforms, or one platform.
+  - Every choice has its own row, and the blueprint and price follow as you change them:
+    - **Tracks:** 1–4. Tracks beyond the line's own become loops, or fast lines through the middle.
+    - **Platforms:** at the sides, islands between pairs of tracks, or on both sides of every track.
+      A track with no platform is a through line: trains that don't call run straight through.
+    - **Style:** a brick booking hall or a glass one (both from the building kit, `buildgen.ts`
+      civic `station` and `station-modern`), or a halt with a shelter on each platform.
+    - **Crossing the tracks:** a footbridge, with stairs to every platform, or a subway.
+    - **Canopies** on or off.
+    - **Platform length:** 60, 130 or 215 m.
 - **A station is refused** on:
   - a gradient steeper than 1 in 200;
   - a curve tighter than 1,000 m;
@@ -89,8 +96,17 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
     where there's another way, such as the other track of a loop.
   - A train won't take the last free track at a loop while a train going its way holds the
     other. That was a real deadlock with three trains and two loops.
-  - A single-track line can run one train more than it has passing loops. More is refused, with
-    the reason.
+  - Lines that share a single-track station are counted together. Between them they can run one
+    train more than they have passing loops, and more is refused, with the reason.
+  - The loop rule above only applies where trains come the other way, so a circular line
+    doesn't deadlock on it.
+- **Clearance points:** a signal stands where its track is 3.8 m clear of every track it meets
+  beyond (at least 12 m short of the points). A train held there is clear of the other line.
+- **Level crossings:** a block over a crossing is *claimed* with the rest of the train's run, so
+  single-line safety is unchanged. But the barriers only come down as the train approaches (its
+  braking distance plus the barriers' 9 s). The train *holds* the block only once they're down
+  and the road is clear. Until then the signal before the crossing stays red. Cars stop a metre
+  short of the barriers.
 - **Braking:** trains brake for the end of their authority with their own service brake
   (`TrainDef.brake`, `trainBraking()` in `catalog.ts`). Each step is cut short at the signal, so
   no train can pass a red one. Speed limits apply through points (50 mph), round a station's
@@ -177,7 +193,30 @@ rw.sim.log                                    // every call: { train, line, stat
 - The static parts of every station are merged into one mesh per material. Signal lamps, barrier
   arms and crossing lights are instanced and updated in place, and only when they change.
 
+## The adversarial review, and what it changed
+
+A separate review tried to break the railway, and found six bugs. All are fixed, with a test
+each in `src/proto/rail/review.test.ts`:
+1. Two lines sharing a single line could fill every passing place and deadlock. Capacity is now
+   counted across lines.
+2. The loop rule deadlocked a circular line.
+3. A car could stop 0.2 m onto a crossing and hold the train, which waited for it, for 90 s or
+   more. Crossings were also shut from over a kilometre away.
+4. Withdrawing a line left trains still waiting in its depot to run it anyway.
+5. A road could be built with a junction within 25 m of a level crossing: the crossing's own
+   road, or a side street added later.
+6. A train held at a signal could stand with its nose on the points.
+
+Also fixed: a train as long as its platform stood 7 m past it; and a rebuild that broke a
+station deleted its line and trains (now they wait until the track is back).
+
 ## Not done yet
+
+- **Partial sharing is slow.** Where a second line shares only part of a single line, its trains
+  can wait a long while at a loop for the first line's trains. They keep running, but slowly.
+- **Stations across several lines** aren't built yet: a station spanning two parallel railways or
+  a junction, with its platforms shared between them. Nor are more add-ons, such as car parks,
+  bay platforms and bus interchanges.
 
 - Trains reversing on a double line change tracks by a crossover that isn't drawn: the train
   steps across at the terminus.

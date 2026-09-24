@@ -17,7 +17,7 @@ const wait = (ms) => page.waitForTimeout(ms);
 await page.goto(url);
 await page.waitForFunction(() => window.proto?.railway, null, { timeout: 90000 });
 await wait(2500);
-await page.evaluate(() => window.proto.setSpeed(4));
+await page.evaluate(() => { window.proto.setSpeed(4); window.proto.purse.balance = 3_000_000; }); // (enough for two stations and their trains)
 
 // the starter line: two stations, trains calling at both
 const starter = await page.evaluate(() => { const R = window.proto.railway; return { stations: R.stations.map((s) => s.name), lines: R.lines.length, trains: R.trains.length }; });
@@ -52,7 +52,7 @@ async function buildStation(x) {
   await page.touchscreen.tap(s.x, s.y);
   await wait(1500);
   await page.screenshot({ path: `${out}/rail-1-plan-${x}.png` });
-  const btn = await page.$('#sheet [data-plan]:not([disabled])');
+  const btn = await page.$('#sheet [data-build]:not([disabled])');
   if (!btn) { fail(`no station can be built at x=${x}: ${(await page.textContent('#sheet').catch(() => ''))?.slice(0, 200)}`); return; }
   await btn.tap();
   await wait(1500);

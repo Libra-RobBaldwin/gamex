@@ -8,7 +8,7 @@ import type { Shell, ToolHandle } from '../ui/shell';
 import { icon } from '../ui/icons';
 import type { TownCrowds } from '../game/crowds';
 import type { QueueSite } from '../people/flows';
-import { LENGTHS, type Station, type StationPlan } from './station';
+import { LENGTHS, type Station, type StationConfig, type StationPlan } from './station';
 import type { Railway } from './railway';
 import type { RailDraw } from './draw';
 import { callOrder, type RailLine, type Train } from './sim';
@@ -123,25 +123,53 @@ export class RailGame {
     const q = net.nearestSeg(g, 30, (s) => net.def(s).cls === 'rail');
     if (!q) { this.c.hint('Tap on a railway · lay track from Build > Rail first', 'alert'); return; }
     this.tapAt = { seg: q.seg.id, s: q.s, side: net.sideOf(q.seg, g) };
+    this.cfg = null;
     this.planSheet();
     this.c.focusOn({ x: q.x, z: q.z }, 260, { x: q.ux, z: q.uz });
   }
+  // The station sheet: quick picks (the layouts that suit this line), then every choice on its own
+  // row (tracks, platforms, style, how people cross, canopies, length) and the one blueprint they
+  // make, with its price. The blueprint shows on the map as the choices change.
   private planSheet() {
-    const { railway, shell } = this.c, at = this.tapAt!;
-    const res = railway.plan(at.seg, at.s, at.side, this.len);
-    const best = res.plans.find((p) => p.recommended && p.ok) ?? res.plans.find((p) => p.ok) ?? res.plans[0];
-    this.preview(best ?? null);
-    const lens = `<div class="row3" role="group" aria-label="Platform length">${LENGTHS.map((l) => `<button data-len="${l.len}" class="${(this.len ?? res.plans[0]?.station.len) === l.len ? 'on' : ''}">${l.label} · ${l.len} m</button>`).join('')}</div>`;
-    const body = res.reason
-      ? `<div class="bad">${icon('alert')}<span>${esc(res.reason)}</span></div>${lens}`
-      : `${lens}${res.plans.map((p, i) => `<div class="plan${p.ok ? '' : ' no'}"><div class="row"><span class="tab">${esc(p.title)}${p.recommended ? ' · recommended' : ''}</span><span class="cost">${money(this.price(p.cost))}</span></div>
+    const { railway, shell, net } = this.c, at = this.tapAt!;
+    const seg = net.segs.get(at.seg), lineTracks = seg && net.def(seg).tracks === 2 ? 2 : 1;
+    const presets = railway.plan(at.seg, at.s, at.side, this.len);
+    if (!this.cfg || this.cfg.seg !== at.seg) {
+      const rec = presets.plans.find((p) => p.recommended && p.ok) ?? presets.plans.find((p) => p.ok) ?? presets.plans[0];
+      this.cfg = { seg: at.seg, ...(rec?.config ?? { tracks: lineTracks === 2 ? 2 : 2, layout: 'island', style: 'victorian', access: 'footbridge', canopy: true }) };
+    }
+    const cfg = this.cfg;
+    const res = presets.reason ? presets : railway.plan(at.seg, at.s, at.side, this.len, cfg);
+    const p = res.plans[0];
+    this.preview(p ?? null);
+    const row = (label: string, key: string, opts: [string | number | boolean, string, boolean?][], on: unknown) => `<div class="grp"><span class="tab">${label}</span><div class="row3" role="group" aria-label="${label}">${opts.map(([v, t, off]) => `<button data-opt="${key}" data-v="${v}" class="${v === on ? 'on' : ''}" aria-pressed="${v === on}" ${off ? 'disabled' : ''}>${esc(t)}</button>`).join('')}</div></div>`;
+    const len = this.len ?? p?.station.len ?? presets.plans[0]?.station.len;
+    const choices = [
+      presets.plans.length ? `<div class="grp"><span class="tab">Quick picks</span><div class="row3">${presets.plans.map((q, i) => `<button data-preset="${i}" class="${q.config.tracks === cfg.tracks && q.config.layout === cfg.layout ? 'on' : ''}">${esc(q.title)}</button>`).join('')}</div></div>` : '',
+      row('Tracks', 'tracks', [1, 2, 3, 4].map((n) => [n, n === 1 ? '1 track' : `${n} tracks`, n < lineTracks]), cfg.tracks),
+      row('Platforms', 'layout', [['side', 'At the sides'], ['island', 'Island', cfg.tracks === 1], ['both', 'Both sides']], cfg.layout),
+      row('Style', 'style', [['victorian', 'Brick hall'], ['modern', 'Glass hall'], ['halt', 'Halt']], cfg.style),
+      row('Crossing the tracks', 'access', [['footbridge', 'Footbridge'], ['subway', 'Subway']], cfg.access),
+      row('Canopies', 'canopy', [[true, 'Canopies'], [false, 'None']], cfg.canopy),
+      `<div class="grp"><span class="tab">Platform length</span><div class="row3" role="group" aria-label="Platform length">${LENGTHS.map((l) => `<button data-len="${l.len}" class="${len === l.len ? 'on' : ''}">${l.label} · ${l.len} m</button>`).join('')}</div></div>`,
+    ].join('');
+    const plan = p ? `<div class="plan${p.ok ? '' : ' no'}"><div class="row"><span class="tab">${esc(p.title)}</span><span class="cost">${money(this.price(p.cost))}</span></div>
           <ul>${p.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>${p.blocked ? `<div class="bad">${icon('alert')}<span>${esc(p.blocked)}</span></div>` : ''}
-          <button class="act primary tone-rail" data-plan="${i}" ${p.ok && this.can(this.price(p.cost)) ? '' : 'disabled'} ${this.can(this.price(p.cost)) ? '' : `title="${esc(this.short(this.price(p.cost)))}"`}>${icon('check')}<span>Build this station</span></button></div>`).join('')}`;
-    const el = shell.openSheet({ key: 'rail-station', title: res.reason ? 'Can’t build a station here' : 'Railway station', icon: 'train', tone: 'rail', body, fresh: true, onClose: () => this.preview(null) });
+          <button class="act primary tone-rail" data-build="1" ${p.ok && this.can(this.price(p.cost)) ? '' : 'disabled'} ${this.can(this.price(p.cost)) ? '' : `title="${esc(this.short(this.price(p.cost)))}"`}>${icon('check')}<span>Build this station</span></button></div>`
+      : `<div class="bad">${icon('alert')}<span>${esc(res.reason ?? 'That doesn’t fit here')}</span></div>`;
+    const body = presets.reason ? `<div class="bad">${icon('alert')}<span>${esc(presets.reason)}</span></div>${choices}` : `${plan}${choices}`;
+    const el = shell.openSheet({ key: 'rail-station', title: presets.reason ? 'Can’t build a station here' : 'Railway station', icon: 'train', tone: 'rail', body, onClose: () => { this.preview(null); this.cfg = null; } });
     el.querySelectorAll<HTMLButtonElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { this.len = +b.dataset.len!; this.planSheet(); }));
-    el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('mouseenter', () => this.preview(res.plans[+b.dataset.plan!])));
-    el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => this.buildStation(res.plans[+b.dataset.plan!])));
+    el.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((b) => b.addEventListener('click', () => { Object.assign(cfg, presets.plans[+b.dataset.preset!].config); this.planSheet(); }));
+    el.querySelectorAll<HTMLButtonElement>('[data-opt]').forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.opt as 'tracks' | 'layout' | 'style' | 'access' | 'canopy', v = b.dataset.v!;
+      (cfg as unknown as Record<string, unknown>)[k] = k === 'tracks' ? +v : k === 'canopy' ? v === 'true' : v;
+      if (cfg.tracks === 1 && cfg.layout === 'island') cfg.layout = 'side';
+      this.planSheet();
+    }));
+    el.querySelector<HTMLButtonElement>('[data-build]')?.addEventListener('click', () => p && this.buildStation(p));
   }
+  private cfg: (StationConfig & { seg: number }) | null = null;
   private buildStation(p: StationPlan) {
     const { railway, shell } = this.c;
     if (this.c.purse && !this.c.purse.spend(this.price(p.cost), 'building')) { this.c.hint(this.short(this.price(p.cost)), 'alert'); return; }
@@ -251,7 +279,7 @@ export class RailGame {
     const lines = railway.lines.filter((l) => l.stops.includes(st.id));
     const sh = railway.shapes.get(st.id);
     const use = (sh?.platforms ?? []).map((_, i) => this.c.people.platformUse(`plat:${st.id}:${i}`)).reduce((a, u) => ({ waiting: a.waiting + u.waiting, boarded: a.boarded + u.boarded, alighted: a.alighted + u.alighted }), { waiting: 0, boarded: 0, alighted: 0 });
-    const lay = st.loop ? `Passing loop · ${st.layout === 'island' ? 'island platform' : 'two platforms'}` : st.layout === 'island' ? 'Island platform' : (sh?.platforms.length ?? 1) > 1 ? 'Two side platforms' : 'One platform';
+    const n = st.tracks ?? (st.loop ? 2 : 1), lay = `${n} track${n === 1 ? '' : 's'}${st.loop ? ' (a passing loop)' : ''} · ${st.layout === 'side' ? 'side platforms' : st.layout === 'island' ? 'island' : 'platforms both sides'} · ${st.style === 'modern' ? 'glass hall' : st.style === 'halt' ? 'halt' : 'brick hall'}${(sh?.platforms.length ?? 0) > 1 || n > 1 ? ` · ${st.access === 'subway' ? 'subway' : 'footbridge'}` : ''}`;
     shell.openInfo({
       key: `station:${st.id}`, title: st.name, sub: 'Railway station', icon: 'train', tone: 'rail',
       facts: [['Layout', lay], ['Platforms', `${sh?.platforms.length ?? 0} × ${st.len} m`], ['Lines', lines.map((l) => `${l.num}`).join(', ') || 'None yet'], ['Waiting', `${use.waiting}`], ['Boarded today', `${use.boarded}`], ['Got off today', `${use.alighted}`]],

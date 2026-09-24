@@ -11,7 +11,7 @@
 // built there.
 import { CLEAR_COST, closestOnPath, minRadius, pathLength, pointAt, polysOverlap, rectCorners, subPath, type Lot, type Network, type P } from '../roads';
 import { bandPolys, type XZ } from '../land';
-import { EDGE, ISLAND, SIDE_W, TrackGraph, at, stationTracks, worksSpan, type Layout, type P3, type StationWorks } from './track';
+import { TrackGraph, stationTracks, worksSpan, type Layout, type P3, type StationWorks } from './track';
 import type { CrossingSite } from './crossing';
 
 // A station as the player built it. It's kept by where it is and which way its track runs, so it
@@ -20,16 +20,24 @@ import type { CrossingSite } from './crossing';
 export interface Station {
   id: number; name: string; x: number; z: number; hx: number; hz: number;
   len: number; layout: Layout; loop: boolean; side: 1 | -1; building: 1 | -1;
+  tracks?: number; style?: StationStyle; access?: Access; canopy?: boolean;
   depot?: { end: 1 | -1; side: 1 | -1; len: number };
   cost: number;
 }
+// What the station looks like: a brick booking hall, a modern glass one, or an unstaffed halt
+// with shelters on its platforms; and how people cross the tracks: a footbridge or a subway.
+export type StationStyle = 'victorian' | 'modern' | 'halt';
+export type Access = 'footbridge' | 'subway';
+export const STYLES: Record<StationStyle, { label: string; cost: number }> = { victorian: { label: 'Brick booking hall', cost: 350_000 }, modern: { label: 'Glass booking hall', cost: 500_000 }, halt: { label: 'Halt (shelters only)', cost: 40_000 } };
+export const ACCESS: Record<Access, { label: string; cost: number }> = { footbridge: { label: 'Footbridge', cost: 220_000 }, subway: { label: 'Subway', cost: 380_000 } };
+export interface StationConfig { tracks: number; layout: Layout; style: StationStyle; access: Access; canopy: boolean }
 export const MAX_GRADE = 0.005; // 1 in 200
 export const MIN_RADIUS = 1000;
 export const DEPOT_LEN = 140; // a siding for the longest train that runs from it, with room to spare
 // platform lengths: long enough for the longest train of each kind, and a few metres more
 export const LENGTHS = [{ len: 60, label: 'Short', fits: 'local trains of 2 cars' }, { len: 130, label: 'Long', fits: 'intercity trains of 5 cars' }, { len: 215, label: 'Very long', fits: 'high-speed trains of 8 cars' }];
 export function lengthFor(trainLen: number) { return Math.ceil((trainLen + 8) / 5) * 5; }
-const COST = { platform: 2500, building: 350_000, footbridge: 220_000, points: 120_000, depot: 400_000 };
+const COST = { platform: 2500, points: 120_000, depot: 400_000 };
 
 // Where a station is on the network now (null if its track has gone).
 export function worksFor(net: Network, st: Station): StationWorks | null {
@@ -44,17 +52,19 @@ export function worksFor(net: Network, st: Station): StationWorks | null {
   if (!best) return null;
   const k = best.sign;
   return {
-    id: st.id, seg: best.seg, s0: best.s - st.len / 2, s1: best.s + st.len / 2, layout: st.layout, loop: st.loop, side: (st.side * k) as 1 | -1,
+    id: st.id, seg: best.seg, s0: best.s - st.len / 2, s1: best.s + st.len / 2, layout: st.layout, loop: st.loop, tracks: st.tracks, side: (st.side * k) as 1 | -1,
     depot: st.depot ? { end: (st.depot.end * k) as 1 | -1, side: (st.depot.side * k) as 1 | -1, len: st.depot.len } : undefined,
   };
 }
 
 // ---------- what a station looks like on the ground ----------
-export interface PlatformShape { edge: P3[]; back: P3[]; width: number; y: number; station: number } // the edge (along the track) and the back, in order
+// a platform: its edge along a track and its other long side (`back`, also an edge when `twoFaced`)
+export interface PlatformShape { edge: P3[]; back: P3[]; width: number; y: number; station: number; twoFaced: boolean }
 export interface StationShape {
   platforms: PlatformShape[];
   building: { x: number; z: number; y: number; rot: number; w: number; d: number };
-  footbridge?: { a: XZ; b: XZ; y: number; rot: number };
+  footbridge?: { a: XZ; b: XZ; y: number; rot: number }; // (or, with a subway, where its stairs go down)
+  access: Access; style: StationStyle; canopy: boolean;
   depot?: { pts: P3[]; shed: { x: number; z: number; y: number; rot: number; w: number; d: number } }; // its siding, and a shed over the far end
   land: XZ[][];
   mid: P3; ux: number; uz: number; // the middle of the platforms, and the track's direction there (along its seg)
@@ -62,33 +72,30 @@ export interface StationShape {
 }
 const PLAT_H = 0.92; // platform surface above the rail head
 export const RAIL_TOP = 0.44;
-export function stationShape(net: Network, g: TrackGraph, w: StationWorks): StationShape | null {
-  const seg = net.segs.get(w.seg), plats = g.platforms.get(w.id);
-  if (!seg || !plats) return null;
+export function stationShape(net: Network, g: TrackGraph, w: StationWorks, look: Partial<Pick<StationConfig, 'style' | 'access' | 'canopy'>> = {}): StationShape | null {
+  const seg = net.segs.get(w.seg);
+  if (!seg || !g.platforms.get(w.id)) return null;
   const path = net.path(seg), tracks = net.def(seg).tracks === 2 ? 2 : 1;
   const st = stationTracks(w, tracks);
   const platforms: PlatformShape[] = [];
   let lo = Infinity, hi = -Infinity;
-  for (const id of plats) {
-    const p = g.pieces[id], pl = p.plat!;
-    const island = w.layout === 'island' && plats.length === 2;
-    if (island && pl.side === -1) continue; // (one island between the two tracks, drawn from the right-hand one)
-    const width = island ? ISLAND : SIDE_W, edge: P3[] = [], back: P3[] = [];
-    const n = Math.max(2, Math.ceil((pl.u1 - pl.u0) / 8));
+  // each platform along the seg between its two offsets, its edge on a track's side
+  const L = pathLength(path), n = Math.max(2, Math.ceil((w.s1 - w.s0) / 8));
+  for (const pl of st.plats) {
+    const [eo, bo] = pl.trackB && !pl.trackA ? [pl.b, pl.a] : [pl.a, pl.b];
+    const edge: P3[] = [], back: P3[] = [];
     let y = 0;
     for (let i = 0; i <= n; i++) {
-      const u = pl.u0 + ((pl.u1 - pl.u0) * i) / n, q = at(p, u), lx = q.uz * pl.side, lz = -q.ux * pl.side;
-      edge.push({ x: q.x + lx * pl.edge, y: q.y, z: q.z + lz * pl.edge });
-      back.push({ x: q.x + lx * (pl.edge + width), y: q.y, z: q.z + lz * (pl.edge + width) });
+      const q = pointAt(path, Math.max(0, Math.min(L, w.s0 + ((w.s1 - w.s0) * i) / n)));
+      edge.push({ x: q.x + q.uz * eo, y: q.y, z: q.z - q.ux * eo });
+      back.push({ x: q.x + q.uz * bo, y: q.y, z: q.z - q.ux * bo });
       y = Math.max(y, q.y);
     }
-    platforms.push({ edge, back, width, y: y + RAIL_TOP + PLAT_H, station: w.id });
+    platforms.push({ edge, back, width: Math.abs(pl.a - pl.b), y: y + RAIL_TOP + PLAT_H, station: w.id, twoFaced: pl.trackA && pl.trackB });
+    lo = Math.min(lo, pl.b); hi = Math.max(hi, pl.a);
   }
-  // how far out the platforms reach, either side of the centre line
-  for (const t of st.tracks) {
-    const sideOut = t.to + t.plat * (EDGE + (w.layout === 'island' && st.tracks.length === 2 ? 0 : SIDE_W));
-    lo = Math.min(lo, t.to - 2.5, sideOut); hi = Math.max(hi, t.to + 2.5, sideOut);
-  }
+  // how far out the tracks and platforms reach, either side of the centre line
+  for (const t of st.tracks) { lo = Math.min(lo, t.to - 2.5); hi = Math.max(hi, t.to + 2.5); }
   const sm = (w.s0 + w.s1) / 2, m = pointAt(path, sm), rot = Math.atan2(m.uz, m.ux);
   // the building on its side, at the middle of the platforms, its front to the road side
   const bSide = w.side, bw = Math.min(26, (w.s1 - w.s0) * 0.4), bd = 10;
@@ -96,9 +103,11 @@ export function stationShape(net: Network, g: TrackGraph, w: StationWorks): Stat
   const building = { x: m.x + m.uz * bo * bSide, z: m.z - m.ux * bo * bSide, y: m.y, rot, w: bw, d: bd };
   // a footbridge over the tracks, a third of the way along, from the building's side to the far platform
   let footbridge: StationShape['footbridge'];
-  if (plats.length >= 2) {
+  if (platforms.length >= 2 || st.tracks.length >= 2) {
     const fq = pointAt(path, sm + (w.s1 - w.s0) * 0.25);
-    const a = bSide === 1 ? hi : lo, b = w.layout === 'island' ? 0 : bSide === 1 ? lo : hi;
+    // (from the building's side out to the platform furthest from it)
+    const far = bSide === 1 ? Math.min(...st.plats.map((p) => (p.a + p.b) / 2)) : Math.max(...st.plats.map((p) => (p.a + p.b) / 2));
+    const a = bSide === 1 ? hi : lo, b = far;
     footbridge = { a: { x: fq.x + fq.uz * a, z: fq.z - fq.ux * a }, b: { x: fq.x + fq.uz * b, z: fq.z - fq.ux * b }, y: fq.y, rot };
   }
   const [a, b] = worksSpan({ ...w, depot: undefined }, tracks);
@@ -114,15 +123,15 @@ export function stationShape(net: Network, g: TrackGraph, w: StationWorks): Stat
     depot = { pts: pc.pts, shed };
     land.push(...bandPolys(pc.pts, 3, 3), rectCorners(shed.x, shed.z, drot, sl + 2, 10));
   }
-  return { platforms, building, footbridge, depot, land, mid: { x: m.x, y: m.y, z: m.z }, ux: m.ux, uz: m.uz, outer: [lo, hi] };
+  return { platforms, building, footbridge, depot, land, access: look.access ?? 'footbridge', style: look.style ?? 'victorian', canopy: look.canopy ?? true, mid: { x: m.x, y: m.y, z: m.z }, ux: m.ux, uz: m.uz, outer: [lo, hi] };
 }
 
 // ---------- planning ----------
 export interface StationPlan {
   layout: Layout; loop: boolean; title: string; notes: string[]; cost: number; ok: boolean; blocked?: string;
-  station: Station; works: StationWorks; shape: StationShape; clears: Lot[]; recommended?: boolean;
+  station: Station; works: StationWorks; shape: StationShape; clears: Lot[]; recommended?: boolean; config: StationConfig;
 }
-export interface StationOptions { len?: number; name?: string; crossings?: CrossingSite[]; stations?: Station[] }
+export interface StationOptions { len?: number; name?: string; crossings?: CrossingSite[]; stations?: Station[]; config?: Partial<StationConfig> & { tracks: number; layout: Layout } }
 
 // Every way a station could be built on this track at this spot, or why none can.
 export function planStation(net: Network, segId: number, s: number, tapSide: 1 | -1, o: StationOptions = {}): { plans: StationPlan[]; reason?: string } {
@@ -134,40 +143,45 @@ export function planStation(net: Network, segId: number, s: number, tapSide: 1 |
   const len = o.len ?? (def.mph >= 150 ? 215 : def.mph >= 90 ? 130 : 60);
   const q = pointAt(path, s), hx = q.ux, hz = q.uz;
   const others = (o.stations ?? []).map((x) => worksFor(net, x)).filter((x): x is StationWorks => !!x);
-  const layouts: { layout: Layout; loop: boolean; title: string; notes: string[]; extra: number; recommended?: boolean }[] = tracks === 2
-    ? [
-      { layout: 'side', loop: false, title: 'Two side platforms', notes: ['A platform either side of the double track', 'A footbridge between them'], extra: COST.footbridge, recommended: true },
-      { layout: 'island', loop: false, title: 'Island platform', notes: ['The tracks spread apart round one platform between them', 'Both directions share the platform, reached by a footbridge'], extra: COST.footbridge + COST.points },
-    ]
-    : [
-      { layout: 'island', loop: true, title: 'Passing loop, island platform', notes: ['The single line opens into two tracks, so trains can pass here', 'One platform between the tracks, reached by a footbridge'], extra: COST.footbridge + 2 * COST.points, recommended: true },
-      { layout: 'side', loop: true, title: 'Passing loop, two platforms', notes: ['The single line opens into two tracks, so trains can pass here', 'A platform on each side, with a footbridge between'], extra: COST.footbridge + 2 * COST.points },
-      { layout: 'side', loop: false, title: 'One platform', notes: ['One platform beside the single track', 'Trains can’t pass each other here'], extra: 0 },
-    ];
+  // the presets on offer, or just the one asked for
+  const look = { style: o.config?.style ?? 'victorian' as StationStyle, access: o.config?.access ?? 'footbridge' as Access, canopy: o.config?.canopy ?? true };
+  const presets: (StationConfig & { title?: string; recommended?: boolean })[] = o.config ? [{ ...look, ...o.config }] : tracks === 2
+    ? [{ tracks: 2, layout: 'side', ...look, title: 'Two side platforms', recommended: true }, { tracks: 2, layout: 'island', ...look, title: 'Island platform' }]
+    : [{ tracks: 2, layout: 'island', ...look, title: 'Passing loop, island platform', recommended: true }, { tracks: 2, layout: 'side', ...look, title: 'Passing loop, two platforms' }, { tracks: 1, layout: 'side', ...look, title: 'One platform' }];
   const plans: StationPlan[] = [];
   let reason: string | undefined;
   const id = -1;
-  for (const lay of layouts) {
-    const w: StationWorks = { id, seg: segId, s0: s - len / 2, s1: s + len / 2, layout: lay.layout, loop: lay.loop, side: tapSide };
+  for (const c of presets) {
+    const n = Math.max(tracks, Math.min(4, c.tracks)), loop = tracks === 1 && n >= 2, layout: Layout = n === 1 && c.layout === 'island' ? 'side' : c.layout;
+    const w: StationWorks = { id, seg: segId, s0: s - len / 2, s1: s + len / 2, layout, loop, tracks: n, side: tapSide };
     const [a, b] = worksSpan(w, tracks);
     const why = checkRun(path, L, a, b, s, len, others, o.crossings ?? [], segId);
     if (why) { reason ??= why; continue; }
     const g = new TrackGraph(net, [...others.filter((x) => x.seg === segId), w]);
     if (g.broken.has(id)) { reason ??= `Too close to points, the end of the track or another station · it needs about ${Math.round(b - a)} m of plain line`; continue; }
-    const shape = stationShape(net, g, w)!;
+    const shape = stationShape(net, g, w, c)!;
     // anything else on its ground (roads, junctions, sites, other stations) stops it; buildings are bought out
     const own = (k: string) => k === `road:${segId}`;
-    const hit = shape.land.map((poly) => net.land.hits(poly, (c) => own(c.key))).flat();
+    const hit = shape.land.map((poly) => net.land.hits(poly, (cl) => own(cl.key))).flat();
     const clears = net.lots.filter((l) => shape.land.some((poly) => polysOverlap(rectCorners(l.x, l.z, l.rot, l.w, l.d), poly)));
     const blocked = hit.length ? `In the way: ${hit[0].owner === 'station' ? 'another station' : hit[0].owner === 'road' ? 'a road or railway' : hit[0].owner === 'junction' ? 'a junction' : hit[0].owner === 'industry' ? 'an industrial site' : 'something already built'}` : undefined;
-    const platforms = shape.platforms.length;
-    const ramp = stationTracks(w, tracks).ramp;
-    const trackCost = lay.loop ? (len + 2 * ramp) * def.cost : lay.layout === 'island' ? (len + 2 * ramp) * def.cost : 0;
-    const cost = Math.round((platforms * len * COST.platform + COST.building + lay.extra + trackCost + clears.length * CLEAR_COST) / 1000) * 1000;
-    const notes = [...lay.notes, `${platforms === 1 ? 'The platform is' : 'Platforms are'} ${len} m long: room for ${LENGTHS.find((x) => x.len >= len)?.fits ?? 'the longest trains'}`];
+    const sec = stationTracks(w, tracks), platforms = shape.platforms.length;
+    // track: every station track moved or new is relaid, with a set of points each end for each one added
+    const perTrack = def.cost / tracks, relaid = sec.tracks.filter((t) => Math.abs(t.to - t.from) > 0.01).length + Math.max(0, n - tracks);
+    const trackCost = Math.min(n, relaid) * perTrack * (len + 2 * sec.ramp) + Math.max(0, n - tracks) * 2 * COST.points + (layout === 'island' && tracks === 2 ? 2 * COST.points : 0);
+    const reach = platforms >= 2 || n >= 2 ? ACCESS[c.access].cost : 0;
+    const cost = Math.round((platforms * len * COST.platform * (c.canopy ? 1.25 : 1) + STYLES[c.style].cost + reach + trackCost + clears.length * CLEAR_COST) / 1000) * 1000;
+    const through = sec.tracks.filter((t) => !t.plat).length;
+    const notes = [
+      loop ? `The single line opens into ${n} tracks, so trains can pass here` : n > tracks ? `${n} tracks through the station, ${n - tracks} more than the line` : `${n === 1 ? 'One track' : `${n} tracks`} through the station`,
+      `${platforms} platform${platforms === 1 ? '' : 's'}: ${layout === 'side' ? 'at the sides' : layout === 'island' ? (platforms === 1 ? 'an island between the tracks' : 'islands between the tracks') : 'on both sides of every track'} · ${len} m long, room for ${LENGTHS.find((x) => x.len >= len)?.fits ?? 'the longest trains'}`,
+      ...(through ? [`${through} track${through === 1 ? '' : 's'} without a platform: trains not calling run straight through`] : []),
+      `${STYLES[c.style].label}${reach ? ` · ${ACCESS[c.access].label.toLowerCase()} over the tracks` : ''}${c.canopy ? ' · canopies' : ''}`,
+    ];
     if (clears.length) notes.push(`${clears.length} building${clears.length === 1 ? '' : 's'} in the way ${clears.length === 1 ? 'is' : 'are'} bought and cleared`);
-    const station: Station = { id, name: o.name ?? '', x: q.x, z: q.z, hx, hz, len, layout: lay.layout, loop: lay.loop, side: tapSide, building: tapSide, cost };
-    plans.push({ layout: lay.layout, loop: lay.loop, title: lay.title, notes, cost, ok: !blocked, blocked, station, works: w, shape, clears, recommended: lay.recommended });
+    const title = c.title ?? (loop ? `Passing loop, ${n} tracks` : `${n} track${n === 1 ? '' : 's'}`) + ` · ${layout === 'side' ? 'side platforms' : layout === 'island' ? 'island' : 'platforms both sides'}`;
+    const station: Station = { id, name: o.name ?? '', x: q.x, z: q.z, hx, hz, len, layout, loop, tracks: n, side: tapSide, building: tapSide, cost, style: c.style, access: c.access, canopy: c.canopy };
+    plans.push({ layout, loop, title, notes, cost, ok: !blocked, blocked, station, works: w, shape, clears, recommended: c.recommended, config: { tracks: n, layout, style: c.style, access: c.access, canopy: c.canopy } });
   }
   if (!plans.length) return { plans, reason: reason ?? 'A station can’t go here' };
   return { plans };

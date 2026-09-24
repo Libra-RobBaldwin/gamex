@@ -1498,7 +1498,8 @@ export class Traffic {
       const xs = this.crossing.get(c.seg.id); // (people crossing)
       if (xs) for (const p of xs) { const x = closestOnPath(p, this.pathOf(c.seg, c.from)).s; if (x > c.s + c.front) ob(Math.max(0.1, x - 2 - c.s - c.front), 0, 0.3); }
       const bs = this.barriers.get(c.seg.id); // (a level crossing, shut)
-      if (bs) for (const [z0, z1] of bs) { const x = c.from === c.seg.a ? z0 : L - z1; if (x > c.s + c.front - 0.3) ob(Math.max(0.05, x - c.s - c.front), 0, 0.3); }
+      // (drawing up a metre short of it; one already on it, or nearly, drives on off it)
+      if (bs) for (const [z0, z1] of bs) { const x = c.from === c.seg.a ? z0 : L - z1; if (x > c.s + c.front + 0.5) ob(Math.max(0.05, x - 1 - c.s - c.front), 0, 0.3); }
       // and beyond the end of it
       if (!e || e.pos - c.s > this.horizon(c)) {
         if (pl) { if (admitted) this.onward(c, pl.next, pl.node, pl.path.exitLane, pl.path.outS, pl.path.lineS - c.s + (pl.path.ext1 - pl.path.ext0), 1, ob); }

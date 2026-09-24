@@ -57,6 +57,61 @@ describe('stations', () => {
     rw3.rebuild();
     expect(rw3.plan([...n3.segs.values()][0].id, 40, 1).plans.filter((p) => p.loop).length).toBe(0);
   });
+  it('come with up to four tracks: side platforms, islands or both, with fast lines through the middle', () => {
+    const net = new Network(() => false, 4000);
+    rail(net, { x: -1800, z: 0 }, { x: 1800, z: 0 });
+    const rw = new Railway(net);
+    rw.rebuild();
+    const seg = [...net.segs.values()][0], L = net.length(seg);
+    const cfg = (tracks: number, layout: 'side' | 'island' | 'both') => ({ tracks, layout, style: 'modern' as const, access: 'subway' as const, canopy: true });
+    // every combination plans, with the platforms it should have
+    const want: Record<string, number> = { '2side': 2, '2island': 1, '2both': 3, '3side': 2, '3island': 2, '3both': 4, '4side': 2, '4island': 2, '4both': 5 };
+    for (const n of [2, 3, 4]) for (const lay of ['side', 'island', 'both'] as const) {
+      const r = rw.plan(seg.id, L / 2, 1, 130, cfg(n, lay));
+      expect(r.plans.length, `${n} ${lay}: ${r.reason}`).toBe(1);
+      expect(r.plans[0].shape.platforms.length, `${n} ${lay}`).toBe(want[`${n}${lay}`]);
+      expect(r.plans[0].ok).toBe(true);
+    }
+    // a four-track station with side platforms: a stopping line calls there, an express runs through on the middle tracks
+    const a = rw.build(rw.plan(seg.id, 200, 1, 130).plans[0]).station;
+    const b = rw.build(rw.plan(seg.id, L / 2, 1, 130, cfg(4, 'side')).plans[0]).station;
+    const c = rw.build(rw.plan(seg.id, L - 200, 1, 130).plans[0]).station;
+    expect(rw.graph.platforms.get(b.id)!.length).toBe(2);
+    const stopper = rw.addLine([a.id, b.id, c.id], false, [TRAINS.dmu], { depot: false }), fast = rw.addLine([a.id, c.id], false, [TRAINS.intercity], { depot: false });
+    expect(typeof stopper).toBe('object'); expect(typeof fast).toBe('object');
+    const through = new Set(rw.graph.bySeg.get(seg.id)!.filter((i) => rw.graph.pieces[i].station === b.id && !rw.graph.pieces[i].plat && rw.graph.pieces[i].curvy === false || (rw.graph.pieces[i].station === b.id && !rw.graph.pieces[i].plat && Math.abs(rw.graph.pieces[i].off) === 2)));
+    let fastThrough = false, shared = 0;
+    for (let i = 0; i < 1800 / 0.1; i++) {
+      rw.update(0.1);
+      const [p, q] = rw.trains;
+      if (p && q) { const A = rw.sim.occupied(p), B = rw.sim.occupied(q); for (const x of A) if (B.has(x)) shared++; }
+      const f = rw.trainsOn(fast as never)[0];
+      if (f && through.has(rw.sim.front(f).piece)) fastThrough = true;
+    }
+    expect(shared).toBe(0);
+    expect(rw.sim.stats.redPassed).toBe(0);
+    expect(fastThrough).toBe(true);
+    const calls = (l: unknown) => rw.sim.log.filter((e) => e.line === (l as { id: number }).id).map((e) => e.station);
+    expect(calls(stopper)).toContain(b.id);
+    expect(calls(fast)).not.toContain(b.id);
+    expect(new Set(calls(fast))).toEqual(new Set([a.id, c.id]));
+  }, 120_000);
+  it('on a single line: three tracks with platforms both sides of each, and trains still pass there', () => {
+    const net = new Network(() => false, 4000);
+    rail(net, { x: -1500, z: 0 }, { x: 1500, z: 0 }, 'rail-branch');
+    const rw = new Railway(net);
+    rw.rebuild();
+    const seg = [...net.segs.values()][0], L = net.length(seg);
+    const a = rw.build(rw.plan(seg.id, 120, 1, 60).plans.find((p) => !p.loop)!).station;
+    const m = rw.build(rw.plan(seg.id, L / 2, 1, 60, { tracks: 3, layout: 'both', style: 'halt', access: 'footbridge', canopy: false }).plans[0]).station;
+    const c = rw.build(rw.plan(seg.id, L - 120, 1, 60).plans.find((p) => !p.loop)!).station;
+    expect(rw.graph.platforms.get(m.id)!.length).toBe(3);
+    const line = rw.addLine([a.id, m.id, c.id], false, [TRAINS.dmu, TRAINS.dmu], { depot: false });
+    expect(typeof line).toBe('object');
+    for (let i = 0; i < 1800 / 0.1; i++) rw.update(0.1);
+    expect(rw.sim.stats.redPassed).toBe(0);
+    for (const t of rw.trains) expect(t.calls, `train ${t.id}`).toBeGreaterThan(6);
+  }, 120_000);
   it('won’t take a train longer than its platforms', () => {
     const net = new Network(() => false, 3000);
     rail(net, { x: -1200, z: 0 }, { x: 1200, z: 0 });

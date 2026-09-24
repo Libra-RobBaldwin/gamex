@@ -14,7 +14,7 @@ import type { TrainDef } from '../catalog';
 import { TrackGraph, worksSpan, type StationWorks } from './track';
 import { RailSim, callOrder, type RailLine, type Train } from './sim';
 import { findCrossings, zoneFrom, type CrossingSite } from './crossing';
-import { DEPOT_LEN, planStation, stationShape, worksFor, type Station, type StationPlan, type StationShape } from './station';
+import { DEPOT_LEN, planStation, type StationOptions, stationShape, worksFor, type Station, type StationPlan, type StationShape } from './station';
 import { pointInPoly } from '../land';
 
 const NAMES = ['Central', 'Parkway', 'Town', 'Riverside', 'North Road', 'Market Street', 'Junction', 'Halt', 'West', 'East', 'Bridge Street', 'Mill Lane'];
@@ -56,7 +56,7 @@ export class Railway {
     this.shapes.clear();
     for (const w of works) {
       if (this.graph.broken.has(w.id)) { this.net.land.release(`station:${w.id}`); continue; }
-      const sh = stationShape(this.net, this.graph, w);
+      const st = this.station(w.id), sh = stationShape(this.net, this.graph, w, { style: st?.style, access: st?.access, canopy: st?.canopy });
       if (!sh) continue;
       this.shapes.set(w.id, sh);
       this.net.land.claim(`station:${w.id}`, 'station', sh.land);
@@ -66,8 +66,9 @@ export class Railway {
   }
 
   // ---------- stations ----------
-  plan(segId: number, s: number, side: 1 | -1, len?: number): { plans: StationPlan[]; reason?: string } {
-    return planStation(this.net, segId, s, side, { len, stations: this.stations, crossings: this.crossings });
+  // every preset layout that fits, or (with `config`) the one asked for: tracks, platforms, style, access, canopy
+  plan(segId: number, s: number, side: 1 | -1, len?: number, config?: StationOptions['config']): { plans: StationPlan[]; reason?: string } {
+    return planStation(this.net, segId, s, side, { len, stations: this.stations, crossings: this.crossings, config });
   }
   // Build a planned station. Returns it, and the buildings that were in its way (the game takes them down).
   build(plan: StationPlan): { station: Station; cleared: Lot[] } {
@@ -119,10 +120,7 @@ export class Railway {
     for (const t of trains.slice(0, this.sim.capacity(line))) this.sim.addTrain(t, line);
     return line;
   }
-  removeLine(l: RailLine) {
-    for (const t of this.trains.filter((x) => x.line === l)) this.sim.removeTrain(t);
-    this.sim.lines = this.sim.lines.filter((x) => x !== l);
-  }
+  removeLine(l: RailLine) { this.sim.removeLine(l); }
   addTrain(l: RailLine, def: TrainDef, dress?: unknown): Train | string { return this.sim.addTrain(def, l, dress); }
   removeTrain(t: Train) { this.sim.removeTrain(t); }
   trainsOn(l: RailLine) { return this.trains.filter((t) => t.line === l); }

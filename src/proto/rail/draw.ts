@@ -116,7 +116,7 @@ export class RailDraw {
     const rw = this.rw, g = rw.graph;
     // the track stations lay: loops, the tracks round islands, depot sidings
     for (const p of g.pieces) {
-      if (!p.curvy && p.depot === undefined) continue;
+      if (!p.curvy && !p.laid && p.depot === undefined) continue;
       const bal = p.depot !== undefined ? G.sidingBallast : G.ballast, yb = p.depot !== undefined ? 0.18 : 0.2;
       G.ballast === bal ? bal.band(p.pts, 2.4, -2.4, yb) : bal.band(p.pts, 2.2, -2.2, yb);
       track(G.sleeper, G.rail, p);
@@ -125,17 +125,23 @@ export class RailDraw {
     for (const [id, sh] of rw.shapes) {
       const st = rw.station(id);
       if (!st) continue;
-      for (const pl of sh.platforms) platform(G, pl.edge, pl.back, pl.y);
+      for (const pl of sh.platforms) platform(G, pl.edge, pl.back, pl.y, pl.twoFaced, sh.canopy && sh.style !== 'halt', sh.style === 'halt');
+      // where the footbridge (or the subway) meets each platform: its stairs go up (or down) there
+      const stairs = sh.platforms.map((pl) => { const i = Math.round((pl.edge.length - 1) * 0.75); return { x: (pl.edge[i].x + pl.back[i].x) / 2, z: (pl.edge[i].z + pl.back[i].z) / 2, y: pl.y }; });
+      if (sh.footbridge) {
+        if (sh.access === 'subway') for (const q of [...stairs, { ...sh.footbridge.a, y: sh.footbridge.y }]) subwayStairs(G, q.x, q.y, q.z, sh.footbridge.rot);
+        else footbridge(G, sh.footbridge.a, sh.footbridge.b, sh.footbridge.y, sh.footbridge.rot, sh.platforms[0]?.y ?? sh.mid.y + 1.3, stairs);
+      }
+      if (sh.depot) { const d = sh.depot.shed; shed(G, d.x, d.y, d.z, d.w, d.d, d.rot); }
+      if (sh.style === 'halt') continue; // (a halt has no booking hall: its shelters are on the platforms)
       // the building, from the building kit, facing away from the track
       const b = sh.building, nx = Math.cos(b.rot + Math.PI / 2), nz = Math.sin(b.rot + Math.PI / 2);
       const side = (b.x - sh.mid.x) * nx + (b.z - sh.mid.z) * nz > 0 ? 1 : -1, fx = nx * side, fz = nz * side;
-      const lot: Lot = { id: -id, x: b.x, z: b.z, rot: Math.atan2(-fx, fz), w: b.w, d: b.d, h: 8, kind: 'civic', arch: 'station', seg: 0, seed: ((id * 0.6180339) % 1), row: -id, front: 6, back: st.layout === 'island' ? 0.5 : 3.6, px: 0, pw: b.w + 4 };
+      const lot: Lot = { id: -id, x: b.x, z: b.z, rot: Math.atan2(-fx, fz), w: b.w, d: b.d, h: 8, kind: 'civic', arch: sh.style === 'modern' ? 'station-modern' : 'station', seg: 0, seed: ((id * 0.6180339) % 1), row: -id, front: 6, back: st.layout === 'island' ? 0.5 : 3.6, px: 0, pw: b.w + 4 };
       const shape = makeBuilding(lot);
       shape.group.position.y = b.y;
       shape.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       this.statics.add(shape.group);
-      if (sh.footbridge) footbridge(G, sh.footbridge.a, sh.footbridge.b, sh.footbridge.y, sh.footbridge.rot, sh.platforms[0]?.y ?? b.y + 1.3);
-      if (sh.depot) { const d = sh.depot.shed; shed(G, d.x, d.y, d.z, d.w, d.d, d.rot); }
     }
     // level crossings: a deck of panels over the track where the road crosses it
     for (const c of rw.crossings) {
@@ -150,7 +156,7 @@ export class RailDraw {
     // signals: a post and a head at the end of each block, on the driver's left
     this.sig = [];
     for (const s of rw.sim.signals()) {
-      const p = g.pieces[s.piece], q = at(p, s.dir === 1 ? p.len - 1 : 1), hx = q.ux * s.dir, hz = q.uz * s.dir;
+      const p = g.pieces[s.piece], back = rw.sim.signalBack(s), q = at(p, s.dir === 1 ? p.len - back : back), hx = q.ux * s.dir, hz = q.uz * s.dir;
       // (the left of the way the train is going; a double line's signals stand outside its tracks)
       const lx = hz, lz = -hx, o = 2.9;
       const x = q.x + lx * o, z = q.z + lz * o;
@@ -335,7 +341,9 @@ function track(sl: Geo, rl: Geo, p: Piece) {
 }
 // a platform: its top, the face along the track, the back down to the ground, and its ends; a white
 // edge and a yellow line a stride back from it
-function platform(G: Record<string, Geo>, edge: P3[], back: P3[], top: number) {
+// (twoFaced: tracks both sides, so both edges get their lines; canopy over the middle half; a halt's
+// shelter instead)
+function platform(G: Record<string, Geo>, edge: P3[], back: P3[], top: number, twoFaced = false, canopy = true, shelter = false) {
   const n = edge.length, lift = top;
   const v = (p: P3, y: number) => [p.x, y, p.z];
   for (let i = 1; i < n; i++) {
@@ -352,7 +360,16 @@ function platform(G: Record<string, Geo>, edge: P3[], back: P3[], top: number) {
     const q = (k0: number, k1: number, g: Geo) => g.quad(v(lerp(edge[i - 1], back[i - 1], k0), lift + 0.01), v(lerp(edge[i - 1], back[i - 1], k1), lift + 0.01), v(lerp(edge[i], back[i], k1), lift + 0.01), v(lerp(edge[i], back[i], k0), lift + 0.01));
     q(0, 0.12 / w, G.edge);
     q(0.8 / w, 0.9 / w, G.yellow);
+    if (twoFaced) { q(1 - 0.12 / w, 1, G.edge); q(1 - 0.9 / w, 1 - 0.8 / w, G.yellow); }
   }
+  if (shelter) {
+    // a bus-stop style shelter at the middle, its back to the far side
+    const i = Math.floor(n / 2), p = lerp(edge[i], back[i], 0.6), q2 = edge[Math.min(n - 1, i + 1)], rot = Math.atan2(q2.z - edge[i].z, q2.x - edge[i].x);
+    G.steel.box(p.x, lift, p.z, 4.2, 2.5, 0.12, rot);
+    G.panel.box(p.x, lift + 0.4, p.z, 4, 1.6, 0.1, rot);
+    G.roof.box(p.x, lift + 2.5, p.z, 4.6, 0.12, 1.8, rot);
+  }
+  if (!canopy) return;
   // a canopy over the middle half, on posts along its back
   const i0 = Math.floor(n * 0.3), i1 = Math.ceil(n * 0.7);
   for (let i = i0; i < i1; i++) {
@@ -362,15 +379,26 @@ function platform(G: Record<string, Geo>, edge: P3[], back: P3[], top: number) {
   }
 }
 // a footbridge: stair towers each end, and an enclosed span between them high enough for the wires
-function footbridge(G: Record<string, Geo>, a: XZ, b: XZ, y: number, rot: number, deck: number) {
+function footbridge(G: Record<string, Geo>, a: XZ, b: XZ, y: number, rot: number, deck: number, stairs: { x: number; y: number; z: number }[] = []) {
   const top = y + 7.2, L = Math.hypot(b.x - a.x, b.z - a.z), ang = Math.atan2(b.z - a.z, b.x - a.x), mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
   G.steel.box(mx, top, mz, L + 2.6, 0.35, 2.4, ang);
   G.panel.box(mx, top + 0.35, mz, L + 2.6, 1.3, 2.4, ang);
   G.roof.box(mx, top + 2.4, mz, L + 3, 0.12, 2.8, ang);
-  for (const e of [a, b]) {
-    G.steel.box(e.x, deck, e.z, 2.6, top - deck + 2.4, 2.6, rot);
-    G.panel.box(e.x, deck + 0.5, e.z, 2.7, top - deck - 0.6, 2.7, rot);
+  // stair towers down to each platform it crosses, and to the ground at the building's end
+  const towers = stairs.length ? [{ ...a, y: deck }, ...stairs] : [{ ...a, y: deck }, { ...b, y: deck }];
+  for (const e of towers) {
+    G.steel.box(e.x, e.y, e.z, 2.6, top - e.y + 2.4, 2.6, rot);
+    G.panel.box(e.x, e.y + 0.5, e.z, 2.7, top - e.y - 0.6, 2.7, rot);
   }
+}
+// a subway's stairs going down from a platform (or the forecourt): low walls round the well and a roof over it
+function subwayStairs(G: Record<string, Geo>, x: number, y: number, z: number, rot: number) {
+  const c = Math.cos(rot), s = Math.sin(rot);
+  for (const k of [-1, 1]) G.panel.box(x - s * 1.1 * k, y, z + c * 1.1 * k, 5, 1.1, 0.2, rot);
+  G.panel.box(x + c * 2.5, y, z + s * 2.5, 0.2, 1.1, 2.4, rot);
+  G.head.box(x, y + 0.04, z, 4.6, 0.02, 2, rot); // (the dark of the stairwell)
+  for (const k of [-1, 1]) G.steel.box(x - s * 1.1 * k + c * 2.2, y, z + c * 1.1 * k + s * 2.2, 0.12, 2.6, 0.12, rot);
+  G.roof.box(x + c * 0.4, y + 2.6, z + s * 0.4, 5.4, 0.12, 2.8, rot);
 }
 function shed(G: Record<string, Geo>, x: number, y: number, z: number, w: number, d: number, rot: number) {
   // (open at the end the siding runs in: three walls and a roof)

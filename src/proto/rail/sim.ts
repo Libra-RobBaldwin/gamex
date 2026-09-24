@@ -38,9 +38,14 @@ const LA_MIN = 250; // reserve at least this far ahead
 const PLAT_MPH = 40, DEPOT_MPH = 15, POINTS_MPH = 50;
 const DWELL = 15; // seconds at a platform, before anyone boards (onCall adds to it)
 const REVERSE_COST = 400;
+export const SIGNAL_BACK = 12; // a signal stands this far short of the end of its block (clear of the points beyond)
+const STOP_BACK = 2; // a train calling draws up this far short of the platform's end
 
 export class RailSim {
   owner: Int32Array;
+  // a block over a level crossing, claimed by a train with the rest of its run but not yet held:
+  // it's held (owner) only once the train is near, the barriers are down and the road is clear
+  claim: Int32Array;
   trains: Train[] = [];
   lines: RailLine[] = [];
   crossings: LevelCrossing[] = [];
@@ -57,6 +62,7 @@ export class RailSim {
 
   constructor(public graph: TrackGraph, crossings: CrossingSite[] = []) {
     this.owner = new Int32Array(graph.blocks.length);
+    this.claim = new Int32Array(graph.blocks.length);
     this.attach(crossings);
   }
   private attach(sites: CrossingSite[]) {
@@ -71,6 +77,9 @@ export class RailSim {
       }
     });
   }
+
+  // is a block held or claimed by a train other than this one?
+  taken(b: number, id = 0) { const o = this.owner[b], c = this.claim[b]; return (o !== 0 && o !== id) || (c !== 0 && c !== id); }
 
   // ---------- trains ----------
   piece(s: Step) { return this.graph.pieces[s.piece]; }
@@ -99,30 +108,46 @@ export class RailSim {
   }
   // How many trains a line can run without them blocking each other for good: on a single line,
   // one more than the places they can pass (its passing loops); on double track, any number.
-  capacity(line: RailLine) {
-    const g = this.graph, plats = line.stops.map((s) => (g.platforms.get(s) ?? []).map((i) => g.pieces[i]));
-    if (plats.every((ps) => ps.some((p) => p.oneWay !== 0))) return Infinity;
-    return 1 + plats.filter((ps) => ps.length >= 2 && ps.every((p) => p.oneWay === 0)).length;
+  // Lines that share a single-track station share its line, so they're counted together: the
+  // group of lines linked that way, all their stations, and how many trains they may run between them.
+  capacity(line: RailLine) { return this.group(line).cap; }
+  group(line: RailLine) {
+    const g = this.graph, single = (s: number) => (g.platforms.get(s) ?? []).some((i) => g.pieces[i].oneWay === 0);
+    const lines = new Set<RailLine>([line]), all = [...new Set([...this.lines, line])];
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const l of all) if (!lines.has(l) && l.stops.some((s) => single(s) && [...lines].some((m) => m.stops.includes(s)))) { lines.add(l); grew = true; }
+    }
+    const stations = new Set([...lines].flatMap((l) => l.stops));
+    if (![...stations].some(single)) return { lines, cap: Infinity };
+    const loops = [...stations].filter((s) => { const ps = (g.platforms.get(s) ?? []).map((i) => g.pieces[i]); return ps.length >= 2 && ps.every((p) => p.oneWay === 0); }).length;
+    return { lines, cap: 1 + loops };
   }
   // Why a train can't run a line (null if it can): too long for a platform, or track it can't use.
   fits(def: TrainDef, length: number, line: RailLine, adding = false): string | null {
     if (adding) {
-      const n = this.trains.filter((t) => t.line === line).length + this.pending.filter((p) => p.train.line === line).length, cap = this.capacity(line);
-      if (n >= cap) return `A single line with ${cap - 1 === 0 ? 'no passing loops' : cap - 1 === 1 ? 'one passing loop' : `${cap - 1} passing loops`} can only run ${cap} train${cap === 1 ? '' : 's'} · add a station with a loop`;
+      const { lines, cap } = this.group(line), n = this.trains.filter((t) => t.line && lines.has(t.line)).length + this.pending.filter((p) => p.train.line && lines.has(p.train.line)).length;
+      const loops = cap - 1 === 0 ? 'no passing loops' : cap - 1 === 1 ? 'one passing loop' : `${cap - 1} passing loops`, trains = `${cap} train${cap === 1 ? '' : 's'}`;
+      if (n >= cap) return lines.size > 1 ? `These lines share a single line with ${loops}: together they can only run ${trains} · add a station with a loop` : `A single line with ${loops} can only run ${trains} · add a station with a loop`;
     }
     for (const s of line.stops) {
       const plats = this.graph.platforms.get(s);
       if (!plats?.length) return 'One of its stations isn’t on the track any more';
       const longest = Math.max(...plats.map((i) => { const p = this.graph.pieces[i]; return p.plat ? p.plat.u1 - p.plat.u0 : 0; }));
-      if (length > longest + 1) return `Too long for the platforms (${Math.round(length)} m train, ${Math.round(longest)} m platform)`;
+      if (length > longest - STOP_BACK + 0.5) return `Too long for the platforms (${Math.round(length)} m train, ${Math.round(longest)} m platform)`;
       if (!plats.some((i) => this.graph.usable(this.graph.pieces[i], def))) return def.needsWires ? 'It needs electrified line' : def.rack ? 'Rack track only at one of the stations' : 'The line is too steep for it';
     }
     return null;
   }
+  // a line withdrawn: its trains leave the track, and any still waiting to come out of the depot go too
+  removeLine(line: RailLine) {
+    for (const t of [...this.trains, ...this.pending.map((p) => p.train)]) if (t.line === line) this.removeTrain(t);
+    this.lines = this.lines.filter((l) => l !== line);
+  }
   removeTrain(t: Train) {
     this.trains = this.trains.filter((x) => x !== t);
     this.pending = this.pending.filter((p) => p.train !== t);
-    for (const b of t.held) if (this.owner[b] === t.id) this.owner[b] = 0;
+    for (const b of t.held) { if (this.owner[b] === t.id) this.owner[b] = 0; if (this.claim[b] === t.id) this.claim[b] = 0; }
     t.held.clear();
   }
   // bring waiting trains out onto the track where there's room
@@ -137,8 +162,8 @@ export class RailSim {
       } else {
         for (const pi of g.platforms.get(p.station) ?? []) {
           const pc = g.pieces[pi];
-          if (!g.usable(pc, t.def) || this.owner[pc.block]) continue;
-          const dir: Dir = pc.oneWay || 1, u = dir === 1 ? pc.plat!.u1 - 6 : pc.len - pc.plat!.u0 - 6;
+          if (!g.usable(pc, t.def) || this.taken(pc.block)) continue;
+          const dir: Dir = pc.oneWay || 1, u = dir === 1 ? pc.plat!.u1 - STOP_BACK : pc.len - pc.plat!.u0 - STOP_BACK;
           place = { step: { piece: pi, dir }, u };
           break;
         }
@@ -146,7 +171,7 @@ export class RailSim {
       if (!place) continue;
       const body = this.backFrom(place.step, place.u, t.length);
       const blocks = new Set(body.map((s) => g.pieces[s.piece].block));
-      if ([...blocks].some((b) => this.owner[b] !== 0)) continue;
+      if ([...blocks].some((b) => this.taken(b))) continue;
       t.body = body; t.u = place.u; t.v = 0; t.held = blocks;
       for (const b of blocks) this.owner[b] = t.id;
       t.state = 'held'; t.station = depot === undefined ? p.station : undefined;
@@ -180,8 +205,8 @@ export class RailSim {
     this.stats.replans++;
     const g = this.graph, target = this.next(t), plats = new Set(g.platforms.get(target) ?? []);
     const standing = t.v < 0.05;
-    const penal = (p: Piece) => { const o = this.owner[p.block]; return o && o !== t.id ? (g.blocks[p.block].kind === 'platform' ? 3000 : 400) : 0; };
-    const stopU = (p: Piece, d: Dir) => (d === 1 ? p.plat!.u1 - 6 : p.len - p.plat!.u0 - 6);
+    const penal = (p: Piece) => { return this.taken(p.block, t.id) ? (g.blocks[p.block].kind === 'platform' ? 3000 : 400) : 0; };
+    const stopU = (p: Piece, d: Dir) => (d === 1 ? p.plat!.u1 - STOP_BACK : p.len - p.plat!.u0 - STOP_BACK);
     // states: a piece and the way along it; the cost is the distance to its start
     type Node = { key: number; step: Step; g: number; prev: number; rev: boolean };
     const best = new Map<number, Node>(), heap: Node[] = [];
@@ -222,7 +247,7 @@ export class RailSim {
       if (!flip) return false;
       // the driver changes ends: the train now faces the other way, on the same track (or the one alongside)
       const blocks = new Set(flip.body.map((s) => g.pieces[s.piece].block));
-      if ([...blocks].some((b) => this.owner[b] !== 0 && this.owner[b] !== t.id)) return false;
+      if ([...blocks].some((b) => this.taken(b, t.id))) return false;
       t.body = flip.body; t.u = flip.u; t.flipped = !t.flipped;
       for (const b of blocks) { this.owner[b] = t.id; t.held.add(b); }
     }
@@ -231,6 +256,7 @@ export class RailSim {
     this.dropHeld(t);
     return true;
   }
+  private stationAt(t: Train) { return this.piece(this.front(t)).plat?.station; }
   private tailU(t: Train) {
     let acc = t.u;
     for (let i = t.body.length - 2; i >= 0; i--) acc += this.piece(t.body[i]).len;
@@ -256,14 +282,12 @@ export class RailSim {
         const nextBlk = j < t.route.length ? this.piece(t.route[j]).block : -1;
         if (g.blocks[blk].safe && nextBlk !== blk) break;
       }
-      const fresh = chunk.filter((x) => this.owner[x] !== t.id);
-      if (fresh.some((x) => this.owner[x] !== 0)) break;
+      const fresh = chunk.filter((x) => this.owner[x] !== t.id && this.claim[x] !== t.id);
+      if (fresh.some((x) => this.taken(x, t.id))) break;
       if (this.lastTrackAtLoop(t, t.route[j - 1])) break;
-      // (the barriers come down only once the rest of the way is clear)
-      const xs = fresh.flatMap((x) => g.blocks[x].crossings);
-      for (const c of xs) want.add(c);
-      if (xs.some((c) => !this.crossings[c].down || !this.roadClear(this.crossings[c].site))) break;
-      for (const x of fresh) { this.owner[x] = t.id; t.held.add(x); }
+      // (a block over a level crossing is only claimed now: see approach())
+      for (const x of fresh) { if (g.blocks[x].crossings.length) this.claim[x] = t.id; else this.owner[x] = t.id; t.held.add(x); }
+      void want;
       this.stats.reservations++;
       t.resv = j;
     }
@@ -275,33 +299,62 @@ export class RailSim {
     if (!p.plat || p.oneWay !== 0) return false;
     const plats = g.platforms.get(p.plat.station) ?? [];
     if (plats.length < 2) return false;
+    // (only where trains come the other way: on a ring every line runs round one way, and holding
+    // back there would only stop the trains ahead leaving)
+    const st = p.plat.station, both = this.lines.some((l) => !l.loop && l.stops.includes(st)) || this.trains.some((o) => o !== t && o.route.concat(o.body).some((x) => plats.includes(x.piece) && x.dir !== last.dir));
+    if (!both) return false;
     let sameWay = false;
     for (const i of plats) {
       if (i === p.id) continue;
-      const o = this.owner[g.pieces[i].block];
+      const o = this.owner[g.pieces[i].block] || this.claim[g.pieces[i].block];
       if (!o || o === t.id) return false; // a track is still free
       const ot = this.trains.find((x) => x.id === o), st = ot?.body.find((s) => s.piece === i) ?? ot?.route.find((s) => s.piece === i);
       if (st && st.dir === last.dir) sameWay = true;
     }
     return sameWay;
   }
-  // how far the train may go: to the end of what's reserved, or its stop (whichever is first)
+  // Nearing a level crossing it has claimed: the barriers come down in time for it to run on at
+  // speed (their 9 s, and its braking distance), and once they're down and the road is clear the
+  // block is the train's.
+  private approach(t: Train, want: Set<number>) {
+    const b = trainBraking(t.def).brake, reach = (t.v * t.v) / (2 * b) + t.v * 11 + 80;
+    let d = this.piece(this.front(t)).len - t.u;
+    for (let i = 0; i < t.resv && d < reach + 1000; i++) {
+      const blk = this.piece(t.route[i]).block;
+      if (this.claim[blk] === t.id && this.owner[blk] !== t.id) {
+        if (d > reach) break;
+        const xs = this.graph.blocks[blk].crossings;
+        for (const c of xs) want.add(c);
+        if (xs.every((c) => this.crossings[c].down && this.roadClear(this.crossings[c].site)) && this.owner[blk] === 0) { this.owner[blk] = t.id; this.claim[blk] = 0; }
+        else break;
+      }
+      d += this.piece(t.route[i]).len;
+    }
+  }
+  // how far the train may go: to its stop, or to the signal at the end of what's reserved, which
+  // stands SIGNAL_BACK short of the block's end so a train held there is clear of the points
   authority(t: Train, ignoreStop = false) {
     let d = this.piece(this.front(t)).len - t.u;
     if (!ignoreStop && t.stop && t.stop.k === -1) return t.stop.u - t.u;
     for (let i = 0; i < t.resv; i++) {
+      const b = this.piece(t.route[i]).block;
+      // (the signal before a level crossing stays red until the barriers are down and the road clear)
+      if (!ignoreStop && this.owner[b] !== t.id && this.claim[b] === t.id) return d - this.signalBack(i ? t.route[i - 1] : this.front(t));
       if (!ignoreStop && t.stop && t.stop.k === i) return d + t.stop.u;
       d += this.piece(t.route[i]).len;
     }
-    return d;
+    if (ignoreStop || (t.resv >= t.route.length && t.stop)) return d;
+    return d - this.signalBack(t.resv ? t.route[t.resv - 1] : this.front(t));
   }
+  // how far short of a piece's end its signal stands: clear of the points beyond (at least SIGNAL_BACK)
+  signalBack(s: Step) { const p = this.piece(s); return Math.min(p.len * 0.6, Math.max(SIGNAL_BACK, s.dir === 1 ? p.clearB : p.clearA)); }
   // release blocks the train is clear of and no longer needs
   private dropHeld(t: Train) {
     const need = new Set<number>();
     for (const s of t.body) need.add(this.piece(s).block);
     for (let i = 0; i < t.resv; i++) need.add(this.piece(t.route[i]).block);
     for (const s of t.later) need.add(this.piece(s).block);
-    for (const b of t.held) if (!need.has(b)) { t.held.delete(b); if (this.owner[b] === t.id) this.owner[b] = 0; }
+    for (const b of t.held) if (!need.has(b)) { t.held.delete(b); if (this.owner[b] === t.id) this.owner[b] = 0; if (this.claim[b] === t.id) this.claim[b] = 0; }
   }
   // The aspect each signal shows, by the piece and direction it stands at the end of: 0 red, 1 single
   // yellow, 2 double yellow, 3 green (UK four-aspect: how many blocks ahead are clear for the train).
@@ -347,7 +400,7 @@ export class RailSim {
       t.leg++;
       t.state = 'held';
       t.station = undefined;
-      if (!this.plan(t)) { t.leg--; t.state = 'dwell'; t.dwell = t.dwellFor - 2; return; }
+      if (!this.plan(t)) { t.leg--; t.state = 'dwell'; t.dwell = t.dwellFor - 2; t.station = t.stop?.station ?? this.stationAt(t); return; }
     }
     if (t.state === 'held') {
       if (!t.route.length && !t.stop && this.time >= t.replanAt) { t.replanAt = this.time + 5; this.plan(t); }
@@ -355,6 +408,7 @@ export class RailSim {
       else return;
     }
     this.reserve(t, want);
+    this.approach(t, want);
     const { accel, brake } = trainBraking(t.def);
     const f = this.front(t), fp = this.piece(f), q = atDir(fp, f.dir, t.u);
     const lim = (p: Piece) => {
@@ -413,6 +467,7 @@ export class RailSim {
     const olds = this.trains.map((t) => ({ t, at: this.pose(t), tail: this.pose(t, Math.min(t.length, 20)) }));
     this.graph = graph;
     this.owner = new Int32Array(graph.blocks.length);
+    this.claim = new Int32Array(graph.blocks.length);
     this.attach(crossings);
     this.trains = [];
     for (const { t, at: p, tail } of olds) {
@@ -420,8 +475,9 @@ export class RailSim {
       t.held = new Set(); t.route = []; t.resv = 0; t.later = []; t.stop = null;
       const body = hit && graph.usable(graph.pieces[hit.step.piece], t.def) ? this.backFrom(hit.step, hit.u, t.length) : null;
       const blocks = body ? new Set(body.map((s) => graph.pieces[s.piece].block)) : null;
-      if (!body || !blocks || [...blocks].some((b) => this.owner[b] !== 0) || (t.line && this.fits(t.def, t.length, t.line))) {
-        if (t.line && !this.fits(t.def, t.length, t.line)) { t.state = 'held'; this.pending.push({ train: t, station: t.line.depot ?? t.line.stops[0] }); }
+      if (!body || !blocks || [...blocks].some((b) => this.taken(b))) {
+        // (nowhere to put it: it waits in its depot, or at its first station, until there's room or the track is back)
+        if (t.line && this.lines.includes(t.line)) { t.state = 'held'; this.pending.push({ train: t, station: t.line.depot ?? t.line.stops[0] }); }
         continue;
       }
       t.body = body; t.u = hit!.u;
@@ -429,7 +485,7 @@ export class RailSim {
       this.trains.push(t);
       if (t.state !== 'dwell') { t.state = 'held'; if (t.v > 0.05) t.v = 0; this.plan(t); }
     }
-    this.lines = this.lines.filter((l) => l.stops.every((s) => graph.platforms.has(s)));
+    // (lines are kept whatever happened to their stations: a train waits until its next station is back)
   }
 
   // blocks each train's body is in now (for tests: no two trains ever share one)

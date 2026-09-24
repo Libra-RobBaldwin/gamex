@@ -1196,7 +1196,8 @@ export const CIVIC: Record<string, { w: number; d: number; front: number; back: 
   hall: { w: 15, d: 10, front: 6, back: 6, label: 'Community hall', pop: 3, unit: 'jobs' },
   cornershop: { w: 9, d: 9, front: 3, back: 5, label: 'Corner shop', pop: 4, unit: 'jobs' },
   substation: { w: 6, d: 5, front: 2.5, back: 2.5, label: 'Electricity substation', pop: 0, unit: 'jobs' },
-  station: { w: 22, d: 10, front: 7, back: 0.5, label: 'Railway station', pop: 12, unit: 'jobs' }, // (only rail/draw.ts builds one, beside its platforms)
+  station: { w: 22, d: 10, front: 7, back: 0.5, label: 'Railway station', pop: 12, unit: 'jobs' }, // (only rail/draw.ts builds these, beside their platforms)
+  'station-modern': { w: 24, d: 11, front: 7, back: 0.5, label: 'Railway station', pop: 14, unit: 'jobs' },
 };
 const SAINTS = ['St Mary’s', 'St John’s', 'All Saints', 'St Peter’s', 'Holy Trinity', 'St Michael’s', 'St Andrew’s'];
 const PUBS = ['The Red Lion', 'The Crown', 'The Railway', 'The Royal Oak', 'The Plough', 'The White Hart', 'The Bell', 'The Swan'];
@@ -1304,6 +1305,23 @@ function civic(k: Kit, l: Lot, r: () => number) {
       k.box(0, 3.25, D / 2 + 0.11, Math.min(8.4, W * 0.46), 0.4, 0.04, cream);
       name = 'Railway station';
       out.push(L.wall[1], 'booking hall', 'platform canopy');
+      break;
+    }
+    case 'station-modern': {
+      // a glass booking hall with a flat roof overhanging its front, and a canopy over the platform behind
+      const L = look(r, 'glass', 'curtain', '#3a3f45');
+      flat(k, X0, zf, X1, F, 0.05, slabsM());
+      k.block(0, 0, W, D, 0, 1, 5.2, 3, facade('lobby', 'glass', L.wall[0], '#3a3f45', '#1f5e3f'), fm(L), fm(L));
+      const grey = plain('#e4e6e8'), green = plain('#1f5e3f');
+      k.box(0, 5.2, 0.8, W + 1.6, 0.45, D + 3.2, grey);
+      k.box(0, 4.4, D / 2 + 0.06, Math.min(10, W * 0.5), 0.6, 0.08, green);
+      const cd = Math.min(3.6, l.back);
+      if (cd >= 2) {
+        k.box(0, 3.6, -D / 2 - cd / 2 - 0.1, W - 1, 0.2, cd, grey);
+        for (let i = 0; i < 4; i++) k.box(-W / 2 + 1.5 + ((W - 3) * i) / 3, 0, -D / 2 - cd + 0.6, 0.18, 3.6, 0.18, plain('#8a9096'));
+      }
+      name = 'Railway station';
+      out.push('glass booking hall', ...(cd >= 2 ? ['platform canopy'] : []));
       break;
     }
     default: {
