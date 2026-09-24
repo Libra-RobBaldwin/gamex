@@ -5,13 +5,16 @@
 import { MAPS, type MapInfo } from '../proto/maps';
 import { NAME, markSvg, ridgeSvg } from '../proto/ui/brand';
 import { icon, type Icon } from '../proto/ui/icons';
+import { EXPLORERS, libraryHref } from './library';
+import { bindRegion, lastRegion, regionBody } from './regionsetup';
 import type { Screen } from './route';
 import { TIER_NAMES, TIER_NOTES, guideSeen, quality, setGuideSeen, setQuality } from './store';
 
 export interface MenuHost {
   go(screen: Screen): void;
   back(): void;
-  play(map: MapInfo, guide: boolean): void;
+  /** start a map; `query` is the whole address query when the map has options (the region's) */
+  play(map: MapInfo, guide: boolean, query?: string): void;
   /** the latest save, once the game can save (nothing saves yet) */
   save: { name: string; when: string; open(): void } | null;
 }
@@ -35,6 +38,7 @@ function home(h: MenuHost) {
       ${s ? `<button class="mrow primary" data-continue>${icon('play')}<span class="t"><b>Continue</b><small>${esc(s.name)} · ${esc(s.when)}</small></span>${chev()}</button>` : ''}
       ${row('new', s ? 'plus' : 'play', 'New game', 'Pick a map to start on', !s)}
       ${row('how', 'finger', 'How to play', 'The controls, and the guided start')}
+      ${row('library', 'layers', 'Library', 'Every vehicle, bridge and building block')}
       ${row('settings', 'cog', 'Settings', 'Quality, and the guide')}
       ${row('about', 'info', 'About', 'Credits and licences')}
     </nav>
@@ -51,7 +55,8 @@ function newGame(notice?: string) {
       <div class="t"><b>${esc(m.name)}</b><small>${esc(m.blurb)}</small>
         ${m.ready ? '' : `<em class="chip">${esc(m.soon ?? 'Coming soon')}</em>`}</div>
       <div class="go">${m.ready
-        ? `<button class="act primary" data-play="${m.id}" aria-label="Play ${esc(m.name)}">${icon('play')}<span>Play</span></button>`
+        ? m.setup ? `<button class="act primary" data-go="${m.id}" aria-label="Set up ${esc(m.name)}">${icon('adjustments')}<span>Set up and play</span></button>`
+          : `<button class="act primary" data-play="${m.id}" aria-label="Play ${esc(m.name)}">${icon('play')}<span>Play</span></button>`
         : m.link ? `<a class="act" href="${m.link.href}">${icon('map')}<span>${esc(m.link.label)}</span></a>` : ''}</div>
     </li>`).join('')}</ul>`;
 }
@@ -67,7 +72,19 @@ function how() {
       ${item('menu', 'Everything else', 'Tap anything on the map to see what it is. <b>Layers</b> changes the view, and <b>Menu</b> has quality and the way back here.')}
     </ul>
     <button class="act primary wide" data-guide>${icon('play')}<span>Start the guided game</span></button>
+    <button class="act wide lib-link" data-go="library">${icon('layers')}<span>See every vehicle and bridge in the Library</span></button>
     <p class="fine">The guide takes you through your first road, stop and line in the starter town. You can skip it at any point.</p>`;
+}
+
+// the game's building blocks, each on its own explorer page (src/app/library.ts)
+function library() {
+  return `<p class="fine">Everything the game is built from, each on a page of its own to look round. Drag, pinch and twist as in the game.</p>
+    <ul class="maps lib">${EXPLORERS.map((e) => `<li class="map ready">
+      <i class="art">${icon(e.icon)}</i>
+      <div class="t"><b>${esc(e.name)}</b><small>${esc(e.blurb)}</small></div>
+      <div class="go"><a class="act" href="${libraryHref(e)}" data-explorer="${e.id}">${icon('play')}<span>Explore</span></a></div>
+    </li>`).join('')}</ul>
+    <p class="fine">Each opens on its own and loads what it shows, so the first visit to one takes a moment. Back returns here.</p>`;
 }
 
 function settings() {
@@ -101,14 +118,16 @@ function about() {
 
 const TITLES: Record<Exclude<Screen, 'home'>, [string, Icon]> = {
   new: ['New game', 'play'],
+  region: ['Region', 'map'],
   how: ['How to play', 'finger'],
+  library: ['Library', 'layers'],
   settings: ['Settings', 'cog'],
   about: ['About', 'info'],
 };
 
 /** Draw a screen into the menu's root, and wire it. */
 export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: string) {
-  const body = screen === 'home' ? home(h) : screen === 'new' ? newGame(notice) : screen === 'how' ? how() : screen === 'settings' ? settings() : about();
+  const body = screen === 'home' ? home(h) : screen === 'new' ? newGame(notice) : screen === 'region' ? regionBody(lastRegion()) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
   const [title, ic] = screen === 'home' ? ['', 'home' as Icon] : TITLES[screen];
   root.innerHTML = `<div class="scr scr-${screen}">
       ${screen === 'home' ? '' : `<header class="bar"><button class="back" data-back aria-label="Back">${icon('arrowLeft')}</button><h2 tabindex="-1">${icon(ic)}<span>${title}</span></h2></header>`}
@@ -127,6 +146,16 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
     reset.disabled = true;
     root.querySelector('[data-guide-state]')!.textContent = 'The guide shows the next time you start the starter town.';
   });
+  if (screen === 'region') {
+    const region = MAPS.find((m) => m.id === 'region')!;
+    const wire = (o: ReturnType<typeof lastRegion>) => bindRegion(root.querySelector('.body')!, o, (next) => {
+      const y = root.scrollTop;
+      root.querySelector('.body')!.innerHTML = regionBody(next);
+      wire(next);
+      root.scrollTop = y;
+    }, (q) => h.play(region, false, q));
+    wire(lastRegion());
+  }
   // move focus to the new screen's heading, so a screen reader reads where it landed
   root.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true });
 }

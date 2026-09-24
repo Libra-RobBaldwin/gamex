@@ -24,12 +24,14 @@ export interface MapInfo {
   load?: () => Promise<unknown>;
   /** the first-visit guide runs over this map (it needs the starter town's roads and stops) */
   guide?: boolean;
+  /** Play opens a setup screen first (the region's seed, style, rivers and towns: region/options.ts) */
+  setup?: boolean;
 }
 
 export const MAPS: MapInfo[] = [
   { id: 'town', name: 'Starter town', blurb: 'A small market town by a lake, with a railway, an estate and room to grow.', icon: 'home', ready: true, guide: true },
-  { id: 'region', name: 'Region', blurb: 'Six kilometres of towns and villages, linked by motorways and railways.', icon: 'map', ready: false, soon: 'Coming soon' },
-  { id: 'place', name: 'Real town', blurb: 'A real UK town from OpenStreetMap: Horley, or anywhere you pick.', icon: 'pin', ready: false, soon: 'Plans only for now', link: { href: './places', label: 'Open Real Town Plans' } },
+  { id: 'region', name: 'Region', blurb: 'Six kilometres of towns and villages, linked by motorways and railways.', icon: 'map', ready: true, setup: true },
+  { id: 'place', name: 'Real town', blurb: 'A real UK town from OpenStreetMap: Horley, or anywhere you pick.', icon: 'pin', ready: false, soon: 'Plans only for now', link: { href: './places.html', label: 'Open Real Town Plans' } },
   { id: 'sandbox', name: 'Sandbox', blurb: 'Empty land by the lake. Build a town from nothing.', icon: 'hammer', ready: true },
 ];
 

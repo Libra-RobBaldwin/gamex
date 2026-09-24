@@ -36,8 +36,9 @@ const host: MenuHost = {
     if (st?.app === 'menu' && st.depth > 0) history.back();
     else { history.replaceState({ app: 'menu', depth: 0 } satisfies AppState, '', menuUrl()); show('home'); }
   },
-  play(map, guide) {
-    gameUrl = `${menuUrl()}${gameSearch(map)}`;
+  play(map, guide, query) {
+    if (inGame) return; // (a second tap on Play while the first loads)
+    gameUrl = `${menuUrl()}${gameSearch(map, query)}`;
     history.pushState({ app: 'game' } satisfies AppState, '', gameUrl);
     void startGame(map, guide || !guideSeen());
   },
@@ -107,7 +108,8 @@ function leave() {
   // step back to the menu's entry, and reload there (popstate below); if there's none, go directly
   if (history.state?.app === 'game') {
     history.back();
-    setTimeout(() => location.replace(menuUrl()), 600);
+    // (if the step back didn't happen, the address still names the game: go to the menu directly)
+    setTimeout(() => { if (new URLSearchParams(location.search).has('map')) location.replace(menuUrl()); }, 800);
   } else location.replace(menuUrl());
 }
 

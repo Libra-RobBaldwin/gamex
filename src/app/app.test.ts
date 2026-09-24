@@ -8,7 +8,7 @@ describe('maps.ts, the registry the menu lists', () => {
   it('has the starter town (ready and the default), the region, real places and the sandbox', () => {
     expect(MAPS.map((m) => m.id)).toEqual(['town', 'region', 'place', 'sandbox']);
     expect(mapById(DEFAULT_MAP)?.ready).toBe(true);
-    expect(mapById('region')?.ready).toBe(false);
+    expect(mapById('region')).toMatchObject({ ready: true, setup: true });
   });
   it('gives every map a name, a line of description and an icon, and says why one is not ready', () => {
     for (const m of MAPS) {
@@ -30,15 +30,20 @@ describe('route: the menu or straight into a game', () => {
     expect(route('?map=sandbox&guide=1', '')).toMatchObject({ kind: 'game', map: { id: 'sandbox' }, guide: true });
     expect(route('?place=horley', '')).toMatchObject({ kind: 'game', map: { id: DEFAULT_MAP } });
   });
+  it('goes straight into a region, with its options', () => {
+    expect(route('?map=region&seed=42&style=desert', '')).toMatchObject({ kind: 'game', map: { id: 'region' } });
+    expect(gameSearch(mapById('region')!, 'map=region&seed=42')).toBe('?map=region&seed=42');
+  });
   it('lists the maps, saying why, for a map that is not ready or not there', () => {
-    expect(route('?map=region', '')).toMatchObject({ kind: 'menu', screen: 'new', notice: expect.stringMatching(/Region/) });
+    const place = mapById('place')!;
+    expect(route('?map=place', '')).toMatchObject({ kind: 'menu', screen: 'new', notice: expect.stringMatching(new RegExp(place.name)) });
     expect(route('?map=nowhere', '')).toMatchObject({ kind: 'menu', screen: 'new', notice: expect.stringMatching(/nowhere/) });
   });
   it('turns a flipped ready flag into a playable deep link', () => {
-    const region = mapById('region')!;
-    region.ready = true;
-    try { expect(route('?map=region', '')).toMatchObject({ kind: 'game', map: { id: 'region' } }); } finally { region.ready = false; }
-    expect(gameSearch(region)).toBe('?map=region');
+    const place = mapById('place')!;
+    place.ready = true;
+    try { expect(route('?map=place', '')).toMatchObject({ kind: 'game', map: { id: 'place' } }); } finally { place.ready = false; }
+    expect(gameSearch(place)).toBe('?map=place');
   });
 });
 

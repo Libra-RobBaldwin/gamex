@@ -26,6 +26,8 @@ export const KEYS = {
   quality: 'untitled.quality',
   /** '1' once the first-visit guide has been finished or skipped */
   guide: 'untitled.guide.seen',
+  /** the region options last started, as a query (region/options.ts optionsQuery) */
+  region: 'untitled.region',
 } as const;
 
 // the game's quality tiers, in main.ts TIERS order (the menu can't load main.ts to read them)
