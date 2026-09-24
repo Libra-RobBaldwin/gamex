@@ -61,7 +61,34 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   | Industries | https://claude.ai/artifact/6JyuqJ7Tdb5m2p4hYyhJzR |
   | HUD mock-up | https://claude.ai/artifact/WGbq3v6p161GpesZehQ1gW |
   | Early look (HUD and ground, before review) | https://claude.ai/artifact/7YPVNSXYBMSRNRTG41zGJY |
-  | Real town plans (Banbury; Horley to come) | https://claude.ai/artifact/7xoS53FzWa2WdyR3NBYPTH |
+  | Real Town Plans tool: postcode, area, plans | https://claude.ai/artifact/7xoS53FzWa2WdyR3NBYPTH |
+
+### The Real Town Plans tool: how its requests are served
+
+A published page can't reach outside servers. So the page (artifact capability `artifact`,
+plus `assets` for images) saves a request by republishing itself: `state.request` =
+`{kind: 'lookup', postcode}` or `{kind: 'build', bbox, size_km, name}`. That wakes the session
+that published it.
+
+The tooling lives in this session's scratchpad under `places/`:
+
+- **`places.py lookup`** uses postcodes.io and stitches a 6×6 grid of OSM z15 tiles.
+- **`places.py fetch`** downloads from Overpass in tiles of about 1.3 km, with polite retries.
+- **`places.py trim`** keeps only the tags the importer reads.
+- **`places.py render`** runs the game's importer and turns its SVG drawings into JPEGs.
+- **`page.py`** reads the state out of a saved copy of the page and writes the next version.
+
+To serve a request:
+
+1. Read the artifact.
+2. Run the step it asks for.
+3. Upload the images as assets.
+4. Set `state.lookup`, or append to `state.areas`.
+5. Clear `state.request`, and never keep the postcode.
+6. Republish.
+
+A later session would need to rebuild this tooling in its own scratchpad; the page itself
+carries on working.
 
 ## The game and previews (published artifacts, owned by the org account)
 
