@@ -43,7 +43,7 @@ export class GameGround {
     for (const c of net.land.all()) if (c.owner !== 'water') blocked.push(...c.polys); // (water isn't a road: no verge round it)
     const lanes: GroundInput['lanes'] = [];
     for (const s of net.segs.values()) {
-      const d = ROADS[s.type];
+      const d = ROADS[s.type] && net.def(s);
       if (!d || (d.family !== 'Rural' && d.cls !== 'rail')) continue;
       const path = net.path(s);
       if (path.some((p) => (p.y ?? 0) < -2)) continue; // (not in tunnels)

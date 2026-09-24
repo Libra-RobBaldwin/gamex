@@ -1,8 +1,8 @@
 // Free-form road network in metres: nodes + segments (straight, or curved as a sampled polyline),
 // snapping, junction splitting, and building plots laid out along both sides of every road.
 
-import { ROADS, halfOf, kerbOf, type Cls } from './catalog';
-export { ROADS, halfOf, kerbOf, type RoadDef } from './catalog';
+import { ROADS, defOf, halfOf, kerbOf, type Cls } from './catalog';
+export { ROADS, defOf, halfOf, kerbOf, laneBase, type RoadDef } from './catalog';
 import { Land, type Claim } from './land';
 import { courseOf, normals, sectionAt, taperOf } from './xsection';
 export type RoadType = string;
@@ -41,7 +41,8 @@ export type { HeightMode } from './grade';
 
 export interface RNode { id: number; x: number; z: number; y: number }
 // `mid` holds the interior points of a curved road, in order from a to b (empty when straight)
-export interface RSeg { id: number; a: number; b: number; mid: P[]; type: RoadType; stops: Stop[]; bridges?: SegBridge[] } // bridges: game/bridges.ts
+// oneway: traffic only runs from a to b, on one carriageway (catalog.oneWay); a motorway is a pair of them
+export interface RSeg { id: number; a: number; b: number; mid: P[]; type: RoadType; stops: Stop[]; bridges?: SegBridge[]; oneway?: boolean } // bridges: game/bridges.ts
 export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower' | 'industry' | 'civic';
 // `row` identifies the run of plots along one side of one street, so neighbours can share a style
 // The building sits at (x, z) facing the road; its plot (parcel) runs from the back of the pavement
@@ -210,7 +211,11 @@ export function bandOf(path: P[], half = HALF) {
 
 const hitsBand = (band: ReturnType<typeof bandOf>, poly: P[], c: P, r: number) => band.some((b) => dist(b.c, c) < b.r + r && polysOverlap(b.poly, poly));
 
-export interface RoadOpts { height: HeightMode; grade: number; cross: CrossMode; spec: Spec; type: RoadType }
+// oneway: traffic runs from the start to the end only; path: the way it runs, from a to b, instead
+// of a straight line or a curve (the interchange builder lays slip roads out this way); limits:
+// heights it has to keep to, on top of what it crosses (a slip road stays level with the motorway
+// until it has left it, say)
+export interface RoadOpts { height: HeightMode; grade: number; cross: CrossMode; spec: Spec; type: RoadType; oneway?: boolean; path?: P[]; limits?: Limit[] }
 export const DEFAULT_OPTS: RoadOpts = { height: 'auto', grade: 0.06, cross: 'junction', spec: GRADES.road, type: 'street' };
 export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; path: P[]; profile?: Profile; bridges: number; raised: number; tunnels: number; sunk: number; choices: BridgeChoice[] }
 
@@ -242,8 +247,8 @@ export class Network {
   // the path walked starting from node `from`
   pathFrom(s: RSeg, from: number) { const p = this.path(s); return from === s.a ? p : p.reverse(); }
   length(s: RSeg) { return pathLength(this.path(s)); }
-  def(s: RSeg) { return ROADS[s.type]; }
-  half(s: RSeg) { return halfOf(ROADS[s.type]); }
+  def(s: RSeg) { return defOf(s.type, s.oneway); }
+  half(s: RSeg) { return halfOf(this.def(s)); }
   band(s: RSeg) { return bandOf(this.path(s), this.half(s)); }
   // widest road meeting at a node: how big the junction is
   nodeHalf(n: number) { return Math.max(HALF, ...this.segsAt(n).map((s) => this.half(s))); }
@@ -271,10 +276,11 @@ export class Network {
   clearOfWorks(poly: P[], skip?: (c: Claim) => boolean) { return this.land.free(poly, skip); }
 
   addNode(x: number, z: number, y = 0) { const n = { id: this.nextId++, x, z, y }; this.nodes.set(n.id, n); return n.id; }
-  addSeg(a: number, b: number, mid: P[] = [], type: RoadType = 'street', stops: Stop[] = []) {
+  addSeg(a: number, b: number, mid: P[] = [], type: RoadType = 'street', stops: Stop[] = [], oneway = false) {
     if (a === b) return -1;
-    if (!mid.length) for (const s of this.segs.values()) if (!s.mid.length && ((s.a === a && s.b === b) || (s.a === b && s.b === a))) return s.id;
+    if (!mid.length) for (const s of this.segs.values()) if (!s.mid.length && ((s.a === a && s.b === b && !!s.oneway === oneway) || (s.a === b && s.b === a && !s.oneway && !oneway))) return s.id;
     const s: RSeg = { id: this.nextId++, a, b, mid, type, stops };
+    if (oneway) s.oneway = true;
     this.segs.set(s.id, s);
     this.claimSeg(s);
     // the roads already at its ends now join it (or taper into it) rather than stopping there
@@ -304,6 +310,20 @@ export class Network {
     return best;
   }
 
+  // Take a road away (and any node it leaves with nothing else at it); the roads at its ends are
+  // re-claimed, since they no longer join it.
+  removeSeg(id: number) {
+    const s = this.segs.get(id);
+    if (!s) return;
+    this.segs.delete(id);
+    this.land.release(`road:${id}`);
+    for (const n of [s.a, s.b]) {
+      const at = this.segsAt(n);
+      if (!at.length) this.nodes.delete(n);
+      for (const o of at) this.claimSeg(o);
+    }
+  }
+
   // Split a segment at a point, returning the new node's id.
   split(segId: number, p: P) {
     const s = this.segs.get(segId)!;
@@ -315,8 +335,8 @@ export class Network {
     const L = pathLength(path);
     // stops go with whichever half they're on; one the split runs through is lost
     const keepA = s.stops.filter((st) => stopSpan(st)[1] < c.s - 1), keepB = s.stops.filter((st) => stopSpan(st)[0] > c.s + 1).map((st) => ({ ...st, s: st.s - c.s }));
-    const sa = this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1), s.type, keepA);
-    const sb = this.addSeg(n, s.b, subPath(path, c.s, L).slice(1, -1), s.type, keepB);
+    const sa = this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1), s.type, keepA, !!s.oneway);
+    const sb = this.addSeg(n, s.b, subPath(path, c.s, L).slice(1, -1), s.type, keepB, !!s.oneway);
     // bridges (and the player's choice of type) go with whichever half they're on
     for (const [id, from, to] of [[sa, 0, c.s], [sb, c.s, L]]) { const x = this.segs.get(id); if (x && s.bridges) x.bridges = clipBridges(s.bridges, from, to); }
     return n;
@@ -437,9 +457,10 @@ export class Network {
   // Check a proposed road and work out its height profile. Buildings in the way are cleared at a
   // cost; the map edge, tight curves, very short roads and impossible gradients are refused.
   check(a: End, b: End, ctrl?: P, opts: RoadOpts = DEFAULT_OPTS): Check {
-    const flat = this.makePath(a, b, ctrl);
+    const flat: P[] = opts.path ? opts.path.map((p) => ({ x: p.x, z: p.z })) : this.makePath(a, b, ctrl);
+    if (opts.path) { flat[0] = { x: a.x, z: a.z }; flat[flat.length - 1] = { x: b.x, z: b.z }; }
     const length = pathLength(flat);
-    const def = ROADS[opts.type], half = halfOf(def);
+    const def = defOf(opts.type, opts.oneway), half = halfOf(def);
     let cost = Math.round(length * def.cost);
     const clears: Lot[] = [];
     let path = flat, profile: Profile | undefined, bridges = 0, raised = 0, tunnels = 0, sunk = 0, choices: BridgeChoice[] = [];
@@ -459,7 +480,7 @@ export class Network {
     // railways need gentler gradients and more headroom (for the wires) than roads
     const spec = def.cls === 'rail' ? GRADES.rail : opts.spec, G = Math.min(opts.grade, def.maxGrade);
     const floor = opts.cross === 'tunnel' ? FLOOR : 0;
-    const limits: Limit[] = [];
+    const limits: Limit[] = [...(opts.limits ?? [])];
     // water has to be bridged with clearance for boats
     const steps = Math.max(20, Math.ceil(length / 2));
     let w0 = -1;
@@ -583,11 +604,11 @@ export class Network {
     cuts.sort((x, y) => x.s - y.s);
     const chain = [{ s: 0, node: na }, ...cuts, { s: L, node: nb }];
     const made: number[] = [];
-    for (let i = 0; i + 1 < chain.length; i++) made.push(this.addSeg(chain[i].node, chain[i + 1].node, subPath(path, chain[i].s, chain[i + 1].s).slice(1, -1), opts.type));
+    for (let i = 0; i + 1 < chain.length; i++) made.push(this.addSeg(chain[i].node, chain[i + 1].node, subPath(path, chain[i].s, chain[i + 1].s).slice(1, -1), opts.type, [], !!opts.oneway));
     // each piece keeps the bridge types chosen for the blueprint (game/bridges.ts)
     for (let i = 0; i + 1 < chain.length; i++) { const sg = this.segs.get(made[i]); if (sg) storeBridges(sg, checked.choices, chain[i].s, chain[i + 1].s); }
     // lots overlapping the new road (e.g. queued ones) are dropped
-    const band = bandOf(path, halfOf(ROADS[opts.type]));
+    const band = bandOf(path, halfOf(defOf(opts.type, opts.oneway)));
     this.lots = this.lots.filter((l) => !hitsBand(band, rectCorners(l.x, l.z, l.rot, l.w, l.d), l, Math.hypot(l.w, l.d) / 2));
     this.touched = this.lots.filter((l) => hitsBand(band, this.parcelRect(l, -0.3), this.parcelCentre(l), this.parcelR(l)));
     for (const l of this.touched) this.fitParcel(l);
@@ -646,7 +667,7 @@ export class Network {
   // than leaving its corners empty. `ring` is the radius of the back of its footway.
   plotsAround(node: number, ring: number, legs: { seg: number; ang: number; half: number }[], centre: P = { x: 0, z: 0 }): Lot[] {
     const n = this.node(node), out: Lot[] = [];
-    if (legs.length < 2 || legs.some((l) => !ROADS[this.segs.get(l.seg)?.type ?? '']?.frontage)) return out;
+    if (legs.length < 2 || legs.some((l) => { const sg = this.segs.get(l.seg); return !sg || !this.def(sg).frontage; })) return out;
     const sorted = [...legs].sort((a, b) => a.ang - b.ang);
     sorted.forEach((l, i) => {
       const nx = sorted[(i + 1) % sorted.length];
@@ -747,6 +768,7 @@ export class Network {
     if (def.cls === 'rail') return { plans: [], reason: 'That’s a railway — stations are coming soon' };
     if (def.family === 'Motorway') return { plans: [], reason: 'No bus stops on a motorway — put one on a slip road or a road nearby' };
     if (pointAt(path, t).y > 0.5) return { plans: [], reason: 'Stops can’t go on a bridge or a ramp' };
+    if (s.oneway && side === -1) return { plans: [], reason: 'Traffic on this one-way road keeps to the other side: put the stop on its left' };
     const probe: Stop = { id: 0, s: t, side, kind: 'layby', take: { pave: 0, lane: 0, land: 0, park: 0 } };
     const [s0, s1] = stopSpan(probe);
     if (s0 < this.nodeHalf(s.a) + 6 || s1 > L - this.nodeHalf(s.b) - 6) return { plans: [], reason: 'Too close to a junction or the end of the road — stops need about 35 m clear' };

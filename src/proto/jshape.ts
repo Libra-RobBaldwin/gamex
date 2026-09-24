@@ -10,8 +10,15 @@ import { STD } from './standards';
 // the junction is then built along the road as it really runs, not a straight line from the node,
 // so where the road's own drawing takes over (its mouth) the two meet exactly even on a curve.
 export interface ShapeLeg { id: number; dir: XZ; ang: number; def: RoadDef; len: number; path?: XZ[] }
-export type ShapeForm = 'priority' | 'signals' | 'mini' | 'roundabout';
-export interface SlipShape { from: number; to: number; path: XZ[]; island: XZ[]; outer: XZ[]; R: number; centre: XZ }
+export type ShapeForm = 'priority' | 'signals' | 'mini' | 'roundabout' | 'merge' | 'diverge';
+// `kind`: a slip road joining or leaving a one-way carriageway (interchange/slips.ts), whose course
+// runs `len` metres alongside it, rather than a left-turn slip cutting a corner
+export interface SlipShape { from: number; to: number; path: XZ[]; island: XZ[]; outer: XZ[]; R: number; centre: XZ; kind?: 'merge' | 'diverge'; len?: number }
+// The markings a merge or diverge paints itself (interchange/slips.ts): lines as polylines with a
+// half-width, broken lines with their dash and gap, hatching as quads; and, for each carriageway
+// through it, the stretch (along the road from its a end) where the junction paints its nearside
+// edge instead of the road
+export interface SlipMarks { solid: { pts: XZ[]; w: number }[]; broken: { pts: XZ[]; w: number; dash: number; gap: number }[]; hatch: XZ[][]; edgeGap: Record<number, [number, number]> }
 export interface Shape {
   form: ShapeForm;
   mouth: Record<number, number>; // where each road's own cross-section ends
@@ -30,6 +37,7 @@ export interface Shape {
   R: number; // roundabout: outer edge of the circulating carriageway
   island: number; // roundabout: radius of the central island
   claims: XZ[][]; // the land it takes
+  marks?: SlipMarks; // a merge or diverge's own markings
 }
 
 const add = (p: XZ, u: XZ, k: number) => ({ x: p.x + u.x * k, z: p.z + u.z * k });
@@ -392,7 +400,7 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     // splitter islands at single-lane entries: only where one fits on its own road, clear of the
     // next road's carriageway (where mapped roads meet the ring close together, say)
     const splitter: Record<number, number> = {};
-    if (form === 'roundabout') for (const l of legs) if (l.def.lanes === 1 && l.def.median === 0) {
+    if (form === 'roundabout') for (const l of legs) if (l.def.lanes === 1 && l.def.median === 0 && !l.def.oneway) {
       const { length: sl, width: sw } = STD.splitter, a0 = ringA(n, l, 0, R) + 0.8;
       const isl = [legAt(n, l, a0, -sw / 2), legAt(n, l, a0, sw / 2), legAt(n, l, a0 + sl - 0.8, 0)];
       const clear = legs.every((o) => o === l || isl.every((p) => { const f = legFrameOf(n, o, p); return f.a < 0 || Math.abs(f.b) > K(o) + 0.3; }));

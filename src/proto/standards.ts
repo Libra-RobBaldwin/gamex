@@ -36,6 +36,16 @@ export const STD = {
   turningHead: { R: 8, entry: 6, minRoad: 30 }, // (a shorter dead end has none: see xsection.endKind)
   // a road ending within this distance of the map's edge, heading out, runs on off the map
   mapEdge: 30,
+  // Slip roads at a grade-separated junction (DMRB CD 122, "Geometric design of grade separated
+  // junctions": the taper merge and taper diverge, layout A), by the main carriageway's design speed.
+  // Merge: the slip road's lane runs alongside the nearside lane past a hatched nose (`nose`, from
+  // where the kerbs part to where the lanes touch), then closes into it over `taper`. Diverge: the
+  // slip road's lane opens out of the nearside lane over `taper`, then parts from it past the nose.
+  // (CD 122 gives 120 kph: a 1:40 merge taper over a 3.65 m lane; the diverge is quicker.)
+  merge(mph: number) { return mph >= 70 ? { taper: 150, nose: 100 } : mph >= 60 ? { taper: 125, nose: 85 } : mph >= 50 ? { taper: 100, nose: 70 } : { taper: 75, nose: 55 }; },
+  diverge(mph: number) { return mph >= 70 ? { taper: 150, nose: 80 } : mph >= 60 ? { taper: 125, nose: 70 } : mph >= 50 ? { taper: 100, nose: 55 } : { taper: 75, nose: 45 }; },
+  // the width of the hatched nose where the slip road's kerb and the carriageway's part
+  noseTip: 1.2,
 };
 
 // The ground runs this far past the buildable map on every side (main.ts sizes it BOUND × 2.6), so

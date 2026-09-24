@@ -5,7 +5,6 @@
 // (house, terrace, shop...) and how tall comes from its tags, what's inside it (a shop's point),
 // the land use around it, and failing all that its size and whether it's joined to neighbours.
 
-import { halfOf, ROADS } from '../catalog';
 import { pointInPoly } from '../land';
 import { closestOnPath, type Lot, type LotKind, type Network, type P } from '../roads';
 import { areas, type OsmData, type Tags } from './overpass';
@@ -222,7 +221,7 @@ export function buildingsOf(d: OsmData, net: Network, local: (lat: number, lon: 
         if (dot > bestDot) { bestDot = dot; rot = r; [w, dd] = q % 2 ? [rect.d, rect.w] : [rect.w, rect.d]; }
       }
       seg = road.seg;
-      const half = halfOf(ROADS[net.segs.get(seg)!.type]);
+      const half = net.half(net.segs.get(seg)!);
       front = Math.max(0, road.d - dd / 2 - half);
     }
     const s = net.segs.get(seg);
