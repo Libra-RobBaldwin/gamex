@@ -12,6 +12,9 @@ import { LENGTHS, type Station, type StationPlan } from './station';
 import type { Railway } from './railway';
 import type { RailDraw } from './draw';
 import { callOrder, type RailLine, type Train } from './sim';
+import type { Purse } from '../game/money';
+import { VEHICLES, type LineIn, type StopIn, type VehicleKind } from '../econdefs';
+import type { RailHooks } from '../game/econ';
 
 export interface RailGameCtx {
   net: Network; shell: Shell; railway: Railway; draw: RailDraw; people: TownCrowds; scene: THREE.Scene;
@@ -20,8 +23,13 @@ export interface RailGameCtx {
   rebuildRoads(): void;
   clear(lots: Lot[]): void; // take these buildings down (a station or its siding is built on their plots)
   hint(text: string, ic?: Parameters<typeof icon>[0]): void;
+  purse?: Purse; // stations and trains are paid for (game/money.ts)
 }
-const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+// the economy's ids for stations and rail lines, clear of the bus stops' and lines'
+export const RAIL_ID = 1_000_000;
+const kindOf = (t: TrainDef): VehicleKind => (t.id === 'intercity' || t.cars >= 4 ? 'intercity' : t.id === 'hs' ? 'hs' : t.id === 'tram' ? 'tram' : t.id === 'rack' ? 'rack' : 'dmu');
+const RUN: Partial<Record<VehicleKind, number>> = { dmu: 4000, intercity: 9000, hs: 12000, tram: 3000, rack: 3500 }; // £ a game day (its month)
+const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 const CAR_SEATS = 75;
 
@@ -48,6 +56,18 @@ export class RailGame {
     };
   }
   get busy() { return this.active !== null; }
+  private price(list: number) { return this.c.purse ? this.c.purse.price(list) : list; }
+  private can(n: number) { return !this.c.purse || this.c.purse.can(n); }
+  private short(n: number) { return `Not enough money · ${money(n)} needed, ${money(this.c.purse?.balance ?? 0)} in the bank`; }
+  trainPrice(t: TrainDef) { return this.price(VEHICLES[kindOf(t)].cost); }
+  // a train for a line, paid for (a reason if it can't run it, or there isn't the money)
+  private buy(l: RailLine, def: TrainDef): Train | string {
+    const cost = this.trainPrice(def);
+    if (!this.can(cost)) return this.short(cost);
+    const r = this.c.railway.addTrain(l, def);
+    if (typeof r !== 'string') this.c.purse?.spend(cost, 'vehicles');
+    return r;
+  }
 
   // ---------- the starter town: a line between two stations on the main line ----------
   starter() {
@@ -114,9 +134,9 @@ export class RailGame {
     const lens = `<div class="row3" role="group" aria-label="Platform length">${LENGTHS.map((l) => `<button data-len="${l.len}" class="${(this.len ?? res.plans[0]?.station.len) === l.len ? 'on' : ''}">${l.label} · ${l.len} m</button>`).join('')}</div>`;
     const body = res.reason
       ? `<div class="bad">${icon('alert')}<span>${esc(res.reason)}</span></div>${lens}`
-      : `${lens}${res.plans.map((p, i) => `<div class="plan${p.ok ? '' : ' no'}"><div class="row"><span class="tab">${esc(p.title)}${p.recommended ? ' · recommended' : ''}</span><span class="cost">${money(p.cost)}</span></div>
+      : `${lens}${res.plans.map((p, i) => `<div class="plan${p.ok ? '' : ' no'}"><div class="row"><span class="tab">${esc(p.title)}${p.recommended ? ' · recommended' : ''}</span><span class="cost">${money(this.price(p.cost))}</span></div>
           <ul>${p.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>${p.blocked ? `<div class="bad">${icon('alert')}<span>${esc(p.blocked)}</span></div>` : ''}
-          <button class="act primary tone-rail" data-plan="${i}" ${p.ok ? '' : 'disabled'}>${icon('check')}<span>Build this station</span></button></div>`).join('')}`;
+          <button class="act primary tone-rail" data-plan="${i}" ${p.ok && this.can(this.price(p.cost)) ? '' : 'disabled'} ${this.can(this.price(p.cost)) ? '' : `title="${esc(this.short(this.price(p.cost)))}"`}>${icon('check')}<span>Build this station</span></button></div>`).join('')}`;
     const el = shell.openSheet({ key: 'rail-station', title: res.reason ? 'Can’t build a station here' : 'Railway station', icon: 'train', tone: 'rail', body, fresh: true, onClose: () => this.preview(null) });
     el.querySelectorAll<HTMLButtonElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { this.len = +b.dataset.len!; this.planSheet(); }));
     el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('mouseenter', () => this.preview(res.plans[+b.dataset.plan!])));
@@ -124,6 +144,7 @@ export class RailGame {
   }
   private buildStation(p: StationPlan) {
     const { railway, shell } = this.c;
+    if (this.c.purse && !this.c.purse.spend(this.price(p.cost), 'building')) { this.c.hint(this.short(this.price(p.cost)), 'alert'); return; }
     const { station, cleared } = railway.build(p);
     this.c.clear(cleared);
     this.c.rebuildRoads();
@@ -188,9 +209,12 @@ export class RailGame {
     const stops = [...this.draft], loop = this.loop;
     const long = stops.every((s) => (railway.station(s)?.len ?? 0) >= 130);
     const trains: TrainDef[] = long ? [TRAINS.intercity, TRAINS.dmu] : [TRAINS.dmu, TRAINS.dmu];
+    const cost = trains.reduce((a, t) => a + this.trainPrice(t), 0);
+    if (!this.can(cost)) { this.c.hint(this.short(cost), 'alert'); return; }
     const l = railway.addLine(stops, loop, trains);
     this.end();
     if (typeof l === 'string') { this.c.hint(l, 'alert'); return; }
+    this.c.purse?.spend(trains.slice(0, railway.sim.capacity(l)).reduce((a, t) => a + this.trainPrice(t), 0), 'vehicles');
     this.lastLine = l;
     this.c.hint(`Line ${l.num} is running · ${railway.trainsOn(l).length + railway.sim.waiting} train${trains.length === 1 ? '' : 's'}${l.depot ? ', out of the depot' : ''}`, 'train');
     this.showLine(l);
@@ -247,10 +271,11 @@ export class RailGame {
     this.showBadges(l.stops);
     shell.openInfo({
       key: `rail-line:${l.id}`, title: `Line ${l.num}`, sub: `${railway.station(l.stops[0])?.name} – ${railway.station(l.stops[l.loop ? 0 : l.stops.length - 1])?.name}`, icon: 'train', tone: 'rail',
-      facts: [['Calls', names.join(' · ')], ['Runs', l.loop ? 'Round and round' : 'There and back'], ['Trains', `${trains.length}`], ['Depot', l.depot ? `Siding at ${railway.station(l.depot)?.name}` : 'None: trains start at a platform']],
+      facts: [['Calls', names.join(' · ')], ['Runs', l.loop ? 'Round and round' : 'There and back'], ['Trains', `${trains.length}`],
+        ...(this.c.purse ? [['Last day', (() => { const b = this.c.purse!.line(RAIL_ID + l.id); return `${money(b.lastFares)} fares · ${money(-b.lastRunning)} running`; })()] as [string, string]] : []), ['Depot', l.depot ? `Siding at ${railway.station(l.depot)?.name}` : 'None: trains start at a platform']],
       note: 'Trains run under signals: one train to a block, points set along each train’s route, and on a single line they pass only at loops.',
       actions: [
-        { label: 'Add a train', icon: 'plus', kind: 'primary', onClick: () => { const r = railway.addTrain(l, trains[0]?.def ?? TRAINS.dmu); this.c.hint(typeof r === 'string' ? r : `A train joins line ${l.num}`, typeof r === 'string' ? 'alert' : 'train'); this.showLine(l); } },
+        { label: `Add a train · ${money(this.trainPrice(trains[0]?.def ?? TRAINS.dmu))}`, icon: 'plus', kind: 'primary', disabled: !this.can(this.trainPrice(trains[0]?.def ?? TRAINS.dmu)), onClick: () => { const r = this.buy(l, trains[0]?.def ?? TRAINS.dmu); this.c.hint(typeof r === 'string' ? r : `A train joins line ${l.num}`, typeof r === 'string' ? 'alert' : 'train'); this.showLine(l); } },
         { label: 'Remove a train', icon: 'minus', disabled: !trains.length, onClick: () => { railway.removeTrain(trains[trains.length - 1]); this.showLine(l); } },
         { label: 'Delete line', icon: 'trash', kind: 'danger', onClick: () => { railway.removeLine(l); shell.closeSheet(); this.c.hint(`Line ${l.num} withdrawn`, 'train'); } },
       ],
@@ -284,8 +309,25 @@ export class RailGame {
   buyTrain(def: TrainDef, name: string) {
     const { railway } = this.c, l = this.lastLine && railway.lines.includes(this.lastLine) ? this.lastLine : railway.lines[0];
     if (!l) { this.c.hint('Build two stations and a rail line first · then trains can run it', 'alert'); return; }
-    const r = railway.addTrain(l, def);
+    const r = this.buy(l, def);
     this.c.hint(typeof r === 'string' ? `${name}: ${r}` : `${name} joins line ${l.num}`, typeof r === 'string' ? 'alert' : 'train');
+  }
+
+  // ---------- the economy (game/econ.ts): stations are stops, rail lines are lines ----------
+  econ(): RailHooks {
+    const rw = this.c.railway;
+    return {
+      stops: (): StopIn[] => [...rw.shapes.keys()].map((id) => { const s = rw.station(id)!; return { id: RAIL_ID + id, kind: 'rail_station', x: s.x, z: s.z, name: s.name }; }),
+      lines: (): LineIn[] => rw.lines.map((l) => { const ts = rw.trainsOn(l); return { id: RAIL_ID + l.id, name: `Rail line ${l.num}`, stops: callOrder(l.stops, l.loop).map((s) => RAIL_ID + s), vehicle: kindOf(ts[0]?.def ?? TRAINS.dmu), count: ts.length }; }),
+      // (along the track, which runs about as straight as the stations are apart, at most of the train's speed, with a stop)
+      time: (a, b, v) => {
+        if (a < RAIL_ID || b < RAIL_ID) return undefined;
+        const p = rw.station(a - RAIL_ID), q = rw.station(b - RAIL_ID);
+        if (!p || !q) return Infinity;
+        return (Math.hypot(p.x - q.x, p.z - q.z) * 1.15) / ((VEHICLES[v].kmh * 0.7 * 1000) / 60) + 1;
+      },
+      running: (v) => RUN[v] ?? 4000,
+    };
   }
 
   // ---------- each frame ----------

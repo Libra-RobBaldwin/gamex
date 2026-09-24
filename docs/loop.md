@@ -58,6 +58,38 @@ the screenshots, and frame time no worse than before the milestone at the same q
 - **Accept:** build two stations and a rail line between them. Trains call at both. The towns at
   each end show the rail service on their panels, and fares come in.
 
+## Status (24 Sep, evening)
+
+- **M1 is done** (`game/lines.ts`, bus-line routing in `traffic.ts`). Checked by
+  `e2e/lines.e2e.mjs` and `game/lines.test.ts`.
+- **M2 and M3 are done** (`game/econ.ts`, `game/money.ts`). Checked by `e2e/loop.e2e.mjs`: the
+  town is steady at the start; a new line through the housing makes it grow within a few days;
+  withdrawing every line makes it decline.
+- **What it took to make the library play in this town.** All of it is in `GAME_TUNE` in
+  `game/econ.ts`, measured with Playwright sweeps:
+  - A review every game day, so a day is the town's month. Money runs at the same pace: each
+    game day's riders pay a month's fares at £2 each.
+  - The town finds its own goods and materials until freight exists.
+  - Offices live mostly on visitors your buses bring.
+  - Taking the bus carries no fixed penalty. The town is small enough to walk across, so
+    otherwise almost nobody rides.
+  - The start is taken as balanced, although it has more jobs than workers.
+  - It reacts sooner than a real town would.
+  - A free plot can be re-planned for the use the economy asks for. The plots come zoned in
+    rings, so offices otherwise had nowhere to go.
+- **Open:**
+  - The library's own test "a well-served town grows" still fails. Two review fixes caused it
+    (freight only where there's room; growth settling on supply). Its root cause is that
+    jobs-in-reach counts every job within 30 minutes equally, so two towns joined by rail get
+    identical reach and the neighbour takes the growth.
+  - A distance-decay fix passes 61 of 62 library tests. The one left fails because it samples
+    a town mid-way through runaway office growth: offices draw visitors, which draw more
+    offices. It needs a decision, so it's not merged. It doesn't affect the game's single town.
+  - Growth is judged for the whole town, not per district.
+  - The "Stop catchments" layer is still off: a 400 m catchment covers the whole invented town.
+  - Money is generous: a busy line makes about four times its running costs. Tune it after
+    playing.
+
 ## Estimates
 
 These come from the measured AI throughput in the handover ("Estimating time"): a focused change
