@@ -4,7 +4,7 @@
 
 import { DEFAULT_MAP, mapById, type MapInfo } from '../proto/maps';
 
-export const SCREENS = ['home', 'new', 'how', 'library', 'settings', 'about'] as const;
+export const SCREENS = ['home', 'new', 'region', 'how', 'library', 'settings', 'about'] as const;
 export type Screen = (typeof SCREENS)[number];
 
 export type Route =
@@ -28,5 +28,5 @@ export function route(search: string, hash: string): Route {
   return { kind: 'game', map, guide: q.get('guide') === '1' };
 }
 
-/** The address a game is played at. */
-export const gameSearch = (map: MapInfo) => `?map=${encodeURIComponent(map.id)}`;
+/** The address a game is played at: `?map=<id>`, or a query that already names the map and its options. */
+export const gameSearch = (map: MapInfo, query?: string) => (query ? `?${query}` : `?map=${encodeURIComponent(map.id)}`);

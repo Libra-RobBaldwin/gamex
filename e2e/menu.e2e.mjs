@@ -43,7 +43,7 @@ async function phone({ blockStorage = false, landscape = false } = {}) {
   page.on('console', (m) => { if (m.type() === 'error') page.errors.push(m.text()); });
   return { ctx, page };
 }
-const inGame = (page) => page.waitForFunction(() => window.proto?.shell && document.body.dataset.app === 'game' && document.querySelector('#app').hidden, null, { timeout: 120000 });
+const inGame = (page, timeout = 120000) => page.waitForFunction(() => window.proto?.shell && document.body.dataset.app === 'game' && document.querySelector('#app').hidden, null, { timeout });
 const atMenu = (page) => page.waitForSelector('#app .scr:not(.scr-load)', { timeout: 60000 });
 const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no console errors${page.errors.length ? ` (${page.errors.slice(0, 3).join(' | ')})` : ''}`);
 
@@ -73,7 +73,7 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   }
   check(await page.evaluate(() => document.querySelector('.scr-about') === null), 'back steps from a screen to the home screen');
   const cards = await page.$$eval('.map', (els) => els.map((e) => ({ ready: e.classList.contains('ready'), text: e.textContent })));
-  check(cards.length >= 4 && cards.some((c) => /Region/.test(c.text) && !c.ready && /Coming soon/i.test(c.text)), 'New game lists the maps, the region as coming soon');
+  check(cards.length >= 4 && cards.some((c) => /Region/.test(c.text) && c.ready) && cards.some((c) => !c.ready && /Plans only/i.test(c.text)), 'New game lists the maps: the region ready, real towns as plans only');
   await page.goto(BASE + '/#about');
   await atMenu(page);
   check(/OpenStreetMap contributors/.test(await page.textContent('.scr-about')), 'About credits © OpenStreetMap contributors');
@@ -149,9 +149,9 @@ for (const id of ['town', 'sandbox']) {
   await page.goto(BASE + '/?place=horley-demo');
   await inGame(page);
   check(true, '?place= goes straight into the game');
-  await page.goto(BASE + '/?map=region');
+  await page.goto(BASE + '/?map=place');
   await atMenu(page);
-  check(await page.$('.scr-new .notice') !== null && /Coming soon/i.test(await page.textContent('.notice')), '?map=region (not ready) opens New game, saying so');
+  check(await page.$('.scr-new .notice') !== null && /Plans only/i.test(await page.textContent('.notice')), '?map=place (not ready) opens New game, saying so');
   await page.goto(BASE + '/?map=nowhere');
   await atMenu(page);
   check(await page.$('.scr-new .notice') !== null, 'an unknown ?map= opens New game, saying so');
@@ -244,6 +244,34 @@ for (const id of ['town', 'sandbox']) {
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${shots}/7-landscape-game.png` });
   noErrors(page, 'landscape');
+  await ctx.close();
+}
+
+// ---- 9. the region: set up, started from the menu with its options, and back to its setup ----
+{
+  const { ctx, page } = await phone();
+  await page.goto(BASE + '/#new');
+  await atMenu(page);
+  await page.tap('[data-go="region"]');
+  await page.waitForSelector('.scr-region');
+  await page.tap('[data-count="rivers"] [data-step="1"]');
+  await page.tap('input[name="rg-style"][value="arctic"]');
+  await page.fill('#rg-seed', '42');
+  await page.dispatchEvent('#rg-seed', 'change');
+  check(await page.textContent('[data-count="rivers"] output') === '2', 'region setup: the steppers change the counts');
+  await page.screenshot({ path: `${shots}/9-region-setup.png`, fullPage: true });
+  await page.tap('[data-start]');
+  await inGame(page, 300000).catch(() => {}); // (a 6 km map is slow to build under software rendering)
+  const q = new URLSearchParams(new URL(page.url()).search);
+  check(q.get('map') === 'region' && q.get('seed') === '42' && q.get('rivers') === '2' && q.get('style') === 'arctic', `the region starts from the menu with its options (${new URL(page.url()).search})`);
+  check(await page.evaluate(() => !!window.proto?.shell && document.body.dataset.app === 'game'), 'the region loads');
+  await page.screenshot({ path: `${shots}/9-region.png` });
+  await page.goBack();
+  await page.waitForTimeout(800);
+  await page.goBack();
+  await page.waitForSelector('#app .scr-region', { timeout: 60000 }).catch(() => {});
+  check(await page.$('.scr-region') !== null && await page.inputValue('#rg-seed') === '42', 'back returns to the region setup, with the choices kept');
+  noErrors(page, 'region');
   await ctx.close();
 }
 

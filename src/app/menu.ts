@@ -6,13 +6,15 @@ import { MAPS, type MapInfo } from '../proto/maps';
 import { NAME, markSvg, ridgeSvg } from '../proto/ui/brand';
 import { icon, type Icon } from '../proto/ui/icons';
 import { EXPLORERS, libraryHref } from './library';
+import { bindRegion, lastRegion, regionBody } from './regionsetup';
 import type { Screen } from './route';
 import { TIER_NAMES, TIER_NOTES, guideSeen, quality, setGuideSeen, setQuality } from './store';
 
 export interface MenuHost {
   go(screen: Screen): void;
   back(): void;
-  play(map: MapInfo, guide: boolean): void;
+  /** start a map; `query` is the whole address query when the map has options (the region's) */
+  play(map: MapInfo, guide: boolean, query?: string): void;
   /** the latest save, once the game can save (nothing saves yet) */
   save: { name: string; when: string; open(): void } | null;
 }
@@ -53,7 +55,8 @@ function newGame(notice?: string) {
       <div class="t"><b>${esc(m.name)}</b><small>${esc(m.blurb)}</small>
         ${m.ready ? '' : `<em class="chip">${esc(m.soon ?? 'Coming soon')}</em>`}</div>
       <div class="go">${m.ready
-        ? `<button class="act primary" data-play="${m.id}" aria-label="Play ${esc(m.name)}">${icon('play')}<span>Play</span></button>`
+        ? m.setup ? `<button class="act primary" data-go="${m.id}" aria-label="Set up ${esc(m.name)}">${icon('adjustments')}<span>Set up and play</span></button>`
+          : `<button class="act primary" data-play="${m.id}" aria-label="Play ${esc(m.name)}">${icon('play')}<span>Play</span></button>`
         : m.link ? `<a class="act" href="${m.link.href}">${icon('map')}<span>${esc(m.link.label)}</span></a>` : ''}</div>
     </li>`).join('')}</ul>`;
 }
@@ -115,6 +118,7 @@ function about() {
 
 const TITLES: Record<Exclude<Screen, 'home'>, [string, Icon]> = {
   new: ['New game', 'play'],
+  region: ['Region', 'map'],
   how: ['How to play', 'finger'],
   library: ['Library', 'layers'],
   settings: ['Settings', 'cog'],
@@ -123,7 +127,7 @@ const TITLES: Record<Exclude<Screen, 'home'>, [string, Icon]> = {
 
 /** Draw a screen into the menu's root, and wire it. */
 export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: string) {
-  const body = screen === 'home' ? home(h) : screen === 'new' ? newGame(notice) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
+  const body = screen === 'home' ? home(h) : screen === 'new' ? newGame(notice) : screen === 'region' ? regionBody(lastRegion()) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
   const [title, ic] = screen === 'home' ? ['', 'home' as Icon] : TITLES[screen];
   root.innerHTML = `<div class="scr scr-${screen}">
       ${screen === 'home' ? '' : `<header class="bar"><button class="back" data-back aria-label="Back">${icon('arrowLeft')}</button><h2 tabindex="-1">${icon(ic)}<span>${title}</span></h2></header>`}
@@ -142,6 +146,16 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
     reset.disabled = true;
     root.querySelector('[data-guide-state]')!.textContent = 'The guide shows the next time you start the starter town.';
   });
+  if (screen === 'region') {
+    const region = MAPS.find((m) => m.id === 'region')!;
+    const wire = (o: ReturnType<typeof lastRegion>) => bindRegion(root.querySelector('.body')!, o, (next) => {
+      const y = root.scrollTop;
+      root.querySelector('.body')!.innerHTML = regionBody(next);
+      wire(next);
+      root.scrollTop = y;
+    }, (q) => h.play(region, false, q));
+    wire(lastRegion());
+  }
   // move focus to the new screen's heading, so a screen reader reads where it landed
   root.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true });
 }

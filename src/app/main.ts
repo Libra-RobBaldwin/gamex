@@ -36,9 +36,9 @@ const host: MenuHost = {
     if (st?.app === 'menu' && st.depth > 0) history.back();
     else { history.replaceState({ app: 'menu', depth: 0 } satisfies AppState, '', menuUrl()); show('home'); }
   },
-  play(map, guide) {
+  play(map, guide, query) {
     if (inGame) return; // (a second tap on Play while the first loads)
-    gameUrl = `${menuUrl()}${gameSearch(map)}`;
+    gameUrl = `${menuUrl()}${gameSearch(map, query)}`;
     history.pushState({ app: 'game' } satisfies AppState, '', gameUrl);
     void startGame(map, guide || !guideSeen());
   },
