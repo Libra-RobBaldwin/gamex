@@ -3,10 +3,10 @@
 // slip, a mini or full roundabout, signals, a merge onto a fast road), assigns every approach
 // lane to the movements that balance the load best, and keeps the form that leaves the most
 // spare capacity. The player can override any of it; the score says what that costs.
-import { kerbOf, rectCorners, type Lot, type Network, type P, type RSeg } from './roads';
+import { kerbOf, pathLength, pointAt, rectCorners, type Lot, type Network, type P, type RSeg } from './roads';
 import { STD } from './standards';
 import { polysTouch } from './land';
-import { approachPath, shapeJunction, ringFootprint, type Shape, type ShapeLeg, type SlipShape } from './jshape';
+import { approachPath, legFrameOf, shapeJunction, ringFootprint, type Shape, type ShapeLeg, type SlipShape } from './jshape';
 
 export type Form = 'join' | 'merge' | 'priority' | 'signals' | 'mini' | 'roundabout';
 export type Move = 'L' | 'S' | 'R';
@@ -47,6 +47,41 @@ export function legsAt(net: Network, node: number): Leg[] {
   }
   // round the junction in the direction traffic circulates (a left turn leads to the next leg)
   return out.sort((a, b) => a.ang - b.ang);
+}
+
+// A junction on a slope. Its roads don't arrive level (one climbing through it, say), so it isn't
+// level either. Each point on it takes the height of the road whose carriageway and footways it's
+// on, as that road would have it there (running on straight behind the node), and between roads
+// (the corners, the middle) a blend of them, weighted steeply towards the nearest. So a road meets
+// the junction at its mouth at exactly its own height and cross-fall, however steeply the side road
+// climbs. Everything drawn on the junction (carriageway, footways, islands, kerbs, markings) and the
+// traffic crossing it sit on this surface. Returns the height above the node at (x, z), or null
+// where the junction is level.
+export function junctionLift(net: Network, node: number, mouth?: Record<number, number>): ((x: number, z: number) => number) | null {
+  const n = net.node(node), y0 = n.y ?? 0;
+  const legs: { leg: ShapeLeg; hs: number[]; slope: number; half: number }[] = [];
+  let sloped = false;
+  for (const l of legsAt(net, node)) {
+    const p = net.pathFrom(l.seg, node), reach = Math.min(pathLength(p), (mouth?.[l.seg.id] ?? 10) + 30), hs: number[] = [];
+    // (its height every metre, out to well past the mouth)
+    for (let a = 0; a <= reach + 1e-6; a += 1) { const y = pointAt(p, a).y; hs.push((Number.isFinite(y) ? y : y0) - y0); }
+    if (hs.some((h) => Math.abs(h) > 0.02)) sloped = true;
+    const k = Math.min(3, hs.length - 1);
+    legs.push({ leg: { id: l.seg.id, dir: l.dir, ang: l.ang, def: net.def(l.seg), len: l.len, path: l.path }, hs, slope: k > 0 ? (hs[k] - hs[0]) / k : 0, half: net.half(l.seg) });
+  }
+  if (!sloped || !legs.length) return null;
+  return (x, z) => {
+    let W = 0, H = 0;
+    for (const g of legs) {
+      const f = legFrameOf(n, g.leg, { x, z }), over = Math.max(0, Math.abs(f.b) - g.half);
+      let h: number;
+      if (f.a <= 0) h = g.slope * f.a;
+      else { const i = Math.min(g.hs.length - 1, Math.floor(f.a)), j = Math.min(g.hs.length - 1, i + 1), t = Math.min(1, f.a - i); h = g.hs[i] + (g.hs[j] - g.hs[i]) * t; }
+      const d = f.a < 0 ? Math.hypot(f.a, over) : over, w = 1 / (d ** 4 + 0.01);
+      W += w; H += w * h;
+    }
+    return H / W;
+  };
 }
 
 // Turning angle from arriving on leg a to leaving on leg b: negative is a left turn (we drive on the left).

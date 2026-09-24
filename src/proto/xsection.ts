@@ -11,7 +11,7 @@
 // Beyond Lt the wider road is its own cross-section.
 import { ROADS, halfOf, kerbOf, type RoadDef } from './catalog';
 import type { Network, P, RSeg } from './roads';
-import { GROUND, STD } from './standards';
+import { STD } from './standards';
 import { approachPath, headShape, joinShape, type EndShape, type JoinShape } from './jshape';
 import type { XZ } from './land';
 
@@ -123,7 +123,7 @@ function offEdge(net: Network, n: P, out: XZ) {
   const c = { x: -out.x, z: -out.z }; // the way the road would carry on
   const heads = (p: number, u: number) => Math.abs(p) > near && Math.sign(u) === Math.sign(p) && Math.abs(u) > 0.5;
   if (!heads(n.x, c.x) && !heads(n.z, c.z)) return null;
-  const G = B * GROUND;
+  const G = net.edge;
   const k = Math.min(c.x ? (Math.sign(c.x) * G - n.x) / c.x : Infinity, c.z ? (Math.sign(c.z) * G - n.z) / c.z : Infinity);
   return k > 1 ? { x: n.x + c.x * k, z: n.z + c.z * k } : null;
 }

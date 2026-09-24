@@ -87,7 +87,7 @@ if (!line || line.stops.length !== 2) fail('the rail line was not created');
 // run: calls at both stations, doors open at a platform, the crossing shuts and holds the road
 await page.evaluate(() => window.proto.focusOn({ x: 0, z: 340 }, 160));
 let doorsSeen = false, closedSeen = false, carsHeld = 0, onTrack = 0;
-for (let i = 0; i < 90; i++) {
+for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a second)
   await wait(1000);
   const s = await page.evaluate((lid) => {
     const P = window.proto, R = P.railway, sim = R.sim, l = R.lines.find((x) => x.id === lid);
@@ -105,7 +105,7 @@ for (let i = 0; i < 90; i++) {
   if (s.waitingCars) carsHeld++;
   if (s.closed && i % 5 === 0) await page.screenshot({ path: `${out}/rail-4-crossing.png` });
   if (new Set(s.calls).size >= 2 && doorsSeen && closedSeen) { console.log('after', i + 1, 's', JSON.stringify(s)); break; }
-  if (i === 89) { console.log('state', JSON.stringify(s)); fail('trains did not call at both stations, open their doors and shut the crossing'); }
+  if (i === 179) { console.log('state', JSON.stringify(s)); fail('trains did not call at both stations, open their doors and shut the crossing'); }
   if (s.red) fail('a train passed a red signal');
 }
 if (onTrack) fail(`a car was on the level crossing while a train held its block (${onTrack} samples)`);

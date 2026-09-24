@@ -16,7 +16,7 @@ import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
 import { patchGround, setGroundQuality } from './ground';
-import { GameWater, LAKE } from './game/water';
+import { GameWater, LAKE, WATER_LEVEL } from './game/water';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
 import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
@@ -34,6 +34,8 @@ import { Railway } from './rail/railway'; // stations, signalling and rail lines
 import { RailDraw } from './rail/draw';
 import { RailGame } from './rail/game';
 import { layRegionRail, planRegionRail } from './rail/region';
+import { edgeCrossings, edgeMesh } from './game/edge';
+import { STD } from './standards';
 import { Loading } from './loading';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
 
@@ -60,9 +62,15 @@ function mapLine() {
 await loading.stage(MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
 const BOUND = MAP.bound;
 // the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
-const gameWater = new GameWater(BOUND * (BOUND > 520 ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
+// A big map (the region) is drawn more coarsely until it streams (docs/region.md R4); the town, even
+// widened, is drawn in full. The town's ground ends just past where you can build (the region's runs
+// on further, for its rivers), and the camera goes right out to it.
+const BIG = BOUND > 2000;
+const gameWater = new GameWater(BIG ? BOUND * 1.5 : BOUND + STD.mapEdge + 10, MAP.water); // (the ground's half-width)
 const isWater = (p: P) => gameWater.isWater(p);
+const EDGE = gameWater.half; // (where the ground ends, in a cut face: game/edge.ts)
 const net = new Network(isWater, BOUND, 11);
+net.edge = EDGE; // (roads running off the map run on to the ground's edge)
 const railway = new Railway(net); // (rebuilt with the roads: commitRoads)
 gameWater.claim(net.land); // the water's land ('water', 3 m past the waterline): plots and parks keep off it
 // the map's industrial estates (the town's is south of the centre)
@@ -99,7 +107,7 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const nav = new NavRig(cam, canvas, {
   view: { ...MAP.view, ...HOME },
   distance: 1200 * SCALE,
-  limits: { hMin: 35, hMax: 900 * SCALE, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
+  limits: { hMin: 35, hMax: 900 * SCALE, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -EDGE, maxX: EDGE, minZ: -EDGE, maxZ: EDGE } },
   shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
 });
 const view = nav.view;
@@ -114,7 +122,7 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, SCALE > 1 ? 4 : undefined, SCALE === 1); // (no 3D hedgerows on a big map until it streams: docs/region.md R4)
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2), gameGround.ground.material);
@@ -127,6 +135,10 @@ for (const m of [...GRASS_MATS, ...grassMats()]) { m.color.set('#ffffff'); patch
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
 scene.add(gameGround.ground.hedges);
 scene.add(ground);
+// the cut face round the edge of the map (the roads running off it are added once they're built)
+let mapEdge = edgeMesh(EDGE, [], gameWater.shapes.ground, WATER_LEVEL);
+scene.add(mapEdge);
+function refreshEdge() { scene.remove(mapEdge); mapEdge.geometry.dispose(); mapEdge = edgeMesh(EDGE, edgeCrossings(net, EDGE), gameWater.shapes.ground, WATER_LEVEL); scene.add(mapEdge); }
 // the lake (src/proto/game/water.ts): beaches and the bed laid over the ground (chained after the
 // ground's own patch), and the water and reeds on top: two draw calls
 gameWater.patch(gameGround.ground.material);
@@ -241,12 +253,16 @@ function commitRoads(made: number[] = []) {
   redesignJunctions();
   claimJunctions();
   evictFromWorks();
-  bridgeLayer.sync(net); // lays out the bridges and stores their types on the segments, which drawRoads reads
+  // lays out the bridges (short of the junctions at their ends) and stores their types on the
+  // segments, which drawRoads reads
+  const reach = (s: RSeg, node: number) => (net.segsAt(node).length > 2 ? (junctions.get(node)?.shape?.mouth[s.id] ?? 0) + 2 : 0);
+  bridgeLayer.sync(net, (s) => [reach(s, s.a), reach(s, s.b)]);
   railway.rebuild(); // (its stations tell drawRoads where they lay their own track)
   lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
   gameGround.invalidate();
+  refreshEdge();
 }
 let lamps: Lamp[] = [];
 const rebuildRoads = () => commitRoads();
@@ -260,7 +276,7 @@ interface Built { lot: Lot; born: number; height: number; name: string; detail: 
 const buildings: Built[] = [];
 const cityGroup = new THREE.Group();
 scene.add(cityGroup);
-const CH = BOUND > 520 ? 240 : 120; // (bigger on a big map: fewer draw calls when it's all in view)
+const CH = BIG ? 240 : 120; // (bigger on a big map: fewer draw calls when it's all in view)
 const chunks = new Map<string, { members: Set<Built>; group: THREE.Group; dirty: boolean }>();
 
 function bakeGroup(group: THREE.Group) {
