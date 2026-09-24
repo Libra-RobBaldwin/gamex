@@ -68,7 +68,8 @@ export function trimJson(data: OverpassRaw, bbox: readonly number[]): OverpassRa
  */
 export function mergeTiles(parts: OverpassRaw[]): OverpassRaw {
   const byKey = new Map<string, OsmElement>();
-  for (const p of parts) for (const e of p.elements) {
+  for (const p of parts) for (const e of p.elements ?? []) {
+    if (!e || typeof e !== 'object' || typeof e.id !== 'number' || !['node', 'way', 'relation'].includes(e.type)) continue;
     const k = `${e.type[0]}${e.id}`;
     const had = byKey.get(k);
     if (!had || (!had.tags && e.tags)) byKey.set(k, e);
@@ -76,6 +77,22 @@ export function mergeTiles(parts: OverpassRaw[]): OverpassRaw {
   const stamps = parts.map((p) => p.osm3s?.timestamp_osm_base).filter((s): s is string => !!s).sort();
   const first = parts[0] ?? { elements: [] };
   return { ...first, osm3s: { ...first.osm3s, timestamp_osm_base: stamps[0] }, remark: undefined, elements: [...byKey.values()] };
+}
+
+/**
+ * Overpass returns every node of a way or relation that touches the box: a railway or a forest
+ * edge can run on for a hundred kilometres. Nodes further than `marginM` outside the box are
+ * pulled in to that margin (kept, with their ids, so ways and rings still join up), so the
+ * importer never sees more than the box and a border round it.
+ */
+export function clampFar(data: OverpassRaw, bbox: readonly number[], marginM = 2000): OverpassRaw {
+  const dLat = marginM / 111_320, dLon = marginM / (111_320 * Math.max(0.1, Math.cos((((bbox[0] + bbox[2]) / 2) * Math.PI) / 180)));
+  const s = bbox[0] - dLat, w = bbox[1] - dLon, n = bbox[2] + dLat, e = bbox[3] + dLon;
+  const elements = data.elements.map((el) => {
+    if (el.type !== 'node' || (el.lat >= s && el.lat <= n && el.lon >= w && el.lon <= e)) return el;
+    return { ...el, lat: Math.min(n, Math.max(s, el.lat)), lon: Math.min(e, Math.max(w, el.lon)) };
+  });
+  return { ...data, elements };
 }
 
 /** One element per line: small diffs if a fixture is ever refreshed, and still readable. */

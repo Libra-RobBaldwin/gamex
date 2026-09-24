@@ -102,6 +102,11 @@ try {
   const sheetBox = await page.locator('#area .sheet').boundingBox();
   check(attrBox && sheetBox && attrBox.y + attrBox.height <= sheetBox.y + 1, 'the map credit sits above the sheet, not under it');
   check(await page.locator('.area-pin').count() === 1, 'a pin marks the postcode');
+  {
+    const sq = await page.locator('.area-square').boundingBox(), pin = await page.locator('.area-pin').boundingBox();
+    const dx = sq.x + sq.width / 2 - (pin.x + pin.width / 2), dy = sq.y + sq.height / 2 - (pin.y + pin.height - 2);
+    check(Math.hypot(dx, dy) > 5 && Math.abs(dx) < sq.width / 2 && Math.abs(dy) < sq.height / 2, `the square starts off the postcode's exact point, with the pin inside (${Math.round(dx)}, ${Math.round(dy)} px)`);
+  }
   await shot('2-area');
 
   // drag the square's handle with one finger: the square moves, the map doesn't
@@ -176,6 +181,13 @@ try {
   check(dl.suggestedFilename() === 'banbury-centre-osm.json', `the download is named after the area (${dl.suggestedFilename()})`);
   check(/ODbL/.test(data.attribution) && data.bbox.length === 4 && data.elements.length > 10000, 'the download is the trimmed data, with its box and the ODbL credit');
 
+  // ---- the phone's Back button steps back, not off the page ----
+  await page.goBack();
+  await page.waitForSelector('#area:not([hidden])');
+  check(page.url().endsWith('/places.html'), 'Back from the plans goes to the map, on the same page');
+  await page.goForward();
+  await page.waitForSelector('#plans:not([hidden])');
+
   // ---- saved: instant reopen, and delete ----
   await page.click('#p-back');
   await page.waitForSelector('#saved .open');
@@ -205,13 +217,15 @@ try {
   check(leaks.length === 0, `no request leaks the postcode or leaves the mocks${leaks.length ? `: ${leaks.join(', ')}` : ''}`);
 
   // ---- a phone on its side ----
-  await page.setViewportSize({ width: 915, height: 412 });
   await page.fill('#pc', 'OX16');
   await page.click('#pc-go');
   await page.waitForSelector('#area:not([hidden]) .leaflet-tile-loaded');
-  await page.waitForTimeout(300);
-  const sq = await page.locator('.area-square').boundingBox(), sh = await page.locator('#area .sheet').boundingBox();
-  check(sq && sh && sq.x + sq.width <= sh.x + 2, 'on its side, the square stays clear of the sheet');
+  await page.click('.chip[data-size="3"]');
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.waitForTimeout(500);
+  const sq = await page.locator('.area-square').boundingBox(), sh = await page.locator('#area .sheet').boundingBox(), hd = await page.locator('.area-handle').boundingBox(), top = await page.locator('.top').boundingBox();
+  check(sq && sh && sq.x >= 0 && sq.x + sq.width <= sh.x + 2 && sq.y >= top.y + top.height - 2 && sq.y + sq.height <= 412 + 2, 'turned on its side, the whole 3 km square is in view and clear of the sheet');
+  check(hd.y >= top.y + top.height - 2, 'and its handle can still be reached');
   await shot('6-landscape');
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } catch (e) {

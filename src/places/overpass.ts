@@ -13,7 +13,9 @@ export const MIRRORS = [
 ] as const;
 
 export const MAX_ATTEMPTS = 8; // per tile: each mirror twice, then give up
-export const TIMEOUT_MS = 100_000; // the query asks the server for 90 s at most
+export const QUERY_S = 60; // what the query asks the server for at most
+export const TIMEOUT_MS = 70_000; // how long the page waits for an answer
+export const DEADLINE_MS = 8 * 60_000; // the whole area, however many tiles: then give up
 
 export interface Deps {
   fetch: (url: string, init: RequestInit) => Promise<Response>;
@@ -70,7 +72,11 @@ export const browserDeps = (): Deps => ({
   online: () => typeof navigator === 'undefined' || navigator.onLine !== false,
 });
 
-export interface FetchOpts { signal?: AbortSignal; onProgress?: (p: Progress) => void; deps?: Deps; timeoutMs?: number; maxAttempts?: number; firstMirror?: number }
+export interface FetchOpts {
+  /** Tiles already fetched (by their box), from an earlier try at the same area: not asked again. New answers are added. */
+  have?: Map<string, string>;
+  deadlineMs?: number;
+  signal?: AbortSignal; onProgress?: (p: Progress) => void; deps?: Deps; timeoutMs?: number; maxAttempts?: number; firstMirror?: number }
 
 /** Every tile, one after another; each tile's answer (Overpass JSON, as text) in order. Throws FetchError when it can't. */
 export async function fetchTiles(tiles: Bbox[], opts: FetchOpts = {}): Promise<string[]> {
@@ -78,8 +84,11 @@ export async function fetchTiles(tiles: Bbox[], opts: FetchOpts = {}): Promise<s
   const max = opts.maxAttempts ?? MAX_ATTEMPTS, timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
   let m = opts.firstMirror ?? 0; // stays on a mirror that's answering, moves on from one that isn't
   const out: string[] = [];
+  const start = d.now(), deadline = opts.deadlineMs ?? DEADLINE_MS;
   const cancelled = () => { if (opts.signal?.aborted) throw new FetchError('Cancelled', 'cancelled'); };
   for (let i = 0; i < tiles.length; i++) {
+    const key = tiles[i].join(','), had = opts.have?.get(key);
+    if (had) { out.push(had); opts.onProgress?.({ state: 'done', tile: i + 1, total: tiles.length, done: i + 1, server: 'this device', attempt: 0 }); continue; }
     let lastReason = '';
     for (let attempt = 1; ; attempt++) {
       cancelled();
@@ -94,7 +103,7 @@ export async function fetchTiles(tiles: Bbox[], opts: FetchOpts = {}): Promise<s
       const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, timeoutMs);
       let verdict: ReturnType<typeof judge>, retryAfter: number | undefined;
       try {
-        const res = await d.fetch(mirror.url, { method: 'POST', body: new URLSearchParams({ data: overpassQuery(tiles[i]) }), signal: ctl.signal });
+        const res = await d.fetch(mirror.url, { method: 'POST', body: new URLSearchParams({ data: overpassQuery(tiles[i], QUERY_S) }), signal: ctl.signal });
         retryAfter = Number(res.headers.get('Retry-After') ?? NaN);
         verdict = judge(res.status, await res.text());
       } catch {
@@ -106,16 +115,17 @@ export async function fetchTiles(tiles: Bbox[], opts: FetchOpts = {}): Promise<s
       }
       if (verdict.ok) {
         out.push(verdict.text);
+        opts.have?.set(key, verdict.text);
         opts.onProgress?.({ state: 'done', ...base, done: i + 1 });
         break;
       }
       if (!verdict.retry) throw new FetchError(`${mirror.name} ${verdict.reason}. This is a bug in the page, not your area.`, 'bad-query');
       lastReason = `${mirror.name} ${verdict.reason}`;
-      if (attempt >= max) {
-        throw new FetchError(`Gave up on tile ${i + 1} of ${tiles.length} after ${max} tries on ${MIRRORS.length} servers (last: ${lastReason}). The public Overpass servers are busy; try again in a few minutes, or pick a smaller area.`, 'gave-up');
+      const wait = backoffMs(attempt, d.random, retryAfter);
+      if (attempt >= max || d.now() - start + wait > deadline) {
+        throw new FetchError(`Gave up on tile ${i + 1} of ${tiles.length} after ${attempt} ${attempt === 1 ? 'try' : 'tries'} (last: ${lastReason}). The public Overpass servers are busy; try again in a few minutes${i ? ` (the ${i} ${i === 1 ? 'tile' : 'tiles'} already fetched are kept)` : ''}, or pick a smaller area.`, 'gave-up');
       }
       m++;
-      const wait = backoffMs(attempt, d.random, retryAfter);
       opts.onProgress?.({ state: 'waiting', ...base, server: MIRRORS[m % MIRRORS.length].name, until: d.now() + wait, reason: lastReason });
       await d.sleep(wait, opts.signal);
     }

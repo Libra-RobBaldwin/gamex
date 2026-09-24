@@ -1,7 +1,7 @@
 import fixture from './fixtures/banbury.json?raw';
 import { describe, expect, it } from 'vitest';
 import { parseOverpass } from './overpass';
-import { KEEP, fixtureText, mergeTiles, overpassQuery, trimElement, trimJson, type OverpassRaw } from './fetch';
+import { KEEP, clampFar, fixtureText, mergeTiles, overpassQuery, trimElement, trimJson, type OverpassRaw } from './fetch';
 
 
 describe('the shared Overpass query and trim', () => {
@@ -32,6 +32,25 @@ describe('the shared Overpass query and trim', () => {
   });
 });
 
+describe('far geometry', () => {
+  it('pulls nodes far outside the box to a margin round it, keeping ids and nearby nodes', () => {
+    const box = [52, -1.4, 52.01, -1.39];
+    const out = clampFar({ elements: [
+      { type: 'node', id: 1, lat: 52.005, lon: -1.395 },
+      { type: 'node', id: 2, lat: 53.5, lon: 0.2 },
+      { type: 'node', id: 3, lat: 52.011, lon: -1.395 },
+      { type: 'way', id: 4, nodes: [1, 2, 3] },
+    ] }, box, 2000);
+    const [a, b, c, w] = out.elements as { lat?: number; lon?: number; id: number }[];
+    expect(a).toEqual({ type: 'node', id: 1, lat: 52.005, lon: -1.395 });
+    expect(b.id).toBe(2);
+    expect(b.lat!).toBeCloseTo(52.01 + 2000 / 111_320, 6);
+    expect(b.lon!).toBeLessThan(-1.35);
+    expect(c.lat).toBe(52.011); // within the margin: untouched
+    expect(w).toEqual({ type: 'way', id: 4, nodes: [1, 2, 3] });
+  });
+});
+
 describe('merging tiles', () => {
   const a: OverpassRaw = { version: 0.6, osm3s: { timestamp_osm_base: '2026-09-24T08:00:00Z' }, elements: [
     { type: 'way', id: 10, nodes: [1, 2], tags: { highway: 'residential' } },
@@ -49,6 +68,11 @@ describe('merging tiles', () => {
     const m = mergeTiles([a, b]);
     expect(m.elements.map((e) => `${e.type}${e.id}`)).toEqual(['way10', 'node1', 'node2', 'relation10', 'node3']);
     expect(m.elements[2].tags).toEqual({ highway: 'crossing' });
+  });
+
+  it('skips anything that isn’t an element', () => {
+    const m = mergeTiles([{ elements: [null, 3, { type: 'node' }, { type: 'x', id: 1 }, { type: 'node', id: 7, lat: 0, lon: 0 }] as never }]);
+    expect(m.elements).toEqual([{ type: 'node', id: 7, lat: 0, lon: 0 }]);
   });
 
   it('takes the oldest data timestamp, so the file never claims to be newer than its oldest tile', () => {

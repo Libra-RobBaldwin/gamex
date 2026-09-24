@@ -145,8 +145,20 @@ describe('fetching tiles', () => {
 
   it('gives up after eight tries with a clear message', async () => {
     const f = fake(Array(20).fill(429));
-    await expect(fetchTiles(tiles, { deps: f.deps })).rejects.toMatchObject({ kind: 'gave-up', message: expect.stringMatching(/Gave up on tile 1 of 4 after 8 tries/) });
+    await expect(fetchTiles(tiles, { deps: f.deps, deadlineMs: 1e9 })).rejects.toMatchObject({ kind: 'gave-up', message: expect.stringMatching(/Gave up on tile 1 of 4 after 8 tries/) });
     expect(f.calls).toHaveLength(8);
+  });
+
+  it('gives up on the whole area after eight minutes of waiting, keeping the tiles it has', async () => {
+    const f = fake([200, 200, ...Array(20).fill(504)]);
+    const have = new Map<string, string>();
+    await expect(fetchTiles(tiles, { deps: f.deps, have })).rejects.toMatchObject({ kind: 'gave-up', message: expect.stringMatching(/tile 3 of 4.*2 tiles already fetched are kept/) });
+    expect(f.sleeps.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(8 * 60_000);
+    expect(have.size).toBe(2);
+    // trying again asks only for the tiles still missing
+    const g = fake([]);
+    expect(await fetchTiles(tiles, { deps: g.deps, have })).toHaveLength(4);
+    expect(g.calls).toHaveLength(2);
   });
 
   it('stops at once on a rejected query, when offline, and when cancelled', async () => {

@@ -58,6 +58,7 @@ document.body.innerHTML = `
     </div>
     <div class="card facet" id="saved-card">
       <span class="tab">Saved on this device</span>
+      <p id="saved-msg" class="msg bad" role="alert"></p>
       <ul id="saved" class="saved"></ul>
     </div>
     <p class="credit">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>, under the Open Database Licence.</p>
@@ -68,7 +69,7 @@ document.body.innerHTML = `
     <h1 class="vh" tabindex="-1">Choose the area</h1>
     <div id="map" aria-label="Map: move the square to the area you want"></div>
     <div class="sheet facet" role="group" aria-label="Choose the area">
-      <p class="hint">${icon('move', 'ic sm')}Drag the handle (or focus it and use the arrow keys), or tap the map, to move the square.</p>
+      <p class="hint">${icon('move', 'ic sm')}Drag the handle, or tap the map, to move the square.</p>
       <div class="sizes" role="radiogroup" aria-label="Size of the square">
         ${SIZES_KM.map((s) => `<button type="button" role="radio" class="chip" data-size="${s}" aria-checked="false">${km(s)}</button>`).join('')}
       </div>
@@ -195,6 +196,7 @@ $<HTMLFormElement>('#pc-form').addEventListener('submit', async (e) => {
 
 async function refreshSaved() {
   const ul = $('#saved');
+  $('#saved-msg').textContent = '';
   let list: AreaMeta[];
   try { list = await listAreas(); } catch (err) {
     ul.innerHTML = `<li class="empty">${esc(err instanceof Error ? err.message : 'This browser can’t keep areas.')}</li>`;
@@ -288,6 +290,9 @@ $('#area-build').addEventListener('click', () => {
 
 let job: AbortController | undefined;
 let tick = 0;
+// tiles already fetched for the area being built, so Try again only asks for the rest
+const tileCache = new Map<string, string>();
+let tilesFor = '';
 let lastRequest: { bbox: ReturnType<AreaMap['bbox']>; sizeKm: number; name: string } | undefined;
 
 function progress(p: Progress) {
@@ -310,7 +315,10 @@ async function startBuild(bbox: ReturnType<AreaMap['bbox']>, size: number, name:
   const id = areaId(bbox, name);
   lastRequest = { bbox, sizeKm: size, name };
   // built before: open the saved copy straight away
-  if (await getArea(id).catch(() => undefined)) { openSaved(id); return; }
+  // (a browser that never answers about its saved areas mustn't stop a build)
+  const before = await Promise.race([getArea(id).catch(() => undefined), new Promise<undefined>((r) => setTimeout(r, 2000))]);
+  if (before) { openSaved(id); return; }
+  if (tilesFor !== id) { tileCache.clear(); tilesFor = id; }
   go('fetch');
   $('#f-title').textContent = 'Fetching the map';
   $('#f-what').textContent = `${name}: a ${km(size)} square.`;
@@ -322,7 +330,7 @@ async function startBuild(bbox: ReturnType<AreaMap['bbox']>, size: number, name:
   job?.abort();
   const ctl = (job = new AbortController());
   try {
-    const parts = await fetchTiles(tiles, { signal: ctl.signal, onProgress: progress, firstMirror: Math.floor(Math.random() * MIRRORS.length) });
+    const parts = await fetchTiles(tiles, { have: tileCache, signal: ctl.signal, onProgress: progress, firstMirror: Math.floor(Math.random() * MIRRORS.length) });
     clearInterval(tick);
     $('#f-title').textContent = 'Building the plan';
     $('#f-server').innerHTML = `${icon('spinner', 'ic sm spin')}Running the game’s importer on the map data…`;
@@ -359,6 +367,16 @@ function runImport(job: Job, signal: AbortSignal): Promise<Extract<Reply, { ok: 
     w.postMessage(job);
   });
 }
+
+// losing the connection mid-fetch shows at once, rather than when a request finally times out
+window.addEventListener('offline', () => {
+  if (at !== 'fetch' || !job) return;
+  job.abort(); clearInterval(tick);
+  $('#f-title').textContent = 'Couldn’t build this area';
+  $('#f-server').textContent = '';
+  $('#f-error').textContent = 'You went offline. Connect and tap Try again: the tiles already fetched are kept.';
+  $('#f-retry').hidden = false;
+});
 
 $('#f-cancel').addEventListener('click', () => { job?.abort(); clearInterval(tick); go(areaMap ? 'area' : 'find'); });
 $('#f-retry').addEventListener('click', () => { if (lastRequest) startBuild(lastRequest.bbox, lastRequest.sizeKm, lastRequest.name); });
@@ -420,7 +438,14 @@ function showPlans(meta: AreaMeta, text: string, built: Built, saved = true) {
 
 async function openSaved(id: string) {
   const [meta, files] = await Promise.all([getArea(id), getFiles(id)]).catch(() => [undefined, undefined]);
-  if (!meta || !files) { refreshSaved(); return; }
+  // a record from an older version of the page, or one the browser only half kept
+  const whole = meta && files && typeof files.data === 'string' && files.built?.stats && typeof files.built.gameSvg === 'string' && typeof files.built.rawSvg === 'string' && Array.isArray(files.built.unsupported);
+  if (!whole) {
+    if (at !== 'find') go('find');
+    await refreshSaved();
+    $('#saved-msg').textContent = `${meta?.name ?? 'That area'} can’t be opened: its saved copy is incomplete. Delete it and build it again.`;
+    return;
+  }
   showPlans(meta, files.data, files.built);
 }
 
@@ -437,7 +462,7 @@ $('#p-play').addEventListener('click', () => {
 });
 $('#p-new').addEventListener('click', () => {
   if (areaMap && current) { areaMap.moveTo(bboxCentre(current.meta.bbox)); setSize(current.meta.sizeKm); nameInput.value = current.meta.name; go('area'); areaMap.fit(); }
-  else if (current) openArea(bboxCentre(current.meta.bbox), current.meta.name);
+  else if (current) { sizeKm = current.meta.sizeKm; openArea(bboxCentre(current.meta.bbox), current.meta.name); }
   else go('find');
 });
 $('#p-back').addEventListener('click', () => { viewer.dispose(); go('find'); });
@@ -448,5 +473,13 @@ go('find', false);
 // the site's offline worker (public/sw.js, shared with the game): with it, this page and every area
 // saved on the device open without a connection
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  window.addEventListener('load', async () => {
+    try {
+      await navigator.serviceWorker.register('sw.js');
+      const sw = (await navigator.serviceWorker.ready).active;
+      // this first visit loaded before the worker was running: hand it the page and its files to keep
+      const urls = [location.href.split('#')[0], ...performance.getEntriesByType('resource').map((r) => r.name)].filter((u) => new URL(u).origin === location.origin);
+      sw?.postMessage({ keep: urls });
+    } catch { /* no offline copy: the page still works online */ }
+  });
 }

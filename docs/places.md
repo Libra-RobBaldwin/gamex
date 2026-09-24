@@ -24,14 +24,22 @@ It's a look ahead at the game's "your real place" start (ROADMAP.md).
    fetched one tile at a time (`overpass.ts`).
    - Four mirrors take turns: overpass-api.de, overpass.kumi.systems, maps.mail.ru and
      overpass.private.coffee. The page stays on a mirror while it answers.
-   - On a 429, a 504, a timeout (100 s), an answer that isn't map data, or a 200 whose
-     remark says the query ran out of time, the page moves on to the next mirror. It waits
-     4, 8, 16 or 32 s, then a minute, or the server's `Retry-After` up to two minutes.
-   - After eight tries on one tile, it gives up with a clear message.
+   - On a 429, a 504, a timeout (70 s; the query asks the server for 60 s at most), an answer
+     that isn't map data, or a 200 whose remark says the query ran out of time, the page moves
+     on to the next mirror. It waits 4, 8, 16 or 32 s, then a minute. It would honour a
+     server's `Retry-After`, up to two minutes, but browsers hide that header from pages unless
+     the server exposes it, and the mirrors don't.
+   - It gives up with a clear message after eight tries on one tile, or when the whole area
+     would take more than eight minutes. The tiles already fetched are kept, so **Try again**
+     asks only for the rest.
+   - If the phone goes offline mid-fetch, the page says so at once.
    - The screen shows tiles done of total, which server is busy, and a countdown.
 4. **Build.** The tiles are merged and trimmed with `src/proto/osm/fetch.ts`, the same code
    `fetch-fixture.mjs` uses, so a downloaded file is exactly a fixture. `importOsm` then runs
-   in a Web Worker (`worker.ts` → `build.ts`).
+   in a Web Worker (`worker.ts` → `build.ts`). Parsing the tiles happens there too, so the page
+   stays smooth. Nodes of long ways and relations that run far outside the square (a railway,
+   a forest edge) are pulled in to a 2 km margin round it (`clampFar`). An area with nothing the
+   game can use (the sea, a field, a lone shop) isn't saved.
 5. **Show.** The page shows:
    - both plans (`importSvg` and `rawSvg`), with pan, pinch, double-tap and buttons to zoom;
    - the counts: road and rail pieces, junctions (nodes where three or more pieces meet),
@@ -39,8 +47,11 @@ It's a look ahead at the game's "your real place" start (ROADMAP.md).
    - what the game can't build yet, grouped by kind;
    - a download of the trimmed data.
 
-   Each built area is kept in IndexedDB, so it reopens instantly, even offline, and can be
-   deleted from the list.
+   Each built area is kept in IndexedDB, so it reopens instantly and can be deleted from the
+   list. A saved copy that's incomplete says so, rather than half-opening. On https (Vercel) the
+   site's service worker (`public/sw.js`) keeps the page and its files from the first visit on,
+   so saved areas open offline. A page that was never opened on the device shows a short
+   "you're offline" note offline, not a different page.
 
 ## Privacy
 
