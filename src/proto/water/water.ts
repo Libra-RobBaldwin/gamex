@@ -11,7 +11,7 @@
 
 import { BaseHeight, TILE, type GridSpec, type HeightSource } from '../terrain/height';
 import { edt } from './flood';
-import { buildRegion, cellOf, isRiverTerrain, marginDepth, share, type Region, type RiverTerrain } from './region';
+import { MARGIN_DEPTH, buildRegion, cellOf, isRiverTerrain, marginDepth, share, type Region, type RiverTerrain } from './region';
 import { CLASS_OF, ReachIndex, SPILL, capsuleRows, channelY, lerpAt, type Hit, type Reach } from './rivers';
 import { DEFAULT_WATER, KIND_CODE, KIND_OF, NAV, type Flow, type WaterKind, type WaterParams, type WaterPoint, type Watercourse } from './types';
 
@@ -38,6 +38,7 @@ export interface WaterTile {
 
 const NONE = 0xffff;
 const FILM = 0.08;
+let queue = new Int32Array(0); // kept between tiles (see flood.ts edt)
 
 export class WaterSystem {
   readonly P: WaterParams;
@@ -120,12 +121,14 @@ export class WaterSystem {
   private settle(R: Region, x: number, z: number, ground: number, srcW: number, rivY: number) {
     const o = this.st, sea = this.P.sea, c = cellOf(R, x, z);
     o.level = -Infinity; o.code = 0; o.type = 0; o.id = 0;
-    if (sea !== null && ground < sea && R.seaNear[c] && ground < sea - marginDepth(share(R, x, z, (k) => R.sea[k] === 1))) { o.level = sea; o.code = KIND_CODE.sea; o.type = BODY.sea; }
+    // (the margin only matters within MARGIN_DEPTH of the level, so it isn't worked out where the
+    // water is clearly deeper than that)
+    if (sea !== null && ground < sea && R.seaNear[c] && (sea - ground > MARGIN_DEPTH || ground < sea - marginDepth(share(R, x, z, (k) => R.sea[k] === 1)))) { o.level = sea; o.code = KIND_CODE.sea; o.type = BODY.sea; }
     // (still water must be at least FILM deep to count: a lake standing a few centimetres over a
     // flat floodplain is a wet field, not open water)
     if (srcW === srcW && srcW > ground + FILM && (sea === null || Math.abs(srcW - sea) > 1e-4) && srcW > o.level) { o.level = srcW; o.code = KIND_CODE.lake; o.type = BODY.lake; o.id = Math.round(srcW * 100); }
     const l = R.lakeNear[c];
-    if (l >= 0 && R.basinLevel[l] > ground && R.basinLevel[l] > o.level && R.basinLevel[l] - FILM - marginDepth(share(R, x, z, (k) => R.basin[k] === l)) > ground) { o.level = R.basinLevel[l]; o.code = KIND_CODE.lake; o.type = BODY.basin; o.id = l; }
+    if (l >= 0 && R.basinLevel[l] > ground + FILM && R.basinLevel[l] > o.level && (R.basinLevel[l] - ground > FILM + MARGIN_DEPTH || R.basinLevel[l] - FILM - marginDepth(share(R, x, z, (k) => R.basin[k] === l)) > ground)) { o.level = R.basinLevel[l]; o.code = KIND_CODE.lake; o.type = BODY.basin; o.id = l; }
     if (rivY > o.level) { o.level = rivY; o.type = BODY.river; o.code = KIND_CODE.river; }
     return o;
   }
@@ -311,17 +314,23 @@ export class WaterSystem {
       level[k] = st.level; kind[k] = code; body[k] = lastB;
     }
     // signed distance to the waterline (a half cell either side of the change)
-    const dry = new Uint8Array(N);
-    for (let k = 0; k < N; k++) dry[k] = kind[k] ? 0 : 1;
-    const inW = edt(dry, 1, n, n), outW = edt(dry, 0, n, n), shore = new Float32Array(N), cap = mg * res;
+    // (one transform, to the points either side of the waterline, signed by which side a point is on)
+    const edge = new Uint8Array(N);
+    for (let k = 0; k < N; k++) {
+      const i = k % n, w = kind[k] !== 0;
+      if ((i > 0 && (kind[k - 1] !== 0) !== w) || (i < n - 1 && (kind[k + 1] !== 0) !== w) || (k >= n && (kind[k - n] !== 0) !== w) || (k < N - n && (kind[k + n] !== 0) !== w)) edge[k] = 1;
+    }
+    const dist = edt(edge, 1, n, n), shore = new Float32Array(N), cap = mg * res;
     let wet = 0;
     for (let k = 0; k < N; k++) {
-      shore[k] = Math.max(-cap, Math.min(cap, kind[k] ? (inW[k] - 0.5) * res : -(outW[k] - 0.5) * res));
+      shore[k] = Math.max(-cap, Math.min(cap, (kind[k] ? dist[k] + 0.5 : -(dist[k] + 0.5)) * res));
       const i = k % n, j = (k - i) / n;
       if (kind[k] && i >= mg && j >= mg && i < n - mg && j < n - mg) wet++;
     }
     // nearest water, by a breadth-first spread from the wet points (and the banks of narrow streams)
-    const nearKind = new Uint8Array(N), nearLevel = new Float32Array(N).fill(NaN), q = new Int32Array(N);
+    const nearKind = new Uint8Array(N), nearLevel = new Float32Array(N).fill(NaN);
+    if (queue.length < N) queue = new Int32Array(N);
+    const q = queue;
     let qh = 0, qt = 0;
     for (let k = 0; k < N; k++) {
       if (kind[k]) { nearKind[k] = kind[k]; nearLevel[k] = level[k]; q[qt++] = k; }
@@ -409,4 +418,3 @@ export class WaterTerrain extends BaseHeight {
   isWater(x: number, z: number) { return this.water.isWater(x, z); }
   sample(g: GridSpec, out = new Float32Array(g.nx * g.nz)) { return this.water.sampleGround(g, out); }
 }
-export { KIND_OF };

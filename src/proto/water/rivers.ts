@@ -23,7 +23,7 @@ export interface Reach {
   surf: Float32Array; // water surface
   speed: Float32Array; // m/s
   cls: Uint8Array; // CLASS_CODE
-  sub: Uint8Array; // 1 where it runs under a lake or the sea (not cut, not drawn: the lake is there)
+  sub: Uint8Array; // 1 where it is neither cut nor drawn (for culverts later: natural rivers run on through lakes and the sea, whose higher water wins)
   bank: Float32Array; // bank slope at each point, rise over run (gentle mudflats on an estuary)
   reach: Float32Array; // how far from the centre line the channel's banks reach before meeting the ground
   up: number[]; // reaches that end where this starts

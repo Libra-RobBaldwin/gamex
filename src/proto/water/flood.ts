@@ -121,10 +121,14 @@ export function label(nx: number, nz: number, inside: (k: number) => boolean, sa
 // distance in cells to the nearest cell where mask[k] === target. Two passes of the 1D lower
 // envelope of parabolas; linear in the number of cells.
 export const FAR = 1e20;
+// (the working arrays are kept between calls: tiles come one after another at the same size, and
+// allocating half a megabyte each time left the collector to run in the middle of the next one)
+let scratch: { N: number; n: number; sq: Float64Array; v: Int32Array; z: Float64Array; g: Float64Array } | null = null;
 export function edt(mask: Uint8Array, target: number, nx: number, nz: number): Float32Array {
-  const N = nx * nz, sq = new Float64Array(N), n = Math.max(nx, nz);
+  const N = nx * nz, n = Math.max(nx, nz);
+  if (!scratch || scratch.N < N || scratch.n < n) scratch = { N, n, sq: new Float64Array(N), v: new Int32Array(n), z: new Float64Array(n + 1), g: new Float64Array(n) };
+  const { sq, v, z, g } = scratch;
   for (let k = 0; k < N; k++) sq[k] = mask[k] === target ? 0 : FAR;
-  const v = new Int32Array(n), z = new Float64Array(n + 1), g = new Float64Array(n);
   const pass = (len: number, o: number, stride: number) => {
     for (let q = 0; q < len; q++) g[q] = sq[o + q * stride];
     let k = 0;

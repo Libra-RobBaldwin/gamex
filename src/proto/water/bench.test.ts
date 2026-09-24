@@ -28,10 +28,17 @@ it('performance', () => {
   for (const [name, make, [ti, tj]] of places) {
     const region = time(() => new WaterSystem(make()).region(0, 0), 3);
     // a tile of ground nobody has asked about before (so the terrain's own lattice is built too),
-    // its region already worked out
-    const colds: number[] = [];
-    for (let r = 0; r < 3; r++) { const w2 = new WaterSystem(make()); w2.region(0, 0); const a = performance.now(); w2.tile(ti, tj); colds.push(performance.now() - a); }
-    const coldTile = colds.sort((a, b) => a - b)[1];
+    // in a region already worked out, as when tiles stream in (another tile is built first, so
+    // this one doesn't pay for collecting the region's garbage); and the very first tile of a
+    // region, straight after it
+    const colds: number[] = [], firsts: number[] = [];
+    for (let r = 0; r < 3; r++) {
+      const w2 = new WaterSystem(make());
+      w2.region(0, 0);
+      let a = performance.now(); w2.tile(ti, tj + 1); firsts.push(performance.now() - a);
+      a = performance.now(); w2.tile(ti, tj); colds.push(performance.now() - a);
+    }
+    const coldTile = colds.sort((a, b) => a - b)[1], firstTile = firsts.sort((a, b) => a - b)[1];
     const w = new WaterSystem(make());
     w.tile(ti, tj);
     const warm = time(() => { w.forget(); w.tile(ti, tj); });
@@ -42,7 +49,7 @@ it('performance', () => {
     const colours = time(() => shoreColours(t, m));
     const ground = time(() => w.sampleGround(tileGrid(ti, tj, 256))), base = time(() => make().sample(tileGrid(ti, tj, 256)), 3);
     const ws = waterSurface(t);
-    out.push(`${name}: region (8 km, 12 km with margins) ${ms(region)}; tile water raster cold ${ms(coldTile)}, warm ${ms(warm)}; ` +
+    out.push(`${name}: region (8 km, 12 km with margins) ${ms(region)}; tile water raster: new ground ${ms(coldTile)}, ground seen before ${ms(warm)}, first tile straight after its region ${ms(firstTile)}; ` +
       `water mesh ${ms(surface)} (${ws?.vertexCount ?? 0} vertices, ${ws?.triangleCount ?? 0} triangles), reeds ${ms(reeds)} (${reedSpots(t).length / 5} tufts), ` +
       `claims ${ms(claims)}, shore colours for a 257² ground mesh ${ms(colours)}; ground with channels cut, 257² ${ms(ground)} (the terrain alone, cold ${ms(base)})`);
   }

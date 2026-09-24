@@ -23,8 +23,8 @@ export const WATER_LIGHT: Record<'day' | 'dusk', WaterLight> = {
     hemiSky: c('#e8f3ff'), hemiGround: c('#5d7040'), hemi: 0.95, sunIntensity: 2.9, background: c('#a9cbe3'),
   },
   dusk: {
-    sunDir: new THREE.Vector3(-330, 90, 140).normalize(), sun: c('#ffae6b'), skyTop: c('#6c6aa8'), skyHorizon: c('#ffa66e'), ambient: c('#7f86bd'),
-    shallow: c('#2f9c9a'), deep: c('#0b2a4a'), foam: c('#f7dcc6'), reflect: 0.34, glint: 14,
+    sunDir: new THREE.Vector3(-230, 75, -250).normalize(), sun: c('#ffae6b'), skyTop: c('#6c6aa8'), skyHorizon: c('#ffa66e'), ambient: c('#7f86bd'),
+    shallow: c('#2f9c9a'), deep: c('#0b2a4a'), foam: c('#f7dcc6'), reflect: 0.34, glint: 40,
     hemiSky: c('#b3a6d6'), hemiGround: c('#4a4234'), hemi: 0.85, sunIntensity: 2.3, background: c('#e8a883'),
   },
 };
@@ -112,7 +112,7 @@ void main() {
   float fres = min(0.85, uReflect * (0.1 + 0.9 * pow(1.0 - ndv, 3.0)));
   vec3 R = reflect(-V, n);
   // the sky seen in the water: horizon to zenith, warmer towards the sun (at dusk that's most of it)
-  vec3 sky = mix(uSkyHorizon, uSkyTop, clamp(R.y * 1.1 - 0.1, 0.0, 1.0)) + uSun * 0.45 * pow(max(dot(R, uSunDir), 0.0), 3.0);
+  vec3 sky = mix(uSkyHorizon, uSkyTop, clamp(R.y * 1.1 - 0.1, 0.0, 1.0)) + uSun * 0.3 * pow(max(dot(R, uSunDir), 0.0), 6.0);
   vec3 col = body * (uAmbient + uSun * max(dot(n, uSunDir), 0.0) * 0.3);
   col = mix(col, sky, fres);
   col += uSun * pow(max(dot(R, uSunDir), 0.0), uGlint) * (0.3 + 0.9 * (uGlint / 90.0));

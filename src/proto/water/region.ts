@@ -152,7 +152,6 @@ export function basinNear(R: Region, x: number, z: number): { id: number; level:
   const id = R.lakeNear[cellOf(R, x, z)];
   return id < 0 ? null : { id, level: R.basinLevel[id] };
 }
-export const seaNear = (R: Region, x: number, z: number) => R.seaNear[cellOf(R, x, z)] === 1;
 // How much of the neighbourhood of a point belongs to a body: the bilinear blend of "is this cell
 // part of it" over the four cells around it (1 well inside, ½ midway to the first cell outside).
 export function share(R: Region, x: number, z: number, test: (k: number) => boolean) {
