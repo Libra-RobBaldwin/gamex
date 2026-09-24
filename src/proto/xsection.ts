@@ -9,7 +9,7 @@
 //                               drawn as hatching (a ghost island), kerbs moving out to suit
 //   u ∈ [MEDIAN·Lt, Lt]         the extra lanes (offside first) taper in from nothing to full width
 // Beyond Lt the wider road is its own cross-section.
-import { ROADS, halfOf, kerbOf, type RoadDef } from './catalog';
+import { ROADS, halfOf, kerbOf, laneBase, type RoadDef } from './catalog';
 import type { Network, P, RSeg } from './roads';
 import { STD } from './standards';
 import { approachPath, headShape, joinShape, type EndShape, type JoinShape } from './jshape';
@@ -29,7 +29,8 @@ function partner(net: Network, s: RSeg, node: number): RSeg | null {
   const o = at[0].id === s.id ? at[1] : at[0];
   return o.id === s.id ? null : o;
 }
-const wider = (a: RoadDef, b: RoadDef) => a.lanes > b.lanes || (a.lanes === b.lanes && (a.median > b.median || halfOf(a) > halfOf(b) + 0.05));
+// (a one-way carriageway and a two-way road don't taper into each other: they're laid out differently)
+const wider = (a: RoadDef, b: RoadDef) => !!a.oneway === !!b.oneway && (a.lanes > b.lanes || (a.lanes === b.lanes && (a.median > b.median || halfOf(a) > halfOf(b) + 0.05)));
 
 export function taperOf(net: Network, s: RSeg): Ends2 {
   const d = net.def(s), L = net.length(s);
@@ -48,7 +49,7 @@ const smooth = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t 
 
 // The cross-section at distance t along s (from its a end), per side of the centreline.
 export interface Section2 {
-  median: number; // half-width of the reservation (hatched while it's opening)
+  median: number; // half-width of the reservation (hatched while it's opening); on a one-way carriageway, where its lanes start (laneBase: negative)
   hatched: boolean; // the reservation here is a painted ghost island, not a kerbed one
   lanes: number; // general lanes each way, counting a tapering lane as a fraction
   lane: number; // lane width
@@ -57,13 +58,13 @@ export interface Section2 {
 }
 export function sectionAt(net: Network, s: RSeg, t: number, ends: Ends2 = taperOf(net, s)): Section2 {
   const d = net.def(s), L = net.length(s);
-  const own = { median: d.median / 2, lanes: d.lanes, lane: d.lane, extra: kerbOf(d) - d.median / 2 - d.lanes * d.lane, back: halfOf(d) - kerbOf(d) };
+  const own = { median: laneBase(d), lanes: d.lanes, lane: d.lane, extra: kerbOf(d) - laneBase(d) - d.lanes * d.lane, back: halfOf(d) - kerbOf(d) };
   let T: Taper | null = null, u = Infinity;
   if (ends.A && t < ends.A.len) { T = ends.A; u = t; }
   if (ends.B && L - t < ends.B.len && L - t < u) { T = ends.B; u = L - t; }
   if (!T) return { median: own.median, hatched: false, lanes: own.lanes, lane: own.lane, kerb: kerbOf(d), back: halfOf(d) };
   const n = T.to, x = u / T.len;
-  const to = { median: n.median / 2, lanes: n.lanes, lane: n.lane, extra: kerbOf(n) - n.median / 2 - n.lanes * n.lane, back: halfOf(n) - kerbOf(n) };
+  const to = { median: laneBase(n), lanes: n.lanes, lane: n.lane, extra: kerbOf(n) - laneBase(n) - n.lanes * n.lane, back: halfOf(n) - kerbOf(n) };
   const km = smooth((x - TAPER.hold) / (TAPER.median - TAPER.hold)), kl = smooth((x - TAPER.median) / (1 - TAPER.median));
   const median = to.median + (own.median - to.median) * km;
   const lanes = to.lanes + (own.lanes - to.lanes) * kl;

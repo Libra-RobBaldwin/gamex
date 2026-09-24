@@ -6,19 +6,25 @@ import { DEFAULT_OPTS, Network, rng, type P } from './roads';
 import { design, landFits, legsAt, type Form, type Junction } from './junction';
 import { Traffic, type Places } from './traffic';
 import { laneSpan } from './xsection';
+import { motorwayCloverleaf, motorwayWithJunction, pairToNode, pairUpMotorways, type IxForm, type IxSize, type SlipStyle } from './interchange/build';
 
 const as = (type: string) => ({ ...DEFAULT_OPTS, type });
 const geo = (n: Network, node: number) => ({ fits: (polys: Parameters<typeof landFits>[2]) => landFits(n, node, polys) });
 
-export interface Scenario { name: string; build: (n: Network) => void; forms?: string[]; prefer?: Form; cars: number; buses?: number; stops?: boolean; minTrips: number; minChanges?: number }
+// build: lays the roads out; it may say which form some junctions must take (an interchange's)
+// through: no works on the map, so its lorries come from roads off the map (along a motorway, say)
+// (bound: the map's half-size, for a scenario that needs more room than most)
+export interface Scenario { name: string; build: (n: Network) => void | { prefer?: Record<number, Form> }; bound?: number; through?: boolean; forms?: string[]; prefer?: Form; cars: number; buses?: number; stops?: boolean; minTrips: number; minChanges?: number }
 
 export function town(sc: Scenario) {
-  const net = new Network(() => false, 900);
-  sc.build(net);
+  const net = new Network(() => false, sc.bound ?? 900);
+  const built = sc.build(net) ?? {};
   const junctions = new Map<number, Junction>();
   for (const nd of net.nodes.values()) {
     if (legsAt(net, nd.id).length < 3) continue;
-    const j = design(net, nd.id, geo(net, nd.id), undefined, sc.prefer ? { form: sc.prefer } : undefined);
+    // (an interchange's junctions take the form it built them for, without slip lanes of their own)
+    const ixf = built.prefer?.[nd.id], pf = ixf ? { form: ixf, slip: false } : sc.prefer ? { form: sc.prefer } : undefined;
+    const j = design(net, nd.id, geo(net, nd.id), undefined, pf);
     if (j) { junctions.set(nd.id, j); net.land.claim(`junction:${nd.id}`, 'junction', j.shape?.claims ?? []); }
   }
   for (const id of net.segs.keys()) for (const l of net.plotsFor(id, { x: 999, z: 999 })) if (net.lotFree(l)) { net.fitParcel(l); net.lots.push(l); }
@@ -33,7 +39,7 @@ export function town(sc: Scenario) {
   const lots = net.lots;
   const places: Places = {
     homes: lots.filter((_, i) => i % 3 !== 2), jobs: lots.filter((_, i) => i % 3 === 2), shops: lots.filter((_, i) => i % 6 === 2),
-    works: lots.filter((_, i) => i % 9 === 5), weight: () => 1,
+    works: sc.through ? [] : lots.filter((_, i) => i % 9 === 5), weight: () => 1,
   };
   return { net, junctions, places };
 }
@@ -133,6 +139,7 @@ export const SCENARIOS: Scenario[] = [
       road({ x: 250, z: -470 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 });
       road({ x: -230, z: 0 }, { x: -510, z: 0 }, undefined, as('rural-60'));
       road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
+      pairUpMotorways(n); // (as main.ts does: the motorway a pair of carriageways splaying into its roundabout)
     },
   },
   // a mini-roundabout well past what it can take: queues on every arm, and nobody stuck for good
@@ -147,6 +154,32 @@ export const SCENARIOS: Scenario[] = [
       n.build({ x: -80, z: -250 }, { x: -80, z: 250 }, undefined, as('rural-40'));
     },
   },
+  // motorway junctions (interchange/build.ts): a pair of one-way carriageways, slip roads leaving and
+  // joining them, and the local road they meet; trips run on and off the motorway at both ends
+  ...([['dumbbell', 'taper', 'open'], ['gsr', 'taper', 'open'], ['diamond', 'taper', 'open'], ['dumbbell', 'parallel', 'open'], ['dumbbell', 'taper', 'tight'], ['gsr', 'taper', 'tight'], ['trumpet', 'taper', 'tight'], ['trumpet', 'taper', 'open']] as [IxForm, SlipStyle, IxSize][]).map(([form, style, size]): Scenario => ({
+    name: `motorway junction: ${form}${style === 'parallel' ? ', parallel slip lanes' : ''}${size === 'tight' ? ', tight' : form === 'trumpet' ? ', open' : ''}`, cars: 170, minTrips: 60, forms: undefined, through: true,
+    build: (n) => {
+      n.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
+      const r = motorwayWithJunction(n, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...n.segs.values()][0], 0, style, size);
+      if (!r.ok) throw new Error(r.reason);
+      return { prefer: r.ix.prefer };
+    },
+  })),
+  // a cloverleaf: two motorways, trips on and off both at every end
+  ...(['tight', 'open'] as IxSize[]).map((size): Scenario => ({
+    name: `motorway junction: cloverleaf, ${size}`, cars: 200, minTrips: 60, forms: undefined, through: true, bound: 1600,
+    build: (n) => {
+      // (the motorway it crosses ends at a roundabout into a town of streets: its trips to and from
+      // the motorways' other ends all go through the cloverleaf)
+      const end = { x: 1400, z: 0 };
+      pairToNode(n, [{ x: -1500, z: 0 }, end], 'motorway', end);
+      const town = n.nearestNode(end, 1)!;
+      for (const [x, z] of [[1400, 450], [1400, -450]]) n.build({ x: town.x, z: town.z, node: town.id }, { x, z }, undefined, { ...DEFAULT_OPTS, type: 'street' });
+      const r = motorwayCloverleaf(n, [{ x: 0, z: -1500 }, { x: 0, z: 1500 }], 'motorway', 0, size);
+      if (!r.ok) throw new Error(r.reason);
+      return { prefer: { ...r.ix.prefer, [town.id]: 'roundabout' } };
+    },
+  })),
   {
     name: 'long multi-lane road with a side road', cars: 120, minTrips: 150, buses: 2, stops: true, forms: ['signals+slip'], minChanges: 30,
     build: (n) => {

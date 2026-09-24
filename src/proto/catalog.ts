@@ -13,16 +13,28 @@ export interface RoadDef {
   bus: number; cycle: number; parking: number; shoulder: number; pave: number; verge: number;
   mph: number; speed: number; cost: number; minR: number; maxGrade: number; frontage: boolean; trees: boolean;
   tracks: number; rack: boolean; electric: boolean; blurb: string;
+  // One carriageway, all its lanes one way (see oneWay below): the path runs down the middle of it,
+  // with `strip` metres of hard strip on the offside (right) and the kerbside lanes on the nearside.
+  oneway?: boolean; strip?: number;
 }
 
 // centreline to the kerb (the edge of the carriageway, or the edge of the ballast for track)
-export const kerbOf = (d: RoadDef) => (d.cls === 'rail' ? (d.tracks === 2 ? 4.3 : 2.4) : d.median / 2 + d.lanes * d.lane + d.bus + d.cycle + d.parking + d.shoulder);
+export const kerbOf = (d: RoadDef) => (d.cls === 'rail' ? (d.tracks === 2 ? 4.3 : 2.4) : d.oneway ? onewayWidth(d) / 2 : d.median / 2 + d.lanes * d.lane + d.bus + d.cycle + d.parking + d.shoulder);
+// a one-way carriageway's paved width, offside hard strip to nearside kerb
+const onewayWidth = (d: RoadDef) => (d.strip ?? 0) + d.lanes * d.lane + d.bus + d.cycle + d.parking + d.shoulder;
+// Where the general lanes start, measured from the centreline towards the traffic's left: half the
+// reservation on a two-way road; on a one-way carriageway, its offside edge, right of the middle
+// (so it's negative). Lane i (0 = nearside) is centred at laneBase + (lanes - i - 0.5) · lane.
+export const laneBase = (d: RoadDef) => (d.oneway ? (d.strip ?? 0) - onewayWidth(d) / 2 : d.median / 2);
 // centreline to the back of the pavement or verge
 export const halfOf = (d: RoadDef) => kerbOf(d) + d.pave + d.verge;
 
 const MIN_R: Record<number, number> = { 20: 10, 30: 14, 40: 40, 50: 80, 60: 130, 70: 180 };
 const GRADE: Record<number, number> = { 20: 0.08, 30: 0.08, 40: 0.07, 50: 0.06, 60: 0.06, 70: 0.05 };
 const ICON: Record<Family, string> = { Street: '🏘️', Avenue: '🌳', Boulevard: '🌳', Arterial: '🚌', Rural: '🌾', Dual: '🛣️', Motorway: '🚀', Rail: '🚆' };
+
+// wider, faster roads cost more per metre (barriers, drainage, lighting)
+const priceOf = (d: RoadDef) => Math.round((halfOf(d) * 2 * 22 * (1 + Math.max(0, d.mph - 30) / 20)) / 10) * 10;
 
 function road(id: string, family: Family, o: Partial<RoadDef> & { lanes: number; mph: number }): RoadDef {
   const d: RoadDef = {
@@ -31,9 +43,7 @@ function road(id: string, family: Family, o: Partial<RoadDef> & { lanes: number;
     ...o,
   };
   d.trees ||= d.pave >= 5 || d.medianKind === 'trees';
-  const width = halfOf(d) * 2;
-  // wider, faster roads cost more per metre (barriers, drainage, lighting)
-  d.cost = Math.round((width * 22 * (1 + Math.max(0, d.mph - 30) / 20)) / 10) * 10;
+  d.cost = priceOf(d);
   const bits = [
     d.lanes === 1 ? '1 lane each way' : `${d.lanes} lanes each way`,
     d.bus ? 'bus lanes' : '', d.cycle ? 'cycle lanes' : '', d.parking ? 'parking bays' : '',
@@ -89,12 +99,47 @@ add(rail('rail-hs', 'High speed', { mph: 186, tracks: 2, maxGrade: 0.035, minR: 
 add(rail('rail-light', 'Light rail', { mph: 50, tracks: 2, maxGrade: 0.06, minR: 40, cost: 2200, electric: true, blurb: 'Double track, electrified · 50 mph · up to 6% · tight curves' }));
 add(rail('rail-rack', 'Rack railway', { mph: 25, tracks: 1, maxGrade: 0.2, minR: 60, cost: 2600, rack: true, blurb: 'Single track with a toothed rack · up to 20% · rack trains only, slow on the rack' }));
 
+// A slip road (DMRB CD 122): one lane one way, a hard strip either side, a verge. It's part of the
+// motorway (no frontage, no buses, grade separated where it crosses anything) and joins it part-way.
+// slip: 50 mph, as most are; slip-40, tighter (a town junction's); -2, two lanes (built as one lane
+// where it meets the motorway, widening once clear of it).
+for (const [id, lanes, mph] of [['slip', 1, 50], ['slip-2', 2, 50], ['slip-40', 1, 40], ['slip-40-2', 2, 40]] as const) {
+  add({ ...road(id, 'Motorway', { lanes, mph, lane: 3.65, shoulder: 1, pave: 0, verge: 2.5 }), label: `Slip road · ${lanes === 1 ? '1 lane' : '2 lanes'} · ${mph} mph`, blurb: `${lanes === 1 ? '1 lane' : '2 lanes'}, one way · hard strips · joins or leaves a motorway part-way`, oneway: true, strip: 1 });
+  ROADS[id].cost = priceOf(ROADS[id]);
+}
+// a slip road type (joins a motorway part-way, and doesn't count as the motorway running on)
+export const isSlip = (type: string) => type === 'slip' || type.startsWith('slip-');
+// the one-way ring of a grade-separated roundabout: two lanes, hard strips, a verge, 40 mph
+add({ ...road('gsr-ring', 'Dual', { lanes: 2, mph: 40, lane: 3.65, shoulder: 0.7, pave: 0, verge: 2.5, frontage: false }), label: 'Roundabout ring · 40 mph', blurb: '2 lanes, one way round · the ring of a grade-separated roundabout', oneway: true, strip: 0.7 });
+ROADS['gsr-ring'].cost = priceOf(ROADS['gsr-ring']);
+
+// The one-way version of a road: the same lanes, all running one way on one carriageway, no
+// reservation and no centre line. A motorway or dual carriageway is built as a pair of these; a
+// one-way street is one. Worked out once per road and kept (not listed with the rest: it's the
+// segment's `oneway` flag that picks it, see roads.ts Network.def).
+const ONE = new Map<string, RoadDef>();
+export function oneWay(d: RoadDef): RoadDef {
+  if (d.oneway || d.cls !== 'road') return d;
+  let o = ONE.get(d.id);
+  if (!o) {
+    // (a fast divided road keeps a hard strip on its offside, as each carriageway of a motorway does)
+    const strip = d.family === 'Motorway' ? 1 : d.median > 0 && d.mph >= 60 ? 0.7 : 0;
+    o = { ...d, id: `${d.id}~1`, oneway: true, strip, median: 0, medianKind: 'none', label: `${d.label.split(' · ')[0].replace(/ \d\+\d$/, '')} (one way) · ${d.mph} mph`, blurb: `${d.lanes === 1 ? '1 lane' : `${d.lanes} lanes`}, one way · ${d.blurb.split(' · ').slice(1).filter((b) => !/reservation|centre|barrier/.test(b)).join(' · ')}` };
+    o.trees = o.pave >= 5;
+    o.cost = priceOf(o);
+    ONE.set(d.id, o);
+  }
+  return o;
+}
+// the road a type and direction flag describe
+export const defOf = (type: string, oneway?: boolean) => (oneway ? oneWay(ROADS[type]) : ROADS[type]);
+
 export const PRESETS = ['street', 'avenue', 'dual', 'motorway'];
 export const RAIL_PRESETS = ['rail-branch', 'rail-main', 'rail-hs', 'rail-light', 'rail-rack'];
 
 export interface RoadFilter { family?: Family; lanes?: number; mph?: number; trees?: boolean; bus?: boolean; cycle?: boolean; parking?: boolean }
 export function filterRoads(f: RoadFilter) {
-  return Object.values(ROADS).filter((d) => d.cls === 'road'
+  return Object.values(ROADS).filter((d) => d.cls === 'road' && !d.oneway
     && (f.family === undefined || d.family === f.family) && (f.lanes === undefined || d.lanes === f.lanes) && (f.mph === undefined || d.mph === f.mph)
     && (f.trees === undefined || d.trees === f.trees) && (f.bus === undefined || !!d.bus === f.bus) && (f.cycle === undefined || !!d.cycle === f.cycle) && (f.parking === undefined || !!d.parking === f.parking))
     .sort((a, b) => halfOf(a) - halfOf(b));

@@ -7,14 +7,19 @@ import { kerbOf, pathLength, pointAt, rectCorners, type Lot, type Network, type 
 import { STD } from './standards';
 import { polysTouch } from './land';
 import { approachPath, legFrameOf, shapeJunction, ringFootprint, type Shape, type ShapeLeg, type SlipShape } from './jshape';
+import { slipShape, slipRoles } from './interchange/slips';
 
-export type Form = 'join' | 'merge' | 'priority' | 'signals' | 'mini' | 'roundabout';
+// 'merge' and 'diverge': a slip road joining or leaving a one-way carriageway part-way along
+// (interchange/slips.ts); the carriageway's lanes carry straight on through them
+export type Form = 'join' | 'merge' | 'diverge' | 'priority' | 'signals' | 'mini' | 'roundabout';
 export type Move = 'L' | 'S' | 'R';
 export const FORM_NAME: Record<Form, string> = {
-  join: 'Plain join', merge: 'Merge', priority: 'Give way', signals: 'Traffic signals', mini: 'Mini-roundabout', roundabout: 'Roundabout',
+  join: 'Plain join', merge: 'Merge', diverge: 'Diverge', priority: 'Give way', signals: 'Traffic signals', mini: 'Mini-roundabout', roundabout: 'Roundabout',
 };
 
-export interface Leg { seg: RSeg; dir: P; ang: number; lanes: number; w: number; len: number; path: P[] } // path: its centreline from the node out, as drawn (jshape.approachPath)
+// path: its centreline from the node out, as drawn (jshape.approachPath); into / out: whether traffic
+// can arrive along it, and leave along it (a one-way road only does one of them)
+export interface Leg { seg: RSeg; dir: P; ang: number; lanes: number; w: number; len: number; path: P[]; into: boolean; out: boolean }
 export type Slip = SlipShape;
 export interface Score { dos: number; demand: number; capacity: number; busiest: string }
 export interface Junction {
@@ -43,7 +48,7 @@ export function legsAt(net: Network, node: number): Leg[] {
     let k = 1;
     while (k < p.length - 1 && dist(p[0], p[k]) < 6) k++;
     const dx = p[k].x - p[0].x, dz = p[k].z - p[0].z, dl = Math.hypot(dx, dz) || 1;
-    out.push({ seg: s, dir: { x: dx / dl, z: dz / dl }, ang: Math.atan2(dz, dx), lanes: d.lanes, w: d.lanes * d.speed * (d.family === 'Motorway' ? 1.6 : 1), len: L, path: approachPath(p) });
+    out.push({ seg: s, dir: { x: dx / dl, z: dz / dl }, ang: Math.atan2(dz, dx), lanes: d.lanes, w: d.lanes * d.speed * (d.family === 'Motorway' ? 1.6 : 1), len: L, path: approachPath(p), into: !s.oneway || s.b === node, out: !s.oneway || s.a === node });
   }
   // round the junction in the direction traffic circulates (a left turn leads to the next leg)
   return out.sort((a, b) => a.ang - b.ang);
@@ -100,7 +105,8 @@ export function designFlows(legs: Leg[], seen?: Map<string, number>) {
   const flows: Record<string, number> = {};
   const total = seen ? [...seen.values()].reduce((t, v) => t + v, 0) : 0;
   for (const a of legs) {
-    const others = legs.filter((b) => b !== a);
+    if (!a.into) continue;
+    const others = legs.filter((b) => b !== a && b.out);
     const W = others.reduce((t, b) => t + b.w, 0) || 1;
     for (const b of others) {
       const k = `${a.seg.id}>${b.seg.id}`;
@@ -179,7 +185,8 @@ export function evaluate(net: Network, _node: number, legs: Leg[], form: Form, f
   const crit = phases.map((ph) => Math.max(1, ...legs.filter((l) => ph.includes(l.seg.id)).map((l) => legs.reduce((t, b) => t + (b === l ? 0 : f(l, b)), 0) / Math.max(1, l.lanes))));
   const C = 60, lost = 5 * phases.length, green = (id: number) => { const p = phases.findIndex((ph) => ph.includes(id)); return ((C - lost) * crit[Math.max(0, p)]) / crit.reduce((t, v) => t + v, 0) / C; };
   for (const a of legs) {
-    const outs = legs.filter((b) => b !== a);
+    if (!a.into) continue; // (nothing arrives along a one-way road leading away)
+    const outs = legs.filter((b) => b !== a && b.out);
     const demand: Record<Move, number> = { L: 0, S: 0, R: 0 }, receive: Record<Move, number> = { L: 0, S: 0, R: 0 };
     const moves: Move[] = [];
     for (const b of outs) {
@@ -199,7 +206,7 @@ export function evaluate(net: Network, _node: number, legs: Leg[], form: Form, f
       return t + legs.reduce((u, y) => { if (y === x) return u; const k = (legs.indexOf(y) - i + n) % n, pass = (ai - i + n) % n; return u + (pass > 0 && pass < k ? f(x, y) : 0); }, 0);
     }, 0) : 0;
     const capOf = (mv: Move[]): number => {
-      if (form === 'merge' || form === 'join') return 1800;
+      if (form === 'merge' || form === 'diverge' || form === 'join') return 1800;
       if (form === 'priority') return isMajor ? (mv.includes('R') ? Math.max(250, 900 - 0.5 * cross) : 1800) : Math.max(150, 750 - 0.45 * cross);
       if (form === 'signals') return 1900 * green(a.seg.id) * (mv.includes('R') ? 0.7 : 1);
       if (form === 'mini') return Math.max(200, 1000 - 0.7 * circ);
@@ -267,6 +274,18 @@ export function design(net: Network, node: number, geo: Geometry, seen?: Map<str
     return { node, form, auto: true, custom: false, complex: legs.length > 4, legs: ids, major, lanes: ev.lanes, slip, R: shape?.R || (form === 'mini' ? Math.max(maxK + 2, 7) : R), reach, score: ev.score, flows, shape };
   };
   if (legs.length === 2) return make('join', false);
+  // a slip road joining or leaving a one-way carriageway
+  const roles = slipRoles(net, legs);
+  if (roles) {
+    const shape = slipShape(net, node, roles);
+    if (shape) {
+      const slip = shape.slip!, major = [roles.main[0].seg.id, roles.main[1].seg.id];
+      const ev = evaluate(net, node, legs, roles.kind, flows, major, slip);
+      const reach: Record<number, number> = {};
+      for (const l of legs) reach[l.seg.id] = shape.line[l.seg.id] ?? 0;
+      return { node, form: roles.kind, auto: true, custom: false, complex: false, legs: ids, major, lanes: ev.lanes, slip, R: 0, reach, score: ev.score, flows, shape };
+    }
+  }
   const options: Junction[] = [];
   if (prefer?.form) return make(prefer.form, prefer.slip ?? true);
   // fast roads (and the end of a motorway) meet others at a roundabout, never a side-road T

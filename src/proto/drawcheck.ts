@@ -54,9 +54,13 @@ export class TriIndex {
 // A square window of the map, `res` metres a cell, holding which surfaces cover each cell's centre.
 export class Raster {
   w: number; h: number; bits: Uint8Array;
+  // the heights footway and verge were drawn at in each cell (the highest), so only those drawn at the
+  // same height count as fighting: one a centimetre over the other is drawn cleanly on top
+  py: Float32Array; vy: Float32Array;
   constructor(readonly x0: number, readonly z0: number, x1: number, z1: number, readonly res = 0.1) {
     this.w = Math.ceil((x1 - x0) / res); this.h = Math.ceil((z1 - z0) / res);
     this.bits = new Uint8Array(this.w * this.h);
+    this.py = new Float32Array(this.w * this.h).fill(-1e9); this.vy = new Float32Array(this.w * this.h).fill(-1e9);
   }
   // fill a triangle (only its part at about height y, so a bridge overhead doesn't count)
   tri(m: Mat, a: Float32Array, i: number, yLo: number, yHi: number) {
@@ -75,7 +79,11 @@ export class Raster {
       for (let k = i0; k <= i1; k++) {
         const px = this.x0 + (k + 0.5) * r;
         const d1 = ((bx - ax) * (pz - az) - (bz - az) * (px - ax)) * s, d2 = ((cx - bx) * (pz - bz) - (cz - bz) * (px - bx)) * s, d3 = ((ax - cx) * (pz - cz) - (az - cz) * (px - cx)) * s;
-        if (d1 >= 0 && d2 >= 0 && d3 >= 0) this.bits[j * this.w + k] |= bit;
+        if (d1 >= 0 && d2 >= 0 && d3 >= 0) {
+          const c = j * this.w + k;
+          this.bits[c] |= bit;
+          if (bit === BIT.pave) this.py[c] = Math.max(this.py[c], ay); else if (bit === BIT.verge) this.vy[c] = Math.max(this.vy[c], ay);
+        }
       }
     }
   }
@@ -145,9 +153,10 @@ const CARR = BIT.asph | BIT.paint;
 
 // Check the window round one place (a junction or a join) at height y. `keep` says which cells to look
 // at (the places' own surroundings, not a neighbour's); `r` is the tolerance, in cells.
-export function checkWindow(idx: TriIndex, node: number, c: P, rad: number, y: number, res = 0.1, r = 2, minArea = 0.03): Defect[] {
+// (top: how far above y surfaces still count, for a junction whose roads climb away from it)
+export function checkWindow(idx: TriIndex, node: number, c: P, rad: number, y: number, res = 0.1, r = 2, minArea = 0.03, top = 1.2): Defect[] {
   const R = new Raster(c.x - rad, c.z - rad, c.x + rad, c.z + rad, res);
-  for (const t of idx.near(R.x0, R.z0, c.x + rad, c.z + rad)) R.tri(t.m, t.a, t.i, y - 0.3, y + 1.2);
+  for (const t of idx.near(R.x0, R.z0, c.x + rad, c.z + rad)) R.tri(t.m, t.a, t.i, y - 0.3, y + top);
   const out: Defect[] = [];
   const inside = (p: P) => Math.hypot(p.x - c.x, p.z - c.z) < rad - 1;
   const add = (kind: Defect['kind'], m: Uint8Array, min = minArea, test?: (cells: number[]) => boolean) => {
@@ -166,7 +175,7 @@ export function checkWindow(idx: TriIndex, node: number, c: P, rad: number, y: n
   // stray markings: paint not on the carriageway, or on a kerbed island or reservation
   add('stray', lines.map((v, i) => (v && (!(R.bits[i] & CARR) || R.bits[i] & (BIT.island | BIT.median)) ? 1 : 0)), 0.02);
   // footway and verge at the same height
-  add('fight', R.bits.map((v) => (v & BIT.pave && v & BIT.verge ? 1 : 0)), 0.05);
+  add('fight', R.bits.map((v, i) => (v & BIT.pave && v & BIT.verge && Math.abs(R.py[i] - R.vy[i]) < 0.004 ? 1 : 0)), 0.05);
   return out;
 }
 

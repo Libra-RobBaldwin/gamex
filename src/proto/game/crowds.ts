@@ -22,7 +22,7 @@ import { DIMS } from '../footprint';
 import type { XZ } from '../land';
 import type { Region } from '../infill';
 import { gameYear, onYearChange } from './era';
-import { frontage, lotSites, roadSites, PAVE_Y, type FootwaySite, type LotSites, type ParkSite, type SchoolSite, type Sites, type StopSite, type VenueSite, type WorksSite } from './crowdsites';
+import { frontage, lotSites, roadSites, PAVE_Y, type CrossingSite, type FootwaySite, type LotSites, type ParkSite, type SchoolSite, type Sites, type StopSite, type VenueSite, type WorksSite } from './crowdsites';
 
 // ---------- the numbers ----------
 export interface ParkCounts { walkers: number; dogWalkers: number; joggers: number; looseDogs: number; sitters: number; kids: number }
@@ -88,6 +88,9 @@ export interface TownView {
 // Shift changes at the works: in before the hour, out just after it.
 const SHIFTS: [number, number][] = [[5 * 60 + 35, 6 * 60 + 5], [13 * 60 + 35, 14 * 60 + 5], [21 * 60 + 35, 22 * 60 + 5]];
 const BUS_CAPACITY = 60;
+// a pelican's timings (s): the least green traffic gets, amber, all-red before the green man, the
+// least red, flashing amber after
+const PELICAN = { minGreen: 20, amber: 3, allRed: 1, minRed: 6, flash: 3 };
 const STOP_PATIENCE = 20, KERB_PATIENCE = 3; // game minutes a queue takes to settle to its level
 
 export class TownCrowds {
@@ -258,36 +261,77 @@ export class TownCrowds {
     else this.holdTraffic();
   }
 
-  // People at a kerb cross when nothing is coming. Traffic doesn't stop for them yet, so they wait
-  // until nothing can reach the crossing before the last of them is over: every vehicle is further
-  // off than it would go in that time (at least at 4 m/s, for one about to pull away), plus a margin.
+  // People at a kerb cross when nothing is coming. At a junction's kerbs traffic doesn't stop for
+  // them, so they wait until nothing can reach the crossing before the last of them is over: every
+  // vehicle is further off than it would go in that time (at least at 4 m/s, for one about to pull
+  // away), plus a margin. At a zebra they have priority: they step out once whatever's coming can
+  // stop comfortably at its line, and it does. At a pelican they press the button and wait for the
+  // green man (pelican()).
   private cross() {
     const cars = this.t.traffic.cars;
     for (const c of this.roads!.crossings) {
       const n = c.kerbs.map((k) => Math.min(4, Math.floor(this.queues.get(k.id)?.waiting ?? 0)));
+      if (c.kind === 'pelican') { this.pelican(c, n); continue; }
       if (!n.some((k) => k >= 1)) continue;
-      const w = Math.hypot(c.to[0].x - c.to[1].x, c.to[0].z - c.to[1].z);
-      const T = (Math.max(...n) - 1) * 1.1 + w / 1.3 + 0.3 + 2; // (as Crowds.board spaces them: 1.1 s apart, at 1.3 m/s)
+      const T = this.crossTime(c, n);
       let clear = true;
       for (const v of cars) {
         if (!v.pose || v.gone !== undefined) continue;
-        const R = 14 + Math.max(4, v.v) * T;
+        // (at a zebra: anything on it, or too near to stop at 2.5 m/s²)
+        const R = c.kind === 'zebra' ? Math.max(v.front, v.back) + 1.5 + (v.v * v.v) / 5 : 14 + Math.max(4, v.v) * T;
         if (Math.abs(v.pose.x - c.mid.x) < R && Math.abs(v.pose.z - c.mid.z) < R && Math.hypot(v.pose.x - c.mid.x, v.pose.z - c.mid.z) < R) { clear = false; break; }
       }
       if (!clear) continue;
-      let until = 0;
-      c.kerbs.forEach((k, i) => {
-        if (n[i] < 1) return;
-        const b = this.crowds.board(k.id, [c.to[i]], n[i]);
-        this.took(k.id, b.n);
-        until = Math.max(until, b.until);
-      });
+      const until = this.over(c, n);
       // and the traffic stops for them until they're over
-      if (until > 0) this.onCrossing.push({ seg: c.seg, at: c.mid, until });
+      if (until > 0) this.onCrossing.push({ seg: c.seg, at: c.stand === undefined ? c.mid : { ...c.mid, stand: c.stand }, until });
     }
     this.holdTraffic();
   }
-  private onCrossing: { seg: number; at: XZ; until: number }[] = [];
+  // how long the people waiting take to get over (as Crowds.board spaces them: 1.1 s apart, at 1.3 m/s)
+  private crossTime(c: CrossingSite, n: number[]) {
+    const w = Math.hypot(c.to[0].x - c.to[1].x, c.to[0].z - c.to[1].z);
+    return (Math.max(...n) - 1) * 1.1 + w / 1.3 + 0.3 + 2;
+  }
+  // everyone waiting at either kerb sets off across; when the last is over
+  private over(c: CrossingSite, n: number[]) {
+    let until = 0;
+    c.kerbs.forEach((k, i) => {
+      if (n[i] < 1) return;
+      const b = this.crowds.board(k.id, [c.to[i]], n[i]);
+      this.took(k.id, b.n);
+      until = Math.max(until, b.until);
+    });
+    return until;
+  }
+  // A pelican's cycle: green for traffic until someone's waiting (and it's had its green a while),
+  // then amber, red with the green man until everyone's over, flashing amber, green again.
+  private pel = new Map<string, { phase: 'green' | 'amber' | 'red' | 'flash'; t: number; hold?: { until: number } }>();
+  private pelican(c: CrossingSite, n: number[]) {
+    const now = this.store.time, P = PELICAN;
+    let p = this.pel.get(c.id);
+    if (!p || now < p.t - 1) this.pel.set(c.id, (p = { phase: 'green', t: now - P.minGreen }));
+    const T = now - p.t;
+    if (p.phase === 'green' && T >= P.minGreen && n.some((k) => k >= 1)) {
+      // traffic stops at the line from the amber (what can't stop comfortably by then goes on over)
+      const hold = { seg: c.seg, at: { ...c.mid, stand: c.stand ?? 2 }, until: now + P.amber + P.allRed + this.crossTime(c, n) };
+      this.onCrossing.push(hold);
+      Object.assign(p, { phase: 'amber', t: now, hold });
+    } else if (p.phase === 'amber' && T >= P.amber + P.allRed) {
+      const until = Math.max(now + P.minRed, this.over(c, n));
+      if (p.hold) p.hold.until = until;
+      Object.assign(p, { phase: 'red', t: now });
+    } else if (p.phase === 'red' && now >= (p.hold?.until ?? 0)) Object.assign(p, { phase: 'flash', t: now });
+    else if (p.phase === 'flash' && T >= P.flash) Object.assign(p, { phase: 'green', t: now, hold: undefined });
+  }
+  // what a pelican's traffic lights show (roaddraw's lamps; the flashing amber flashes)
+  pelicanLight(id: string): 'red' | 'amber' | 'green' | null {
+    const p = this.pel.get(id);
+    if (!p || p.phase === 'green') return 'green';
+    if (p.phase === 'flash') return Math.floor(this.store.time * 2) % 2 ? 'amber' : null;
+    return p.phase === 'amber' && this.store.time - p.t < PELICAN.amber ? 'amber' : 'red';
+  }
+  private onCrossing: { seg: number; at: XZ & { stand?: number }; until: number }[] = [];
   private holdTraffic() {
     const now = this.store.time, m = this.t.traffic.crossing;
     this.onCrossing = this.onCrossing.filter((x) => x.until > now);

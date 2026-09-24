@@ -3,12 +3,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BAY, ROADS, bayWeight, closestOnPath, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
-import { junctionLift, legsAt, type Junction } from './junction';
+import { junctionLift, legsAt, moveOf, type Junction } from './junction';
 import { STD } from './standards';
-import { legAt, legDir, legFrameOf, ringA, type ShapeLeg } from './jshape';
+import { PEDX, pedCrossingsOn, type PedX } from './pedx';
+import { GHOST_PAIR, crossingAt, legAt, legDir, legFrameOf, ringA, type ShapeLeg } from './jshape';
 import { TAPER, courseOf, normals, type Course, type Section2 } from './xsection';
 import type { XZ } from './land';
-import type { RoadDef } from './catalog';
+import { laneBase, type RoadDef } from './catalog';
 
 export const paveMat = new THREE.MeshLambertMaterial({ color: '#bdb8ad', polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 export const asphaltMat = new THREE.MeshLambertMaterial({ color: '#484c52', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
@@ -233,6 +234,8 @@ const islandMat = lit('#7aa653', over(4));
 const kerbMat = lit('#c9c4ba', { side: THREE.DoubleSide });
 const barrierMat = lit('#a9adb0', { side: THREE.DoubleSide });
 const hintMat = lit('#8c877d', over(1));
+// tactile paving at a crossing's dropped kerbs: blister paving, buff (uncontrolled) or red (at signals)
+const tactileBuffMat = lit('#c9a56a', over(1.5)), tactileRedMat = lit('#b0503e', over(1.5));
 const cutMat = lit('#6f9446');
 // the grass the roads draw themselves: verges, roundabout islands, cutting slopes (the game gives
 // them the ground's own look, so they match the fields and lawns round them)
@@ -248,6 +251,8 @@ export const holeMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWri
 export const LAMP_OFF = new THREE.MeshBasicMaterial({ color: '#1b1d20' });
 export const LAMP_ON: Record<string, THREE.Material> = { red: new THREE.MeshBasicMaterial({ color: '#ff3b2f' }), amber: new THREE.MeshBasicMaterial({ color: '#ffb020' }), green: new THREE.MeshBasicMaterial({ color: '#35e06b' }) };
 const lampGeo = new THREE.BoxGeometry(0.22, 0.22, 0.06);
+// a Belisha beacon's pole (black and white bands) and its amber globe, at a zebra crossing
+const beaconWhite = lit('#f2f2ee'), beaconGlobe = new THREE.MeshBasicMaterial({ color: '#ffa726' });
 // which surface each material is, for checking the drawing from above (drawcheck.ts)
 export const SURFACES = { pave: [paveMat], asph: [asphaltMat], lines: [lineMat, yellowMat], verge: [vergeMat], island: [islandMat], median: [medianMat], paint: [busMat, cycleMat, bayMat] };
 
@@ -410,7 +415,13 @@ function inPoly(p: XZ, q: XZ[]) {
 // lane centres, measured from the centreline on the traffic's own (left) side
 export function laneCentre(net: Network, s: RSeg, i: number) {
   const d = net.def(s);
-  return d.lanes > 1 ? d.median / 2 + (d.lanes - 1 - i + 0.5) * d.lane : d.median / 2 + d.lane / 2;
+  return d.lanes > 1 ? laneBase(d) + (d.lanes - 1 - i + 0.5) * d.lane : laneBase(d) + d.lane / 2;
+}
+// the parts of [a, b] outside every gap
+function outside(a: number, b: number, gaps: [number, number][]) {
+  let out: [number, number][] = [[a, b]];
+  for (const [g0, g1] of gaps) out = out.flatMap(([x, y]) => (g1 <= x || g0 >= y ? [[x, y]] : [...(g0 > x ? [[x, g0]] : []), ...(g1 < y ? [[g1, y]] : [])]) as [number, number][]);
+  return out.filter(([x, y]) => y - x > 0.2);
 }
 // Where a road's own drawing stops at each end of its course, taken from the junction's shape (or the
 // turning head at a cul-de-sac): its carriageway (`strip`), its markings (`line`), its reservation
@@ -445,13 +456,15 @@ export function setTrackSkip(f: (s: RSeg) => [XZ, XZ][]) { trackSkip = f; }
 // the railway's materials, for rail/draw.ts to lay its own track in
 export const RAIL_MATS = { ballast: ballastMat, sleeper: sleeperMat, rail: railMat, verge: vergeMat };
 
-export interface Lamp { mesh: THREE.Mesh; node: number; seg: number; col: 'red' | 'amber' | 'green' }
+// (pedx: a pelican crossing's, whose lights follow its people rather than a junction's)
+export interface Lamp { mesh: THREE.Mesh; node: number; seg: number; col: 'red' | 'amber' | 'green'; pedx?: string }
 
 export function drawRoads(net: Network, group: THREE.Group, junctions: Map<number, Junction>, trunkMat: THREE.Material, crownMat: THREE.Material, editing: number | null = null): Lamp[] {
   for (const c of [...group.children]) { group.remove(c); (c as THREE.Mesh).geometry.dispose(); }
   const F = () => new Flat();
   const pave = F(), asph = F(), lines = F(), verge = F(), median = F(), yellow = F(), bus = F(), cyc = F(), bays = F();
   const ballast = F(), sleepers = F(), railsF = F(), rack = F(), holes = F(), hint = F(), island = F(), wires = F();
+  const tactileBuff = F(), tactileRed = F();
   const cut = new Solid(), body = new Solid(), rails = new Solid(), barrier = new Solid(), kerbs = new Solid(), portal = new Solid(), poles = new Solid();
   const parked = carCols.map(() => new Solid());
   const furn = { glass: new Solid(), frame: new Solid(), red: new Solid() };
@@ -461,6 +474,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   const giveWay = new Painted(); // (give-way lines: see giveWayMat)
   const tree = (x: number, y: number, z: number, s = 1) => trees.push(new THREE.CylinderGeometry(0.18 * s, 0.25 * s, 3 * s, 5).translate(x, y + 1.5 * s, z), new THREE.IcosahedronGeometry(2.2 * s, 0).translate(x, y + 4.4 * s, z));
   const courses = new Map<number, Course>();
+  const beacons = new Solid(), globes: THREE.BufferGeometry[] = [];
 
   // the land junctions pave beyond the roads meeting there (where a raised road's walls and parapets stop)
   const jland: { box: [number, number, number, number]; polys: XZ[][] }[] = [];
@@ -557,6 +571,16 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     }
     // ---- road: pavements or verges, then the carriageway ----
     const ends = endsOf(junctions, s, C);
+    // pedestrian crossings along it (pedx.ts), and the stretch each keeps clear of other markings: the
+    // crossing, its give-way or stop lines, and its zig-zags either side
+    const pxs = pedCrossingsOn(net, s, C, ends);
+    const pxBack = (x: PedX) => (x.kind === 'zebra' ? 1.5 : 2.5) + 0.3;
+    const pxNear = (r: number, pad: number) => pxs.some((x) => Math.abs(r - x.r) < x.w / 2 + pad);
+    const cutOut = (a: number, b: number, pad: (x: PedX) => number) => {
+      let out: [number, number][] = [[a, b]];
+      for (const x of pxs) { const lo = x.r - x.w / 2 - pad(x), hi = x.r + x.w / 2 + pad(x); out = out.flatMap(([p, q]) => (hi <= p || lo >= q ? [[p, q]] : [[p, lo], [hi, q]].filter(([u, v]) => v - u > 0.3)) as [number, number][]); }
+      return out;
+    };
     const surface = d.pave > 0 ? pave : verge;
     // where the road runs on into one with grass verges (out of town), the footway tapers out to the
     // kerb over its last few metres rather than stopping square
@@ -642,6 +666,22 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
         }
       }
     } else fullWidth(s0, s1);
+    // one carriageway of a motorway or fast dual carriageway: a safety barrier along the central
+    // reservation, on its offside verge (the other carriageway has its own, a little way off)
+    if (d.oneway && d.id.endsWith('~1') && d.verge > 1 && (d.family === 'Motorway' || (d.family === 'Dual' && d.mph >= 60))) {
+      const o = -(kerbOf(d) + d.verge - 0.6), bq = part(s0 + 0.3, s1 - 0.3);
+      // (not where it would stand on another carriageway: where the pair splays in to a junction, say)
+      const others = [...net.segs.values()].filter((x) => x !== s && x.oneway && net.def(x).cls === 'road');
+      const clear = (x: number, z: number) => !others.some((x2) => { const c = closestOnPath({ x, z }, net.path(x2)); // (the barrier stands d.verge - 0.6 out from the kerb: stop where the kerbs are nearer than a
+        // ghost island's width, plus a metre, where the pair splays into a junction's chevrons)
+        return c.d < net.half(x2) + 0.3 || c.d < kerbOf(net.def(x2)) + GHOST_PAIR + 1.6 - d.verge; });
+      for (let i = 1; i < bq.p.length; i++) {
+        const p = bq.p[i - 1], q = bq.p[i], L2 = Math.hypot(q.x - p.x, q.z - p.z) || 1, nx = (q.z - p.z) / L2, nz = -(q.x - p.x) / L2;
+        const P0 = [p.x + nx * o, p.z + nz * o], Q0 = [q.x + nx * o, q.z + nz * o];
+        if (!clear(P0[0], P0[1]) || !clear(Q0[0], Q0[1])) continue;
+        barrier.quad([P0[0], (p.y ?? 0) + 0.25, P0[1]], [Q0[0], (q.y ?? 0) + 0.25, Q0[1]], [Q0[0], (q.y ?? 0) + 1.05, Q0[1]], [P0[0], (p.y ?? 0) + 1.05, P0[1]]);
+      }
+    }
 
     // ---- markings, kept clear of junctions ----
     const joinAt = (e: 0 | 1) => C.kinds[e] === 'join' || C.kinds[e] === 'edge';
@@ -671,19 +711,25 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     // the centre line of a single carriageway sits midway between the lane edges (it moves over
     // where lanes are narrowed), running on round a join into the next road
     const c0 = Math.max(l0, ends.centre[0]), c1 = Math.min(l1, CL - ends.centre[1]);
-    for (const [a, b] of runs((q) => C.sec(q).median < 0.05, c0, c1)) dashRun(lines, cp, (q) => { const x = S(q); return (x.L.lane - x.R.lane) / 2; }, a, b, 3, 3, 0.07, 0.35, ...anchor(a, b));
+    if (!d.oneway) for (const [a0, b0] of runs((q) => C.sec(q).median < 0.05, c0, c1)) for (const [a, b] of cutOut(a0, b0, (x) => pxBack(x) + PEDX.zigzags * PEDX.zig)) dashRun(lines, cp, (q) => { const x = S(q); return (x.L.lane - x.R.lane) / 2; }, a, b, 3, 3, 0.07, 0.35, ...anchor(a, b));
     // lane lines: where a lane tapers away, its line closes in on the reservation's edge line
-    for (const k of [1, -1] as const) for (let j = 1; j < d.lanes; j++) {
+    // (a one-way road's lanes are all on its left: see catalog.laneBase)
+    const sides = d.oneway ? ([1] as const) : ([1, -1] as const);
+    for (const k of sides) for (let j = 1; j < d.lanes; j++) {
       const off = (q: number) => { const x = S(q), sd = k === 1 ? x.L : x.R, n = x.x.lanes; return k * (x.x.median + ((sd.lane - x.x.median) * (n - j)) / n); };
-      for (const [a, b] of runs((q) => C.sec(q).lanes - j > 0.12, l0, l1)) dashRun(lines, cp, off, a, b, 4, 5, 0.07, 0.35, ...anchor(a, b));
+      for (const [a0, b0] of runs((q) => C.sec(q).lanes - j > 0.12, l0, l1)) for (const [a, b] of cutOut(a0, b0, pxBack)) dashRun(lines, cp, off, a, b, 4, 5, 0.07, 0.35, ...anchor(a, b));
     }
     // kerbside lanes (bus lanes, cycle lanes, parking), only where the road has its own full width
     const T = C.taper, k0 = C.rhoOf(T.A ? TAPER.median * T.A.len : 0), k1 = C.rhoOf(L - (T.B ? TAPER.median * T.B.len : 0));
     const ks0 = Math.max(s0, k0), ks1 = Math.min(s1, k1), kl0 = Math.max(l0, k0), kl1 = Math.min(l1, k1);
-    for (const k of [1, -1] as const) {
+    // (where a slip road joins or leaves a one-way carriageway, the junction paints its nearside edge)
+    const gaps = [s.a, s.b].flatMap((nd) => { const g = junctions.get(nd)?.shape?.marks?.edgeGap[s.id]; return g ? [[C.rhoOf(g[0]), C.rhoOf(g[1])] as [number, number]] : []; });
+    // a one-way carriageway with hard strips has edge lines both sides: its offside one at the lanes' edge
+    if (d.oneway && (d.strip ?? 0) > 0) solid(lines, l0, l1, (q) => C.sec(q).median, 0.1);
+    for (const k of sides) {
       const S2 = (x: ReturnType<typeof S>) => (k === 1 ? x.L : x.R);
       const span = (a: number, b: number) => (k === 1 ? [a, b] : [-b, -a]) as [number, number];
-      if (d.shoulder) solid(lines, l0, l1, (q) => k * S2(S(q)).lane, 0.1);
+      if (d.shoulder || (d.strip ?? 0) > 0) for (const [a, b] of outside(l0, l1, gaps)) solid(lines, a, b, (q) => k * S2(S(q)).lane, 0.1);
       if (ks1 - ks0 < 1) continue;
       const q = part(ks0, ks1);
       if (d.bus) { band(bus, q, (i) => span(S2(q.sec[i]).lane, S2(q.sec[i]).lane + d.bus), 0.26); solid(lines, kl0, kl1, (t) => k * S2(S(t)).lane, 0.12); }
@@ -697,6 +743,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
         for (let t = ks0 + 4; t < ks1 - 5; t += 6) {
           const x = S(t + 3), side = S2(x);
           if (side.park < d.parking - 0.1) continue; // painted out by a stop
+          if (pxs.some((x) => t + 6 > x.r - x.w / 2 - pxBack(x) - PEDX.zigzags * PEDX.zig && t < x.r + x.w / 2 + pxBack(x) + PEDX.zigzags * PEDX.zig)) continue; // (nor on a crossing's zig-zags)
           const pm = side.lane + d.bus + d.cycle + d.parking / 2;
           lines.dashes(cp, () => k * pm, t, t + 0.12, 0.12, 1, d.parking / 2, 0.35);
           if ((Math.sin(s.id * 7 + t * 13.7) + 1) / 2 < 0.65) {
@@ -708,7 +755,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     }
     // "lane ends" arrows (bent, TSRGD diagram 1014) in each lane that tapers away, before the taper,
     // for traffic heading into the narrower road
-    for (const Tp of [T.A, T.B]) if (Tp) {
+    for (const Tp of [T.A, T.B]) if (Tp && !(d.oneway && Tp.atA)) {
       const { length: al, gap, count } = STD.deflectionArrow(d.mph);
       const k = Tp.atA ? -1 : 1; // the side whose traffic is heading for the join (we drive on the left)
       for (let j = Tp.to.lanes; j < d.lanes; j++) for (let n = 0; n < count; n++) {
@@ -746,11 +793,76 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       const rs = C.rhoOf(st.s);
       shelter(furn, cp, rs, kerb(rs) + k * 0.2);
     }
+    // pedestrian crossings: a zebra (stripes, give-way blocks, Belisha beacons) or a pelican (studs,
+    // stop lines, signals), both with zig-zags (TSRGD diagram 1001.1) along the kerbs and the middle
+    // and red blister paving at the dropped kerbs
+    for (const x of pxs) {
+      const Wq = (t: number, o: number) => { const q = pointAt(cp, t); return [q.x + q.uz * o, (q.y ?? 0), q.z - q.ux * o]; };
+      const quad = (f: Flat, t0: number, t1: number, o0: number, o1: number, yy: number) => {
+        const p = [Wq(t0, o0), Wq(t1, o0), Wq(t1, o1), Wq(t0, o1)];
+        f.tri3(p[0][0], p[0][1] + yy, p[0][2], p[1][0], p[1][1] + yy, p[1][2], p[2][0], p[2][1] + yy, p[2][2]);
+        f.tri3(p[0][0], p[0][1] + yy, p[0][2], p[2][0], p[2][1] + yy, p[2][2], p[3][0], p[3][1] + yy, p[3][2]);
+      };
+      const X = S(x.r), kL = X.L.kerb, kR = X.R.kerb, eL = X.L.lane, eR = X.R.lane, mid = (eL - eR) / 2;
+      const t0 = x.r - x.w / 2, t1 = x.r + x.w / 2, back = pxBack(x);
+      if (x.kind === 'zebra') {
+        // black and white stripes (road-coloured gaps) across, each parallel to the kerb
+        const n = Math.max(3, Math.round((kL + kR) / 0.6)), sw = (kL + kR) / n;
+        for (let i = 0; i < n; i++) if ((i + Math.round(n / 2)) % 2 === 0) quad(lines, t0, t1, -kR + i * sw + 0.02, -kR + (i + 1) * sw - 0.02, 0.35);
+        // give-way blocks (diagram 1003.1) a metre and a half back, across each approach
+        for (const [tA, o0, o1] of [[t0 - back, mid, eL], [t1 + back - 0.3, -eR, mid]] as const)
+          for (let o = o0 + 0.15; o < o1 - 0.3; o += 0.9) quad(lines, tA, tA + 0.3, o, Math.min(o1 - 0.15, o + 0.5), 0.35);
+      } else {
+        // two lines of studs across (diagram 1055), and a stop line (1001) across each approach
+        for (const t of [t0, t1]) for (let o = -kR + 0.3; o < kL - 0.3; o += 0.6) quad(lines, t - 0.1, t + 0.1, o, o + 0.2, 0.35);
+        quad(lines, t0 - back, t0 - back + 0.3, mid, eL, 0.35);
+        quad(lines, t1 + back - 0.3, t1 + back, -eR, mid, 0.35);
+      }
+      // zig-zags either side, out from the lines: at each kerb and along the middle
+      for (const sgn of [-1, 1]) {
+        const start = sgn < 0 ? t0 - back : t1 + back, room = sgn < 0 ? start - l0 - 1 : l1 - 1 - start;
+        const m = Math.max(2, Math.min(PEDX.zigzags, Math.floor(room / PEDX.zig)));
+        for (const [base, amp] of [[eL - 0.35, 0.22], [-(eR - 0.35), 0.22], [mid, 0.22]] as const) for (let i = 0; i < m; i++) {
+          const a = start + sgn * i * PEDX.zig, b = a + sgn * PEDX.zig, oa = base + (i % 2 ? amp : -amp), ob = base + (i % 2 ? -amp : amp);
+          const [A, B] = [Wq(a, oa), Wq(b, ob)], dx = B[0] - A[0], dz = B[2] - A[2], L2 = Math.hypot(dx, dz) || 1, nx = -dz / L2 * 0.05, nz = dx / L2 * 0.05;
+          lines.tri3(A[0] + nx, A[1] + 0.35, A[2] + nz, B[0] + nx, B[1] + 0.35, B[2] + nz, B[0] - nx, B[1] + 0.35, B[2] - nz);
+          lines.tri3(A[0] + nx, A[1] + 0.35, A[2] + nz, B[0] - nx, B[1] + 0.35, B[2] - nz, A[0] - nx, A[1] + 0.35, A[2] - nz);
+        }
+      }
+      // red blister paving at the dropped kerbs, both sides (a controlled crossing's)
+      const deep = Math.min(1.2, d.pave - 0.2);
+      quad(tactileRed, t0 - 0.2, t1 + 0.2, kL + 0.05, kL + deep, 0.16);
+      quad(tactileRed, t0 - 0.2, t1 + 0.2, -kR - deep, -kR - 0.05, 0.16);
+      const q = pointAt(cp, x.r), u = { x: q.ux, z: q.uz }, y0 = q.y ?? 0;
+      if (x.kind === 'zebra') {
+        // a Belisha beacon at each end: a black-and-white banded pole and an amber globe
+        for (const [t, o] of [[t0 - 0.4, kL + 0.5], [t1 + 0.4, -(kR + 0.5)]] as const) {
+          const p = Wq(t, o);
+          for (let b = 0; b < 8; b++) (b % 2 ? poles : beacons).box(p[0], p[2], u.x, u.z, 0.06, 0.06, y0 + 0.15 + b * 0.35, y0 + 0.15 + (b + 1) * 0.35);
+          globes.push(new THREE.IcosahedronGeometry(0.24, 1).translate(p[0], y0 + 3.2, p[2]));
+        }
+      } else {
+        // signals for each approach: on the nearside at the stop line and on the far side, facing the traffic
+        for (const [t, o, dir] of [[t0 - back - 0.6, kL + 0.6, 1], [t1 + 0.8, kL + 0.6, 1], [t1 + back + 0.6, -(kR + 0.6), -1], [t0 - 0.8, -(kR + 0.6), -1]] as const) {
+          const p = Wq(t, o), f = { x: -u.x * dir, z: -u.z * dir }; // (f: towards the traffic it's for)
+          poles.box(p[0], p[2], u.x, u.z, 0.08, 0.08, y0 + 0.15, y0 + 3.5);
+          poles.box(p[0], p[2], u.x, u.z, 0.1, 0.2, y0 + 2.3, y0 + 3.4);
+          poles.box(p[0], p[2], u.x, u.z, 0.1, 0.12, y0 + 1.0, y0 + 1.3); // (the push button)
+          (['red', 'amber', 'green'] as const).forEach((col, i) => {
+            const m = new THREE.Mesh(lampGeo, LAMP_OFF);
+            m.position.set(p[0] + f.x * 0.12, y0 + 3.15 - i * 0.33, p[2] + f.z * 0.12);
+            m.rotation.y = -Math.atan2(f.z, f.x) + Math.PI / 2;
+            group.add(m);
+            lamps.push({ mesh: m, node: -1, seg: s.id, col, pedx: x.id });
+          });
+        }
+      }
+    }
     // street trees along wide pavements, clear of junctions and stops
     if (d.pave >= 5) for (const k of [1, -1]) for (let t = (k === 1 ? ends.L : ends.R)[0] + 8; t < CL - (k === 1 ? ends.L : ends.R)[1] - 4; t += 14) {
       if (s.stops.some((st) => { const [a, b] = stopSpan(st).map((q) => C.rhoOf(q)); return st.side === k && t > a - 6 && t < b + 6; })) continue;
       const x = S(t), side = k === 1 ? x.L : x.R;
-      if (side.back - side.kerb < 3) continue;
+      if (side.back - side.kerb < 3 || pxNear(t, 3)) continue;
       const q = pointAt(cp, t), o = k * (side.kerb + 1.4);
       const at = { x: q.x + q.uz * o, z: q.z - q.ux * o };
       // not on a junction's land (a slip road, an island), nor off the map
@@ -790,12 +902,31 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     }
     // on a slope, the whole junction lies on the plane its roads arrive on (junctionLift)
     { const f = junctionLift(net, n.id, sh.mouth); lift = f && gridded(f); }
-    for (const q of sh.paves) (noPave ? verge : pave).poly(q, y + 0.15);
+    // (where some of its roads have footways and some verges, each road's own piece is what it has, the
+    // shared ones footway; footway a centimetre up and verge a little down, so where they overlap the
+    // footway is drawn cleanly over the verge and never at the same height, which would flicker)
+    const mixed = !noPave && segs.some((x) => net.def(x).pave === 0);
+    sh.paves.forEach((q, i) => {
+      const leg = sh.paveLeg?.[i], ls = leg != null ? net.segs.get(leg) : undefined;
+      if (!mixed) (noPave ? verge : pave).poly(q, y + 0.15);
+      else if (ls && net.def(ls).pave === 0) verge.poly(q, y + 0.145);
+      else pave.poly(q, y + 0.16);
+    });
     for (const q of sh.aprons) asph.poly(q, y + 0.25);
+    // ghost islands where roads meet a roundabout close together: chevrons on the carriageway
+    for (const q of sh.ghost?.chevrons ?? []) { lines.tri3(q[0].x, y + 0.35, q[0].z, q[1].x, y + 0.35, q[1].z, q[2].x, y + 0.35, q[2].z); lines.tri3(q[0].x, y + 0.35, q[0].z, q[2].x, y + 0.35, q[2].z, q[3].x, y + 0.35, q[3].z); }
     for (const isl of sh.islands) {
       kerbed(isl, y);
       // a keep-left bollard at the end facing oncoming traffic
       if (isl.length === 3) { const b0 = { x: (isl[0].x + isl[1].x) / 2 * 0.8 + isl[2].x * 0.2, z: (isl[0].z + isl[1].z) / 2 * 0.8 + isl[2].z * 0.2 }; kerbs.box(b0.x, b0.z, 1, 0, 0.18, 0.18, y + 0.4, y + 1.3); }
+    }
+    // a merge or diverge (interchange/slips.ts) paints its own nose, taper and edge lines
+    if (sh.marks) {
+      const at = (pts: XZ[]) => pts.map((p) => ({ x: p.x, z: p.z, y }));
+      for (const l of sh.marks.solid) lines.strip(at(l.pts), () => [-l.w, l.w], 0.35);
+      for (const l of sh.marks.broken) { const pts = at(l.pts); lines.dashes(pts, () => 0, 0, pathLength(pts), l.dash, l.gap, l.w, 0.35); }
+      for (const q of sh.marks.hatch) { lines.tri3(q[0].x, y + 0.35, q[0].z, q[1].x, y + 0.35, q[1].z, q[2].x, y + 0.35, q[2].z); lines.tri3(q[0].x, y + 0.35, q[0].z, q[2].x, y + 0.35, q[2].z, q[3].x, y + 0.35, q[3].z); }
+      continue;
     }
     const legs = legsAt(net, n.id);
     const ring = j.form === 'roundabout' || j.form === 'mini';
@@ -848,19 +979,21 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       const W = (a: number, b: number) => { const p = legAt(n, fl, a, b); return [p.x, p.z] as const; };
       const rect = (f: Flat, a0: number, a1: number, b0: number, b1: number, yy: number) => { const p = [W(a0, b0), W(a1, b0), W(a1, b1), W(a0, b1)]; f.tri(p[0][0], p[0][1], p[1][0], p[1][1], p[2][0], p[2][1], y + yy); f.tri(p[0][0], p[0][1], p[2][0], p[2][1], p[3][0], p[3][1], y + yy); };
       const triW = (f: Flat, pts: [number, number][], yy: number) => { const q = pts.map(([a, b]) => W(a, b)); f.tri(q[0][0], q[0][1], q[1][0], q[1][1], q[2][0], q[2][1], y + yy); };
-      const d = net.def(leg.seg), kIn = kerbOf(d);
+      const d = net.def(leg.seg), kIn = kerbOf(d), lb = d.oneway ? -kIn : laneBase(d);
+      // (nothing arrives along a one-way road leading away: no line across it, no arrows)
+      if (!leg.into) continue;
       // at a roundabout the give-way line follows the edge of the ring
-      const lineAtB = (b: number) => (ring ? ringA(n, fl, b, sh.R) + 0.3 : sh.line[leg.seg.id] ?? 0);
-      const lineAt = lineAtB((d.median / 2 + kIn) / 2);
+      const gw = sh.giveWay?.[leg.seg.id], lineAtB = (b: number) => (ring ? ringA(n, fl, b, sh.R) + 0.3 : gw ? gw[0] + gw[1] * b : sh.line[leg.seg.id] ?? 0);
+      const lineAt = lineAtB((lb + kIn) / 2);
       const approaches = !(j.form === 'priority' && j.major.includes(leg.seg.id));
       // a solid stop line across the incoming half at signals; elsewhere the give-way line, right
       // across the entry as it is where the line is (a roundabout's entry flares out to the ring):
-      // from the splitter island (or the centre) to the kerb, whole dashes only
-      if (j.form === 'signals') rect(mk, lineAt, lineAt + 0.3, d.median / 2 + 0.2, kIn - 0.1, 0.36);
+      // from the splitter island (or the centre, or right across a one-way road) to the kerb, whole dashes only
+      if (j.form === 'signals') rect(mk, lineAt, lineAt + 0.3, lb + 0.2, kIn - 0.1, 0.36);
       else if (approaches) {
         const G = STD.giveWay, P = G.dash + G.gap, H = 2 * G.width + G.apart, single = j.form === 'mini';
         const wide = single ? G.width : H, v1 = single ? G.width / H : 1; // (the strip's width, and how much of the texture across)
-        const b0 = Math.max(d.median / 2, sh.splitter[leg.seg.id] ? STD.splitter.width / 2 : 0) + 0.15;
+        const b0 = Math.max(lb, sh.splitter[leg.seg.id] ? STD.splitter.width / 2 : 0) + 0.15;
         // the line's k-th period, as the four corners of its dash across the strip's width: [near start,
         // near end, far end, far start] in (x, z); a dash is painted where it lies wholly on the carriageway
         let corners: (k: number, f: number) => (readonly [number, number])[];
@@ -904,11 +1037,26 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
           triW(mka, [[a0 + e, c - hw + e * 1.6], [a0 + e, c + hw - e * 1.6], [a1 - ti, c]], 0.37);
         }
       }
+      // where people cross the arm (jshape.crossingAt, the crossing game/crowdsites.ts walks them to):
+      // tactile paving on both footways at the dropped kerbs, buff for an uncontrolled crossing, red
+      // at the lights, where two lines of studs (TSRGD diagram 1055) mark it across the carriageway
+      const xt = crossingAt(sh, j.form, fl, n.y);
+      if (xt !== null) {
+        const deep = Math.min(1.2, d.pave), wide = 1.2, lit = j.form === 'signals', f = lit ? tactileRed : tactileBuff;
+        const hy = segs.some((x) => net.def(x).pave === 0) ? 0.17 : 0.16; // (just over the footway, which a mixed junction lifts)
+        rect(f, xt - wide, xt + wide, kIn + 0.05, kIn + deep, hy);
+        rect(f, xt - wide, xt + wide, -kIn - deep, -kIn - 0.05, hy);
+        if (lit) for (const a of [xt - wide - 0.1, xt + wide + 0.1]) for (let b = -kIn + 0.3; b < kIn - 0.3; b += 0.6) rect(mk, a - 0.08, a + 0.08, b, b + 0.2, 0.36);
+      }
       // lane arrows, a pair per approach lane
       const lanes = j.lanes[leg.seg.id] ?? [];
       // arrows only where lanes actually divide the traffic (not on a plain single-lane approach)
-      const arrows = lanes.length > 1 || j.form === 'signals' || n.id === editing;
-      if (arrows) lanes.forEach((mv, i) => {
+      // (not at a roundabout: every entry there is a left turn onto the ring, whichever exit it's for;
+      // elsewhere only the movements there are, never towards a road that only leads in)
+      const can = new Set(legs.filter((o) => o !== leg && o.out).map((o) => moveOf(leg, o)));
+      const arrows = !ring && (lanes.length > 1 || j.form === 'signals' || n.id === editing);
+      if (arrows) lanes.map((mv) => mv.filter((m) => can.has(m))).forEach((mv, i) => {
+        if (!mv.length) return;
         const c = laneCentre(net, leg.seg, i), la = Math.max(lineAtB(c), sh.mouth[leg.seg.id] ?? 0);
         // (behind the give-way triangle, if the lane has one)
         const T = STD.giveWayTriangle(d.mph), first = approaches && j.form !== 'signals' ? lineAtB(c) + T.back + T.length + 6 : la + 9;
@@ -1022,13 +1170,14 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
 
   const add = (f: Flat | Solid, m: THREE.Material, order = 0) => { if (f.pos.length) { const mesh = f.mesh(m); mesh.renderOrder = order; group.add(mesh); return mesh; } return null; };
   add(pave, paveMat); add(asph, asphaltMat); add(lines, lineMat); add(verge, vergeMat); add(median, medianMat); add(yellow, yellowMat);
-  add(bus, busMat); add(cyc, cycleMat); add(bays, bayMat); add(hint, hintMat);
+  add(bus, busMat); add(cyc, cycleMat); add(bays, bayMat); add(hint, hintMat); add(tactileBuff, tactileBuffMat); add(tactileRed, tactileRedMat);
   add(ballast, ballastMat); add(sleepers, sleeperMat); add(railsF, railMat); add(rack, rackMat); add(wires, poleMat);
   add(island, islandMat); add(kerbs, kerbMat); add(poles, poleMat); add(portal, portalMat);
   parked.forEach((p, i) => add(p, carCols[i]));
   lift = null;
   add(cut, cutMat); add(body, concreteMat); add(rails, parapetMat); add(barrier, barrierMat);
-  add(furn.glass, shelterGlass); add(furn.frame, shelterFrame); add(furn.red, stopRed);
+  add(furn.glass, shelterGlass); add(furn.frame, shelterFrame); add(furn.red, stopRed); add(beacons, beaconWhite);
+  if (globes.length) { const g = mergeGeometries(globes.map((x) => x.toNonIndexed())); for (const x of globes) x.dispose(); if (g) group.add(new THREE.Mesh(g, beaconGlobe)); }
   const hm = add(holes, holeMat, -10);
   if (hm) { hm.receiveShadow = false; hm.castShadow = false; }
   if (boards.pos.length) group.add(boards.mesh(chevronMat()));

@@ -8,7 +8,8 @@ import { closestOnPath, kerbOf, pathLength, pointAt, type Lot, type Network, typ
 import { legsAt, type Junction } from '../junction';
 import { CELL, type Region } from '../infill';
 import { USE } from '../buildgen';
-import { STD } from '../standards';
+import { crossingAt } from '../jshape';
+import { pedCrossingsOn, type PedXKind } from '../pedx';
 import { courseOf, type Course } from '../xsection';
 import { endsOf, section } from '../roaddraw';
 import type { QueueSite, Bench } from '../people/flows';
@@ -31,7 +32,9 @@ export interface StopSite {
   residents: number; jobs: number; // within a few minutes' walk
 }
 // Both kerbs of one arm of a junction: people wait at either and cross to the other.
-export interface CrossingSite { id: string; node: number; seg: number; mid: XZ; kerbs: [QueueSite, QueueSite]; to: [XZ, XZ]; footfall: string[] }
+// kind: a zebra or pelican crossing along a road (pedx.ts; node -1), where traffic stops `stand` metres
+// short of its middle; otherwise the kerbs at a junction's arm
+export interface CrossingSite { id: string; node: number; seg: number; mid: XZ; kerbs: [QueueSite, QueueSite]; to: [XZ, XZ]; footfall: string[]; kind?: PedXKind; stand?: number }
 export interface ParkSite {
   id: string; kind: 'park' | 'pocket' | 'playground' | 'allotments';
   area: XZ[]; paths: XZ[][]; benches: Bench[]; cells: number;
@@ -107,13 +110,9 @@ export function roadSites(net: Network, junctions: Map<number, Junction>): Sites
     const n = net.node(j.node);
     for (const leg of legsAt(net, j.node)) {
       const d = net.def(leg.seg);
-      if (d.pave <= 0 || d.lanes > 1 || d.median > 0 || Math.abs(n.y) > 0.3) continue;
-      const trim = sh.paveTrim[leg.seg.id];
-      if (!trim) continue;
-      let t = Math.max(trim[0], trim[1]) + 1.2;
-      // at a roundabout, clear of the splitter island
-      if (j.form === 'roundabout') t = Math.max(t, sh.R + STD.splitter.length + 1.5);
-      if (t > leg.len - 12) continue;
+      // (jshape.crossingAt: where roaddraw paints the crossing, so people cross where it's drawn)
+      const t = crossingAt(sh, j.form, { id: leg.seg.id, dir: leg.dir, ang: leg.ang, def: d, len: leg.len }, n.y);
+      if (t === null) continue;
       // (feet halfway between the pavement and the carriageway, so neither shows them sunk or floating)
       const u = leg.dir, K = kerbOf(d), y = n.y + 0.2;
       // the leg's frame, as jshape.W: `a` out along it, `b` across (+b the side traffic arrives on)
@@ -129,6 +128,29 @@ export function roadSites(net: Network, junctions: Map<number, Junction>): Sites
       const id = `cross:${j.node}:${leg.seg.id}`;
       const fw = footways.filter((f) => f.seg === leg.seg.id).map((f) => f.id);
       crossings.push({ id, node: j.node, seg: leg.seg.id, mid: W(t, 0), kerbs: [kerbSite(1, `${id}:a`), kerbSite(-1, `${id}:b`)], to: [W(t, -(K + 0.4)), W(t, K + 0.4)], footfall: fw });
+    }
+  }
+  // zebras and pelicans along the roads (pedx.ts: where roaddraw paints them)
+  for (const s of net.segs.values()) {
+    if (net.def(s).cls !== 'road' || net.def(s).pave <= 0) continue;
+    const C = course(s);
+    for (const x of pedCrossingsOn(net, s, C, endsOf(junctions, s, C))) {
+      const q = pointAt(C.path, x.r), sd = section(net, s, C, x.r), y = (q.y ?? 0) + 0.2;
+      // +o: the road's left, a to b
+      const W = (a: number, o: number): XZ => ({ x: q.x + q.ux * a + q.uz * o, z: q.z + q.uz * a - q.ux * o });
+      const kerbSite = (sgn: 1 | -1, id: string): QueueSite => {
+        const K = sgn === 1 ? sd.L.kerb : sd.R.kerb, w = (sgn === 1 ? sd.L.back : sd.R.back) - K;
+        return {
+          id, kind: 'stop', at: W(0, sgn * (K + Math.max(0.55, Math.min(1.1, w - 0.9)))),
+          along: sgn === 1 ? Math.atan2(q.uz, q.ux) : Math.atan2(-q.uz, -q.ux),
+          facing: sgn === 1 ? Math.atan2(q.ux, -q.uz) : Math.atan2(-q.ux, q.uz), y,
+        };
+      };
+      const fw = footways.filter((f) => f.seg === s.id).map((f) => f.id);
+      crossings.push({
+        id: x.id, node: -1, seg: s.id, mid: W(0, 0), kerbs: [kerbSite(1, `${x.id}:a`), kerbSite(-1, `${x.id}:b`)],
+        to: [W(0, -(sd.R.kerb + 0.4)), W(0, sd.L.kerb + 0.4)], footfall: fw, kind: x.kind, stand: x.w / 2 + (x.kind === 'zebra' ? 1.5 : 2.5),
+      });
     }
   }
   return { footways, stops, crossings };

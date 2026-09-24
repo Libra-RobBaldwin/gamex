@@ -287,6 +287,14 @@ body.paused #st-rush { color: var(--gold); }
 #tpanel .lift { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
 #tpanel .lift b { color: #fff; }
 #tpanel .prof { width: 100%; height: 56px; background: rgba(0, 0, 0, 0.25); }
+/* "Junction here": a motorway blueprint across a road (interchange/plan.ts) */
+#tpanel .ix { display: flex; flex-direction: column; gap: 6px; }
+#tpanel .ixh { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+#tpanel .ixh > .ic { color: var(--mode); }
+#tpanel .ixrow { display: flex; flex-wrap: wrap; gap: 6px; }
+#tpanel .ixrow button { min-height: 40px; padding: 6px 10px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(0, 0, 0, 0.2); color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; }
+#tpanel .ixrow button.on { border-color: var(--mode); box-shadow: inset 0 0 0 1px var(--mode); background: rgba(255, 255, 255, 0.08); }
+#tpanel .ix small { color: var(--muted); font-size: 12px; }
 
 /* ---------------- landscape: a short, wide screen ----------------
    Height is what runs out, so the bar stands up the right-hand side as a short column, the status

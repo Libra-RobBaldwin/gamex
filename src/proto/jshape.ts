@@ -3,15 +3,22 @@
 // the slip road, where each road's own markings stop, and where its stop or give-way line is.
 // Drawing, traffic and the land registry all read the same shape, so they can't disagree.
 import { circlePoly, bandPolys, type XZ } from './land';
-import { kerbOf, halfOf, type RoadDef } from './catalog';
+import { kerbOf, halfOf, laneBase, type RoadDef } from './catalog';
 import { STD } from './standards';
 
 // `path`, if given, is the leg's centreline from the node outwards as it's drawn (see approachPath):
 // the junction is then built along the road as it really runs, not a straight line from the node,
 // so where the road's own drawing takes over (its mouth) the two meet exactly even on a curve.
 export interface ShapeLeg { id: number; dir: XZ; ang: number; def: RoadDef; len: number; path?: XZ[] }
-export type ShapeForm = 'priority' | 'signals' | 'mini' | 'roundabout';
-export interface SlipShape { from: number; to: number; path: XZ[]; island: XZ[]; outer: XZ[]; R: number; centre: XZ }
+export type ShapeForm = 'priority' | 'signals' | 'mini' | 'roundabout' | 'merge' | 'diverge';
+// `kind`: a slip road joining or leaving a one-way carriageway (interchange/slips.ts), whose course
+// runs `len` metres alongside it, rather than a left-turn slip cutting a corner
+export interface SlipShape { from: number; to: number; path: XZ[]; island: XZ[]; outer: XZ[]; R: number; centre: XZ; kind?: 'merge' | 'diverge'; len?: number }
+// The markings a merge or diverge paints itself (interchange/slips.ts): lines as polylines with a
+// half-width, broken lines with their dash and gap, hatching as quads; and, for each carriageway
+// through it, the stretch (along the road from its a end) where the junction paints its nearside
+// edge instead of the road
+export interface SlipMarks { solid: { pts: XZ[]; w: number }[]; broken: { pts: XZ[]; w: number; dash: number; gap: number }[]; hatch: XZ[][]; edgeGap: Record<number, [number, number]> }
 export interface Shape {
   form: ShapeForm;
   mouth: Record<number, number>; // where each road's own cross-section ends
@@ -30,6 +37,15 @@ export interface Shape {
   R: number; // roundabout: outer edge of the circulating carriageway
   island: number; // roundabout: radius of the central island
   claims: XZ[][]; // the land it takes
+  marks?: SlipMarks; // a merge or diverge's own markings
+  // priority: where a side road's give-way line runs, on the major road's kerb line: `a` at b = 0, and
+  // how it changes across (a = a0 + k b), so a road meeting at an angle has it square to the major road
+  giveWay?: Record<number, [number, number]>;
+  // where two roads meet a roundabout close together with no footway between: the V between them
+  // is carriageway, painted with chevrons (a ghost island) rather than left as a sliver of grass
+  ghost?: { polys: XZ[][]; chevrons: XZ[][] };
+  // which road each of `paves` is the footway (or verge) of, where it's only one road's (null: shared)
+  paveLeg?: (number | null)[];
 }
 
 const add = (p: XZ, u: XZ, k: number) => ({ x: p.x + u.x * k, z: p.z + u.z * k });
@@ -404,12 +420,15 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     // (the footway's outline crosses each road no nearer than its road's footway starts)
     const pv = ringOutline(n, legs, R + F, B, Math.max(1, std.entryRadius - F), (l) => Math.max(...paveTrim[l.id]));
     const apron = kerb.pts, pave = pv.pts, aprons = kerb.pieces, paves = pv.pieces;
-    legs.forEach((l, i) => { const nx = legs[(i + 1) % N], q = nose(n, l, nx, B(l), B(nx), pv.at[i].m); if (q) paves.push(q); });
+    const paveLeg: (number | null)[] = [null, ...legs.map((l) => l.id)]; // (the ring, then each road's arm)
+    legs.forEach((l, i) => { const nx = legs[(i + 1) % N], q = nose(n, l, nx, B(l), B(nx), pv.at[i].m); if (q) { paves.push(q); paveLeg.push(null); } });
+    const ghost = ghostIslands(n, legs, R, (l) => Math.max(...paveTrim[l.id], mouth[l.id]));
+    aprons.push(...ghost.polys);
     const claims = paves;
     // splitter islands at single-lane entries: only where one fits on its own road, clear of the
     // next road's carriageway (where mapped roads meet the ring close together, say)
     const splitter: Record<number, number> = {};
-    if (form === 'roundabout') for (const l of legs) if (l.def.lanes === 1 && l.def.median === 0) {
+    if (form === 'roundabout') for (const l of legs) if (l.def.lanes === 1 && l.def.median === 0 && !l.def.oneway) {
       const { length: sl, width: sw } = STD.splitter, a0 = ringA(n, l, 0, R) + 0.8;
       const isl = [legAt(n, l, a0, -sw / 2), legAt(n, l, a0, sw / 2), legAt(n, l, a0 + sl - 0.8, 0)];
       const clear = legs.every((o) => o === l || isl.every((p) => { const f = legFrameOf(n, o, p); return f.a < 0 || Math.abs(f.b) > K(o) + 0.3; }));
@@ -417,7 +436,7 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
       islands.push(isl);
       splitter[l.id] = a0 + sl - 0.8;
     }
-    return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter, slip: null, R, island: std.island, claims };
+    return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter, slip: null, R, island: std.island, claims, paveLeg, ghost };
   }
   // priority and signals: corners with proper kerb radii, one of them perhaps a slip road
   let slip: SlipShape | null = null;
@@ -448,11 +467,26 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     const tm = prev.isSlip && slip ? Math.hypot(slip.path[slip.path.length - 1].x - n.x, slip.path[slip.path.length - 1].z - n.z) : Math.max(prev.back.tj, prev.kerb.tj);
     paveTrim[l.id] = [Math.max(0, tp), Math.max(0, tm)];
   });
+  // a side road's give-way line (TSRGD diagram 1003) is right against the major road, along its kerb
+  // line, so a driver waiting there can see along it: where each point across the arriving half first
+  // leaves the major road's carriageway
+  const giveWay: Record<number, [number, number]> = {};
+  if (form === 'priority') for (const l of legs) {
+    if (major.includes(l.id)) continue;
+    const majors = legs.filter((o) => o !== l && major.includes(o.id));
+    const on = (p: XZ) => majors.some((o) => { const f = legFrameOf(n, o, p); return f.a >= 0 && Math.abs(f.b) < K(o); });
+    const clearAt = (b: number) => { let a = 0; while (a < mouth[l.id] && on(legAt(n, l, a, b))) a += 0.1; return Math.min(a, mouth[l.id]); };
+    const b0 = l.def.oneway ? -K(l) + 0.3 : laneBase(l.def) + 0.3, b1 = K(l) - 0.3, a0 = clearAt(b0), a1 = clearAt(b1);
+    const k = (a1 - a0) / (b1 - b0), at0 = a0 - k * b0;
+    giveWay[l.id] = [at0 + 0.1, k];
+    // (traffic waits there: at its furthest point across the arriving half)
+    line[l.id] = Math.max(a0, a1) + 0.1;
+  }
   const apron: XZ[] = [], pave: XZ[] = [];
   // as pieces: the middle, where every road's kerbs leave the node; each road out to its mouth; each
   // corner's rounding (or, round the outside of a bend, the bit behind the node)
   const hull = (b: (l: ShapeLeg) => number) => convexHull(legs.flatMap((l) => [legAt(n, l, 0, -b(l)), legAt(n, l, 0, b(l))]));
-  const aprons: XZ[][] = [hull(K)], paves: XZ[][] = [hull(B)];
+  const aprons: XZ[][] = [hull(K)], paves: XZ[][] = [hull(B)], paveLeg: (number | null)[] = [null];
   const half = (l: ShapeLeg, b: number, a: number) => [legAt(n, l, 0, 0), ...run(n, l, 0, a, 0), legAt(n, l, a, 0), legAt(n, l, a, b), ...run(n, l, a, 0, b), legAt(n, l, 0, b)];
   const arm = (l: ShapeLeg, b: number, a0: number, a1: number) => [legAt(n, l, 0, -b), ...run(n, l, 0, a0, -b), legAt(n, l, a0, -b), legAt(n, l, a1, b), ...run(n, l, a1, 0, b), legAt(n, l, 0, b)];
   // (a rounded corner is fanned from the node, so it meets both roads' arms whichever way they curve)
@@ -463,13 +497,14 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     aprons.push(arm(l, K(l), m, m));
     // (the footway a half at a time, each ending square where its road's own footway starts)
     paves.push(half(l, -B(l), Math.max(m, tm)), half(l, B(l), Math.max(m, tp)));
+    paveLeg.push(l.id, l.id);
     const ka = round(c.kerb, l, nx, K(l), K(nx));
     if (ka) aprons.push(ka);
     // (a slip road's corner: the footway runs out to the kerbs' corner, the island sitting on it)
     const kb = c.isSlip && c.kerb.x ? [legAt(n, l, 0, B(l)), legAt(n, l, Math.max(m, tp), B(l)), c.kerb.x, legAt(n, nx, Math.max(mouth[nx.id], paveTrim[nx.id][1]), -B(nx)), legAt(n, nx, 0, -B(nx)), n] : round(c.back, l, nx, B(l), B(nx));
-    if (kb) paves.push(kb);
+    if (kb) { paves.push(kb); paveLeg.push(null); }
     const q = c.isSlip ? null : nose(n, l, nx, B(l), B(nx), Math.max(m, tp));
-    if (q) paves.push(q);
+    if (q) { paves.push(q); paveLeg.push(null); }
   });
   // (along a curving road the outlines follow its kerb and footway between the corners and the mouth)
   legs.forEach((l, i) => {
@@ -483,7 +518,90 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     islands.push(slip.island);
     claims.push(...bandPolys(slip.path, STD.slipWidth / 2 + 0.5, STD.slipWidth / 2 + STD.slipFootway + 0.5), slip.island);
   }
-  return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter: {}, slip, R: 0, island: 0, claims };
+  return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter: {}, slip, R: 0, island: 0, claims, paveLeg, giveWay };
+}
+
+// Ghost islands: between each pair of neighbouring arms whose facing edges (a kerb, or the back of a
+// footway where there is one, which stays as it is) run close together out from the ring, from the
+// ring's edge out to where they're GHOST metres apart (GHOST_PAIR for a motorway's two carriageways
+// splaying in: out to where its reservation's barriers start). Chevrons (TSRGD diagram 1042) point
+// at the ring, where the arms come together, from where its arms' own flares end.
+// Chevrons (TSRGD diagram 1042) filling an area between two edges P(a) and Q(a), from a0 (the narrow
+// end, where the edges come together) to a1: a solid line along each edge, and V's of solid bars
+// inside, their points towards a0, each arm meeting the edge a half-width further on (cut off at a1).
+// Returns quads.
+export function chevronsIn(P: (a: number) => XZ, Q: (a: number) => XZ, a0: number, a1: number, mph: number): { bars: XZ[][]; lines: XZ[][] } {
+  const c = STD.chevron(mph), bars: XZ[][] = [], lines: XZ[][] = [];
+  const dir = Math.sign(a1 - a0) || 1, len = Math.abs(a1 - a0);
+  const at = (a: number, f: number) => { const p = P(a), q = Q(a); return { x: p.x + (q.x - p.x) * f, z: p.z + (q.z - p.z) * f }; };
+  const width = (a: number) => Math.hypot(P(a).x - Q(a).x, P(a).z - Q(a).z);
+  // the edge lines, just inside each edge
+  for (const f of [0, 1]) for (let k = 0; k < Math.ceil(len); k++) {
+    const u0 = a0 + dir * k, u1 = a0 + dir * Math.min(len, k + 1), w0 = width(u0), w1 = width(u1);
+    if (w0 < 0.05 && w1 < 0.05) continue;
+    const i0 = Math.min(0.5, c.edge / Math.max(0.1, w0)), i1 = Math.min(0.5, c.edge / Math.max(0.1, w1));
+    const s0 = f ? 1 - i0 : i0, s1 = f ? 1 - i1 : i1;
+    lines.push([at(u0, f), at(u1, f), at(u1, s1), at(u0, s0)]);
+  }
+  // the bars: an apex on the middle at d, arms on out to each edge (inside its line) half a width
+  // further on; an arm that would run past a1 stops there
+  const arm = (d: number, back: number, f: number) => {
+    const t = Math.min(1, (len - d) / back);
+    return at(a0 + dir * (d + back * t), 0.5 + (f - 0.5) * t);
+  };
+  for (let d = c.bar + c.gap; d + c.bar < len - 0.3; d += c.bar + c.gap) {
+    const w = width(a0 + dir * d);
+    if (w < 1.2) continue;
+    const back = w / 2, inset = (c.edge * 2) / w;
+    for (const f of [inset, 1 - inset]) bars.push([arm(d, back, f), arm(d + c.bar, back, f), at(a0 + dir * (d + c.bar), 0.5), at(a0 + dir * d, 0.5)]);
+  }
+  return { bars, lines };
+}
+export const GHOST = 5, GHOST_PAIR = 12;
+const unitv = (p: XZ, c: XZ) => { const dx = p.x - c.x, dz = p.z - c.z, l = Math.hypot(dx, dz) || 1; return { x: dx / l, z: dz / l }; };
+function ghostIslands(n: XZ, legs: ShapeLeg[], R: number, from: (l: ShapeLeg) => number) {
+  const polys: XZ[][] = [], chevrons: XZ[][] = [];
+  if (legs.length < 2) return { polys, chevrons };
+  const edge = (l: ShapeLeg) => (l.def.pave > 0 ? halfOf(l.def) : kerbOf(l.def));
+  legs.forEach((l, i) => {
+    const nx = legs[(i + 1) % legs.length];
+    if (gapOf(l, nx) > 1.2) return;
+    const el = edge(l), en = edge(nx), a0 = Math.max(from(l), from(nx)), max = l.def.oneway && nx.def.oneway ? GHOST_PAIR : GHOST;
+    const P = (a: number) => legAt(n, l, a, el), Q = (a: number) => legAt(n, nx, a, -en);
+    const gap = (a: number) => Math.hypot(P(a).x - Q(a).x, P(a).z - Q(a).z);
+    if (gap(a0) > max) return;
+    let a1 = a0;
+    while (a1 < Math.min(l.len, nx.len) - 10 && gap(a1 + 1) <= max) a1 += 1;
+    if (a1 - a0 < 3) return;
+    const side: XZ[] = [], other: XZ[] = [];
+    const mid = (a: number) => { const p = P(a), q = Q(a); return { x: (p.x + q.x) / 2, z: (p.z + q.z) / 2 }; };
+    // (from inside the ring's edge, so it meets the ring with no sliver between; out to the grass
+    // beyond, which ends in a rounded nose: the island's far end curves round it)
+    const r = gap(a1) / 2, c = mid(a1 + r), e1 = unitv(P(a1 + r), c), d = unitv(mid(a1), c);
+    for (let a = Math.max(0, R - 3); a <= a1 + r + 1e-6; a += 1) { side.push(P(a)); other.push(Q(a)); }
+    const nose: XZ[] = [];
+    for (let k = 1; k < 12; k++) { const t = (Math.PI * k) / 12; nose.push({ x: c.x + r * (Math.cos(t) * e1.x + Math.sin(t) * d.x), z: c.z + r * (Math.cos(t) * e1.z + Math.sin(t) * d.z) }); }
+    polys.push([...side, P(a1 + r), ...nose, Q(a1 + r), ...other.reverse()]);
+    // chevrons, their points towards the ring (where the edges come together), from where the ring's own flares end
+    // (inside the roads' own edge lines, which border it: a carriageway's is its hard strip in from the kerb)
+    const lineIn = (d: RoadDef) => (d.oneway ? d.strip ?? 0 : 0) + 0.1;
+    const ch = chevronsIn((a) => legAt(n, l, a, el - lineIn(l.def)), (a) => legAt(n, nx, a, -(en - lineIn(nx.def))), a0, a1 + r * 0.6, Math.max(l.def.mph, nx.def.mph));
+    chevrons.push(...ch.bars);
+  });
+  return { polys, chevrons };
+}
+
+// Where people cross a junction's arm (game/crowdsites.ts walks them there, roaddraw paints it): a
+// little way back from the corner on a single carriageway with footways, clear of a roundabout's
+// splitter island; null where there's no crossing (a dual carriageway, a raised junction, too short).
+export function crossingAt(sh: Shape, form: string, l: ShapeLeg, y = 0): number | null {
+  const d = l.def;
+  if (d.pave <= 0 || d.lanes > 1 || d.median > 0 || Math.abs(y) > 0.3) return null;
+  const trim = sh.paveTrim[l.id];
+  if (!trim) return null;
+  let t = Math.max(trim[0], trim[1]) + 1.2;
+  if (form === 'roundabout') t = Math.max(t, sh.R + STD.splitter.length + 1.5);
+  return t > l.len - 12 ? null : t;
 }
 
 // The footprint of a roundabout of radius R: can it go here? (the ring and its footway)
