@@ -7,7 +7,7 @@ model and level. Every model has true UK dimensions (length, width, height, whee
 positions, hitch points), so the traffic sim can use them, and economy stats (capacity, speed,
 price, running cost), so the library doubles as the fleet the player buys.
 
-Nothing outside the folder uses it yet. The integration plan is at the end.
+The game's traffic is drawn with it (`src/proto/game/fleet.ts`); see "In the game" at the end.
 
 - **Showroom:** `npx vite --port 5199`, then open `/vehicles-demo.html`. Parade, Showroom and
   Turntable views; filters for category, maker, operator and year; day and night.
@@ -524,6 +524,43 @@ The order matters: each step is shippable on its own and the game keeps working 
    one per visible model and level. Past a few hundred metres everything is the far box. For
    county-sized maps, LOD 2 buckets can move into a single `BatchedMesh` or a merged far-traffic
    mesh per tile if draw calls ever bite.
+
+## In the game
+
+Steps 1–7 of the plan above are in, through `src/proto/game/fleet.ts`. `traffic.ts` keeps only
+the simulation, the spawning and each vehicle's size.
+
+- **What a trip gets:** `Fleet.dress(seg, heavy)` picks a model for the area the trip starts in and
+  for `gameYear()`.
+  - The area comes from `areaOfRoad`: what fronts the road, `net.zoneAt`, and the road itself.
+  - Models come from `paletteFor(year)`: the commonest few of each sort that year, which keeps the
+    number of draw calls bounded.
+  - A trip from a works is always a goods vehicle.
+- **Bodies:** each vehicle's true length and width are registered as a body
+  (`footprint.registerBody`). The conflict tables are worked out for each body.
+  - An artic or bendy bus is its tractor plus a trailer hung on the hitch, with the trailer's tail
+    on the course. On a bend the trailer angles away from the tractor and cuts inside, but it never
+    swings out of its lane.
+  - The trailer's position is a function of the course alone, so the tables allow for exactly
+    what's drawn.
+  - A bus longer than a lay-by's stand calls from the lane.
+- **Lamps:**
+  - Headlamps come on from the game hour, each driver at a slightly different moment.
+  - Brake lamps show when decelerating harder than 1 m/s², and are held for 0.6 s.
+  - Indicators come from a lane change, a merge, the turn claimed at the next junction (a left
+    signal when leaving a roundabout), and a bus pulling out.
+- **Doors:** a bus's kerb-side doors open while it stands at a stop (`DoorStates`).
+  `Fleet.kerbDoors` gives the door positions where `game/crowds.ts` boards and alights people.
+- **The player's buses and trains:**
+  - Buses are in the company livery (`OWN_LIVERY`) with fleet numbers.
+  - Trains are made up from `purchaseList` sets with `consistOffsets`.
+  - Before there are express sets, a train is a locomotive and coaches.
+- **HUD:** Transport → Buy vehicles lists `purchaseList(gameYear())`. Buses and trains from it run
+  now.
+- **Culling:** only vehicles in view are drawn (`Fleet.frame` each frame). While the game is paused,
+  `traffic.redraw()` keeps panning honest.
+- **Tests:** `src/proto/game/*.review.test.ts` (artics and bendy buses, goods trips, period
+  trains) and `fleet.doors.test.ts`.
 
 ## Screenshots
 
