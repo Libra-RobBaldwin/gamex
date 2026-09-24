@@ -11,6 +11,7 @@ export const COLOURS = {
   timber: '#86603a', timberDark: '#553d26',
   steelRed: '#9a4630', steelGreen: '#3f6a55', steelGrey: '#7f8d94', steelWhite: '#eef0ee', steelBlue: '#2f5f8f',
   cable: '#f4f4f0', roof: '#4a3f3a',
+  bearer: '#403a33', // the dark steelwork and gaps under an open (unballasted) railway deck
 } as const;
 export type Mat = keyof typeof COLOURS;
 

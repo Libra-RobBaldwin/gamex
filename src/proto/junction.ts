@@ -6,7 +6,7 @@
 import { kerbOf, rectCorners, type Lot, type Network, type P, type RSeg } from './roads';
 import { STD } from './standards';
 import { polysTouch } from './land';
-import { shapeJunction, ringFootprint, type Shape, type ShapeLeg, type SlipShape } from './jshape';
+import { approachPath, shapeJunction, ringFootprint, type Shape, type ShapeLeg, type SlipShape } from './jshape';
 
 export type Form = 'join' | 'merge' | 'priority' | 'signals' | 'mini' | 'roundabout';
 export type Move = 'L' | 'S' | 'R';
@@ -14,7 +14,7 @@ export const FORM_NAME: Record<Form, string> = {
   join: 'Plain join', merge: 'Merge', priority: 'Give way', signals: 'Traffic signals', mini: 'Mini-roundabout', roundabout: 'Roundabout',
 };
 
-export interface Leg { seg: RSeg; dir: P; ang: number; lanes: number; w: number; len: number }
+export interface Leg { seg: RSeg; dir: P; ang: number; lanes: number; w: number; len: number; path: P[] } // path: its centreline from the node out, as drawn (jshape.approachPath)
 export type Slip = SlipShape;
 export interface Score { dos: number; demand: number; capacity: number; busiest: string }
 export interface Junction {
@@ -43,7 +43,7 @@ export function legsAt(net: Network, node: number): Leg[] {
     let k = 1;
     while (k < p.length - 1 && dist(p[0], p[k]) < 6) k++;
     const dx = p[k].x - p[0].x, dz = p[k].z - p[0].z, dl = Math.hypot(dx, dz) || 1;
-    out.push({ seg: s, dir: { x: dx / dl, z: dz / dl }, ang: Math.atan2(dz, dx), lanes: d.lanes, w: d.lanes * d.speed * (d.family === 'Motorway' ? 1.6 : 1), len: L });
+    out.push({ seg: s, dir: { x: dx / dl, z: dz / dl }, ang: Math.atan2(dz, dx), lanes: d.lanes, w: d.lanes * d.speed * (d.family === 'Motorway' ? 1.6 : 1), len: L, path: approachPath(p) });
   }
   // round the junction in the direction traffic circulates (a left turn leads to the next leg)
   return out.sort((a, b) => a.ang - b.ang);
@@ -131,7 +131,7 @@ export function assignLanes(n: number, moves: Move[], demand: Record<Move, numbe
 
 // What the junction may take: `fits` says whether a footprint is free of other people's land
 export interface Geometry { fits: (polys: P[][]) => boolean }
-export const shapeLegs = (net: Network, legs: Leg[]): ShapeLeg[] => legs.map((l) => ({ id: l.seg.id, dir: l.dir, ang: l.ang, def: net.def(l.seg), len: l.len }));
+export const shapeLegs = (net: Network, legs: Leg[]): ShapeLeg[] => legs.map((l) => ({ id: l.seg.id, dir: l.dir, ang: l.ang, def: net.def(l.seg), len: l.len, path: l.path }));
 
 // Score a form: how full the busiest lane would be at design traffic (degree of saturation).
 export function evaluate(net: Network, _node: number, legs: Leg[], form: Form, flows: Record<string, number>, major: number[], slip: Slip | null, fixed?: Record<number, Move[][]>) {

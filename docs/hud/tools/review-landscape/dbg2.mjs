@@ -1,0 +1,10 @@
+import { open, insets } from './lib.mjs';
+const [w, h] = (process.argv[2] || '844x390').split('x').map(Number);
+const { browser, page } = await open(w, h);
+if (process.argv[3]) await insets(page, 0, 47, 21, 47);
+await page.evaluate(() => { window.__c = []; document.addEventListener('click', (e) => window.__c.push((e.target.closest('button')?.textContent || e.target.tagName).trim().slice(0, 20)), true); });
+const st = () => page.evaluate(() => ({ sheet: proto.shell.sheetKey, clicks: window.__c.splice(0) }));
+await page.tap('[data-bar="build"]'); await page.waitForTimeout(500); console.log('after build', await st());
+await page.tap('[data-tab="stops"]'); await page.waitForTimeout(500); console.log('after stops tab', await st());
+await page.tap('[data-tab="rail"]'); await page.waitForTimeout(500); console.log('after rail tab', await st());
+await browser.close();

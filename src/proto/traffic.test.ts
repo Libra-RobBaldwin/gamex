@@ -15,7 +15,8 @@ describe('traffic never drives through itself', () => {
       expect(r.overlapPairs).toBe(0);
       expect(r.outOfLane).toBe(0);
       expect(r.arrived).toBeGreaterThan(sc.minTrips);
-      expect(r.gaveUp).toBeLessThan(Math.max(3, r.arrived * 0.05));
+      // (a give-up: a driver who has stood still for 90 s, or found no way on; fewer than one trip in a hundred)
+      expect(r.gaveUp).toBeLessThanOrEqual(Math.max(1, r.arrived * 0.01));
       expect(r.laneChanges).toBeGreaterThanOrEqual(sc.minChanges ?? 0);
     }, 120_000);
   }

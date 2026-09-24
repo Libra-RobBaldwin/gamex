@@ -1,0 +1,21 @@
+import { open, check } from './lib.mjs';
+const W = +(process.argv[2] || 412), H = +(process.argv[3] || 915);
+const { browser, page, errs } = await open(W, H);
+const hintVisible = () => page.evaluate(() => { const h = document.querySelector('#hint'); if (h.hidden) return { shown: false }; const e = h.getBoundingClientRect(); h.style.pointerEvents = 'auto'; const t = document.elementFromPoint(e.left + e.width / 2, e.top + e.height / 2); h.style.pointerEvents = ''; return { shown: true, onTop: !!t?.closest('#hint'), under: t?.closest('#sheet') ? 'sheet' : t?.id, text: h.textContent.trim().slice(0, 60) }; });
+await page.tap('[data-bar="transport"]'); await page.tap('[data-tab="buy"]'); await page.waitForTimeout(300);
+await page.tap('[data-add="bus"]'); await page.waitForTimeout(150);
+let h = await hintVisible();
+console.log('sheet top', await page.$eval('#sheet', (e) => Math.round(e.getBoundingClientRect().top)));
+check('"Bus added" hint visible over Buy vehicles sheet', h.onTop, JSON.stringify(h));
+// a train that can't run (needs wires) -> failure hint
+const trains = await page.$$('[data-train]');
+await trains[trains.length - 1].tap(); await page.waitForTimeout(150);
+h = await hintVisible();
+check('train result hint visible over Buy vehicles sheet', h.onTop, JSON.stringify(h));
+await page.tap('.sheet .close');
+await page.tap('[data-bar="build"]'); await page.tap('[data-tab="freight"]'); { const bb = await page.$eval('.card.locked', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }); await page.touchscreen.tap(bb.x, bb.y); } await page.waitForTimeout(150);
+h = await hintVisible();
+check('locked-card reason hint visible over Build sheet', h.onTop, JSON.stringify(h));
+await page.screenshot({ path: `hint-build-${W}.png` });
+check('no page errors', errs.length === 0, JSON.stringify(errs));
+await browser.close();

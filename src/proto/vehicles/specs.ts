@@ -305,6 +305,14 @@ export function railSpec(style: BodyStyle, year: number, r: Rand): Spec {
       design.slam = year < 1975; design.panelled = year < 1950;
       return { dims: d, design, stats: { capacity: year < 1950 ? 56 : 64, unit: 'pax', speedKmh: byYear(year, [[1900, 110], [1975, 200]]), cost: 900000, running: 30000, power: 'none' } };
     }
+    case 'metro-car': {
+      // a sub-surface metro car: shorter and lower than main-line stock, third-rail fed
+      const L = byYear(year, [[1960, 16.0], [2000, 17.2]]) * jit();
+      const d = dims(L, 2.85, 3.65, bogies(L, L * 0.62), 0.4, 0.2);
+      design.cab = true; design.nose = year < 1990 ? 'flat' : 'raked';
+      design.slam = false; design.panto = false;
+      return { dims: d, design, stats: { capacity: 130, unit: 'pax', speedKmh: byYear(year, [[1960, 80], [2000, 100]]), cost: 1100000, running: 70000, power: 'electric' } };
+    }
     case 'tram': {
       const L = 10;
       const d = dims(L, 2.65, 3.4, [L / 2 - 2.2, -L / 2 + 2.2], 0.33, 0.2);

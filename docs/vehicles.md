@@ -7,7 +7,7 @@ model and level. Every model has true UK dimensions (length, width, height, whee
 positions, hitch points), so the traffic sim can use them, and economy stats (capacity, speed,
 price, running cost), so the library doubles as the fleet the player buys.
 
-Nothing outside the folder uses it yet. The integration plan is at the end.
+The game's traffic is drawn with it (`src/proto/game/fleet.ts`); see "In the game" at the end.
 
 - **Showroom:** `npx vite --port 5199`, then open `/vehicles-demo.html`. Parade, Showroom and
   Turntable views; filters for category, maker, operator and year; day and night.
@@ -361,8 +361,8 @@ vr.stats;                     // { calls, tris, instances, buckets }
   the middle of the length. That's what `traffic.ts` already assumes: its `place()` builds the
   matrix from `Euler(0, -heading, pitch)` with `heading = atan2(uz, ux)`.
 - **Geometry.** `geometry(model, lod)` returns one cached, flat-shaded, non-indexed
-  `BufferGeometry` with `position`, `normal`, `color` and `vk` (paint zone, light code,
-  wheel-centre x, wheel-centre y). The renderer shares these attributes between buckets.
+  `BufferGeometry` with `position`, `normal`, `color`, `vk` (paint zone, light code,
+  wheel-centre x, wheel-centre y) and `vd` (a motion tag, see Doors and moving parts). The renderer shares these attributes between buckets.
 - **Levels of detail.** 0 near (full detail), 1 middle (no arches, wheels as axle blocks, window
   bands as strips, lamps kept so night traffic still twinkles), 2 far (a coloured box, or two for
   lorries, ships and aircraft). `lodFor(length, pixelsPerMetre)` picks near above about 40 px
@@ -379,7 +379,7 @@ vr.stats;                     // { calls, tris, instances, buckets }
   | Boats, aircraft | 900 | 240 | 24 |
 
 - **Per-instance data.** `instanceColor` is the body colour; three more instanced colours carry
-  zones 2–4; `iData` carries the flags and the odometer. Wheels spin by `odometer / radius`.
+  zones 2–4; `iData` carries the flags, the odometer, the doors (left and right, packed) and the curvature. Wheels spin by `odometer / radius`.
 - **Lights.** Baked light codes: head 1, tail 2 (dim with lights, bright when braking), brake 3,
   indicators 4 (left, −z) and 5 (right), interior 6 (bus, train and cab windows), blue beacon 7,
   amber beacon 8, sign 9 (cab "for hire" lamp, destination blinds). Per-instance `FLAGS`:
@@ -406,6 +406,72 @@ vr.stats;                     // { calls, tris, instances, buckets }
   vans, rigid lorries, tractors and trailers separately, multiple units as 2-, 3- and 4-car sets,
   high-speed sets, locomotives, carriages, wagons, trams, boats and planes, each with capacity,
   unit, speed, price, running cost and length.
+
+## Doors and moving parts
+
+Every passenger door is laid out once, in `doors.ts`, and the geometry, the tests and the
+placement helpers all read that layout. The parts that move (door leaves, bogies, steered front
+wheels, steam coupling rods, pantographs) carry a motion tag per vertex (`vd`), and the vertex
+shader moves them from four numbers per vehicle, so none of it costs a draw call or a
+per-vehicle mesh.
+
+| Stock | Doors a side | Kind |
+|---|---|---|
+| Compartment coaches (panelled, pre-1950) and slam-door electrics | one per compartment or bay (7–9) | hinged slam doors, swing out |
+| Corridor coaches (1950–74) and slam-door railcars | 4 | slam |
+| High-speed coaches before 1990 | 2, at the ends | slam |
+| Electric units 1985–99, rack railcars | 2 pairs | pocket (slide into the body) |
+| Electric units from 2000 | 2 pairs, a third of the way along | plug (step out, then slide) |
+| Diesel units and coaches from 1985 | 2 single leaves by the ends | plug (pocket on 1985–99 diesels) |
+| Metro cars | 3 wide pairs | pocket |
+| Tram sections | 2 pairs | plug |
+| Balcony trams, half-cab buses | open platforms | none |
+| Buses: front door (and a centre door on long single-deckers, bendies and some deckers) | kerb side only | folding before 1990, plug after |
+| Coaches | one single leaf at the front | folding before 1980, plug after |
+
+Near level: a dark doorway (lit at night) with a tread plate, a seal round the frame, the leaves
+with their windows, a seal on the meeting edge, open buttons (green once released) and an amber
+lamp over the door (lit while open); slam doors have a droplight and a handle. Middle level: a
+panel in the door colour on modern stock, nothing on slam stock and buses. Far level: nothing.
+
+```ts
+import { doorsOf, DoorStates, dwellDoors, doorPositions, platformSide, FLAGS } from './vehicles';
+
+doorsOf(model);          // [{ x, width, y0, y1, leaves, kind, sides, dir }], front to back
+
+// stateful: keyed by any id, opens at each door kind's own speed
+const doors = new DoorStates();
+doors.setDoors(vehicleId, 1, 'left', { model, delay: carIndex * 0.2 }); // 0 shut … 1 open
+doors.update(dt);
+const [left, right] = doors.get(vehicleId);
+
+// or stateless, through a stop: t seconds since it came to rest, standing for dwell seconds
+const open = dwellDoors(t, dwell, model, carIndex); // opens after 0.6 s, shut 0.8 s before it leaves
+
+// drawing: doors, and the path's curvature for bogies and steering (1/radius, + turning right)
+vr.add(model, lod, matrix, colours, flags, odometer, left, right, curvature);
+// FLAGS.pantoDown folds the pantograph
+
+// where passengers go: every door's sill in the world, just outside the body, with its side
+doorPositions(model, { x, z, heading, y }, platformPoint); // → [{ index, side, x, y, z, nx, nz, width, kind }]
+platformSide({ x, z, heading }, platformPoint);          // 'left' | 'right'
+```
+
+- **Sides.** Left is the driver's left (−z), which is the kerb side in Britain; buses only have
+  doors there. A reversed car (the trailing driving car of a unit) is drawn with heading + π, so
+  pass that same heading to `doorPositions`/`platformSide` and its sides come out right; pass it
+  −curvature too.
+- **Wheels** turn by odometer / radius. **Bogies** swivel by asin(pivot × curvature), which is
+  exactly where the rail's tangent is under a bogie when the car's ends are on the curve.
+  **Front wheels** steer by atan(wheelbase × curvature). **Coupling rods** ride the crank pins.
+- **Articulation.** Bendy buses and trams have real bellows (each half carries its half, out to
+  the turntable, closed with a dark diaphragm so a bend never shows daylight). `follow()` drags
+  a trailer in quarter-metre steps, so it tracks a curve the same at any frame rate, and holds
+  the angle to `maxAngle` (1.3 rad) so it never folds through the tractor.
+- **The demo.** Turntable: *Doors* opens and shuts them, *Close-up* frames the front door on the
+  kerb side (`?close=1&doors=1`). Parade: *Station* (`?at=stop`) shows the platforms and the bus
+  lay-by, where trains stop and open their doors on the platform side and buses pull in, open
+  up, and wait for a gap before pulling out.
 
 ## Integration plan
 
@@ -458,6 +524,43 @@ The order matters: each step is shippable on its own and the game keeps working 
    one per visible model and level. Past a few hundred metres everything is the far box. For
    county-sized maps, LOD 2 buckets can move into a single `BatchedMesh` or a merged far-traffic
    mesh per tile if draw calls ever bite.
+
+## In the game
+
+Steps 1–7 of the plan above are in, through `src/proto/game/fleet.ts`. `traffic.ts` keeps only
+the simulation, the spawning and each vehicle's size.
+
+- **What a trip gets:** `Fleet.dress(seg, heavy)` picks a model for the area the trip starts in and
+  for `gameYear()`.
+  - The area comes from `areaOfRoad`: what fronts the road, `net.zoneAt`, and the road itself.
+  - Models come from `paletteFor(year)`: the commonest few of each sort that year, which keeps the
+    number of draw calls bounded.
+  - A trip from a works is always a goods vehicle.
+- **Bodies:** each vehicle's true length and width are registered as a body
+  (`footprint.registerBody`). The conflict tables are worked out for each body.
+  - An artic or bendy bus is its tractor plus a trailer hung on the hitch, with the trailer's tail
+    on the course. On a bend the trailer angles away from the tractor and cuts inside, but it never
+    swings out of its lane.
+  - The trailer's position is a function of the course alone, so the tables allow for exactly
+    what's drawn.
+  - A bus longer than a lay-by's stand calls from the lane.
+- **Lamps:**
+  - Headlamps come on from the game hour, each driver at a slightly different moment.
+  - Brake lamps show when decelerating harder than 1 m/s², and are held for 0.6 s.
+  - Indicators come from a lane change, a merge, the turn claimed at the next junction (a left
+    signal when leaving a roundabout), and a bus pulling out.
+- **Doors:** a bus's kerb-side doors open while it stands at a stop (`DoorStates`).
+  `Fleet.kerbDoors` gives the door positions where `game/crowds.ts` boards and alights people.
+- **The player's buses and trains:**
+  - Buses are in the company livery (`OWN_LIVERY`) with fleet numbers.
+  - Trains are made up from `purchaseList` sets with `consistOffsets`.
+  - Before there are express sets, a train is a locomotive and coaches.
+- **HUD:** Transport → Buy vehicles lists `purchaseList(gameYear())`. Buses and trains from it run
+  now.
+- **Culling:** only vehicles in view are drawn (`Fleet.frame` each frame). While the game is paused,
+  `traffic.redraw()` keeps panning honest.
+- **Tests:** `src/proto/game/*.review.test.ts` (artics and bendy buses, goods trips, period
+  trains) and `fleet.doors.test.ts`.
 
 ## Screenshots
 

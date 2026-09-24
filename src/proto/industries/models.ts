@@ -191,7 +191,9 @@ const iron_ore_mine: Recipe = (s, v) => {
   s.ground(PAL.rough);
   s.pad(0, 0, W - 4, D - 4, '#a27a62');
   if (v === 'opencast') {
-    benches(s, W - 4, D * 0.55, back + D * 0.28, 2, '#9a5a3e', 5);
+    // the pit starts 10 m in from the back fence, leaving the siding (5 m in) and its wagons clear
+    const pd = D * 0.555 - 10;
+    benches(s, W - 4, pd, back + 10 + pd / 2, 2, '#9a5a3e', 5);
     const dx = -W * 0.1, dz = -D * 0.05;
     s.k.box(dx, 0, dz, 9, 5, 9, '#c9b24a'); s.k.box(dx, 5, dz, 6, 4, 6, '#c9b24a');
     s.dyn.movers.push({ kind: 'jib', x: dx, y: 8, z: dz, rot: 0, len: 30, colour: '#c9b24a', phase: s.r() });

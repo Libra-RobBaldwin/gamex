@@ -12,7 +12,7 @@
 import { ROADS, halfOf, kerbOf, type RoadDef } from './catalog';
 import type { Network, P, RSeg } from './roads';
 import { GROUND, STD } from './standards';
-import { headShape, joinShape, type EndShape, type JoinShape } from './jshape';
+import { approachPath, headShape, joinShape, type EndShape, type JoinShape } from './jshape';
 import type { XZ } from './land';
 
 const pathLength = (p: P[]) => p.reduce((t, q, i) => (i ? t + Math.hypot(q.x - p[i - 1].x, q.z - p[i - 1].z) : 0), 0);
@@ -155,7 +155,9 @@ export function endKind(net: Network, s: RSeg, node: number): EndKind {
   if (n === 2) return 'join';
   const p = net.pathFrom(s, node);
   if (offEdge(net, p[0], unit(p[0], p[1]))) return 'edge';
-  return turnsRound(net.def(s)) ? 'head' : 'end';
+  // (a stub too short to hold a turning head clear of whatever it leaves just ends: a turning head
+  // there would swallow the junction it comes off)
+  return turnsRound(net.def(s)) && net.length(s) >= STD.turningHead.minRoad ? 'head' : 'end';
 }
 const lerp2 = (a: Section2, b: Section2, f: number): Section2 => ({
   median: a.median + (b.median - a.median) * f, hatched: a.hatched, lanes: a.lanes + (b.lanes - a.lanes) * f, lane: a.lane + (b.lane - a.lane) * f,
@@ -163,8 +165,12 @@ const lerp2 = (a: Section2, b: Section2, f: number): Section2 => ({
 });
 
 export function courseOf(net: Network, s: RSeg, taper: Ends2 = taperOf(net, s)): Course {
-  const d = net.def(s), own = net.path(s), L = pathLength(own);
   const kinds: [EndKind, EndKind] = [endKind(net, s, s.a), endKind(net, s, s.b)];
+  // (into a junction the road runs straight for its first few metres, as the junction is built on it)
+  let own = net.path(s);
+  if (kinds[0] === 'junction') own = approachPath(own);
+  if (kinds[1] === 'junction') own = approachPath(own.slice().reverse()).reverse();
+  const d = net.def(s), L = pathLength(own);
   const joins: [JoinShape | null, JoinShape | null] = [null, null], heads: [EndShape | null, EndShape | null] = [null, null];
   // round a join the cross-section blends to halfway between the two roads' by the middle of the curve
   const halfway: [Section2 | null, Section2 | null] = [null, null], fills: Course['fills'] = [null, null], onward: Course['onward'] = [null, null];

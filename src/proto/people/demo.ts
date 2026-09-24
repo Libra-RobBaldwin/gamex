@@ -10,6 +10,7 @@ import { circleRoute, Mode, type Route } from './track';
 import { dress, MIXES, ROLES, type Role } from './wardrobe';
 import { DOGS, SPECIES } from './shaders';
 import { hex, rng, type XZ } from './util';
+import { NavRig, SunFollow } from '../kit/camera';
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -26,24 +27,16 @@ sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.05;
 scene.add(hemi, sun, sun.target);
 
-// ---------------- the game's camera: orthographic, looking down at an angle ----------------
+// ---------------- the game's camera: the shared kit (kit/camera.ts) ----------------
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
-const view = { x: 20, z: -2, az: Math.PI / 4, el: 0.6, h: 60 };
-function placeCamera() {
-  const w = canvas.clientWidth, h = canvas.clientHeight, aspect = w / h;
-  cam.left = (-view.h * aspect) / 2; cam.right = (view.h * aspect) / 2; cam.top = view.h / 2; cam.bottom = -view.h / 2;
-  cam.updateProjectionMatrix();
-  const d = 1200;
-  cam.position.set(view.x + Math.sin(view.az) * Math.cos(view.el) * d, Math.sin(view.el) * d, view.z + Math.cos(view.az) * Math.cos(view.el) * d);
-  cam.lookAt(view.x, 0, view.z);
-  cam.updateMatrixWorld();
-  const r = Math.max(40, view.h * 0.9);
-  const sc = sun.shadow.camera;
-  sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 10; sc.far = 900; sc.updateProjectionMatrix();
-  sun.target.position.set(view.x, 0, view.z);
-  sun.position.set(view.x - 160, 260, view.z + 110).sub(sun.target.position).normalize().multiplyScalar(320).add(sun.target.position);
-}
-function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); placeCamera(); }
+const nav = new NavRig(cam, canvas, {
+  view: { x: 20, z: -2, az: Math.PI / 4, el: 0.6, h: 60 },
+  limits: { hMin: 8, hMax: 600 },
+  // the sun's shadow follows the view, in texel steps so its edges don't shimmer
+  shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 }, radius: 40 }),
+});
+const view = nav.view;
+function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); nav.apply(); }
 window.addEventListener('resize', resize);
 
 // ---------------- scenery (plain boxes; the game draws the real thing) ----------------
@@ -262,7 +255,6 @@ const VIEWS: Record<string, Partial<typeof view>> = {
   'Bus stop': { x: 36, z: -3, h: 26 }, 'High street': { x: -20, z: -2, h: 55 }, Station: { x: 50, z: -27, h: 40, el: 0.95 }, 'Works gate': { x: 70, z: 4, h: 40 },
   Park: { x: 16, z: 34, h: 60 }, School: { x: -52, z: 18, h: 44 }, Fields: { x: -185, z: 5, h: 150 }, Town: { x: -20, z: 0, h: 260 }, Turntable: { x: TT.x, z: TT.z + 1, h: 16 },
 };
-let spin = false;
 for (const name of Object.keys(VIEWS)) {
   const b = document.createElement('button');
   b.textContent = name;
@@ -270,32 +262,11 @@ for (const name of Object.keys(VIEWS)) {
   ui.views.append(b);
 }
 function setView(name: string) {
-  Object.assign(view, { az: Math.PI / 4, el: 0.6 }, VIEWS[name]);
-  spin = name === 'Turntable';
+  nav.setView({ az: Math.PI / 4, el: 0.6, ...VIEWS[name] });
+  // the turntable turns slowly about the middle of the screen (it waits while a finger is down)
+  nav.spin = name === 'Turntable' ? 0.35 : 0;
   for (const b of ui.views.querySelectorAll('button')) b.classList.toggle('on', b.textContent === name);
-  placeCamera();
 }
-const pointers = new Map<number, { x: number; y: number }>();
-canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
-canvas.addEventListener('pointerup', (e) => pointers.delete(e.pointerId));
-canvas.addEventListener('pointercancel', (e) => pointers.delete(e.pointerId));
-canvas.addEventListener('pointermove', (e) => {
-  const p = pointers.get(e.pointerId);
-  if (!p) return;
-  const dx = e.clientX - p.x, dy = e.clientY - p.y;
-  if (pointers.size === 1) {
-    const s = view.h / canvas.clientHeight, c = Math.cos(view.az), si = Math.sin(view.az);
-    view.x -= (dx * c - dy * si / Math.sin(view.el)) * s; view.z -= (-dx * si - dy * c / Math.sin(view.el)) * s;
-  } else if (pointers.size === 2) {
-    const [a, b] = [...pointers.values()], d0 = Math.hypot(a.x - b.x, a.y - b.y);
-    p.x = e.clientX; p.y = e.clientY;
-    const [a1, b1] = [...pointers.values()], d1 = Math.hypot(a1.x - b1.x, a1.y - b1.y);
-    view.h = Math.max(8, Math.min(600, view.h * (d0 / Math.max(1, d1))));
-  }
-  p.x = e.clientX; p.y = e.clientY;
-  placeCamera();
-});
-canvas.addEventListener('wheel', (e) => { view.h = Math.max(8, Math.min(600, view.h * Math.exp(e.deltaY * 0.001))); placeCamera(); e.preventDefault(); }, { passive: false });
 ui.clock.oninput = () => { clock = +ui.clock.value; };
 ui.play.onclick = () => { playing = !playing; ui.play.textContent = playing ? '⏸' : '▶'; };
 ui.wait.oninput = () => { waiting = +ui.wait.value; };
@@ -303,7 +274,7 @@ const callBus = () => { bus.x = BUS_STOP_X - 60; bus.v = 10; bus.served = false;
 ui.bus.onclick = callBus;
 ui.era.onchange = () => { crowds.year = +ui.era.value; store.remove('turntable'); turntable(); };
 ui.rain.onclick = () => { store.rain = store.rain > 0.5 ? 0 : 1; ui.rain.classList.toggle('on', store.rain > 0.5); scene.background = new THREE.Color(store.rain > 0.5 ? '#8f9aa4' : '#a9c7dd'); };
-ui.stress.onchange = () => { stressN = +ui.stress.value; if (stressN) Object.assign(view, { x: 20, z: -112, h: 150, az: Math.PI / 4, el: 0.6 }); placeCamera(); };
+ui.stress.onchange = () => { stressN = +ui.stress.value; if (stressN) { nav.spin = 0; nav.setView({ x: 20, z: -112, h: 150, az: Math.PI / 4, el: 0.6 }); } };
 const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
 
 let last = performance.now(), acc = { n: 0, ms: 0, upd: 0, flows: 0 }, fps = 0, frameMs = 0, updMs = 0, flowMs = 0;
@@ -311,7 +282,7 @@ function frame(now: number) {
   const raw = now - last, dt = Math.min(0.1, raw / 1000);
   last = now;
   if (playing) clock = (clock + dt * MINUTES_PER_S) % 1440;
-  if (spin) { view.az += dt * 0.35; placeCamera(); }
+  nav.update(dt, now);
   const f0 = performance.now();
   crowds.set(stressN ? [...townFlows(clock), ...stressFlows(stressN)] : townFlows(clock), clock);
   const f1 = performance.now();
@@ -330,10 +301,11 @@ resize();
 setView('Bus stop');
 requestAnimationFrame(frame);
 
-declare global { interface Window { __people: unknown } }
+declare global { interface Window { __people: unknown; nav: NavRig } }
+window.nav = nav;
 window.__people = {
   store, crowds, renderer, cam, view, BUDGETS,
-  setView, placeCamera,
+  setView, nav, placeCamera: () => nav.apply(),
   setClock: (m: number) => { clock = m; },
   // run the town forward without drawing (for screenshots on slow software GL)
   advance: (sec: number) => { for (let t = 0; t < sec; t += 0.05) { if (playing) clock = (clock + 0.05 * MINUTES_PER_S) % 1440; crowds.set(stressN ? [...townFlows(clock), ...stressFlows(stressN)] : townFlows(clock), clock); stepVehicles(0.05); store.update(cam, canvas.clientHeight, 0.05); } },
@@ -343,7 +315,7 @@ window.__people = {
   measure: async (n: number, lod: number, frames = 8, shadows = true) => {
     stressN = n; store.forceLod = lod; playing = false; sun.castShadow = shadows;
     store.setBudget({ ...BUDGETS[0], near: 1e6, mid: 1e6, far: 1e6, buildsPerFrame: 1e6 });
-    Object.assign(view, { x: 20, z: -112, h: 170, az: Math.PI / 4, el: 0.6 }); placeCamera();
+    nav.setView({ x: 20, z: -112, h: 170, az: Math.PI / 4, el: 0.6 });
     // only the measuring crowd
     const flows = stressFlows(n);
     crowds.set(flows, clock); store.update(cam, canvas.clientHeight, 0.016);

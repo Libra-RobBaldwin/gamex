@@ -1,12 +1,12 @@
 {
-  "name": "Tracks & Towns",
-  "short_name": "Tracks",
-  "description": "Build a transport network one challenge at a time.",
+  "name": "Untitled · a transport game",
+  "short_name": "Untitled",
+  "description": "Build roads, rail and bus routes for a town that grows around them.",
   "start_url": "/",
   "display": "fullscreen",
-  "orientation": "portrait",
-  "background_color": "#2a6da3",
-  "theme_color": "#12161e",
+  "orientation": "any",
+  "background_color": "#0f3322",
+  "theme_color": "#0f3322",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },

@@ -84,7 +84,7 @@ const cross = (type: string) => (n: Network) => { n.build({ x: -250, z: 0 }, { x
 const tee = (main: string, side = 'street') => (n: Network) => { n.build({ x: -250, z: 0 }, { x: 250, z: 0 }, undefined, as(main)); n.build(n.snapStart({ x: 0, z: 0 }, 3), { x: 0, z: 250 }, undefined, as(side)); };
 
 // minTrips: a floor on trips completed in three minutes (about 60% of what each manages); give-ups
-// (drivers stuck for 90 s) must stay rare; minChanges: lane changes that have to happen there.
+// (drivers stuck for 90 s) must stay under one trip in a hundred; minChanges: lane changes that have to happen there.
 export const SCENARIOS: Scenario[] = [
   { name: 'roundabout, single-lane approaches', build: cross('rural-40'), prefer: 'roundabout', forms: ['roundabout'], cars: 90, minTrips: 80 },
   { name: 'roundabout, dual-lane approaches', build: cross('dual'), forms: ['roundabout'], cars: 130, minTrips: 90 },
@@ -133,6 +133,18 @@ export const SCENARIOS: Scenario[] = [
       road({ x: 250, z: -470 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 });
       road({ x: -230, z: 0 }, { x: -510, z: 0 }, undefined, as('rural-60'));
       road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
+    },
+  },
+  // a mini-roundabout well past what it can take: queues on every arm, and nobody stuck for good
+  { name: 'mini-roundabout, heavy demand', build: cross('street'), forms: ['mini'], cars: 150, minTrips: 190 },
+  {
+    // the offside lane ends with both lanes queued back through the taper from a give-way beyond
+    // (a busy road the street meets): the zip merge has to work at a crawl, and nobody stops dead
+    name: 'lane drop with queues in both lanes', cars: 150, minTrips: 200, forms: ['priority+slip'], minChanges: 100,
+    build: (n) => {
+      n.build({ x: -80, z: 0 }, { x: 0, z: 0 });
+      n.build(n.snapStart({ x: 0, z: 0 }, 3), { x: 320, z: 0 }, undefined, as('dual'));
+      n.build({ x: -80, z: -250 }, { x: -80, z: 250 }, undefined, as('rural-40'));
     },
   },
   {

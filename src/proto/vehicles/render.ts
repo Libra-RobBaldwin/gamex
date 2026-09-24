@@ -4,12 +4,16 @@
 //     per-instance colours for the band, roof and accent zones);
 //   – light: baked lamp codes glow when the instance's flags switch them on (headlamps, tail and
 //     brake lamps, indicators that blink, interior lights, flashing beacons, cab signs);
-//   – wheels: vertices tagged with a wheel centre turn by the instance's odometer.
+//   – wheels: vertices tagged with a wheel centre turn by the instance's odometer;
+//   – moving parts (motion.ts): door leaves slide, plug, swing or fold by the instance's door
+//     state, bogies swivel and front wheels steer by its curvature, coupling rods go round with
+//     the wheels and pantographs fold down with a flag.
 // Per-frame cost is one matrix and a few floats per vehicle; draw calls are one per model and
 // level that has anything on screen.
 import * as THREE from 'three';
 import type { Livery, Lod, Model } from './types';
 import { geometry } from './build';
+import { packDoors, MOTION_GLSL_COMMON, MOTION_GLSL_NORMAL, MOTION_GLSL_VERTEX } from './motion';
 
 export interface VehicleMaterialOptions { night?: number }
 
@@ -27,11 +31,12 @@ attribute vec4 vk;
 attribute vec3 iC2;
 attribute vec3 iC3;
 attribute vec3 iC4;
-attribute vec2 iData;
+attribute vec4 iData;
 uniform float uTime;
 uniform float uNight;
 varying vec3 vEmit;
-vec2 spin(vec2 p, vec2 c, float a) { vec2 d = p - c; float s = sin(a), co = cos(a); return c + vec2(co * d.x - s * d.y, s * d.x + co * d.y); }`)
+vec2 spin(vec2 p, vec2 c, float a) { vec2 d = p - c; float s = sin(a), co = cos(a); return c + vec2(co * d.x - s * d.y, s * d.x + co * d.y); }
+${MOTION_GLSL_COMMON}`)
       .replace('#include <color_vertex>', `
 vColor = color;
 int zone = int(vk.x + 0.5);
@@ -54,12 +59,19 @@ else if (li == 5 && (fl & 8) != 0) vEmit = vec3(1.6, 0.75, 0.05) * blink;
 else if (li == 6 && (fl & 16) != 0) vEmit = vec3(1.0, 0.86, 0.55) * 0.75 * uNight;
 else if (li == 7 && (fl & 32) != 0) vEmit = vec3(0.2, 0.35, 2.0) * step(0.5, fract(uTime * 2.5 + (position.z > 0.0 ? 0.5 : 0.0)));
 else if (li == 8 && (fl & 32) != 0) vEmit = vec3(1.8, 0.8, 0.05) * step(0.5, fract(uTime * 2.0 + position.x * 0.2));
-else if (li == 9 && (fl & 64) != 0) vEmit = vec3(1.5, 1.0, 0.3) * glow;`)
+else if (li == 9 && (fl & 64) != 0) vEmit = vec3(1.5, 1.0, 0.3) * glow;
+else if (li == 10 || li == 11) {
+  vec2 dd = mvDoors(iData.z);
+  float o = position.z > 0.0 ? dd.y : dd.x;
+  if (o > 0.004) vEmit = li == 10 ? vec3(1.7, 0.85, 0.08) : vec3(0.25, 1.4, 0.35);
+}`)
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
 float wheelA = vk.w > 0.0 ? -iData.y / vk.w : 0.0;
-if (vk.w > 0.0) objectNormal.xy = spin(objectNormal.xy, vec2(0.0), wheelA);`)
+if (vk.w > 0.0) objectNormal.xy = spin(objectNormal.xy, vec2(0.0), wheelA);
+${MOTION_GLSL_NORMAL}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-if (vk.w > 0.0) transformed.xy = spin(transformed.xy, vk.zw, wheelA);`);
+if (vk.w > 0.0) transformed.xy = spin(transformed.xy, vk.zw, wheelA);
+${MOTION_GLSL_VERTEX}`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec3 vEmit;`)
@@ -67,8 +79,30 @@ varying vec3 vEmit;`)
 totalEmissiveRadiance += vEmit;`);
   };
   // every vehicle shares this shader, so compile it once
-  mat.customProgramCacheKey = () => 'vehicle-v1';
+  mat.customProgramCacheKey = () => 'vehicle-v2';
   return { material: mat, uniforms };
+}
+
+// The shadow pass's material: three's depth shader with the same wheel spin and motion, so an
+// open slam door, a swung-out bus door or a folded pantograph casts its shadow where it is.
+export function vehicleDepthMaterial() {
+  const mat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute vec4 vk;
+attribute vec4 iData;
+vec2 spin(vec2 p, vec2 c, float a) { vec2 d = p - c; float s = sin(a), co = cos(a); return c + vec2(co * d.x - s * d.y, s * d.x + co * d.y); }
+${MOTION_GLSL_COMMON}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vec3 objectNormal = vec3(0.0, 0.0, 1.0);
+float wheelA = vk.w > 0.0 ? -iData.y / vk.w : 0.0;
+if (vk.w > 0.0) transformed.xy = spin(transformed.xy, vk.zw, wheelA);
+${MOTION_GLSL_NORMAL}
+${MOTION_GLSL_VERTEX}`);
+  };
+  mat.customProgramCacheKey = () => 'vehicle-depth-v1';
+  return mat;
 }
 
 const tmpC = new THREE.Color();
@@ -81,15 +115,16 @@ class Bucket {
   private c3: THREE.InstancedBufferAttribute;
   private c4: THREE.InstancedBufferAttribute;
   private data: THREE.InstancedBufferAttribute;
-  constructor(public model: Model, public lod: Lod, material: THREE.Material, public cap: number, shadows: boolean) {
+  constructor(public model: Model, public lod: Lod, material: THREE.Material, public cap: number, shadows: boolean, depth?: THREE.Material) {
     const src = geometry(model, lod);
     const g = new THREE.BufferGeometry();
-    for (const k of ['position', 'normal', 'color', 'vk']) g.setAttribute(k, src.getAttribute(k));
+    for (const k of ['position', 'normal', 'color', 'vk', 'vd']) g.setAttribute(k, src.getAttribute(k));
     g.boundingSphere = src.boundingSphere; g.boundingBox = src.boundingBox;
     this.c2 = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
     this.c3 = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
     this.c4 = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
-    this.data = new THREE.InstancedBufferAttribute(new Float32Array(cap * 2), 2);
+    // flags, odometer, doors (packed left and right), curvature
+    this.data = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
     for (const a of [this.c2, this.c3, this.c4, this.data]) a.setUsage(THREE.DynamicDrawUsage);
     g.setAttribute('iC2', this.c2); g.setAttribute('iC3', this.c3); g.setAttribute('iC4', this.c4); g.setAttribute('iData', this.data);
     this.mesh = new THREE.InstancedMesh(g, material, cap);
@@ -99,21 +134,22 @@ class Bucket {
     this.mesh.count = 0;
     this.mesh.frustumCulled = false; // positions change every frame; culling per vehicle happens in the caller
     this.mesh.castShadow = shadows && lod < 2;
+    if (depth) this.mesh.customDepthMaterial = depth;
     this.mesh.receiveShadow = false;
     this.mesh.name = `${model.id}#${lod}`;
   }
-  set(i: number, m: THREE.Matrix4, cols: readonly THREE.Color[], flags: number, odo: number) {
+  set(i: number, m: THREE.Matrix4, cols: readonly THREE.Color[], flags: number, odo: number, doors = 0, curve = 0) {
     this.mesh.setMatrixAt(i, m);
     this.mesh.setColorAt(i, cols[0]);
     const [c2, c3, c4] = [cols[1] ?? cols[0], cols[2] ?? cols[0], cols[3] ?? cols[0]];
     this.c2.setXYZ(i, c2.r, c2.g, c2.b); this.c3.setXYZ(i, c3.r, c3.g, c3.b); this.c4.setXYZ(i, c4.r, c4.g, c4.b);
-    this.data.setXY(i, flags, odo);
+    this.data.setXYZW(i, flags, odo, doors, curve);
   }
   flush() {
     this.mesh.count = this.count;
     if (!this.count) return;
     const upd = (a: THREE.BufferAttribute, n: number) => { a.clearUpdateRanges(); a.addUpdateRange(0, this.count * n); a.needsUpdate = true; };
-    upd(this.mesh.instanceMatrix, 16); upd(this.mesh.instanceColor!, 3); upd(this.c2, 3); upd(this.c3, 3); upd(this.c4, 3); upd(this.data, 2);
+    upd(this.mesh.instanceMatrix, 16); upd(this.mesh.instanceColor!, 3); upd(this.c2, 3); upd(this.c3, 3); upd(this.c4, 3); upd(this.data, 4);
   }
   dispose() {
     for (const k of ['iC2', 'iC3', 'iC4', 'iData']) this.mesh.geometry.deleteAttribute(k);
@@ -192,8 +228,11 @@ export class Glow {
 export class VehicleRenderer {
   readonly group = new THREE.Group();
   readonly material: THREE.MeshLambertMaterial;
+  readonly depthMaterial = vehicleDepthMaterial();
   readonly uniforms: { uTime: { value: number }; uNight: { value: number } };
   private buckets = new Map<string, Bucket>();
+  // the same buckets by model and level, so add() doesn't build a string key per vehicle per frame
+  private byModel = new Map<Model, (Bucket | undefined)[]>();
   shadows: boolean;
   constructor(opts: { shadows?: boolean } = {}) {
     const { material, uniforms } = vehicleMaterial();
@@ -202,11 +241,14 @@ export class VehicleRenderer {
     this.group.name = 'vehicles';
   }
   begin() { for (const b of this.buckets.values()) b.count = 0; }
-  add(model: Model, lod: Lod, matrix: THREE.Matrix4, colours: readonly THREE.Color[], flags = 0, odo = 0) {
-    const key = `${model.id}|${lod}`;
-    let b = this.buckets.get(key);
-    if (!b || b.count >= b.cap) b = this.grow(key, model, lod, b);
-    b.set(b.count++, matrix, colours, flags, odo);
+  // One vehicle this frame. odo is metres travelled (wheels turn by it); doorsLeft and doorsRight
+  // are how far open (0–1) the doors on the driver's left (−z, the kerb side in Britain) and right
+  // are, from a DoorStates or dwellDoors; curve is the curvature of the path under the vehicle
+  // (1 / radius, positive turning right) for bogies and steered wheels.
+  add(model: Model, lod: Lod, matrix: THREE.Matrix4, colours: readonly THREE.Color[], flags = 0, odo = 0, doorsLeft = 0, doorsRight = 0, curve = 0) {
+    let b = this.byModel.get(model)?.[lod];
+    if (!b || b.count >= b.cap) b = this.grow(`${model.id}|${lod}`, model, lod, b);
+    b.set(b.count++, matrix, colours, flags, odo, doorsLeft || doorsRight ? packDoors(doorsLeft, doorsRight) : 0, curve);
   }
   end(time = 0) {
     this.uniforms.uTime.value = time;
@@ -223,20 +265,23 @@ export class VehicleRenderer {
   }
   private grow(key: string, model: Model, lod: Lod, old?: Bucket) {
     const cap = old ? old.cap * 2 : lod === 2 ? 64 : 16;
-    const b = new Bucket(model, lod, this.material, cap, this.shadows);
+    const b = new Bucket(model, lod, this.material, cap, this.shadows, this.depthMaterial);
     if (old) {
       // copy what's already been added this frame
       for (let i = 0; i < old.count; i++) {
         const m = new THREE.Matrix4(); old.mesh.getMatrixAt(i, m); b.mesh.setMatrixAt(i, m);
         const c = new THREE.Color(); old.mesh.getColorAt(i, c); b.mesh.setColorAt(i, c);
       }
-      for (const k of ['iC2', 'iC3', 'iC4', 'iData']) (b.mesh.geometry.getAttribute(k).array as Float32Array).set((old.mesh.geometry.getAttribute(k).array as Float32Array).subarray(0, old.count * (k === 'iData' ? 2 : 3)));
+      for (const k of ['iC2', 'iC3', 'iC4', 'iData']) (b.mesh.geometry.getAttribute(k).array as Float32Array).set((old.mesh.geometry.getAttribute(k).array as Float32Array).subarray(0, old.count * (k === 'iData' ? 4 : 3)));
       b.count = old.count;
       this.group.remove(old.mesh); old.dispose();
     }
     this.buckets.set(key, b);
+    let per = this.byModel.get(model);
+    if (!per) { per = []; this.byModel.set(model, per); }
+    per[lod] = b;
     this.group.add(b.mesh);
     return b;
   }
-  dispose() { for (const b of this.buckets.values()) { this.group.remove(b.mesh); b.dispose(); } this.buckets.clear(); this.material.dispose(); }
+  dispose() { for (const b of this.buckets.values()) { this.group.remove(b.mesh); b.dispose(); } this.buckets.clear(); this.byModel.clear(); this.material.dispose(); this.depthMaterial.dispose(); }
 }

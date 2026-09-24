@@ -40,12 +40,17 @@ export interface SheetSpec {
   from?: BarKey;
   /** Hold the sheet at its full height, so switching tabs doesn't move the tabs under the finger. */
   fixed?: boolean;
+  /** One row for the tabs and Close, no title block: for a sheet that should leave most of the map clear. */
+  compact?: boolean;
 }
 export interface BuildCategory { id: string; label: string; icon: Icon; disabled?: string; note?: string }
 export interface BuildItem {
   id: string;
   label: string;
   spec?: string;
+  /** A shorter name and a few words for the card, in place of `label` and `spec` (it has room for one short line of each). */
+  name?: string;
+  short?: string;
   icon?: Icon;
   tone?: Tone;
   /** Shown disabled, with this reason. */
@@ -282,26 +287,29 @@ export class Shell {
     const body = el.querySelector('.sb');
     const keep = was && was.key === spec.key && !spec.fresh && body ? body.scrollTop : 0;
     this.sheet = spec;
-    el.className = `sheet facet tone-${spec.tone ?? 'look'}${spec.fixed ? ' fixed' : ''}`;
-    el.setAttribute('aria-label', spec.title);
-    html(el, `<header>
+    const compact = !!spec.compact && !!spec.tabs;
+    el.className = `sheet facet tone-${spec.tone ?? 'look'}${spec.fixed && !compact ? ' fixed' : ''}${compact ? ' compact' : ''}`;
+    el.setAttribute('aria-label', spec.sub ? `${spec.title}: ${spec.sub}` : spec.title);
+    const tabs = spec.tabs ? `<div class="stabs" role="tablist">${spec.tabs.map((t) => `<button role="tab" data-tab="${t.id}" aria-selected="${t.id === spec.tab}" ${t.disabled ? `disabled title="${esc(t.disabled)}"` : ''}>${t.icon ? icon(t.icon) : ''}<span>${esc(t.label)}</span></button>`).join('')}</div>` : '';
+    const close = `<button class="close" aria-label="Close" title="Close">${icon('x')}</button>`;
+    html(el, `${compact ? `<header>${tabs}${close}</header>` : `<header>
         ${spec.back ? `<button class="back" aria-label="Back" title="Back">${icon('arrowLeft')}</button>` : ''}
         ${spec.icon ? `<i class="badge">${icon(spec.icon)}</i>` : ''}
         <div class="ttl"><h2>${esc(spec.title)}</h2>${spec.sub ? `<span class="sub">${esc(spec.sub)}</span>` : ''}</div>
-        <button class="close" aria-label="Close" title="Close">${icon('x')}</button>
+        ${close}
       </header>
-      ${spec.tabs ? `<div class="stabs" role="tablist">${spec.tabs.map((t) => `<button role="tab" data-tab="${t.id}" aria-selected="${t.id === spec.tab}" ${t.disabled ? `disabled title="${esc(t.disabled)}"` : ''}>${t.icon ? icon(t.icon) : ''}<span>${esc(t.label)}</span></button>`).join('')}</div>` : ''}
+      ${tabs}`}
       <div class="sb">${spec.body}${spec.actions?.length ? `<div class="acts">${spec.actions.map((a, i) => actionHtml(a, i, 'act')).join('')}</div>` : ''}</div>`);
     if (el.hidden) { el.classList.add('enter'); el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true }); }
     el.hidden = false;
     el.querySelector('.close')!.addEventListener('click', () => this.closeSheet());
     el.querySelector('.back')?.addEventListener('click', () => spec.back!());
     el.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => spec.onTab?.(b.dataset.tab!)));
-    const tabs = el.querySelector<HTMLElement>('.stabs');
-    if (tabs) {
-      tabs.scrollLeft = this.tabScroll;
-      const more = () => { this.tabScroll = tabs.scrollLeft; fade(tabs); };
-      tabs.addEventListener('scroll', more, { passive: true });
+    const tabRow = el.querySelector<HTMLElement>('.stabs');
+    if (tabRow) {
+      tabRow.scrollLeft = this.tabScroll;
+      const more = () => { this.tabScroll = tabRow.scrollLeft; fade(tabRow); };
+      tabRow.addEventListener('scroll', more, { passive: true });
       requestAnimationFrame(more);
     }
     el.querySelectorAll<HTMLButtonElement>('[data-act]').forEach((b) => b.addEventListener('click', () => spec.actions![+b.dataset.act!].onClick()));
@@ -352,13 +360,23 @@ export class Shell {
     const c = this.cats.find((x) => x.id === this.buildCat);
     const list = this.items.get(this.buildCat) ?? [];
     const body = this.openSheet({
-      key: `build:${this.buildCat}`, title: 'Build', sub: 'Pick something, then draw it on the map', from: 'build', fixed: true,
+      key: `build:${this.buildCat}`, title: 'Build', sub: 'Pick something, then draw it on the map', from: 'build', compact: true,
       tabs: this.cats.map((x) => ({ id: x.id, label: x.label, icon: x.icon, disabled: x.disabled })), tab: this.buildCat,
       onTab: (id) => this.openBuild(id),
-      body: `<div class="grid">${list.map((it, i) => `<button class="card${it.locked ? ' locked' : ''}${it.on?.() ? ' on' : ''} tone-${it.tone ?? 'look'}" data-item="${i}" ${it.locked ? 'aria-disabled="true"' : ''}>
-          <b>${it.icon ? icon(it.icon) : ''}<span>${esc(it.label)}</span></b>${it.spec ? `<span>${esc(it.spec)}</span>` : ''}${it.locked ? `<span class="why">${esc(it.locked)}</span>` : ''}</button>`).join('')}</div>
+      // one row of small cards that scrolls sideways, so the sheet stays a strip over the bar
+      body: `<div class="strip">${list.map((it, i) => {
+          const what = it.locked ?? it.short ?? it.spec ?? '';
+          const full = [it.label, it.spec, it.locked].filter(Boolean).join(' · ');
+          return `<button class="card mini${it.locked ? ' locked' : ''}${it.on?.() ? ' on' : ''} tone-${it.tone ?? 'look'}" data-item="${i}" ${it.locked ? 'aria-disabled="true"' : ''} title="${esc(full)}" aria-label="${esc(full)}">
+          <b>${it.icon ? icon(it.icon) : ''}<span>${esc(it.name ?? it.label)}</span></b>${what ? `<span class="${it.locked ? 'why' : ''}">${esc(what)}</span>` : ''}</button>`;
+        }).join('')}</div>
         ${c?.note ? `<p class="note">${esc(c.note)}</p>` : ''}`,
     });
+    const strip = body.querySelector<HTMLElement>('.strip')!;
+    const fadeStrip = () => fade(strip);
+    strip.addEventListener('scroll', fadeStrip, { passive: true });
+    strip.querySelector<HTMLElement>('.card.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    requestAnimationFrame(fadeStrip);
     body.querySelectorAll<HTMLButtonElement>('[data-item]').forEach((b) => b.addEventListener('click', () => {
       const it = list[+b.dataset.item!];
       if (it.locked) { this.hint(`${icon('info')}<span>${esc(it.label)}: ${esc(it.locked)}</span>`, 3500); return; }

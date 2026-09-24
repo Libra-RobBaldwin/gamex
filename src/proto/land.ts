@@ -7,7 +7,7 @@
 // county.
 
 export interface XZ { x: number; z: number }
-export type Owner = 'road' | 'junction' | 'slip' | 'island';
+export type Owner = 'road' | 'junction' | 'slip' | 'island' | 'industry' | 'water'; // industry: a site's plot (game/industry.ts); water: lakes and rivers (game/water.ts)
 export interface Claim { key: string; owner: Owner; polys: XZ[][]; box: [number, number, number, number] }
 
 const CELL = 40;

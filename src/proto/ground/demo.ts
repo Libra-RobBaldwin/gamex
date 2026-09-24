@@ -8,6 +8,7 @@ import { bandPolys, circlePoly } from '../land';
 import { CROP, type CropName } from './covers';
 import { Ground, setGroundQuality, type Covers, type GroundInput, type GroundQuality, type XZ } from './index';
 import { rng, worldNoise } from './noise';
+import { NavRig, SunFollow } from '../kit/camera';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 $('#mark').innerHTML = markSvg();
@@ -25,67 +26,19 @@ sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.6;
 scene.add(hemi, sun, sun.target);
 
-// ---- camera: orthographic, as in the game ----
+// ---- camera: the shared kit (kit/camera.ts), the game's gestures ----
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 6000);
-const view = { x: 0, z: 0, az: Math.PI / 4, el: 0.6, h: 200 };
-function place() {
-  const w = canvas.clientWidth || 1, hgt = canvas.clientHeight || 1, a = w / hgt;
-  cam.left = (-view.h * a) / 2; cam.right = (view.h * a) / 2; cam.top = view.h / 2; cam.bottom = -view.h / 2;
-  const d = 2500, y = sceneY();
-  cam.position.set(view.x + Math.sin(view.az) * Math.cos(view.el) * d, y + Math.sin(view.el) * d, view.z + Math.cos(view.az) * Math.cos(view.el) * d);
-  cam.lookAt(view.x, y, view.z);
-  cam.updateProjectionMatrix();
-  // the sun's shadow box follows the view (snapped to whole metres so shadows don't crawl)
-  const r = Math.min(900, view.h * 1.4), sx = Math.round(view.x), sz = Math.round(view.z);
-  sun.position.set(sx - 160, y + 260, sz + 110); sun.target.position.set(sx, y, sz);
-  const sc = sun.shadow.camera; sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 1; sc.far = 1200; sc.updateProjectionMatrix();
-}
-function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); place(); }
+const nav = new NavRig(cam, canvas, {
+  view: { x: 0, z: 0, az: Math.PI / 4, el: 0.6, h: 200 },
+  limits: { hMin: 35, hMax: 900 },
+  distance: 2500,
+  // the sun's shadow box follows the view, in whole texels so shadows don't crawl
+  shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 }, radius: 140, cover: 1.4, near: 1, far: 1200 }),
+});
+const view = nav.view;
+const place = () => nav.apply();
+function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); nav.apply(); }
 window.addEventListener('resize', resize);
-
-// ground height under the view (the hills scene isn't flat)
-let heightAt: (x: number, z: number) => number = () => 0;
-const sceneY = () => heightAt(view.x, view.z);
-
-// ---- gestures ----
-const ray = new THREE.Raycaster(), level = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-function groundAt(sx: number, sy: number) {
-  const r = canvas.getBoundingClientRect();
-  ray.setFromCamera(new THREE.Vector2(((sx - r.left) / r.width) * 2 - 1, -((sy - r.top) / r.height) * 2 + 1), cam);
-  level.constant = -sceneY();
-  const p = new THREE.Vector3();
-  return ray.ray.intersectPlane(level, p) ? p : null;
-}
-const pts = new Map<number, { x: number; y: number }>();
-let anchor: THREE.Vector3 | null = null, pinch: { d: number; a: number; h: number; az: number } | null = null;
-canvas.addEventListener('pointerdown', (e) => {
-  canvas.setPointerCapture(e.pointerId);
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pts.size === 1) anchor = groundAt(e.clientX, e.clientY);
-  if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), a: Math.atan2(b.y - a.y, b.x - a.x), h: view.h, az: view.az }; anchor = null; }
-});
-canvas.addEventListener('pointermove', (e) => {
-  if (!pts.has(e.pointerId)) return;
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pts.size === 1 && anchor) {
-    // move the view so the point first touched stays under the finger
-    const g = groundAt(e.clientX, e.clientY);
-    if (g) { view.x += anchor.x - g.x; view.z += anchor.z - g.z; place(); }
-  } else if (pts.size === 2 && pinch) {
-    const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y), ang = Math.atan2(b.y - a.y, b.x - a.x);
-    view.h = Math.max(35, Math.min(900, (pinch.h * pinch.d) / Math.max(10, d)));
-    view.az = pinch.az + (ang - pinch.a);
-    place();
-  }
-});
-const lift = (e: PointerEvent) => {
-  pts.delete(e.pointerId);
-  pinch = null;
-  if (pts.size === 1) { const [p] = [...pts.values()]; anchor = groundAt(p.x, p.y); } else anchor = null;
-};
-canvas.addEventListener('pointerup', lift);
-canvas.addEventListener('pointercancel', lift);
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); view.h = Math.max(35, Math.min(900, view.h * Math.exp(e.deltaY * 0.001))); place(); }, { passive: false });
 
 // ---- the old ground, for Before ----
 function speckle() {
@@ -293,9 +246,10 @@ function setScene(k: string) {
   }
   cur = SCENES[k]();
   scene.add(cur.group, cur.ground.hedges, ...cur.grounds);
-  heightAt = cur.height ?? (() => 0);
+  // the hills scene isn't flat: the camera pans and pivots on the ground itself
+  nav.setGround(cur.height, [-50, 400]);
   applyBefore();
-  Object.assign(view, cur.home);
+  nav.setView(cur.home);
   labelsEl.innerHTML = (cur.labels ?? []).map((l) => `<div>${l.t}</div>`).join('');
   $('#desc').textContent = cur.desc;
   document.querySelectorAll<HTMLButtonElement>('[data-scene]').forEach((b) => b.classList.toggle('on', b.dataset.scene === k));
@@ -321,7 +275,7 @@ function applyBefore() {
 
 // ---- controls ----
 document.querySelectorAll<HTMLButtonElement>('[data-scene]').forEach((b) => (b.onclick = () => setScene(b.dataset.scene!)));
-document.querySelectorAll<HTMLButtonElement>('[data-zoom]').forEach((b) => (b.onclick = () => { view.h = Number(b.dataset.zoom); place(); }));
+document.querySelectorAll<HTMLButtonElement>('[data-zoom]').forEach((b) => (b.onclick = () => { nav.animateTo({ h: Number(b.dataset.zoom) }); }));
 $('#before').onclick = () => { before = !before; applyBefore(); };
 const QS: GroundQuality[] = ['high', 'medium', 'low'];
 let qi = 0;
@@ -344,6 +298,7 @@ const v3 = new THREE.Vector3();
 function frame(now: number) {
   const dt = now - last;
   last = now; frames++; acc += dt;
+  nav.update(Math.min(0.1, dt / 1000), now);
   renderer.render(scene, cam);
   if (cur?.labels) {
     const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -375,7 +330,7 @@ function pixelCost(frames = 20) {
   const uv = g.getAttribute('uv') as THREE.BufferAttribute, pos = g.getAttribute('position') as THREE.BufferAttribute;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / 22.5, pos.getZ(i) / 22.5);
   const m = new THREE.Mesh(g);
-  m.position.set(view.x, sceneY(), view.z);
+  m.position.set(view.x, view.y ?? 0, view.z); // (at the height the camera looks at)
   s2.add(m);
   const time = (mat: THREE.Material) => {
     m.material = mat;
@@ -393,4 +348,5 @@ function pixelCost(frames = 20) {
   g.dispose();
   return out;
 }
-(window as unknown as { groundDemo: unknown }).groundDemo = { pixelCost, setScene, setQuality, setDusk, view, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };
+(window as unknown as { nav: NavRig }).nav = nav;
+(window as unknown as { groundDemo: unknown }).groundDemo = { pixelCost, setScene, setQuality, setDusk, view, nav, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };

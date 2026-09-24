@@ -6,9 +6,11 @@
 //
 // Lamps: white lamps (head, code 1) glow with FLAGS.lights; red lamps use the brake code (3) so
 // the traffic layer lights them on the last vehicle with FLAGS.brake.
-import { Kit, C, paint, fixed, type P2, type Style, type LoftSect } from './kit';
+import { Kit, C, paint, fixed, asWheel, type P2, type Style, type LoftSect } from './kit';
 import type { Model } from './types';
-import { num, str, flag, wheels, axleBlock } from './parts';
+import { num, flag, wheels, axleBlock, bellowsHalf } from './parts';
+import { railLayout, drawDoors, doorsOf, type Door } from './doors';
+import { MOTION } from './motion';
 import { rng, pick } from './util';
 import { BOX_COLOURS } from './operators';
 
@@ -87,30 +89,66 @@ function lamps(k: Kit, x: number, dir: 1 | -1, hw: number, y: number) {
   }
 }
 
+// A bogie: at the near level, outside side frames with axleboxes and springs, a transom, and the
+// wheels inside; further off, a block with the wheels suggested. It swivels about its pivot on
+// curves (the shader turns it by the curvature the vehicle is given).
 function bogie(k: Kit, x: number, hw: number, r: number, axles = 2, spacing = 2.6) {
   const lod = k.lod;
   const half = ((axles - 1) * spacing) / 2;
-  k.box(x - half - 0.7, x + half + 0.7, r * 0.6, r * 2 + 0.25, -hw + 0.25, hw - 0.25, C.bogie, { py: null });
-  for (let i = 0; i < axles; i++) {
-    const ax = x - half + i * spacing;
-    if (lod === 0) wheels(k, ax, r, hw - 0.28, 0.14, 'plain');
-    else axleBlock(k, ax, r, hw - 0.3, 1.8);
-  }
+  k.moving([MOTION.bogie, x, 0, 0], () => {
+    if (lod !== 0) {
+      k.box(x - half - 0.7, x + half + 0.7, r * 0.6, r * 2 + 0.25, -hw + 0.25, hw - 0.25, C.bogie, { py: null });
+      for (let i = 0; i < axles; i++) axleBlock(k, x - half + i * spacing, r, hw - 0.3, 1.8);
+      return;
+    }
+    const zo = hw - 0.18, zi = hw - 0.27; // side frames, outside the wheels
+    for (const s of [1, -1] as const) {
+      k.box(x - half - 0.75, x + half + 0.75, r * 0.62, r * 1.62, s > 0 ? zi : -zo, s > 0 ? zo : -zi, C.bogie, { nx: null, px: null, [s > 0 ? 'nz' : 'pz']: null });
+      // axleboxes over the wheel centres and the springs above them, on the frame's face
+      for (let i = 0; i < axles; i++) {
+        const ax = x - half + i * spacing;
+        k.sideRect(ax - 0.2, ax + 0.2, r * 0.72, r * 1.3, zo, fixed('#45484c'), s, 0.012);
+        k.sideRect(ax - 0.13, ax + 0.13, r * 1.3, r * 1.62, zo, fixed('#5c6064'), s, 0.012);
+      }
+      // the wheels between the frames: only their bottoms show, so six sides do
+      for (let i = 0; i < axles; i++) {
+        const ax = x - half + i * spacing, st = asWheel(C.tyre, ax, r);
+        k.cylZ(ax, r, r, s * (hw - 0.29), s * (hw - 0.42), 6, st, st, null);
+      }
+    }
+    // the transom across the middle, carrying the body on its pivot
+    k.box(x - 0.35, x + 0.35, r * 1.05, r * 1.7, -zi, zi, C.bogie, { nz: null, pz: null });
+  });
 }
 function buffers(k: Kit, x: number, dir: 1 | -1, hw: number, y: number, beam: Style = C.trim) {
-  k.box(dir > 0 ? x - 0.2 : x, dir > 0 ? x : x + 0.2, y - 0.3, y + 0.25, -hw + 0.05, hw - 0.05, beam);
+  // the beam stands a centimetre proud of the end, so its face never shares a plane with it
+  k.box(dir > 0 ? x - 0.19 : x - 0.01, dir > 0 ? x + 0.01 : x + 0.19, y - 0.3, y + 0.25, -hw + 0.05, hw - 0.05, beam);
   if (k.lod === 0) for (const s of [1, -1]) k.cylX(x, x + dir * 0.45, y, s * 0.87, 0.17, 0.17, 6, C.buffer, null, C.buffer);
 }
 function coupler(k: Kit, x: number, dir: 1 | -1, y: number) {
   k.box(dir > 0 ? x : x - 0.5, dir > 0 ? x + 0.5 : x, y - 0.15, y + 0.15, -0.2, 0.2, C.buffer);
 }
+// A single-arm pantograph on a frame standing on insulators. The arms and the head fold down
+// with FLAGS.pantoDown; the frame and insulators stay put.
 function pantograph(k: Kit, x: number, y: number, lod: number) {
-  k.box(x - 0.6, x + 0.6, y, y + 0.2, -0.55, 0.55, C.pantograph, { py: null });
-  if (lod !== 0) { k.box(x - 0.1, x + 0.1, y + 0.2, y + 0.9, -0.03, 0.03, C.pantograph); k.box(x - 0.15, x + 0.15, y + 0.9, y + 0.95, -0.8, 0.8, C.pantograph); return; }
-  // a single-arm pantograph: lower arm leaning back, upper arm forward, collector bar on top
-  k.prism([[x - 0.9, y + 0.2], [x - 0.8, y + 0.2], [x + 0.2, y + 0.75], [x + 0.1, y + 0.78]], 0.04, C.pantograph, () => C.pantograph);
-  k.prism([[x + 0.1, y + 0.75], [x + 0.2, y + 0.75], [x - 0.5, y + 1.3], [x - 0.6, y + 1.3]], 0.03, C.pantograph, () => C.pantograph);
-  k.box(x - 0.66, x - 0.44, y + 1.3, y + 1.36, -0.85, 0.85, C.pantograph);
+  if (lod !== 0) {
+    k.box(x - 0.6, x + 0.6, y, y + 0.2, -0.55, 0.55, C.pantograph, { py: null });
+    k.moving([MOTION.panto, y + 0.2, 0, 0], () => { k.box(x - 0.1, x + 0.1, y + 0.2, y + 0.9, -0.03, 0.03, C.pantograph); k.box(x - 0.15, x + 0.15, y + 0.9, y + 0.95, -0.8, 0.8, C.pantograph); });
+    return;
+  }
+  const ins = fixed('#8c4a2e'); // brown glazed insulators
+  for (const ix of [x - 0.55, x + 0.55]) for (const iz of [-0.45, 0.45]) k.box(ix - 0.06, ix + 0.06, y, y + 0.18, iz - 0.06, iz + 0.06, ins, { py: null });
+  const b = y + 0.18;
+  k.box(x - 0.95, x + 0.7, b, b + 0.08, -0.52, 0.52, C.pantograph);
+  k.moving([MOTION.panto, b + 0.1, 0, 0], () => {
+    // lower arm leaning forward from the hinge, upper arm back to the head, and the rod that works it
+    k.prism([[x - 0.9, b + 0.08], [x - 0.78, b + 0.08], [x + 0.25, b + 0.66], [x + 0.14, b + 0.72]], 0.05, C.pantograph, () => C.pantograph);
+    k.prism([[x + 0.14, b + 0.66], [x + 0.26, b + 0.68], [x - 0.5, b + 1.22], [x - 0.6, b + 1.22]], 0.035, C.pantograph, () => C.pantograph);
+    k.prism([[x - 0.82, b + 0.1], [x - 0.76, b + 0.1], [x + 0.18, b + 0.62], [x + 0.13, b + 0.65]], 0.015, null, () => C.pantograph, 0.12);
+    // the head: a carbon strip on its frame, with horns turned down at each end
+    k.box(x - 0.64, x - 0.46, b + 1.22, b + 1.32, -0.62, 0.62, fixed('#1c1c1e'), { py: fixed('#1c1c1e'), px: C.pantograph, nx: C.pantograph });
+    for (const s of [1, -1]) k.box(x - 0.62, x - 0.48, b + 1.1, b + 1.3, s > 0 ? 0.62 : -0.78, s > 0 ? 0.78 : -0.62, C.pantograph, { [s > 0 ? 'nz' : 'pz']: null });
+  });
 }
 function windows(k: Kit, x0: number, x1: number, y0: number, y1: number, hw: number, n: number, gap = 0.12, st: Style = C.glass) {
   if (k.lod !== 0) { k.sideRect(x0, x1, y0, y1, hw, st); return; }
@@ -118,6 +156,18 @@ function windows(k: Kit, x0: number, x1: number, y0: number, y1: number, hw: num
     const a = x0 + ((x1 - x0) * i) / n + gap / 2, b = x0 + ((x1 - x0) * (i + 1)) / n - gap / 2;
     k.sideRect(a, b, y0, y1, hw, st);
   }
+}
+// Windows along a side, stopping at the doors: each stretch of side between two doors gets
+// windows about `pitch` apart. The middle level draws one strip per stretch.
+function windowsAround(k: Kit, x0: number, x1: number, y0: number, y1: number, hw: number, pitch: number, doors: Door[], gap = 0.14) {
+  const spans = doors.map((d) => [d.x - d.width / 2 - 0.14, d.x + d.width / 2 + 0.14] as const).sort((a, b) => a[0] - b[0]);
+  let a = x0;
+  const run = (lo: number, hi: number) => {
+    if (hi - lo < 0.45) return;
+    windows(k, lo, hi, y0, y1, hw, Math.max(1, Math.round((hi - lo) / pitch)), gap);
+  };
+  for (const [s0, s1] of spans) { if (s1 <= a) continue; run(a, Math.min(s0, x1)); a = Math.max(a, s1); }
+  run(a, x1);
 }
 
 export function buildRail(k: Kit, m: Model) {
@@ -135,23 +185,10 @@ export function buildRail(k: Kit, m: Model) {
 function carriage(k: Kit, m: Model) {
   const g = m.design, d = m.dims, lod = k.lod, style = m.style;
   const L = d.length, hw = d.width / 2, H = d.height, r = d.wheelR;
-  const tram = style === 'tram';
-  const floor = tram ? 0.35 : style === 'hs-power' || style.endsWith('loco') ? 1.0 : 1.15;
-  const loco = style === 'diesel-loco' || style === 'electric-loco';
-  const cab = loco || style === 'hs-power' || flag(g, 'cab') || style === 'rack-car';
-  const nose0 = str<Nose>(g, 'nose', 'flat');
-  let front: Nose = 'flat', back: Nose = 'flat';
-  if (loco) { front = back = nose0; }
-  else if (style === 'hs-power') { front = num(g, 'year', 2000) >= 2008 ? 'needle' : 'wedge'; back = 'flat'; }
-  else if (style === 'rack-car') { front = back = 'raked'; }
-  else if (cab) { front = tram ? 'curved' : nose0; back = 'flat'; }
-  const x0 = -L / 2, x1 = L / 2;
+  const lay = railLayout(m);
+  const { tram, loco, floor, cab, front, back, x0, x1, bx0, bx1, h, wy0, wy1 } = lay;
   const b = railBody(k, hw, floor, H, x0, x1, front, back, num(g, 'noseLen', 4));
-  const h = H - floor;
   // livery: window band, cab ends and a skirt
-  const wy0 = floor + h * (tram ? 0.26 : 0.3), wy1 = floor + h * (tram ? 0.78 : 0.62);
-  const nl = front === 'wedge' || front === 'needle' ? num(g, 'noseLen', 4) : front === 'curved' || front === 'short' ? 1.9 : 0.9;
-  const bx0 = x0 + (cab && back !== 'flat' ? nl : 0.3), bx1 = x1 - (cab ? nl + 0.3 : 0.3);
   k.sideRect(bx0, bx1, wy0 - 0.12, wy1 + 0.12, hw, band, 0, 0.008);
   if (cab) {
     if (front === 'flat' || front === 'raked' || front === 'angled' || front === 'short') k.end(front === 'raked' || front === 'angled' ? x1 : x1, 1, -hw * 0.9, hw * 0.9, floor, floor + h * (front === 'short' ? 0.6 : 0.5), ends, 0.006);
@@ -167,21 +204,12 @@ function carriage(k: Kit, m: Model) {
     }
     k.sideRect(bx0, bx1, floor + h * 0.12, floor + h * 0.2, hw, ends, 0, 0.01);
   } else if (style !== 'hs-power' || num(g, 'year', 2000) >= 2008) {
-    const n = Math.max(3, Math.round((bx1 - bx0) / (tram ? 1.7 : 1.5)));
-    windows(k, bx0 + 0.2, bx1 - 0.2, wy0, wy1, hw, n, 0.14);
+    // the middle level draws no slam doors, so its window strip runs straight past them
+    const cut = doorsOf(m).filter((dr) => lod === 0 || dr.kind !== 'slam');
+    windowsAround(k, bx0 + 0.2, bx1 - 0.2, wy0, wy1, hw, tram ? 1.7 : 1.5, cut);
   }
-  // doors: slam doors are thin lines at every compartment; later stock has doors near each end
-  if (lod === 0 && !loco && style !== 'hs-power') {
-    if (flag(g, 'slam')) {
-      for (let x = bx0 + 0.9; x < bx1 - 0.4; x += 1.9) for (const s of [1, -1] as const) {
-        k.sideRect(x, x + 0.05, floor + 0.1, wy1 + 0.1, hw, C.trim, s, 0.014);
-        k.sideRect(x + 0.7, x + 0.75, floor + 0.1, wy1 + 0.1, hw, C.trim, s, 0.014);
-      }
-    } else {
-      const doorX = tram ? [x0 + L * 0.3, x0 + L * 0.7] : [bx0 + 1.2, (bx0 + bx1) / 2, bx1 - 1.2];
-      for (const x of doorX) k.sideRect(x - (tram ? 0.65 : 0.6), x + (tram ? 0.65 : 0.6), floor + 0.05, wy1 + 0.2, hw, ends, 0, 0.014);
-    }
-  }
+  // doors: leaves set in frames, which the shader opens (see doors.ts)
+  if (!loco) drawDoors(k, m, hw);
   // running gear and underframe
   if (tram) {
     k.sideRect(x0 + 0.2, x1 - 0.2, 0.08, floor + 0.05, hw, body, 0, 0.006);
@@ -194,9 +222,11 @@ function carriage(k: Kit, m: Model) {
   const hauled = style === 'coach-stock' || style === 'hs-coach' || loco;
   if (hauled && !(style === 'hs-coach')) { buffers(k, x1, 1, hw, 1.05); buffers(k, x0, -1, hw, 1.05); }
   else if (!tram) { if (cab) coupler(k, x1, 1, 1.0); coupler(k, x0, -1, 1.0); }
-  if (lod === 0 && !loco) {
-    if (!cab || back === 'flat') k.end(x0, -1, -0.45, 0.45, floor + 0.1, H - 0.3, C.rubber, 0.02);
-    if (!cab) k.end(x1, 1, -0.45, 0.45, floor + 0.1, H - 0.3, C.rubber, 0.02);
+  // gangways between coaches and unit cars, and the bellows between tram sections
+  if (!loco && style !== 'hs-power' && style !== 'rack-car' && (lod === 0 || tram)) {
+    const [len, hwB, y0, y1] = tram ? [0.45, hw - 0.14, floor + 0.02, H - 0.12] : [0.45, 0.52, floor + 0.05, H - 0.35];
+    if (!cab || back === 'flat') bellowsHalf(k, x0, -1, len, hwB, y0, y1);
+    if (!cab) bellowsHalf(k, x1, 1, len, hwB, y0, y1);
   }
   // roof: pantographs, fans, exhausts
   if (flag(g, 'panto') || style === 'electric-loco' || (style === 'hs-power' && flag(g, 'panto'))) pantograph(k, loco ? L * 0.3 : 0, H, lod);
@@ -204,6 +234,27 @@ function carriage(k: Kit, m: Model) {
     for (let i = 0; i < (loco ? 3 : 1); i++) k.disc([-L * 0.15 + i * 2.2, H + 0.01, 0], 'y', 1, 0.5, 6, C.grille);
   }
   if (style === 'rack-car') k.box(-1.2, 1.2, 0.25, floor, -0.25, 0.25, C.buffer);
+}
+
+// Coupling rods on coupled wheels: a crank pin and a balance weight on every wheel (which turn
+// with it), and a rod each side joining the pins, carried round by them. The two sides are set
+// a quarter turn apart, as on the real thing.
+function couplingRods(k: Kit, axles: readonly number[], r: number, zOut: number, st: Style) {
+  const cr = r * 0.42;
+  const xs = axles.slice().sort((a, b) => a - b);
+  for (const s of [1, -1] as const) {
+    const ph = s > 0 ? Math.PI / 2 : 0;
+    const px = Math.cos(ph) * cr, py = r + Math.sin(ph) * cr;
+    const z = s * (zOut + 0.02);
+    for (const x of xs) {
+      k.disc([x + px, py, z], 'z', s, 0.07, 6, asWheel(C.chrome, x, r));
+      // the balance weight, opposite the pin
+      k.disc([x - px * 1.1, r - (py - r) * 1.1, s * (zOut + 0.01)], 'z', s, r * 0.32, 5, asWheel(fixed('#222224'), x, r));
+    }
+    k.moving([MOTION.rod, cr, ph, r], () => {
+      k.box(xs[0] + px - 0.1, xs[xs.length - 1] + px + 0.1, py - 0.05, py + 0.05, s > 0 ? z : z - 0.05, s > 0 ? z + 0.05 : z, st);
+    });
+  }
 }
 
 // Steam: frames, coupled wheels, a boiler with smokebox, chimney and dome, a cab, and side tanks
@@ -220,7 +271,7 @@ function steam(k: Kit, m: Model) {
   const drivers = tank ? [1.6, 0, -1.6] : [2.2, 0.3, -1.6];
   for (const x of drivers) lod === 0 ? wheels(k, x, r, hw - 0.3, 0.14, 'rail') : axleBlock(k, x, r, hw - 0.3, 1.8);
   if (!tank) for (const x of [L / 2 - 1.4, L / 2 - 2.9 + 0.8]) lod === 0 ? wheels(k, x, 0.46, hw - 0.35, 0.12, 'rail') : axleBlock(k, x, 0.46, hw - 0.35, 1.6);
-  if (lod === 0) for (const s of [1, -1]) k.box(drivers[drivers.length - 1] - 0.1, drivers[0] + 0.1, r - 0.06, r + 0.06, s * (hw - 0.28), s * (hw - 0.22), C.chrome);
+  if (lod === 0) couplingRods(k, drivers, r, hw - 0.3, C.chrome);
   // cylinders
   if (lod === 0) for (const s of [1, -1]) k.cylX(L / 2 - 2.3, L / 2 - 1.1, fl - 0.35, s * (hw - 0.35), 0.32, 0.32, 6, C.chassis, null, C.chassis);
   // boiler, smokebox, chimney, dome, safety valves
@@ -274,7 +325,7 @@ function shunter(k: Kit, m: Model) {
   k.end(xCab, 1, hw * 0.62 + 0.05, hw - 0.3, H - 1.3, H - 0.5, C.glass);
   k.end(-L / 2 + 0.3, -1, -hw + 0.4, hw - 0.4, H - 1.3, H - 0.5, C.glass);
   for (const x of d.axles) lod === 0 ? wheels(k, x, r, hw - 0.25, 0.14, 'rail') : axleBlock(k, x, r, hw - 0.25, 1.8);
-  if (lod === 0) for (const s of [1, -1]) k.box(d.axles[2] - 0.1, d.axles[0] + 0.1, r - 0.06, r + 0.06, s * (hw - 0.24), s * (hw - 0.18), fixed('#8a8f94'));
+  if (lod === 0) couplingRods(k, d.axles, r, hw - 0.25, fixed('#8a8f94'));
   buffers(k, L / 2 - 0.2, 1, hw, 1.0, ends);
   buffers(k, -L / 2 + 0.2, -1, hw, 1.0, ends);
   lamps(k, L / 2 - 0.2, 1, hw * 0.8, 1.2);

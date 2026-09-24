@@ -6,7 +6,10 @@ import { circlePoly, bandPolys, type XZ } from './land';
 import { kerbOf, halfOf, type RoadDef } from './catalog';
 import { STD } from './standards';
 
-export interface ShapeLeg { id: number; dir: XZ; ang: number; def: RoadDef; len: number }
+// `path`, if given, is the leg's centreline from the node outwards as it's drawn (see approachPath):
+// the junction is then built along the road as it really runs, not a straight line from the node,
+// so where the road's own drawing takes over (its mouth) the two meet exactly even on a curve.
+export interface ShapeLeg { id: number; dir: XZ; ang: number; def: RoadDef; len: number; path?: XZ[] }
 export type ShapeForm = 'priority' | 'signals' | 'mini' | 'roundabout';
 export interface SlipShape { from: number; to: number; path: XZ[]; island: XZ[]; outer: XZ[]; R: number; centre: XZ }
 export interface Shape {
@@ -15,9 +18,14 @@ export interface Shape {
   line: Record<number, number>; // where its stop / give-way line is (0: it has none)
   paveTrim: Record<number, [number, number]>; // where its footway ends, on its +b and -b sides
   medianTrim: Record<number, number>; // where its central reservation's nose is
-  apron: XZ[]; // the carriageway inside the mouths
-  pave: XZ[]; // the outer edge of the footway around it
+  apron: XZ[]; // the carriageway inside the mouths (its outline, which may cross itself where roads meet at awkward angles)
+  pave: XZ[]; // the outer edge of the footway around it (the same)
+  // the same as simple pieces, overlapping: drawn (and claimed) as their union, so however
+  // awkwardly the roads meet there's never a fill that crosses itself
+  aprons: XZ[][];
+  paves: XZ[][];
   islands: XZ[][];
+  splitter: Record<number, number>; // roundabout: how far out each road's splitter island reaches (0: it has none)
   slip: SlipShape | null;
   R: number; // roundabout: outer edge of the circulating carriageway
   island: number; // roundabout: radius of the central island
@@ -56,14 +64,135 @@ function arcCCW(c: XZ, r: number, a0: number, a1: number, step = 0.12) {
   for (let i = 0; i <= n; i++) { const a = a0 + ((a1 - a0) * i) / n; out.push({ x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r }); }
   return out;
 }
-const gapOf = (a: ShapeLeg, b: ShapeLeg) => { let g = b.ang - a.ang; while (g <= 0) g += Math.PI * 2; return g; };
+// the convex hull of some points (anticlockwise, as x right and z down count it)
+function convexHull(pts: XZ[]): XZ[] {
+  const p = [...pts].sort((a, b) => a.x - b.x || a.z - b.z);
+  if (p.length < 3) return p;
+  const cross = (o: XZ, a: XZ, b: XZ) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+  const lo: XZ[] = [], hi: XZ[] = [];
+  for (const q of p) { while (lo.length > 1 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.reverse()) { while (hi.length > 1 && cross(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+  return [...lo.slice(0, -1), ...hi.slice(0, -1)];
+}
+const gapOf = (a: { ang: number }, b: { ang: number }) => { let g = b.ang - a.ang; while (g <= 0) g += Math.PI * 2; return g; };
+
+// ---- a leg's own frame, following its centreline ----
+// Every junction arm is measured `a` metres out along the road's centreline and `b` across it (+b
+// the side traffic arrives on), square to the piece of centreline there, exactly as the road's own
+// strips are drawn: so a stop line, an island or a kerb built in this frame sits where the road is.
+export const APPROACH = 6; // metres: how far out a leg's direction is taken (junction.legsAt)
+// The centreline a junction's arm is drawn along: the road's own path from the node, run straight
+// out to the first point APPROACH or more from the node (the way legsAt measures the arm's
+// direction), so a kink in the first few metres (common in mapped data) doesn't twist the mouth.
+export function approachPath<T extends XZ>(p: T[]): T[] {
+  let k = 1;
+  while (k < p.length - 1 && Math.hypot(p[k].x - p[0].x, p[k].z - p[0].z) < APPROACH) k++;
+  return k > 1 ? [p[0], ...p.slice(k)] : p;
+}
+// the piece of the leg's centreline at distance a (a vertex belongs to the piece after it, as drawn)
+function pieceAt(l: ShapeLeg, a: number) {
+  const p = l.path!;
+  let acc = 0;
+  for (let i = 1; i < p.length; i++) {
+    const L = Math.hypot(p[i].x - p[i - 1].x, p[i].z - p[i - 1].z);
+    if (a < acc + L - 1e-6 || i === p.length - 1) return { p: p[i - 1], u: L ? { x: (p[i].x - p[i - 1].x) / L, z: (p[i].z - p[i - 1].z) / L } : l.dir, s: a - acc };
+    acc += L;
+  }
+  return { p: p[0], u: l.dir, s: a };
+}
+const curved = (l: ShapeLeg) => !!l.path && l.path.length > 1;
+// the point a out along leg l and b across
+export function legAt(n: XZ, l: ShapeLeg, a: number, b: number): XZ {
+  if (!curved(l)) return W(n, l.dir, a, b);
+  const q = pieceAt(l, a);
+  return W(q.p, q.u, q.s, b);
+}
+// the way the leg runs at distance a
+export function legDir(l: ShapeLeg, a: number): XZ { return curved(l) ? pieceAt(l, a).u : l.dir; }
+// a straight leg standing in for l, touching its centreline at distance a: same frame there
+function frameAt(n: XZ, l: ShapeLeg, a: number): ShapeLeg {
+  if (!curved(l)) return l;
+  const u = legDir(l, a), c = legAt(n, l, a, 0), o = add(c, u, -a);
+  return { ...l, path: undefined, dir: u, ang: Math.atan2(u.z, u.x), o } as ShapeLeg & { o: XZ };
+}
+const originOf = (n: XZ, l: ShapeLeg) => (l as ShapeLeg & { o?: XZ }).o ?? n;
+// points along the line b across leg l, strictly between a0 and a1 (either way round): at most a
+// metre apart, and at each corner of the centreline, so a curving kerb is followed
+function run(n: XZ, l: ShapeLeg, a0: number, a1: number, b: number): XZ[] {
+  if (!curved(l) || Math.abs(a1 - a0) < 0.05) return [];
+  const at = new Set<number>(), lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+  for (let a = Math.ceil(lo) ; a < hi; a += 1) at.add(a);
+  let acc = 0;
+  const p = l.path!;
+  for (let i = 1; i < p.length - 1; i++) { acc += Math.hypot(p[i].x - p[i - 1].x, p[i].z - p[i - 1].z); at.add(acc); }
+  const out = [...at].filter((a) => a > lo + 0.05 && a < hi - 0.05).sort((x, y) => x - y);
+  return (a1 < a0 ? out.reverse() : out).map((a) => legAt(n, l, a, b));
+}
+// Where a point is in leg l's frame: `a` along its centreline (from the node) and `b` across; the
+// nearest point of the centreline, run on straight past its far end.
+export function legFrameOf(n: XZ, l: ShapeLeg, p: XZ) {
+  const path = curved(l) ? l.path! : [n, add(n, l.dir, l.len)];
+  let best = { a: 0, b: Infinity, d: Infinity }, acc = 0;
+  for (let i = 1; i < path.length; i++) {
+    const q = path[i - 1], r = path[i], L = Math.hypot(r.x - q.x, r.z - q.z) || 1e-9, u = { x: (r.x - q.x) / L, z: (r.z - q.z) / L };
+    // (run on straight both ways: behind the node `a` goes negative)
+    const t = (p.x - q.x) * u.x + (p.z - q.z) * u.z, tc = Math.max(i === 1 ? -Infinity : 0, i === path.length - 1 ? t : Math.min(L, t));
+    const c = add(q, u, tc), d = Math.hypot(p.x - c.x, p.z - c.z);
+    // (+b is W's side: (-u.z, u.x))
+    if (d < best.d) best = { a: acc + tc, b: (p.x - c.x) * -u.z + (p.z - c.z) * u.x, d };
+    acc += L;
+  }
+  return { a: best.a, b: best.b };
+}
+// Where two roads leave a junction close together, the thin V of ground between their footways is
+// paved over, out to where the footways are NOSE metres apart: a paved nose, not a sliver of grass.
+const NOSE = 0.8;
+function nose(n: XZ, l: ShapeLeg, nx: ShapeLeg, bl: number, bn: number, from: number): XZ[] | null {
+  if (gapOf(l, nx) > 1.3) return null;
+  const P: XZ[] = [], Q: XZ[] = [];
+  for (let a = from; a < Math.min(l.len, 90); a += 0.5) {
+    const p = legAt(n, l, a, bl), f = legFrameOf(n, nx, p);
+    if (f.a < 0 || f.a > nx.len) break;
+    const gap = -f.b - bn;
+    if (gap > NOSE) break;
+    P.push(p); Q.push(gap > 0 ? legAt(n, nx, f.a, -bn) : p);
+  }
+  return P.length > 1 ? [n, ...P, ...Q.reverse()] : null;
+}
+// where the line b across leg l reaches radius R from the node (going out from it)
+export function ringA(n: XZ, l: ShapeLeg, b: number, R: number) {
+  if (Math.abs(b) >= R) return 0;
+  const r = (a: number) => { const p = legAt(n, l, a, b); return Math.hypot(p.x - n.x, p.z - n.z); };
+  let lo = 0, hi = R + 2;
+  while (r(hi) < R && hi < R * 4 + 40) hi += R;
+  if (r(lo) >= R) return 0;
+  for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (r(m) < R) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+}
 // the nearside general lane's centre, measured from the road's centreline
 const nearLane = (d: RoadDef) => d.median / 2 + (d.lanes - 0.5) * d.lane;
 
 // A corner between leg i's +b kerb and leg j's -b kerb, rounded with radius r (lines at offsets ki, kj).
+// On a curving road each kerb is taken as its tangent where the corner meets it, found by trying again
+// from where the last try met it.
 function corner(n: XZ, li: ShapeLeg, lj: ShapeLeg, ki: number, kj: number, r: number) {
+  let ai = 0, aj = 0, c = cornerOf(n, li, lj, ki, kj, r);
+  for (let it = 0; it < 5 && (curved(li) || curved(lj)) && c.centre; it++) {
+    const ni = Math.max(0, Math.min(li.len, c.ti)), nj = Math.max(0, Math.min(lj.len, c.tj));
+    if (Math.abs(ni - ai) < 0.01 && Math.abs(nj - aj) < 0.01) break;
+    ai = ni; aj = nj;
+    const d = cornerOf(n, frameAt(n, li, ai), frameAt(n, lj, aj), ki, kj, r);
+    if (!d.centre) break;
+    c = d;
+  }
+  return c;
+}
+function cornerOf(n0: XZ, li: ShapeLeg, lj: ShapeLeg, ki: number, kj: number, r: number) {
+  // (a leg that isn't a straight line from the node is first taken as straight along its first piece)
+  if (curved(li)) li = frameAt(n0, li, 0);
+  if (curved(lj)) lj = frameAt(n0, lj, 0);
   const g = gapOf(li, lj);
-  const pi = W(n, li.dir, 0, ki), pj = W(n, lj.dir, 0, -kj);
+  const pi = W(originOf(n0, li), li.dir, 0, ki), pj = W(originOf(n0, lj), lj.dir, 0, -kj);
   if (g > Math.PI - 0.1) {
     // straight on, or the outside of a bend: the kerbs simply meet
     const m = g < Math.PI + 0.1 ? null : meet(pi, li.dir, pj, lj.dir);
@@ -81,7 +210,22 @@ function corner(n: XZ, li: ShapeLeg, lj: ShapeLeg, ki: number, kj: number, r: nu
 }
 
 // A left-turn slip from leg i to leg j: a curved lane cutting the corner with an island inside it.
-function slipFor(n: XZ, li: ShapeLeg, lj: ShapeLeg): SlipShape | null {
+// On curving roads it's built on the kerbs' tangents where it meets them, and only where the roads
+// run straight enough for a slip and its island to sit on them.
+function slipFor(n: XZ, li0: ShapeLeg, lj0: ShapeLeg): SlipShape | null {
+  let sl = slipOn(n, frameAt(n, li0, 0), frameAt(n, lj0, 0));
+  if (!curved(li0) && !curved(lj0)) return sl?.shape ?? null;
+  for (let it = 0; it < 3 && sl; it++) sl = slipOn(n, frameAt(n, li0, sl.ti), frameAt(n, lj0, sl.tj));
+  if (!sl) return null;
+  const f = [frameAt(n, li0, sl.ti), frameAt(n, lj0, sl.tj)];
+  for (const [k, l0] of [li0, lj0].entries()) for (let a = 0; a <= (k ? sl.tj : sl.ti) + 4; a += 1) {
+    const p = legAt(n, l0, a, 0), q = W(originOf(n, f[k]), f[k].dir, a, 0);
+    if (Math.hypot(p.x - q.x, p.z - q.z) > 0.3) return null;
+  }
+  return sl.shape;
+}
+function slipOn(n0: XZ, li: ShapeLeg, lj: ShapeLeg): { shape: SlipShape; ti: number; tj: number } | null {
+  const oi = originOf(n0, li), oj = originOf(n0, lj);
   const g = gapOf(li, lj);
   if (g < 0.6 || g > 2.2) return null;
   const s = Math.sin(g / 2), w = STD.slipWidth;
@@ -90,7 +234,7 @@ function slipFor(n: XZ, li: ShapeLeg, lj: ShapeLeg): SlipShape | null {
   // big enough that a proper island (6 m deep) fits between the slip and the junction
   const R = Math.max(STD.slipRadius(Math.max(li.def.mph, lj.def.mph)), (6.3 + w / 2 + d / s) / (1 / s - 1));
   if (R > 48) return null;
-  const pi = W(n, li.dir, 0, bi), pj = W(n, lj.dir, 0, -bj);
+  const pi = W(oi, li.dir, 0, bi), pj = W(oj, lj.dir, 0, -bj);
   const m = meet(pi, li.dir, pj, lj.dir);
   if (!m) return null;
   const Xs = add(pi, li.dir, m.s), t = R / Math.tan(g / 2);
@@ -107,7 +251,7 @@ function slipFor(n: XZ, li: ShapeLeg, lj: ShapeLeg): SlipShape | null {
     if (h >= Ri) return null;
     return f - Math.sqrt(Ri * Ri - h * h);
   };
-  const Ki = W(n, li.dir, 0, ki + 0.4), Kj = W(n, lj.dir, 0, -(kj + 0.4));
+  const Ki = W(oi, li.dir, 0, ki + 0.4), Kj = W(oj, lj.dir, 0, -(kj + 0.4));
   const mk = meet(Ki, li.dir, Kj, lj.dir);
   const si = onLine(Ki, li.dir), sj = onLine(Kj, lj.dir);
   if (!mk || si === null || sj === null || si <= mk.s + 2 || sj <= mk.t + 2) return null;
@@ -116,15 +260,29 @@ function slipFor(n: XZ, li: ShapeLeg, lj: ShapeLeg): SlipShape | null {
   const island = [X, ...edge];
   // the slip's outside footway edge
   const outer = arc(C, Ti, Tj, 0.08).map((p) => { const v = norm({ x: p.x - C.x, z: p.z - C.z }); return add(C, v, R - w / 2 - STD.slipFootway); });
-  return { from: li.id, to: lj.id, path, island, outer, R, centre: C };
+  return { shape: { from: li.id, to: lj.id, path, island, outer, R, centre: C }, ti: m.s + t, tj: m.t + t };
 }
 
 // Lines where a leg's kerb (offset k) meets a circle of radius R about the node, rounded by radius re.
+// (On a curving road, on the kerb's tangent where the rounding meets it, found by trying again.)
 function flare(n: XZ, l: ShapeLeg, k: number, R: number, re: number, side: 1 | -1) {
-  const bc = k + re, dc = R + re;
-  const ac = Math.sqrt(Math.max(0, dc * dc - bc * bc));
-  const C = W(n, l.dir, ac, side * bc);
-  const T = W(n, l.dir, ac, side * k);
+  let f = flareOn(n, frameAt(n, l, 0), k, R, re, side);
+  for (let it = 0; it < 5 && curved(l); it++) {
+    const g = flareOn(n, frameAt(n, l, Math.max(0, f.a)), k, R, re, side);
+    const done = Math.abs(g.a - f.a) < 0.01;
+    f = g;
+    if (done) break;
+  }
+  return f;
+}
+function flareOn(n: XZ, l: ShapeLeg, k: number, R: number, re: number, side: 1 | -1) {
+  const o = originOf(n, l), bc = k + re, dc = R + re;
+  // the rounding's centre runs along the line bc across the leg: where it's dc from the node
+  const w = { x: W(o, l.dir, 0, side * bc).x - n.x, z: W(o, l.dir, 0, side * bc).z - n.z };
+  const wu = w.x * l.dir.x + w.z * l.dir.z;
+  const ac = -wu + Math.sqrt(Math.max(0, wu * wu - (w.x * w.x + w.z * w.z) + dc * dc));
+  const C = W(o, l.dir, ac, side * bc);
+  const T = W(o, l.dir, ac, side * k);
   const v = norm({ x: C.x - n.x, z: C.z - n.z });
   const Q = add(n, v, R);
   return { a: ac, onLine: T, onRing: Q, centre: C, ringAng: Math.atan2(Q.z - n.z, Q.x - n.x) };
@@ -132,17 +290,23 @@ function flare(n: XZ, l: ShapeLeg, k: number, R: number, re: number, side: 1 | -
 
 // The outline of a ring of radius R about the node with each leg (kerb offset k) flared into it by
 // radius re: a roundabout's kerb, or a turning head's. `at` says where each leg's own kerbs meet the flare.
-function ringOutline(n: XZ, legs: ShapeLeg[], R: number, k: (l: ShapeLeg) => number, re: number) {
-  const pts: XZ[] = [], at: { hi: number; lo: number }[] = [];
+// `mouth`, if given, is the least distance out each leg's outline crosses the road (so a footway's
+// outline reaches as far as its road's footway starts, which is where the kerb's flare starts).
+function ringOutline(n: XZ, legs: ShapeLeg[], R: number, k: (l: ShapeLeg) => number, re: number, mouth?: (l: ShapeLeg) => number) {
+  const pts: XZ[] = [], at: { hi: number; lo: number; m: number }[] = [];
+  // (and as pieces: the ring, and each arm from the middle out to its mouth)
+  const pieces: XZ[][] = [circlePoly(n, R, 48)];
   legs.forEach((l, i) => {
     const nx = legs[(i + 1) % legs.length];
     const lo = flare(n, l, k(l), R, re, -1), hi = flare(n, l, k(l), R, re, 1);
-    const m = Math.max(lo.a, hi.a);
-    at.push({ hi: hi.a, lo: lo.a });
-    pts.push(...arc(lo.centre, lo.onRing, lo.onLine), W(n, l.dir, m, -k(l)), W(n, l.dir, m, k(l)), ...arc(hi.centre, hi.onLine, hi.onRing));
+    const m = Math.max(lo.a, hi.a, mouth?.(l) ?? 0);
+    at.push({ hi: hi.a, lo: lo.a, m });
+    const arm = [...arc(lo.centre, lo.onRing, lo.onLine), ...run(n, l, lo.a, m, -k(l)), legAt(n, l, m, -k(l)), legAt(n, l, m, k(l)), ...run(n, l, m, hi.a, k(l)), ...arc(hi.centre, hi.onLine, hi.onRing)];
+    pts.push(...arm);
+    pieces.push([n, ...arm]);
     pts.push(...arcCCW(n, R, hi.ringAng, flare(n, nx, k(nx), R, re, -1).ringAng));
   });
-  return { pts, at };
+  return { pts, at, pieces };
 }
 
 // The turning head at the end of a cul-de-sac: a turning circle about the road's end, flared in from
@@ -231,20 +395,29 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     const F = std.footway;
     const kerb = ringOutline(n, legs, R, K, std.entryRadius);
     legs.forEach((l, i) => {
-      const { hi, lo } = kerb.at[i];
+      const { hi, lo } = kerb.at[i], edge = ringA(n, l, 0, R); // (where the leg's centreline meets the ring)
       mouth[l.id] = Math.max(lo, hi);
-      line[l.id] = R + 0.4;
-      medianTrim[l.id] = R + 1;
+      line[l.id] = R + 0.4; // (as traffic reads it; the give-way line itself is drawn on the ring's edge, ringA)
+      medianTrim[l.id] = edge + 1;
       paveTrim[l.id] = [hi, lo];
     });
-    const apron = kerb.pts, pave = ringOutline(n, legs, R + F, B, Math.max(1, std.entryRadius - F)).pts;
-    const claims = [pave];
-    // splitter islands at single-lane entries
+    // (the footway's outline crosses each road no nearer than its road's footway starts)
+    const pv = ringOutline(n, legs, R + F, B, Math.max(1, std.entryRadius - F), (l) => Math.max(...paveTrim[l.id]));
+    const apron = kerb.pts, pave = pv.pts, aprons = kerb.pieces, paves = pv.pieces;
+    legs.forEach((l, i) => { const nx = legs[(i + 1) % N], q = nose(n, l, nx, B(l), B(nx), pv.at[i].m); if (q) paves.push(q); });
+    const claims = paves;
+    // splitter islands at single-lane entries: only where one fits on its own road, clear of the
+    // next road's carriageway (where mapped roads meet the ring close together, say)
+    const splitter: Record<number, number> = {};
     if (form === 'roundabout') for (const l of legs) if (l.def.lanes === 1 && l.def.median === 0) {
-      const { length: sl, width: sw } = STD.splitter;
-      islands.push([W(n, l.dir, R + 0.8, -sw / 2), W(n, l.dir, R + 0.8, sw / 2), W(n, l.dir, R + sl, 0)]);
+      const { length: sl, width: sw } = STD.splitter, a0 = ringA(n, l, 0, R) + 0.8;
+      const isl = [legAt(n, l, a0, -sw / 2), legAt(n, l, a0, sw / 2), legAt(n, l, a0 + sl - 0.8, 0)];
+      const clear = legs.every((o) => o === l || isl.every((p) => { const f = legFrameOf(n, o, p); return f.a < 0 || Math.abs(f.b) > K(o) + 0.3; }));
+      if (a0 + sl - 0.8 > l.len - 6 || !clear) continue;
+      islands.push(isl);
+      splitter[l.id] = a0 + sl - 0.8;
     }
-    return { form, mouth, line, paveTrim, medianTrim, apron, pave, islands, slip: null, R, island: std.island, claims };
+    return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter, slip: null, R, island: std.island, claims };
   }
   // priority and signals: corners with proper kerb radii, one of them perhaps a slip road
   let slip: SlipShape | null = null;
@@ -276,18 +449,41 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     paveTrim[l.id] = [Math.max(0, tp), Math.max(0, tm)];
   });
   const apron: XZ[] = [], pave: XZ[] = [];
+  // as pieces: the middle, where every road's kerbs leave the node; each road out to its mouth; each
+  // corner's rounding (or, round the outside of a bend, the bit behind the node)
+  const hull = (b: (l: ShapeLeg) => number) => convexHull(legs.flatMap((l) => [legAt(n, l, 0, -b(l)), legAt(n, l, 0, b(l))]));
+  const aprons: XZ[][] = [hull(K)], paves: XZ[][] = [hull(B)];
+  const half = (l: ShapeLeg, b: number, a: number) => [legAt(n, l, 0, 0), ...run(n, l, 0, a, 0), legAt(n, l, a, 0), legAt(n, l, a, b), ...run(n, l, a, 0, b), legAt(n, l, 0, b)];
+  const arm = (l: ShapeLeg, b: number, a0: number, a1: number) => [legAt(n, l, 0, -b), ...run(n, l, 0, a0, -b), legAt(n, l, a0, -b), legAt(n, l, a1, b), ...run(n, l, a1, 0, b), legAt(n, l, 0, b)];
+  // (a rounded corner is fanned from the node, so it meets both roads' arms whichever way they curve)
+  const round = (c: { pts: XZ[]; x: XZ | null; centre: XZ | null }, l: ShapeLeg, nx: ShapeLeg, bl: number, bn: number) =>
+    c.centre ? [n, ...c.pts] : c.x ? [legAt(n, l, 0, bl), c.x, legAt(n, nx, 0, -bn), n] : c.pts.length > 1 ? [legAt(n, l, 0, bl), ...c.pts, legAt(n, nx, 0, -bn), n] : null;
   legs.forEach((l, i) => {
-    const m = mouth[l.id];
-    apron.push(W(n, l.dir, m, -K(l)), W(n, l.dir, m, K(l)), ...corners[i].kerb.pts);
-    const [tp, tm] = paveTrim[l.id];
-    pave.push(W(n, l.dir, Math.max(m, tm), -B(l)), W(n, l.dir, Math.max(m, tp), B(l)), ...corners[i].back.pts);
+    const nx = legs[(i + 1) % N], c = corners[i], m = mouth[l.id], [tp, tm] = paveTrim[l.id];
+    aprons.push(arm(l, K(l), m, m));
+    // (the footway a half at a time, each ending square where its road's own footway starts)
+    paves.push(half(l, -B(l), Math.max(m, tm)), half(l, B(l), Math.max(m, tp)));
+    const ka = round(c.kerb, l, nx, K(l), K(nx));
+    if (ka) aprons.push(ka);
+    // (a slip road's corner: the footway runs out to the kerbs' corner, the island sitting on it)
+    const kb = c.isSlip && c.kerb.x ? [legAt(n, l, 0, B(l)), legAt(n, l, Math.max(m, tp), B(l)), c.kerb.x, legAt(n, nx, Math.max(mouth[nx.id], paveTrim[nx.id][1]), -B(nx)), legAt(n, nx, 0, -B(nx)), n] : round(c.back, l, nx, B(l), B(nx));
+    if (kb) paves.push(kb);
+    const q = c.isSlip ? null : nose(n, l, nx, B(l), B(nx), Math.max(m, tp));
+    if (q) paves.push(q);
   });
-  const claims: XZ[][] = [pave, apron];
+  // (along a curving road the outlines follow its kerb and footway between the corners and the mouth)
+  legs.forEach((l, i) => {
+    const m = mouth[l.id], prev = corners[(i - 1 + N) % N], here = corners[i];
+    apron.push(...run(n, l, prev.kerb.tj, m, -K(l)), legAt(n, l, m, -K(l)), legAt(n, l, m, K(l)), ...run(n, l, m, here.kerb.ti, K(l)), ...here.kerb.pts);
+    const [tp, tm] = paveTrim[l.id];
+    pave.push(...(prev.isSlip ? [] : run(n, l, prev.back.tj, Math.max(m, tm), -B(l))), legAt(n, l, Math.max(m, tm), -B(l)), legAt(n, l, Math.max(m, tp), B(l)), ...(here.isSlip ? [] : run(n, l, Math.max(m, tp), here.back.ti, B(l))), ...here.back.pts);
+  });
+  const claims: XZ[][] = [...paves];
   if (slip) {
     islands.push(slip.island);
     claims.push(...bandPolys(slip.path, STD.slipWidth / 2 + 0.5, STD.slipWidth / 2 + STD.slipFootway + 0.5), slip.island);
   }
-  return { form, mouth, line, paveTrim, medianTrim, apron, pave, islands, slip, R: 0, island: 0, claims };
+  return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter: {}, slip, R: 0, island: 0, claims };
 }
 
 // The footprint of a roundabout of radius R: can it go here? (the ring and its footway)
