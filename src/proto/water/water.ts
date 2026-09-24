@@ -347,24 +347,52 @@ export class WaterSystem {
       }
     }
     // By still water (lakes, the sea) the distance above is only good to the raster: its contours,
-    // the foam line and the beaches drawn from it, follow the 4 m cells in stair-steps. Close to the
-    // waterline, the depth over the ground's slope gives it to a fraction of a cell (as far out as
-    // beaches are drawn); that blends back into the raster distance two and a half to four cells out.
-    for (let k = 0; k < N; k++) {
-      const s = shore[k], nk = nearKind[k];
-      if (Math.abs(s) >= 4 * res || (nk !== KIND_CODE.lake && nk !== KIND_CODE.sea)) continue;
-      const i = k % n, j = (k - i) / n;
-      if (i < 1 || j < 1 || i >= n - 1 || j >= n - 1) continue;
-      const grad = Math.hypot(ground[k + 1] - ground[k - 1], ground[k + n] - ground[k - n]) / (2 * res);
-      // (on gently shelving shores only: a steep bank or quay wall is a cliff between samples, and
-      // its waterline is already sharp where the ground cuts the water)
-      if (grad < 1e-3 || grad > 0.2) continue;
-      // (and only where it agrees with the raster to within a cell: land standing well above the
-      // water, like a quay, isn't a slope running down into it)
-      const fine = (nearLevel[k] - FILM - ground[k]) / grad;
-      if (Math.abs(fine - s) > res) continue;
-      const w = Math.max(0, Math.min(1, (Math.abs(s) - 2.5 * res) / (1.5 * res)));
-      shore[k] = fine + (s - fine) * w * w * (3 - 2 * w);
+    // the foam line and the beaches drawn from it, follow the 4 m cells in stair-steps. Near the
+    // water it's replaced by the distance to the waterline itself, found between raster points (by
+    // marching squares on the depth: where the bed crosses the level less the film), blending back
+    // into the raster distance two and a half to four cells out.
+    {
+      const f = new Float32Array(N).fill(NaN);
+      for (let k = 0; k < N; k++) if (nearKind[k] === KIND_CODE.lake || nearKind[k] === KIND_CODE.sea) f[k] = nearLevel[k] - FILM - ground[k];
+      const segs = new Map<number, number[]>(); // per cell: x0, z0, x1, z1 (in cells) of each piece of waterline
+      const pt: number[] = [];
+      for (let j = 0; j + 1 < n; j++) for (let i = 0; i + 1 < n; i++) {
+        const k = j * n + i, c = [f[k], f[k + 1], f[k + n + 1], f[k + n]];
+        if (!(c[0] === c[0] && c[1] === c[1] && c[2] === c[2] && c[3] === c[3])) continue;
+        if ((c[0] > 0) === (c[1] > 0) && (c[1] > 0) === (c[2] > 0) && (c[2] > 0) === (c[3] > 0)) continue;
+        const cx = [i, i + 1, i + 1, i], cz = [j, j, j + 1, j + 1];
+        pt.length = 0;
+        for (let e = 0; e < 4; e++) {
+          const a = c[e], b = c[(e + 1) & 3];
+          if ((a > 0) === (b > 0)) continue;
+          const t = a / (a - b), e1 = (e + 1) & 3;
+          pt.push(cx[e] + (cx[e1] - cx[e]) * t, cz[e] + (cz[e1] - cz[e]) * t);
+        }
+        if (pt.length >= 4) segs.set(k, pt.length === 4 ? pt.slice() : [...pt.slice(0, 4), ...pt.slice(4, 8)]);
+      }
+      if (segs.size) {
+        const W = 5;
+        for (let k = 0; k < N; k++) {
+          const s = shore[k];
+          if (Math.abs(s) >= 4 * res || f[k] !== f[k]) continue;
+          const i = k % n, j = (k - i) / n;
+          let best = Infinity;
+          for (let b = Math.max(0, j - W); b <= Math.min(n - 2, j + W); b++) for (let a = Math.max(0, i - W); a <= Math.min(n - 2, i + W); a++) {
+            const L = segs.get(b * n + a);
+            if (!L) continue;
+            for (let q = 0; q + 3 < L.length; q += 4) {
+              const x0 = L[q], z0 = L[q + 1], dx = L[q + 2] - x0, dz = L[q + 3] - z0, ll = dx * dx + dz * dz;
+              const t = ll > 0 ? Math.max(0, Math.min(1, ((i - x0) * dx + (j - z0) * dz) / ll)) : 0;
+              const d = (i - x0 - dx * t) ** 2 + (j - z0 - dz * t) ** 2;
+              if (d < best) best = d;
+            }
+          }
+          if (best === Infinity) continue;
+          const fine = (f[k] > 0 ? 1 : -1) * Math.sqrt(best) * res;
+          const w = Math.max(0, Math.min(1, (Math.abs(s) - 2.5 * res) / (1.5 * res)));
+          shore[k] = fine + (s - fine) * w * w * (3 - 2 * w);
+        }
+      }
     }
     const cover = new Uint8Array(N);
     for (let k = 0; k < N; k++) cover[k] = kind[k] || ext[k] === ext[k] ? 1 : 0;

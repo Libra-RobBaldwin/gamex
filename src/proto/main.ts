@@ -111,6 +111,7 @@ scene.add(ground);
 // ground's own patch), and the water and reeds on top: two draw calls
 gameWater.patch(gameGround.ground.material);
 scene.add(gameWater.group);
+gameWater.light(scene, sun); // (evening light: the sun, sky and water change together)
 
 // ---------------- trees (instanced) ----------------
 interface Tree { x: number; z: number; s: number; kind: number }
