@@ -39,8 +39,59 @@ the user's current priority is the core game loop.**
      world water through `GameWater`, and the invented town as the default.
   5. **#1–#8,** the original library PRs: everything in them is already in #9. Close them with a
      note once the user agrees (they asked the Vercel bot to comment on all of them).
-- **The game loop plan:** `docs/loop.md`, if present, was written by a design workflow: three
-  designs (player-first, architecture-first, risk-first) judged into one plan. Start there.
+- **Part-finished streams: where each stopped, and where to pick up.** Their sessions are
+  archived, and anything they hadn't pushed is lost.
+  - **Traffic (PR #17, `claude/work-traffic`).**
+    - *Landed:* lane-drop zip merging; committed drivers leave room for longer waits; harness
+      scenarios (a heavy mini-roundabout, a lane drop queued in both lanes).
+    - *Stopped:* partway through its own adversarial review. No review tests were pushed, so the
+      fixes are unreviewed. It had also measured the traffic step getting 18% slower
+      (1.70 → 2.04 ms) and hadn't found why.
+    - *Pick up:*
+      1. Resolve the `traffic.ts` conflict against the library-vehicles merge.
+      2. Re-run its harness scenarios.
+      3. Find the 18% slowdown.
+      4. Run an adversarial review (lane drops, roundabouts, give-ups, gridlock) before relying on it.
+  - **Economy (merged at 32be666).**
+    - *Landed:* two adversarial reviews. The second wrote 23 failing tests
+      (`economy.review2.test.ts`), and they now pass.
+    - *Stopped:* partway through its fix workflow. Since then the original
+      `economy.test.ts` "a well-served town grows and gets denser" fails (796 is not above 902.4).
+      One of the last fixes probably regressed it, most likely "Count only homes near a stop as
+      homes near a stop" or "Rebuild catchments after a review changes the towns".
+    - *Not written:* `docs/economy.md`, the guide to wiring the library into the game.
+    - *Pick up:* fix the growth test first, without weakening it. Then write the wiring notes
+      as the start of the game loop.
+  - **Junctions (merged, PR #24).**
+    - *Landed:* its last commits: markings kept on the carriageway, splitter islands only where
+      they fit, short stubs end square, splitter islands back at the town's roundabouts.
+    - *Stopped:* partway through "Banbury holes audited by arm position; fixing markings and fills".
+      Whether its own review ran is unknown.
+    - *Pick up:* check the invented town's junctions at 412×915. The user reported joins that
+      don't line up; look especially for holes at arm positions.
+  - **Ground (PR #21, `claude/work-ground`, 12 commits).**
+    - *Landed:* its look review is done and fixed (`src/proto/ground/review.look.test.ts`).
+    - *Stopped:* before its performance review finished.
+    - *Pick up:* resolve the conflicts (`main.ts`, `ground/game.ts`, `ground/demo.ts`,
+      `bridges/demo.ts`), then measure draw calls and frame time on each quality tier at phone
+      size. It's scenery, so after the loop.
+  - **Timing tests (`claude/work-bench-robust`).** Nothing was pushed; the work is lost.
+    - *The brief, to redo:* one helper (e.g. `src/proto/test/speed.ts`) measures the machine's
+      speed with a fixed workload (typed-array geometry, Map inserts, allocation), takes the best
+      of a few runs, and clamps the result to 0.5–4× a reference. Every timing budget in the tests
+      is multiplied by it: the bridges, terrain, water and world benchmarks.
+    - A real 2× regression must still fail. Never loosen a budget.
+  - **Terminals follow-up (PR #25, 1 commit).** The terminals session woke after finishing and
+    pushed this: the opencast ironstone pit kept clear of the mine's siding, plus a GitHub Actions
+    CI for typecheck and tests. It's unreviewed. Merge it only if its CI treats the two known test
+    failures sensibly; otherwise it's red from the first run.
+  - **People and HUD.** Both woke after finishing and started follow-ups that were never pushed:
+    - people: wiring stations, trains and people, and route smoothing (backlog item A3);
+    - HUD: measuring how much of the screen the HUD covers, and more compact layouts.
+    Redo them from the backlog when they come up.
+  - **The game-loop design** was stopped before it wrote `docs/loop.md`, so write it fresh from
+    the backlog's group A.
+- **The game loop plan:** `docs/loop.md` doesn't exist yet (see above). Write it first: one page, milestones that each end playable.
 - **Backlog from the finished streams:** the section below, if present, lists every "still to do"
   the archived sessions reported, sorted against the focus.
 - **GitHub quirk:** the combined commit-status API returns 403 to the Claude GitHub app, so it
