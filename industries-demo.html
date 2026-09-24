@@ -36,9 +36,15 @@
       .tline .money { margin-left: auto; opacity: 0.8; font-variant-numeric: tabular-nums; }
       .pill { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #3a475c; }
       .pill.warn { background: #8a4b1f; }
-      .suggest { margin: 4px 0 6px; padding: 5px 8px; border-radius: 8px; background: #1b2433; border: 1px solid #2a3240; }
+      .ic { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
+      .ic.sm { width: 13px; height: 13px; vertical-align: -2px; }
+      #tpanel button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+      #tpanel .chip { display: block; }
+      .suggest { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0 6px; padding: 5px 8px; border-radius: 8px; background: #1b2433; border: 1px solid #2a3240; }
+      .suggest .ic { margin-top: 1px; color: #d69a2d; }
       .tmode { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-      .tmode .g { font-size: 18px; width: 24px; text-align: center; }
+      .tmode .g { width: 24px; display: flex; justify-content: center; }
+      .tmode .g .ic { width: 20px; height: 20px; }
       .tmode .info { flex: 1; min-width: 0; }
       .tmode .info small { display: block; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .tmode.off { opacity: 0.55; }
@@ -49,7 +55,8 @@
       .chip.owned { background: #2e7d5b; border-color: #3fa476; }
       .chip.building { background: #5a4a1f; border-color: #8a7330; }
       .chip.available { background: #253043; border-color: #d69a2d; }
-      .chip.locked, .chip.era, .chip.blocked, .chip.superseded { opacity: 0.5; }
+      .chip.locked, .chip.era, .chip.blocked, .chip.superseded, .chip.not_offered { opacity: 0.5; }
+      .chip.oversized { border-style: dashed; }
       .log { font-size: 11px; opacity: 0.8; margin-top: 4px; }
       .tstats { display: block; opacity: 0.6; font-size: 11px; margin-top: 2px; }
       #tpanel .row output { width: 42px; }

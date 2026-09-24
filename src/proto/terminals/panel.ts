@@ -1,18 +1,20 @@
 // The "Terminals" panel of the industries demo: for the selected site, each mode's ladder of
-// tiers with prices and reasons, buy, refit and remove to see the models change, and a readout
-// of what the site makes against what its terminals can move, with a stand-in economy (a review
-// every 30 days) so the unlock and idle rules can be watched working.
+// tiers with prices and reasons, buy, refit, cancel and remove to see the models change, and a
+// readout of what the site makes against what its terminals can move, with a stand-in economy (a
+// review each game month, as the economy layer runs it) so the unlock and idle rules can be
+// watched working.
 import * as THREE from 'three';
 import { INDUSTRY_TYPES, type IndustryId } from '../industries/catalogue';
 import type { IndustryFx, FxHandle } from '../industries/fx';
 import type { IndustryModel } from '../industries/models';
 import { toLocal, toWorld } from '../industries/site';
 import type { IndustryVisualState } from '../industries/state';
-import { FITS, LADDER, MODE_NAME, MODES, TIERS, type FitId, type Mode, type TierId } from './catalogue';
+import { FITS, LADDER, MODE_NAME, MODES, REVIEW_DAYS, TIERS, type FitId, type Mode, type TierId } from './catalogue';
+import { icon } from './icons';
 import { roomCheck, waterBehind, waterline, bounds } from './layout';
 import { buildTerminals, fxModel, type TerminalsModel } from './models';
 import {
-  apply, estimateFlows, report, review, shownFor, specFor, startingTerminals, terminalFor, tick,
+  MAX_LEVEL, apply, estimateFlows, report, review, shownFor, specFor, startingTerminals, terminalFor, tick,
   type Offer, type Purchase, type SiteCapacity, type SiteContext, type SiteTerminals, type TerminalEvent,
 } from './rules';
 
@@ -67,7 +69,8 @@ export class TerminalsPanel {
     }
     return x;
   }
-  private spec() { const s = this.h.site(); return specFor(INDUSTRY_TYPES[s.id], s.model.variant); }
+  // what the site sends and takes in the demo's year: the docks' trades and a factory's inputs change with it
+  private spec() { const s = this.h.site(); return specFor(INDUSTRY_TYPES[s.id], s.model.variant, this.h.year()); }
   private ctx(x = this.sim()): SiteContext {
     const m = this.h.site().model, B = bounds(m);
     // with neighbours either side, only land behind the site (or out over the water) is free
@@ -155,17 +158,17 @@ export class TerminalsPanel {
     return true;
   }
 
-  // One review period: 30 days of upkeep and idle ageing, then the 2D-style production review.
-  step(days = 30, idle = false) {
-    const x = this.sim(), spec = this.spec();
+  // One review period: a game month of traffic, upkeep and idle ageing, then the 2D-style
+  // production review. Only terminals vehicles can reach are served, so a rail terminal with no
+  // rail line to it moves nothing and in time is mothballed.
+  step(days = REVIEW_DAYS, idle = false) {
+    const x = this.sim(), spec = this.spec(), ctx = this.ctx(x);
     x.day += days;
-    const served: Partial<Record<Mode, boolean>> = {};
-    if (!idle && x.service > 0) for (const t of x.st.terminals) served[t.mode] = true;
-    const tk = tick(spec, x.st, days, served, x.day);
+    const flows = idle ? null : estimateFlows(spec, x.st, x.level, { lift: x.service, supply: x.service, stockFill: x.fill, hours: days * 24 }, ctx);
+    const tk = tick(spec, x.st, days, flows?.served ?? {}, x.day);
     x.st = tk.st; x.upkeep = tk.upkeep / days; x.spent += tk.upkeep;
     this.events(tk.events);
-    if (!idle) {
-      const flows = estimateFlows(spec, x.st, x.level, { lift: x.service, supply: x.service, stockFill: x.fill, hours: days * 24 });
+    if (flows) {
       const rv = review(spec, x.st, this.ctx(x), x.level, flows);
       x.level = rv.level; x.fill = flows.stockFill; x.st = rv.st;
       this.events(rv.events);
@@ -193,7 +196,7 @@ export class TerminalsPanel {
   render() {
     if (!this.on) return;
     const x = this.sim(), spec = this.spec(), ctx = this.ctx(x);
-    const flows = estimateFlows(spec, x.st, x.level, { lift: x.service, supply: x.service, stockFill: x.fill });
+    const flows = estimateFlows(spec, x.st, x.level, { lift: x.service, supply: x.service, stockFill: x.fill }, ctx);
     const rep = report(spec, x.st, ctx, x.level, flows);
     const cap = rep.capacity, prod = rep.production;
     // the berths load and unload, so a processor's readout is its traffic both ways
@@ -205,20 +208,21 @@ export class TerminalsPanel {
     const pills = [
       flows.stockFill >= 0.9 ? '<span class="pill warn">stockpiling</span>' : '',
       Object.entries(flows.queue ?? {}).some(([, v]) => (v ?? 0) >= 0.5) ? '<span class="pill warn">queueing</span>' : '',
-      cap.levelCap < Math.min(4, x.level * 1.12) - 1e-6 ? '<span class="pill">capped</span>' : '',
+      cap.levelCap < Math.min(MAX_LEVEL, x.level * 1.12) - 1e-6 ? '<span class="pill">capped</span>' : '',
     ].join('');
     const levelTxt = `Level ${x.level.toFixed(2)} of 4 · ${makes ? `makes ${t_h(prod.out)}` : `takes ${t_h(prod.in)}`}${makes && prod.in > 0 ? `, takes ${t_h(prod.in)}` : ''}`;
-    const enough = cap.levelCap >= 4 ? 'enough for level 4' : `enough for level ${cap.levelCap.toFixed(2)}`;
-    const capTxt = cap.levelCap > 0 ? `terminals ${both ? 'handle' : 'move'} ${t_h(can)}${both ? ' in and out' : ''}: ${enough}` : x.st.terminals.length ? 'no terminal open' : 'no terminal yet';
+    const enough = cap.levelCap >= MAX_LEVEL ? 'enough for level 4' : `enough for level ${cap.levelCap.toFixed(2)}`;
+    const capTxt = cap.levelCap > 0 ? `terminals ${both ? 'handle' : 'move'} ${t_h(can)}${both ? ' in and out' : ''}: ${enough}` : x.st.terminals.length ? 'no terminal working' : 'no terminal yet';
     const rows = MODES.map((mode) => this.modeRow(mode, rep.offers.filter((o) => o.mode === mode), x, cap)).join('');
+    const say = x.note ? `${icon('alert')}<span>${x.note}</span>` : rep.suggestion ? `${icon('bulb')}<span>${rep.suggestion.text}</span>` : `${icon('check')}<span>The terminals keep up</span>`;
     el.innerHTML = `
       <div class="thead"><b>${levelTxt}</b><span>${capTxt}</span></div>
       <div class="bar" title="production against what the terminals can move"><i style="width:${Math.min(100, (need / scale) * 100)}%"></i><b style="left:${Math.min(100, (can / scale) * 100)}%"></b></div>
       <div class="tline">${pills}<span class="money">Day ${x.day} · ${money(x.spent)} spent · ${money(x.upkeep)}/day</span></div>
-      <div class="suggest">${x.note ? `⚠ ${x.note}` : rep.suggestion ? `💡 ${rep.suggestion.text}` : '✓ The terminals keep up'}</div>
+      <div class="suggest">${say}</div>
       ${rows}
       <div class="row tog">
-        <button data-a="review">Review ▶</button><button data-a="auto" class="${this.timer ? 'on' : ''}">Auto</button><button data-a="idle">Idle 30 days</button>
+        <button data-a="review">${icon('play')}Review</button><button data-a="auto" class="${this.timer ? 'on' : ''}">Auto</button><button data-a="idle">Idle a month</button>
       </div>
       <div class="row tog">
         <button data-a="rail" class="${x.rail ? 'on' : ''}">Rail line</button><button data-a="crowd" class="${x.crowded ? 'on' : ''}">Neighbours</button>
@@ -232,23 +236,25 @@ export class TerminalsPanel {
 
   private modeRow(mode: Mode, offs: Offer[], x: SiteSim, cap: SiteCapacity) {
     const M = MODE_NAME[mode];
-    if (offs.every((o) => o.status === 'not_offered')) return `<div class="tmode off"><span class="g">${M.glyph}</span><div class="info"><b>${M.name}</b><small>${offs[0].reason}</small></div></div>`;
+    if (offs.every((o) => o.status === 'not_offered' && o.block !== 'oversized')) return `<div class="tmode off"><span class="g">${icon(M.icon)}</span><div class="info"><b>${M.name}</b><small>${offs[0].reason}</small></div></div>`;
     const cur = terminalFor(x.st, mode);
     const c = cap.byMode[mode];
+    const state = !cur ? '' : cur.status !== 'open' ? cur.status : !c?.reached ? `no ${M.vehicle} can reach it` : `${t_h(c.tph)} · ${TIERS[cur.tier].berths} ${TIERS[cur.tier].berths > 1 ? M.vehicles : M.vehicle} at once · stock ${TIERS[cur.tier].stock.toLocaleString('en-GB')} t`;
     const head = cur
-      ? `<b>${M.name} · ${TIERS[cur.pending?.tier ?? cur.tier].name}</b><small>${FITS[cur.pending?.fit ?? cur.fit].name} · ${cur.status === 'open' ? `${t_h(c?.tph ?? 0)} · ${TIERS[cur.tier].berths} ${TIERS[cur.tier].berths > 1 ? M.vehicles : M.vehicle} at once · stock ${TIERS[cur.tier].stock.toLocaleString('en-GB')} t` : cur.status}${cur.idle >= 1 ? ` · idle ${Math.floor(cur.idle)} d` : ''}</small>`
+      ? `<b>${M.name} · ${TIERS[cur.pending?.tier ?? cur.tier].name}</b><small>${FITS[cur.pending?.fit ?? cur.fit].name} · ${state}${cur.idle >= 1 ? ` · idle ${Math.floor(cur.idle)} d` : ''}</small>`
       : `<b>${M.name}</b><small>No terminal</small>`;
     const chips = offs.map((o) => {
-      const short: Record<string, string> = { era: o.reason.toLowerCase(), grade: '🔒', rail: 'no rail line', road: 'no road', room: 'no room', busy: 'wait', superseded: '·' };
-      const lab = o.status === 'owned' ? '✓' : o.status === 'building' ? '⏳' : o.status === 'available' ? money(o.cost) : short[o.block ?? 'grade'] ?? '🔒';
-      return `<button class="chip ${o.status}" data-a="buy" data-m="${mode}" data-t="${o.tier}" title="${o.reason}">${TIERS[o.tier].name}<i>${lab}</i></button>`;
+      const short: Record<string, string> = { era: o.reason.toLowerCase(), grade: icon('lock', 'ic sm'), rail: 'no rail line', road: 'no road', room: 'no room', busy: 'wait', superseded: 'in use', oversized: 'not needed' };
+      const lab = o.status === 'owned' ? icon('check', 'ic sm') : o.status === 'building' ? icon('clock', 'ic sm') : o.status === 'available' ? money(o.cost) : short[o.block ?? 'grade'] ?? icon('lock', 'ic sm');
+      return `<button class="chip ${o.status}${o.block === 'oversized' ? ' oversized' : ''}" data-a="buy" data-m="${mode}" data-t="${o.tier}" title="${o.reason}">${TIERS[o.tier].name}<i>${lab}</i></button>`;
     }).join('');
     const acts = cur ? [
-      TIERS[cur.pending?.tier ?? cur.tier].fits.length > 1 ? `<button data-a="fit" data-m="${mode}">Fit ▸</button>` : '',
+      TIERS[cur.pending?.tier ?? cur.tier].fits.length > 1 ? `<button data-a="fit" data-m="${mode}" aria-label="Change the handling kit">${icon('tool')}Fit</button>` : '',
       cur.status === 'mothballed' ? `<button data-a="reopen" data-m="${mode}">Reopen</button>` : '',
-      cur.builtIn ? '' : `<button data-a="rm" data-m="${mode}">✕</button>`,
+      cur.pending || cur.status === 'building' ? `<button data-a="cancel" data-m="${mode}">Cancel</button>` : '',
+      cur.builtIn ? '' : `<button data-a="rm" data-m="${mode}" aria-label="Demolish">${icon('x')}</button>`,
     ].join('') : '';
-    return `<div class="tmode"><span class="g">${M.glyph}</span><div class="info">${head}</div>${acts}</div><div class="chips">${chips}</div>`;
+    return `<div class="tmode"><span class="g">${icon(M.icon)}</span><div class="info">${head}</div>${acts}</div><div class="chips">${chips}</div>`;
   }
 
   private bind(el: HTMLElement) {
@@ -258,7 +264,8 @@ export class TerminalsPanel {
       b.addEventListener('click', () => {
         if (a === 'review') this.step();
         else if (a === 'auto') { this.auto(!this.timer); this.render(); }
-        else if (a === 'idle') this.step(30, true);
+        else if (a === 'idle') this.step(REVIEW_DAYS, true);
+        else if (a === 'cancel' && mode) this.do({ kind: 'cancel', mode });
         else if (a === 'rail') this.set({ rail: !this.sim().rail });
         else if (a === 'crowd') this.set({ crowded: !this.sim().crowded });
         else if (a === 'water') this.set({ water: !this.sim().water });

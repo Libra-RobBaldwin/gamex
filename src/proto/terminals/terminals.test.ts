@@ -5,12 +5,12 @@ import { CARGO, INDUSTRY_IDS, INDUSTRY_TYPES, type CargoId, type IndustryId } fr
 import { IndustryFx } from '../industries/fx';
 import { buildIndustry, defaultPlot, type IndustryModel } from '../industries/models';
 import {
-  CARGO_CLASS, FITS, LADDER, MODES, MODE_OF, TIERS, TIER_IDS, inEra, suitOf, throughput, tierCost, type FitId, type Mode, type TierId,
+  CARGO_CLASS, FITS, LADDER, LOAD_TIME_2D, MODES, MODE_OF, SIM_SECONDS_PER_HOUR, TIERS, TIER_IDS, inEra, suitOf, throughput, tierCost, type FitId, type Mode, type TierId,
 } from './catalogue';
 import { bounds, overlaps, place, roomCheck, waterline, type Box } from './layout';
 import { buildTerminals, fxModel } from './models';
 import {
-  IDLE_CUT_DAYS, IDLE_MOTHBALL_DAYS, IDLE_WARN_DAYS, MOTHBALL_UPKEEP, REMOVE_REFUND, apply, capacity, dwellFactor, dwellHours, estimateFlows,
+  IDLE_CUT_DAYS, IDLE_MOTHBALL_DAYS, IDLE_WARN_DAYS, MOTHBALL_UPKEEP, REMOVE_REFUND, apply, berthRate, capacity, dwellFactor, dwellHours, estimateFlows,
   levelCap, levelsAt, offers, outAt, report, review, shareOutput, shownFor, specFor, startingTerminals, suggest, terminalFor, tick, townSpec,
   type SiteContext, type SiteFlows, type SiteTerminals, type Terminal,
 } from './rules';
@@ -19,6 +19,8 @@ const open = (mode: Mode, tier: TierId, fit: FitId = 'standard', extra: Partial<
 const withT = (grade: 1 | 2 | 3, ...terminals: Terminal[]): SiteTerminals => ({ grade, terminals });
 const CTX: SiteContext = { year: 1975, rail: true };
 const colliery = specFor('coal_mine');
+// a big works: every rank of every ladder is worth having here, where a colliery stops at rank 2
+const steel = specFor('steelworks');
 const flows = (f: Partial<SiteFlows>): SiteFlows => ({ produced: 66, moved: 66, stockFill: 0.5, ...f });
 const bare = new Map<IndustryId, IndustryModel>(INDUSTRY_IDS.map((id) => [id, buildIndustry(id, defaultPlot(id), { seed: 1, bare: true })]));
 // modes a site can use, with water for the waterside-optional ones
@@ -76,13 +78,18 @@ describe('catalogue', () => {
 describe('capacity and growth', () => {
   it('caps a site at what its terminals move, and adds terminals up', () => {
     const bay = withT(1, open('road', 'loading_bay'));
-    expect(levelCap(colliery, bay)).toBeCloseTo(throughput('loading_bay') / outAt(colliery, 1), 6);
-    expect(levelCap(colliery, bay)).toBeLessThan(1); // a loading bay can't keep up with even a small pit
+    // berths times what each turns round an hour, stops and all
+    expect(levelCap(colliery, bay)).toBeCloseTo((TIERS.loading_bay.berths * berthRate(bay.terminals[0], 'coal')) / outAt(colliery, 1), 6);
+    expect(berthRate(bay.terminals[0], 'coal')).toBeLessThan(TIERS.loading_bay.perBerth); // the fixed part of each stop costs berth time
+    // a loading bay moves a small pit's level-1 output, as the 2D loading bay did, but not a full one
+    expect(levelCap(colliery, bay)).toBeGreaterThan(1);
+    expect(levelCap(colliery, bay)).toBeLessThan(4);
     const both = withT(2, open('road', 'lorry_depot'), open('rail', 'sidings'));
     expect(levelCap(colliery, both)).toBeCloseTo(levelsAt(colliery, both.terminals[0]) + levelsAt(colliery, both.terminals[1]), 9);
     expect(levelCap(colliery, both)).toBeGreaterThan(4);
-    // only open terminals count
+    // only open terminals count, and only those vehicles can reach
     expect(levelCap(colliery, withT(1, { ...open('road', 'loading_bay'), status: 'building' }))).toBe(0);
+    expect(levelCap(colliery, both, { rail: false })).toBeCloseTo(levelsAt(colliery, both.terminals[0]), 9);
     const cap = capacity(colliery, both);
     expect(cap.load).toBeCloseTo(cap.levelCap * 66, 6);
     expect(cap.berths).toBe(TIERS.lorry_depot.berths + TIERS.sidings.berths);
@@ -99,9 +106,12 @@ describe('capacity and growth', () => {
       expect(levelCap(spec, top), id).toBeGreaterThanOrEqual(4);
       for (const m of modes) expect(levelsAt(spec, { tier: LADDER[m][0], fit: 'standard' }), `${id} ${m}`).toBeLessThan(4);
     }
-    // and the big works need the big terminals: a steelworks can't reach level 4 on rank 2s alone
-    const steel = specFor('steelworks');
-    expect(levelCap(steel, withT(2, open('road', 'lorry_depot'), open('rail', 'rail_terminal'), open('water', 'quay')))).toBeLessThan(4);
+    // and the big works need the big terminals: no rank 2 alone, even with its best kit, takes a
+    // steelworks to level 4. (Three of them together now can: the starters had to grow to carry
+    // a level-1 site of every 2D industry, and each rank is more than twice the one below.)
+    for (const tier of ['lorry_depot', 'rail_terminal', 'quay'] as TierId[]) {
+      expect(Math.max(...TIERS[tier].fits.map((fit) => levelsAt(steel, { tier, fit }))), tier).toBeLessThan(4);
+    }
   });
 
   it('handles each class best with the kit made for it', () => {
@@ -119,12 +129,18 @@ describe('capacity and growth', () => {
 
   it('shortens stops up the ladder and with the right kit', () => {
     const bay = { tier: 'loading_bay' as TierId, fit: 'standard' as FitId };
-    expect(dwellFactor(bay, 'coal')).toBeCloseTo(1, 9);
+    // the factor is the stop itself on the 2D clock (a game hour is 60 of its seconds), not a
+    // ratio to a starter's stop: a lorry of coal at a loading bay stands for 6.2 LOAD_TIMEs
+    expect(dwellFactor(bay, 'coal')).toBeCloseTo((dwellHours(bay, 'coal', 20) * SIM_SECONDS_PER_HOUR) / LOAD_TIME_2D, 9);
     expect(dwellHours({ tier: 'road_terminal', fit: 'standard' }, 'goods', 20)).toBeLessThan(dwellHours({ tier: 'lorry_depot', fit: 'standard' }, 'goods', 20));
     expect(dwellHours({ tier: 'lorry_depot', fit: 'standard' }, 'goods', 20)).toBeLessThan(dwellHours(bay, 'goods', 20));
     const mgr = dwellHours({ tier: 'rail_terminal', fit: 'rapid_loader' }, 'coal', 1000), old = dwellHours({ tier: 'sidings', fit: 'standard' }, 'coal', 1000);
     expect(mgr).toBeLessThan(old / 3);
-    expect(dwellFactor({ tier: 'marshalling_yard', fit: 'standard' }, 'steel')).toBeLessThan(1);
+    expect(dwellFactor({ tier: 'marshalling_yard', fit: 'standard' }, 'steel')).toBeLessThan(dwellFactor({ tier: 'sidings', fit: 'standard' }, 'steel'));
+    // bulk tips out quicker than it's loaded, by road and rail; a ship's hold has to be grabbed out
+    expect(dwellHours(bay, 'coal', 20, 'unload')).toBeLessThan(dwellHours(bay, 'coal', 20, 'load'));
+    expect(dwellHours(bay, 'goods', 20, 'unload')).toBeCloseTo(dwellHours(bay, 'goods', 20, 'load'), 9);
+    expect(dwellHours({ tier: 'quay', fit: 'standard' }, 'coal', 1000, 'unload')).toBeCloseTo(dwellHours({ tier: 'quay', fit: 'standard' }, 'coal', 1000), 9);
     for (const id of TIER_IDS) expect(dwellHours({ tier: id, fit: 'standard' }, 'coal', 20)).toBeGreaterThan(0);
   });
 
@@ -135,19 +151,29 @@ describe('capacity and growth', () => {
     expect(review(colliery, big, CTX, 2, flows({ produced: 132, moved: 60 })).level).toBe(2); // in between: steady
     expect(review(colliery, big, CTX, 2, flows({ produced: 132, moved: 10 })).level).toBeCloseTo(1.92, 9); // under 15%: falls
     expect(review(colliery, big, CTX, 1.02, flows({ moved: 0 })).level).toBe(1); // never below 1
-    const depot = withT(2, open('road', 'lorry_depot')); // cap 2.12 x 1.0 standard
-    const cap = levelCap(colliery, depot);
-    const r = review(colliery, depot, CTX, 2.05, flows({ produced: 135, moved: 130 }));
+    const bay = withT(1, open('road', 'loading_bay')); // enough for about level 3
+    const cap = levelCap(colliery, bay);
+    const r = review(colliery, bay, CTX, cap - 0.05, flows({ produced: outAt(colliery, cap - 0.05), moved: outAt(colliery, cap - 0.1) }));
     expect(r.capped).toBe(true);
     expect(r.level).toBeCloseTo(cap, 9);
-    expect(r.level).toBeLessThan(2.05 * 1.12);
+    expect(r.level).toBeLessThan((cap - 0.05) * 1.12);
+    // a stockyard filling while 45% is collected: it eases back until 60% is
+    const full = review(colliery, big, CTX, 2, flows({ produced: 132, moved: 60, stockFill: 1 }));
+    expect(full.level).toBeCloseTo(2 * 0.96, 9);
+    expect(review(colliery, big, CTX, 1.55, flows({ produced: 102.3, moved: 60, stockFill: 1 })).level).toBeCloseTo(60 / 66 / 0.6, 9);
+    // more than the terminals can move (the bigger one demolished): it eases back to what they can
+    const over = review(colliery, bay, CTX, 4, flows({ produced: 264, moved: outAt(colliery, cap), stockFill: 1 }));
+    expect(over.level).toBeCloseTo(4 * 0.96, 9);
+    expect(over.capped).toBe(true);
   });
 
   it('opens up the next rank when output presses against the terminals, and says why', () => {
+    // a colliery grown a little past what its loading bay moves (about level 3)
     const bay = withT(1, open('road', 'loading_bay'));
-    const f = estimateFlows(colliery, bay, 1, { stockFill: 0.8 });
+    const level = levelCap(colliery, bay) * 1.1;
+    const f = estimateFlows(colliery, bay, level, { stockFill: 0.8 });
     expect(f.stockFill).toBe(1);
-    const r = review(colliery, bay, CTX, 1, f);
+    const r = review(colliery, bay, CTX, level, f);
     expect(r.pressure.pressing).toBe(true);
     expect(r.st.grade).toBe(2);
     expect(r.unlocked).toEqual(['lorry_depot', 'rail_terminal']); // no water at a colliery
@@ -155,13 +181,18 @@ describe('capacity and growth', () => {
     expect(r.suggestion?.text).toMatch(/^Colliery output is stockpiling: an? [a-z ]+ would move [\d.]+x more$/);
     expect(r.events[0].kind).toBe('unlocked');
     expect(r.events[0].text).toContain('Now available: lorry depot, rail freight terminal');
-    // and rank 2 must be bought and used before rank 3 opens
-    const again = review(colliery, r.st, CTX, 1, f);
+    // and rank 2 must be bought and used before rank 3 opens (at a steelworks, which needs one)
+    const steelBay = withT(2, open('road', 'loading_bay'));
+    const steelLevel = levelCap(steel, steelBay) * 1.2;
+    const again = review(steel, steelBay, CTX, steelLevel, estimateFlows(steel, steelBay, steelLevel, { stockFill: 0.95 }));
+    expect(again.pressure.pressing).toBe(true);
     expect(again.st.grade).toBe(2);
     expect(again.unlocked).toEqual([]);
-    expect(offers(colliery, again.st, CTX).find((o) => o.tier === 'road_terminal')!.status).toBe('locked');
-    const pressed = review(colliery, withT(2, open('road', 'lorry_depot')), CTX, 2.12, estimateFlows(colliery, withT(2, open('road', 'lorry_depot')), 2.12, { stockFill: 0.95 }));
+    expect(offers(steel, again.st, CTX).find((o) => o.tier === 'road_terminal')!.status).toBe('locked');
+    const depot = withT(2, open('road', 'lorry_depot')), depotLevel = levelCap(steel, depot) * 1.1;
+    const pressed = review(steel, depot, CTX, depotLevel, estimateFlows(steel, depot, depotLevel, { stockFill: 0.95 }));
     expect(pressed.st.grade).toBe(3);
+    expect(pressed.unlocked).toEqual(['road_terminal', 'marshalling_yard']); // the steelworks isn't on the water here
   });
 
   it("doesn't open anything up without pressure", () => {
@@ -173,13 +204,15 @@ describe('capacity and growth', () => {
   });
 
   it('says what stands in the way when nothing bigger can be built', () => {
+    // a steelworks outgrowing its lorry depot, with no land either side for a bigger one
     const depot = withT(3, open('road', 'lorry_depot'));
-    const room = roomCheck(bare.get('coal_mine')!, [{ mode: 'road', tier: 'lorry_depot' }], {}, () => false);
-    const f = estimateFlows(colliery, depot, 2.12, { stockFill: 0.95 });
-    const s = suggest(colliery, depot, { ...CTX, rail: false, room }, 2.12, f);
+    const room = roomCheck(bare.get('steelworks')!, [{ mode: 'road', tier: 'lorry_depot' }], {}, () => false);
+    const level = levelCap(steel, depot) * 1.1;
+    const f = estimateFlows(steel, depot, level, { stockFill: 0.95 });
+    const s = suggest(steel, depot, { ...CTX, rail: false, room }, level, f);
     expect(s?.reason).toBe('stuck');
-    expect(s?.text).toBe('Colliery output is stockpiling. Private sidings: needs a rail line to the site'); // the smallest thing that would help
-    expect(suggest(colliery, depot, { ...CTX, room }, 2.12, f)?.text).toMatch(/^Colliery output is stockpiling: private sidings would move/);
+    expect(s?.text).toBe('Steelworks output is stockpiling. Private sidings: needs a rail line to the site'); // the smallest thing that would help
+    expect(suggest(steel, depot, { ...CTX, room }, level, f)?.text).toMatch(/^Steelworks output is stockpiling: private sidings would move/);
   });
 
   it('tells vehicles from concrete: a full stockyard with idle berths wants more lorries', () => {
@@ -192,9 +225,12 @@ describe('capacity and growth', () => {
   });
 
   it('shows queueing where a site only takes things in', () => {
+    // private sidings unload a level-1 power station's coal with a little to spare; at 1.2 the
+    // trains wait
     const ps = specFor('power_station'), st = withT(1, open('rail', 'sidings'));
-    const f = estimateFlows(ps, st, 1, { supply: 1 });
-    const r = review(ps, st, CTX, 1, f);
+    expect(levelCap(ps, st)).toBeGreaterThan(1);
+    const f = estimateFlows(ps, st, 1.2, { supply: 1 });
+    const r = review(ps, st, CTX, 1.2, f);
     expect(r.pressure.queueing).toBe('rail');
     expect(r.suggestion?.text).toBe('Trains are queueing at the private sidings: a rail freight terminal serves 2 at once');
   });
@@ -213,8 +249,13 @@ describe('capacity and growth', () => {
     expect(find('coal_mine', 'sidings', { ...CTX, rail: false }).status).toBe('blocked');
     expect(find('coal_mine', 'sidings', { ...CTX, rail: false }).reason).toBe('Needs a rail line to the site');
     expect(find('coal_mine', 'loading_bay', { ...CTX, road: false }).reason).toBe('Needs a road to the site');
-    expect(find('coal_mine', 'road_terminal', { ...CTX, year: 1930 }, withT(3)).status).toBe('era');
-    expect(find('coal_mine', 'road_terminal', { ...CTX, year: 1930 }, withT(3)).reason).toBe('From 1955');
+    expect(find('steelworks', 'road_terminal', { ...CTX, year: 1930 }, withT(3)).status).toBe('era');
+    expect(find('steelworks', 'road_terminal', { ...CTX, year: 1930 }, withT(3)).reason).toBe('From 1955');
+    // nothing bigger than the smallest that moves all a site will ever make
+    expect(find('coal_mine', 'road_terminal').status).toBe('not_offered');
+    expect(find('coal_mine', 'road_terminal').reason).toBe('Not needed: a lorry depot with conveyor and hopper can move all the colliery makes at full production');
+    expect(find('coal_mine', 'marshalling_yard').block).toBe('oversized');
+    expect(find('coal_mine', 'rail_terminal').block).toBe('grade'); // private sidings don't: a colliery can use one
     // a fit from a later era isn't recommended early
     expect(find('coal_mine', 'rail_terminal', { ...CTX, year: 1950 }, withT(2)).fit).not.toBe('rapid_loader');
     expect(find('coal_mine', 'rail_terminal', { ...CTX, year: 1970 }, withT(2)).fit).toBe('rapid_loader');
@@ -222,8 +263,8 @@ describe('capacity and growth', () => {
     expect(find('coal_mine', 'jetty').block).toBe('mode');
     expect(find('refinery', 'jetty').block).toBe('water');
     expect(find('coal_mine', 'sidings', { ...CTX, rail: false }).block).toBe('rail');
-    expect(find('coal_mine', 'road_terminal', { ...CTX, year: 1930 }, withT(3)).block).toBe('era');
-    expect(find('coal_mine', 'road_terminal').block).toBe('grade');
+    expect(find('steelworks', 'road_terminal', { ...CTX, year: 1930 }, withT(3)).block).toBe('era');
+    expect(find('steelworks', 'road_terminal').block).toBe('grade');
     expect(find('coal_mine', 'loading_bay').block).toBeUndefined();
   });
 
@@ -248,7 +289,7 @@ describe('capacity and growth', () => {
     const depot = o.find((x) => x.tier === 'lorry_depot')!;
     expect(depot.status).toBe('blocked');
     expect(depot.reason).toBe('No room beside the site (it needs 38 × 42 m)');
-    expect(o.find((x) => x.tier === 'marshalling_yard')!.reason).toMatch(/^No room behind the site/);
+    expect(o.find((x) => x.tier === 'rail_terminal')!.reason).toMatch(/^No room behind the site/);
     // a brewery too small for sidings of its own needs land behind even for those
     const small = buildIndustry('brewery', defaultPlot('brewery', 'tower', 0, 0), { seed: 1, bare: true, variant: 'tower' });
     const tiny = buildIndustry('brewery', { poly: [{ x: -25, z: -20 }, { x: 25, z: -20 }, { x: 25, z: 20 }, { x: -25, z: 20 }], facing: { x: 0, z: 1 } }, { seed: 1, bare: true });
@@ -299,16 +340,21 @@ describe('buying, upgrading and removing', () => {
     const after = tick(colliery, r.st, 6, { road: true }, 106);
     expect(terminalFor(after.st, 'road')!.tier).toBe('lorry_depot');
     expect(after.events[0].kind).toBe('upgraded');
-    // nothing more in that mode until it opens
-    const blocked = apply(colliery, { ...r.st, grade: 3 }, CTX, { kind: 'build', mode: 'road', tier: 'road_terminal' });
+    // nothing more in that mode until it opens (at a steelworks, which a road freight terminal suits)
+    const up = apply(steel, withT(3, open('road', 'loading_bay')), { ...CTX, day: 100 }, { kind: 'build', mode: 'road', tier: 'lorry_depot' });
+    if (!up.ok) throw new Error(up.reason);
+    const blocked = apply(steel, up.st, CTX, { kind: 'build', mode: 'road', tier: 'road_terminal' });
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) expect(blocked.reason).toBe('Wait for the lorry depot to open');
   });
 
   it('refuses what is locked or blocked, with the reason', () => {
-    const r = apply(colliery, withT(1), CTX, { kind: 'build', mode: 'rail', tier: 'marshalling_yard' });
+    const r = apply(steel, withT(1), CTX, { kind: 'build', mode: 'rail', tier: 'marshalling_yard' });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('Unlocks as the site grows');
+    const big = apply(colliery, withT(3), CTX, { kind: 'build', mode: 'rail', tier: 'marshalling_yard' });
+    expect(big.ok).toBe(false);
+    if (!big.ok) expect(big.reason).toMatch(/^Not needed: a rail freight terminal/);
     const f = apply(colliery, withT(2), { ...CTX, year: 1950 }, { kind: 'build', mode: 'rail', tier: 'rail_terminal', fit: 'rapid_loader' });
     expect(f.ok).toBe(false);
     if (!f.ok) expect(f.reason).toBe('Rapid loader: From 1965');
@@ -379,7 +425,7 @@ describe('terminals left idle', () => {
     expect(r.upkeep).toBe(TIERS.loading_bay.upkeep * 30);
     const s = suggest(colliery, withT(1, open('road', 'loading_bay', 'standard', { idle: 45 })), CTX, 1);
     expect(s?.reason).toBe('idle');
-    expect(s?.text).toBe('The loading bay has had no lorries for 45 days and costs £40 a day');
+    expect(s?.text).toBe('The loading bay has had no lorries for 45 days and costs £150 a day');
   });
 
   it("never closes the docks' own quay", () => {
@@ -398,7 +444,9 @@ describe('sharing output between terminals', () => {
     const road = r.byMode.road!, rail = r.byMode.rail!;
     expect((road.coal ?? 0) + (rail.coal ?? 0)).toBeCloseTo(200, 6);
     expect(r.left.coal).toBeCloseTo(0, 6);
-    expect(rail.coal! / 200).toBeGreaterThan(0.8); // the rapid loader takes most of the coal
+    // the rapid loader takes most of the coal: over three quarters, now that a lorry's fixed stop
+    // is shorter and the depot's four bays turn lorries round faster than they did
+    expect(rail.coal! / 200).toBeGreaterThan(0.75);
     expect(road.goods! / 40).toBeGreaterThan(rail.goods! / 40); // the depot most of the crates
   });
 

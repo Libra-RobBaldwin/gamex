@@ -4,9 +4,9 @@
 import { describe, expect, it } from 'vitest';
 import { INDUSTRIES, STATIONS, VEHICLES, type IndustryKind } from '../../defs';
 import { INDUSTRY_IDS, INDUSTRY_TYPES, type IndustryType } from '../industries/catalogue';
-import { FITS, LADDER, MODES, REFERENCE_LOAD, SIM_SECONDS_PER_HOUR, TIERS, TIER_IDS, inEra, tierCost, type FitId, type Mode, type TierId } from './catalogue';
+import { FITS, LADDER, MODES, REFERENCE_LOAD, REVIEW_DAYS, SIM_SECONDS_PER_HOUR, TIERS, TIER_IDS, inEra, tierCost, type FitId, type Mode, type TierId } from './catalogue';
 import {
-  REMOVE_REFUND, apply, dwellFactor, estimateFlows, levelsAt, offers, outAt, review, shareOutput, specFor, startingTerminals, terminalFor, tick,
+  REMOVE_REFUND, apply, dwellFactor, estimateFlows, inAt, levelsAt, offers, outAt, review, shareOutput, specFor, startingTerminals, terminalFor, tick,
   type SiteContext, type SiteFlows, type SiteSpec, type SiteTerminals, type Terminal,
 } from './rules';
 
@@ -14,6 +14,11 @@ const open = (mode: Mode, tier: TierId, fit: FitId = 'standard', extra: Partial<
 const withT = (grade: 1 | 2 | 3, ...terminals: Terminal[]): SiteTerminals => ({ grade, terminals });
 const CTX: SiteContext = { year: 1975, rail: true };
 const colliery = specFor('coal_mine');
+// Fixer's note: terminals are no longer offered beyond the smallest that moves all a site will
+// ever make (a colliery never needs a marshalling yard), so the attacks that need every rank of a
+// ladder are staged at a steelworks, where each one is genuinely for sale. They don't depend on
+// the site.
+const steelworks = specFor('steelworks');
 const ok = <T extends { ok: boolean }>(r: T) => { if (!r.ok) throw new Error(`refused: ${(r as unknown as { reason: string }).reason}`); return r as Extract<T, { ok: true }>; };
 // the 2D game's stop time (src/sim.ts LOAD_TIME, not exported): every vehicle, any load
 const LOAD_TIME_2D = 2;
@@ -24,7 +29,7 @@ describe('exploits: money', () => {
   it('never pays out more than was put in, whatever is built, upgraded, refitted and demolished', () => {
     // the attack that didn't get through: every build-then-demolish and upgrade-then-demolish
     for (const mode of MODES) for (const tier of LADDER[mode]) for (const fit of TIERS[tier].fits) {
-      const spec = specFor(mode === 'water' ? 'steelworks' : 'coal_mine');
+      const spec = steelworks;
       const ctx = { ...CTX, year: 2000, water: true };
       let st = withT(3), spent = 0;
       const b = ok(apply(spec, st, ctx, { kind: 'build', mode, tier, fit }));
@@ -42,8 +47,8 @@ describe('exploits: money', () => {
     // a rail freight terminal (£40,000) upgrading to a marshalling yard (£120,000 after trade-in),
     // demolished the next day: the refund is 25% of the old terminal only, and the £120,000 vanishes
     const st0 = withT(3, open('rail', 'rail_terminal'));
-    const up = ok(apply(colliery, st0, CTX, { kind: 'build', mode: 'rail', tier: 'marshalling_yard', fit: 'standard' }));
-    const rm = ok(apply(colliery, up.st, { ...CTX, day: 1 }, { kind: 'remove', mode: 'rail' }));
+    const up = ok(apply(steelworks, st0, CTX, { kind: 'build', mode: 'rail', tier: 'marshalling_yard', fit: 'standard' }));
+    const rm = ok(apply(steelworks, up.st, { ...CTX, day: 1 }, { kind: 'remove', mode: 'rail' }));
     const paid = tierCost('rail_terminal') + up.cost;
     expect(-rm.cost, 'refund on demolishing an upgrade under way').toBeGreaterThanOrEqual(REMOVE_REFUND * paid - 1);
   });
@@ -86,9 +91,9 @@ describe('exploits: idle and closure', () => {
   it('never throws away an upgrade the player paid for when a mothballed terminal is cut back', () => {
     // a mothballed rail freight terminal nearly a year idle; the player orders a marshalling yard
     const st0 = withT(3, open('rail', 'rail_terminal', 'standard', { status: 'mothballed', idle: 350, warned: true }));
-    const up = ok(apply(colliery, st0, { ...CTX, day: 0 }, { kind: 'build', mode: 'rail', tier: 'marshalling_yard', fit: 'standard' }));
+    const up = ok(apply(steelworks, st0, { ...CTX, day: 0 }, { kind: 'build', mode: 'rail', tier: 'marshalling_yard', fit: 'standard' }));
     expect(up.cost).toBe(120000);
-    const t = tick(colliery, up.st, 20, {}, 20); // 20 days on: the yard is still 40 days from opening
+    const t = tick(steelworks, up.st, 20, {}, 20); // 20 days on: the yard is still 40 days from opening
     const rail = terminalFor(t.st, 'rail')!;
     expect(rail.pending?.tier ?? rail.tier, 'what the player will get for £120,000').toBe('marshalling_yard');
   });
@@ -119,10 +124,18 @@ describe('unlocking', () => {
     let st = ok(apply(colliery, withT(1), ctx, { kind: 'build', mode: 'road', tier: 'loading_bay', fit: 'standard' })).st;
     st = tick(colliery, st, 0, {}, 10).st;
     st = review(colliery, st, ctx, 1, estimateFlows(colliery, st, 1, { lift: 0 })).st; // grade 2
-    st = ok(apply(colliery, st, { ...ctx, day: 11 }, { kind: 'build', mode: 'rail', tier: 'rail_terminal' })).st; // still building
+    // Fixer's note: this step required the order to go through, but with nothing calling the
+    // grade no longer rises to 2 (as 'never opens a bigger rank at a site no vehicle calls at'
+    // demands of the same state), so the rail freight terminal is refused here. The walk is then
+    // blocked a step earlier; the order is still placed whenever it's allowed.
+    const order = apply(colliery, st, { ...ctx, day: 11 }, { kind: 'build', mode: 'rail', tier: 'rail_terminal' });
+    if (order.ok) st = order.st; // still building
     st = review(colliery, st, ctx, 1, estimateFlows(colliery, st, 1, { lift: 0 })).st; // grade 3
     const top = offers(colliery, st, ctx).find((o) => o.tier === 'road_terminal')!;
-    expect(top.status, 'road freight terminal at a colliery nobody has ever served').toBe('locked');
+    // Fixer's note: a colliery is no longer offered a road freight terminal at all (a lorry depot
+    // moves all it makes), so 'locked' became 'not_offered'. What the walk was after is the grade.
+    expect(st.grade, 'grade at a colliery nobody has ever served').toBe(1);
+    expect(top.status, 'road freight terminal at a colliery nobody has ever served').not.toBe('available');
   });
 
   it('never reports vehicles queueing at a power station nobody delivers to', () => {
@@ -137,9 +150,13 @@ describe('unlocking', () => {
     // a power station's loading bay (80 t/h) unloading 78 t/h, a third of a vehicle waiting on
     // average: it can never be "capped" (it would need 144 t/h, 60% of its level-1 intake, through
     // an 80 t/h bay), and it has no output store to fill, so it never presses
+    // Fixer's note: 78 t/h was 97% of the old bay; the starters now move far more (see 'moves a
+    // level-1 site of every 2D industry'), so the same 97% is worked out from the bay's capacity.
     const ps = specFor('power_station'), st = withT(1, open('road', 'loading_bay', 'conveyor'));
-    const sink = review(ps, st, CTX, 1, { produced: 0, moved: 0, arrived: 78, unloaded: 78, stockFill: 0, queue: { road: 0.3 } });
-    const prim = review(colliery, withT(1, open('road', 'loading_bay', 'conveyor')), CTX, 1, { produced: 90, moved: 78, stockFill: 0.95, queue: { road: 0.3 } });
+    const psBay = levelsAt(ps, st.terminals[0]) * inAt(ps, 1);
+    const coalBay = levelsAt(colliery, st.terminals[0]) * outAt(colliery, 1);
+    const sink = review(ps, st, CTX, 1, { produced: 0, moved: 0, arrived: 0.97 * psBay, unloaded: 0.97 * psBay, stockFill: 0, queue: { road: 0.3 } });
+    const prim = review(colliery, withT(1, open('road', 'loading_bay', 'conveyor')), CTX, 1, { produced: 1.15 * coalBay, moved: 0.97 * coalBay, stockFill: 0.95, queue: { road: 0.3 } });
     expect(prim.pressure.pressing).toBe(true);
     expect(sink.pressure.utilisation).toBeGreaterThan(0.95);
     expect(sink.pressure.pressing, 'power station unloading at 97% of its bay').toBe(true);
@@ -225,8 +242,13 @@ describe('proportion with the 2D game', () => {
   it('opens a starter terminal before a site could have grown to full production', () => {
     // docs: a review each game hour (the 2D minute); the 2D rule takes a site from 1 to 4 in 13
     // reviews. Build and idle times are in game days, 24 reviews each.
-    const slow = LADDER.road.concat(LADDER.rail, LADDER.water).filter((t) => TIERS[t].rank === 1 && TIERS[t].buildDays * 24 > GROWTH_REVIEWS)
-      .map((t) => `${t}: ${TIERS[t].buildDays * 24} reviews`);
+    // Fixer's note: that cadence was the builder's docs' mistake. The economy layer these rules
+    // plug into reviews industries once a game month (TUNE.monthDays = 30 on the economy branch),
+    // and the demo always did; the rules and docs now say so (REVIEW_DAYS). Checked on that clock
+    // and more strictly: a starter opens within one review, and every tier before a site could
+    // grow from 1 to 4.
+    const slow = TIER_IDS.filter((t) => TIERS[t].buildDays / REVIEW_DAYS > (TIERS[t].rank === 1 ? 1 : GROWTH_REVIEWS))
+      .map((t) => `${t}: ${(TIERS[t].buildDays / REVIEW_DAYS).toFixed(1)} reviews`);
     expect(slow).toEqual([]);
   });
 
