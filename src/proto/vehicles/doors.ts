@@ -77,7 +77,9 @@ export function busLayout(m: Model) {
   const sill = coach ? 1.55 : style === 'bus-single' || frontHalf || rearHalf ? (lowFloor ? 1.05 : 1.2) : 1.05;
   const y0 = coach ? 0.42 : lowFloor ? 0.3 : 0.38;
   const y1 = decker ? 2.3 : coach ? Math.min(H - 0.4, 2.45) : Math.min(H - 0.45, 2.6);
-  const doorFront: [number, number] | null = rearHalf ? null : coach ? [xN - 1.5, xN - 0.5] : [xN - rake - 1.35, xN - rake - 0.2];
+  // the front door stands between the front wheel's arch and the windscreen pillar
+  const arch = d.axles[0] + d.wheelR * 1.1 + 0.08;
+  const doorFront: [number, number] | null = rearHalf ? null : coach ? [Math.max(arch, xN - 1.5), xN - 0.5] : [Math.max(arch, xN - rake - 1.35), xN - rake - 0.2];
   const year = yearOf(m);
   const midDoor = (style === 'bus-single' && L > 11) || rearHalf || frontHalf || (decker && year >= 1968 && L >= 9.6 && m.seed % 2 === 0);
   const mid = (x0 + x1) / 2 - (frontHalf ? 0.4 : 0);
@@ -103,8 +105,9 @@ function compute(m: Model): Door[] {
       return [{ x: -L / 2 + 0.6, width: 0.95, y0: 0.4, y1: 2.2, leaves: 1, kind: 'open', sides: ['left'], dir: -1 }];
     }
     if (style === 'bus-heritage') {
-      const xS = m.dims.length / 2 - num(m, 'bonnet', 1.6);
-      return [{ x: xS - 0.62, width: 0.8, y0: 0.5, y1: 2.35, leaves: 1, kind: 'fold', sides: ['left'], dir: 1 }];
+      // the entrance is just behind the front wheel
+      const x1 = m.dims.axles[0] - m.dims.wheelR * 1.1 - 0.08;
+      return [{ x: x1 - 0.4, width: 0.8, y0: 0.5, y1: 2.35, leaves: 1, kind: 'fold', sides: ['left'], dir: 1 }];
     }
     const b = busLayout(m);
     const kind: DoorKind = year < 1990 ? 'fold' : 'plug';
@@ -129,7 +132,8 @@ function compute(m: Model): Door[] {
   const add = (x: number, width: number, leaves: 1 | 2, kind: DoorKind, dir: 1 | -1 = x >= 0 ? 1 : -1) =>
     out.push({ x, width, y0: sill, y1: kind === 'slam' ? Math.min(top, r.wy1 + 0.12) : top, leaves, kind, sides: both, dir });
   const span = r.bx1 - r.bx0;
-  const slam = m.design.slam === true;
+  // high-speed coaches of the 1970s–80s kept slam doors (the plug doors came with the next generation)
+  const slam = m.design.slam === true || (style === 'hs-coach' && year < 1990);
   if (style === 'hs-power') { add(r.bx0 + 1.2, 0.9, 1, 'plug', -1); return out; }
   if (slam) {
     const compartment = (style === 'coach-stock' && m.design.panelled === true) || style === 'emu-car';
@@ -228,7 +232,9 @@ export function drawDoors(k: Kit, m: Model, hw: number) {
           // which way this leaf goes: bi-parting leaves part from the middle
           const dir = n === 2 ? (i === 0 ? -1 : 1) : d.dir;
           const la = n === 2 ? (i === 0 ? xa : d.x) : xa, lb = n === 2 ? (i === 0 ? d.x : xb) : xb;
-          const travel = dir * (lw + (n === 2 ? 0.02 : 0.04));
+          // far enough that the leaf and the seal on its edge are clear of the opening (or, for a
+          // pocket door, all the way into the pocket)
+          const travel = dir * (lw + 0.06);
           const tag = d.kind === 'plug'
             ? [MOTION.plug, travel, s * 0.09, 0] as const
             : [MOTION.pocket, travel, 0, dir > 0 ? xb : xa] as const;
