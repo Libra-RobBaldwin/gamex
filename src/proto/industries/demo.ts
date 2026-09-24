@@ -12,6 +12,7 @@ import { offsetRing, overlayFor } from './overlay';
 import { TerminalsPanel } from '../terminals/panel';
 import { plotRect, toWorld } from './site';
 import type { IndustryVisualState } from './state';
+import { NavRig, SunFollow, mountNavControls } from '../kit/camera';
 
 const q = new URLSearchParams(location.search);
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -118,52 +119,45 @@ INDUSTRY_IDS.forEach((id, i) => {
   sites.push(place(i, id, want ? vi : i % INDUSTRY_TYPES[id].variants.length, 1));
 });
 
-// ---------------- camera: isometric, pinch and drag ----------------
+// ---------------- camera: the shared kit (kit/camera.ts), the same gestures as the game ----------------
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, -2000, 4000);
-const view = { x: 0, z: 0, zoom: Number(q.get('zoom') ?? 0) || 0, tall: false };
+// the classic isometric: 45 degrees round, about 35 degrees down
+const ISO = { az: Math.PI / 4, el: Math.atan2(1.15, Math.SQRT2) };
+const nav = new NavRig(cam, canvas, {
+  view: { x: 0, z: 0, h: 1100, ...ISO },
+  limits: { hMin: 40, hMax: 2400, elMin: 0.35, elMax: 1.52 },
+  distance: 1000,
+  shadow: new SunFollow(sun, { dir: { x: -260, y: 420, z: 180 }, back: 525, far: 1500 }),
+});
+const view = nav.view;
+mountNavControls(nav, { below: $('top') });
 let focus = Math.max(0, INDUSTRY_IDS.indexOf((q.get('focus') ?? '') as IndustryId));
 let gallery = !q.has('focus');
-function fitView() {
-  view.tall = false;
-  if (panel?.on && !gallery) { panel.refresh(true); return; }
-  if (gallery) { view.x = 0; view.z = 0; view.zoom ||= 1100; }
-  else { const m = sites[focus].model; view.x = m.frame.cx; view.z = m.frame.cz; view.zoom = Number(q.get('zoom') ?? 0) || Math.max(m.frame.w, m.frame.d) * 1.45; }
-}
-function placeCamera() {
-  const a = innerWidth / innerHeight, h = view.zoom / 2;
-  cam.left = -h * a; cam.right = h * a; cam.top = h; cam.bottom = -h;
-  cam.updateProjectionMatrix();
-  // the classic isometric: 45 degrees round, about 35 degrees down; nudged so the panel doesn't hide
-  // the subject (further for the taller Terminals panel, which covers about half the screen)
-  const nudge = q.get('ui') === '0' ? 0 : view.tall ? view.zoom * 0.26 : view.zoom * 0.12;
-  const t = new THREE.Vector3(view.x + (view.tall ? nudge : 0), 0, view.z + nudge);
-  cam.position.copy(t).add(new THREE.Vector3(1, 1.15, 1).normalize().multiplyScalar(1000));
-  cam.lookAt(t);
-  sun.position.copy(t).add(new THREE.Vector3(-260, 420, 180));
-  sun.target.position.copy(t);
-  const sc = sun.shadow.camera as THREE.OrthographicCamera, r = Math.min(900, view.zoom * 0.9);
-  sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 10; sc.far = 1500; sc.updateProjectionMatrix();
-}
-const ptrs = new Map<number, { x: number; y: number }>();
-let pinch = 0;
-canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
-canvas.addEventListener('pointerup', (e) => { ptrs.delete(e.pointerId); pinch = 0; });
-canvas.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); pinch = 0; });
-canvas.addEventListener('pointermove', (e) => {
-  const p = ptrs.get(e.pointerId);
-  if (!p) return;
-  if (ptrs.size === 2) {
-    const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinch) view.zoom = Math.max(40, Math.min(2400, view.zoom * (pinch / d)));
-    pinch = d;
-  } else {
-    // screen drag to ground movement along the isometric axes
-    const k = view.zoom / innerHeight, dx = (e.clientX - p.x) * k, dy = (e.clientY - p.y) * k * 1.4;
-    view.x -= (dx - dy) * Math.SQRT1_2; view.z -= (-dx - dy) * Math.SQRT1_2;
+// Show the whole gallery, or the whole site in focus, in the space the title and the panel leave
+// clear. zoom: the height of the view in metres (0 to fit).
+function siteBox(list: typeof sites) {
+  const min = { x: Infinity, y: 0, z: Infinity }, max = { x: -Infinity, y: 25, z: -Infinity };
+  for (const s of list) for (const p of s.model.frame.outline) {
+    const w = toWorld(s.model.frame, p[0], p[1]);
+    min.x = Math.min(min.x, w.x); max.x = Math.max(max.x, w.x); min.z = Math.min(min.z, w.z); max.z = Math.max(max.z, w.z);
   }
-  p.x = e.clientX; p.y = e.clientY;
-});
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); view.zoom = Math.max(40, Math.min(2400, view.zoom * Math.exp(e.deltaY * 0.001))); }, { passive: false });
+  return { min, max };
+}
+function fitView(zoom = Number(q.get('zoom') ?? 0) || 0, ms = 0) {
+  // with the Terminals panel open, the panel frames the site and what's built round it
+  if (panel?.on && !gallery) { panel.refresh(true); return; }
+  const ui = q.get('ui') !== '0';
+  const pad = ui ? { top: $('top').getBoundingClientRect().bottom, bottom: $('panel').getBoundingClientRect().height, left: 8, right: 60 } : {};
+  let to = nav.fitting(siteBox(gallery ? sites : [sites[focus]]), pad, ISO);
+  // room to zoom out a little past the whole gallery
+  if (gallery) nav.setLimits({ hMax: Math.max(2400, to.h * 1.5) });
+  if (zoom) to = { ...to, h: zoom };
+  if (ms > 0) nav.animateTo(to, ms); else nav.setView(to);
+}
+// the catchment ring is drawn a few pixels wide: redraw it when the zoom changes
+let ringH = 0;
+// (while it moves, only after a big change; once it comes to rest, exactly)
+nav.onChange((v) => { if (showRing && Math.abs(v.h - ringH) > ringH * (nav.busy ? 0.15 : 0.001)) drawOverlay(); });
 
 // ---------------- catchment ring and icons ----------------
 let showRing = q.get('ring') === '1';
@@ -193,7 +187,8 @@ function drawOverlay() {
   const shape = new THREE.Shape(ov.ring.map((p) => new THREE.Vector2(p.x, -p.z)));
   const fill = new THREE.Mesh(new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2), fillMat);
   fill.position.y = 0.5;
-  ringLine.add(fill, new THREE.Mesh(ribbon(ov.ring, Math.max(1.5, view.zoom / 180)), ringMat));
+  ringH = view.h;
+  ringLine.add(fill, new THREE.Mesh(ribbon(ov.ring, Math.max(1.5, view.h / 180)), ringMat));
   const col = ov.colour === '#2c2c2e' || ov.colour === '#1d1d1f' ? '#ffffff' : ov.colour;
   ringMat.color.set(col); fillMat.color.set(col);
   for (const ic of ov.icons) {
@@ -258,12 +253,12 @@ toggle('delivered', () => state.recentlyDelivered, (v) => { state.recentlyDelive
 toggle('all', () => applyAll, (v) => { applyAll = v; });
 toggle('ring', () => showRing, (v) => { showRing = v; });
 toggle('night', () => night, (v) => { night = v; setNight(); });
-toggle('zoomall', () => gallery, (v) => { gallery = v; view.zoom = 0; fitView(); });
+toggle('zoomall', () => gallery, (v) => { gallery = v; fitView(0, 450); });
 const go = (d: number) => {
   const was = focus;
   focus = (focus + d + sites.length) % sites.length; gallery = false; $('zoomall').classList.remove('on');
   if (panel.on) { tvis = {}; showOthers(true); rebuild(was); rebuild(focus); showOthers(false); }
-  fitView(); applyState();
+  fitView(0, 450); applyState();
 };
 $('prev').addEventListener('click', () => go(-1));
 $('next').addEventListener('click', () => go(1));
@@ -285,11 +280,14 @@ panel = new TerminalsPanel({
   site: () => { const s = sites[focus]; return { key: `${focus}:${s.variant}:${s.seed}`, id: s.id, model: s.model, handle: s.handle }; },
   rebuildSite: (bare) => { tvis = {}; showOthers(!bare); rebuild(focus); },
   setVisual: (patch) => { tvis = { ...tvis, ...patch }; fx.setState(sites[focus].handle, stateFor(focus)); drawOverlay(); },
+  // the site and its terminals, in the space the title and the (tall) panel leave clear
   fit: (b) => {
-    const w = b.x1 - b.x0, d = b.z1 - b.z0, a = innerWidth / innerHeight;
-    view.x = (b.x0 + b.x1) / 2; view.z = (b.z0 + b.z1) / 2; view.tall = q.get('ui') !== '0';
-    // an isometric box w x d is 0.71 (w + d) across the screen and about 0.45 (w + d) high
-    view.zoom = Number(q.get('zoom') ?? 0) || Number(q.get('zoomk') ?? 1) * Math.max((0.74 * (w + d)) / a, 0.5 * (w + d) * (view.tall ? 2.1 : 1.1), 120);
+    const ui = q.get('ui') !== '0';
+    const pad = ui ? { top: $('top').getBoundingClientRect().bottom, bottom: $('panel').getBoundingClientRect().height, left: 8, right: 60 } : {};
+    let to = nav.fitting({ min: { x: b.x0, y: 0, z: b.z0 }, max: { x: b.x1, y: 25, z: b.z1 } }, pad, ISO);
+    const zoom = Number(q.get('zoom') ?? 0);
+    to = { ...to, h: Math.max(120, zoom || to.h * Number(q.get('zoomk') ?? 1)) };
+    nav.animateTo(to, 450);
   },
 });
 $('terms').addEventListener('click', () => {
@@ -311,7 +309,7 @@ if (q.get('terminals') === '1') {
 }
 
 // ---------------- loop ----------------
-function resize() { renderer.setSize(innerWidth, innerHeight, false); placeCamera(); }
+function resize() { renderer.setSize(innerWidth, innerHeight, false); nav.apply(); }
 addEventListener('resize', resize);
 fitView();
 setNight();
@@ -319,10 +317,12 @@ resize();
 applyState();
 const t0 = performance.now();
 let fixedTime: number | null = q.has('t') ? Number(q.get('t')) : null;
-function frame() {
+let last = performance.now();
+function frame(now: number) {
   const t = fixedTime ?? (performance.now() - t0) / 1000;
   fx.update(t);
-  placeCamera();
+  nav.update(Math.min(0.1, (now - last) / 1000), now);
+  last = now;
   renderer.render(scene, cam);
   placeIcons();
   requestAnimationFrame(frame);
@@ -330,8 +330,9 @@ function frame() {
 requestAnimationFrame(frame);
 
 // for headless screenshots and poking about in the console
+(window as unknown as { nav: NavRig }).nav = nav;
 (window as unknown as { demo: unknown }).demo = {
-  fx, sites, state, scene, renderer, toWorld, terminals: panel,
+  fx, nav, sites, state, scene, renderer, toWorld, terminals: panel,
   setTime: (t: number | null) => { fixedTime = t; },
   focusOn: (id: IndustryId, variant?: string) => {
     focus = INDUSTRY_IDS.indexOf(id); gallery = false;
@@ -343,8 +344,8 @@ requestAnimationFrame(frame);
     Object.assign(state, rest);
     if (n !== undefined) { night = n; setNight(); }
     if (ring !== undefined) showRing = ring;
-    if (g !== undefined) { gallery = g; view.zoom = 0; fitView(); }
-    if (zoom) view.zoom = zoom;
+    if (g !== undefined) { gallery = g; fitView(zoom ?? 0); }
+    else if (zoom) nav.setView({ h: zoom });
     applyState();
   },
 };

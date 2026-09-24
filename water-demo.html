@@ -22,20 +22,12 @@
       #bar { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; gap: 4px; padding: 4px; }
       button { flex: 1; font: inherit; font-size: 12px; font-weight: 600; color: #eef2f7; background: transparent; border: 0; border-radius: 9px; padding: 9px 0; cursor: pointer; }
       button.on { background: rgba(76, 195, 255, 0.22); }
-      #side { position: absolute; right: 8px; top: 92px; display: flex; flex-direction: column; gap: 5px; }
-      #side button { width: 40px; height: 38px; flex: none; background: var(--glass); border: 1px solid var(--line); font-size: 16px; }
     </style>
   </head>
   <body>
     <div id="phone">
       <canvas id="c"></canvas>
       <div id="top" class="glass"><b id="title">Water</b><div id="desc" class="m"></div><div id="stats" class="m"></div></div>
-      <div id="side">
-        <button id="rotl" title="Turn left">⟲</button>
-        <button id="rotr" title="Turn right">⟳</button>
-        <button id="zin" title="Closer">+</button>
-        <button id="zout" title="Further">−</button>
-      </div>
       <div id="probe" class="glass"></div>
       <div id="bar" class="glass">
         <button data-preset="coast">Coast</button>
