@@ -113,7 +113,7 @@ export class Economy {
   // the last review's reach, by the zone order of that review (zones added since renumber the
   // rest, so `at` maps each zone reviewed to its place in these arrays)
   private lastReach: { work: Reach; shop: Reach; leisure: Reach; zones: ZState[]; at?: Map<ZState, number> } | null = null;
-  private dirty = { times: true, service: true };
+  private dirty = { times: true, service: true, cover: true }; // cover: catchments, zone pairs and trips
   private fareStops: SState[] = []; // stops with fares not yet shown in a money event
   private runningOwed = 0; // running costs not yet shown in a money event
   private paxStops: SState[] = []; // passenger stops with lines calling
@@ -232,6 +232,7 @@ export class Economy {
     };
     z.buildings.push(s);
     this.buildingMap.set(b.id, s);
+    this.dirty.cover = true;
     // what the town asked for counts as built once it's up
     if (p) z.town.done.built += s.cap;
   }
@@ -240,6 +241,7 @@ export class Economy {
   updateBuilding(id: number, patch: Partial<Pick<BuildingIn, 'kind' | 'capacity' | 'x' | 'z' | 'occupancy'>>, req?: number) {
     const b = this.buildingMap.get(id);
     if (!b) return;
+    this.dirty.cover = true;
     const was = b.cap;
     if (patch.x !== undefined) b.x = patch.x;
     if (patch.z !== undefined) b.z = patch.z;
@@ -266,6 +268,7 @@ export class Economy {
   // off the books, but left in its zone's list (a town clearing many at once filters that once)
   private forget(b: BState) {
     this.buildingMap.delete(b.id);
+    this.dirty.cover = true;
     if (b.densify) this.pending.delete(b.densify);
     b.densify = 0;
   }
@@ -359,6 +362,7 @@ export class Economy {
     let t0 = performance.now();
     if (this.dirty.times) { this.refreshTimes(); const t = performance.now(); this.timing.times += t - t0; t0 = t; }
     if (this.dirty.service) { this.refreshService(); const t = performance.now(); this.timing.service += t - t0; t0 = t; }
+    else if (this.dirty.cover) { this.refreshCover(); const t = performance.now(); this.timing.service += t - t0; t0 = t; }
     const hour = hourShape(((this.clock + this.time) / 60) % 24);
     for (const ind of this.indMap.values()) this.industryStep(ind, dt);
     for (const t of this.townMap.values()) {
@@ -545,15 +549,23 @@ export class Economy {
     const p = this.timing.parts, t0 = performance.now();
     this.skim = new Skim(paxStops, this.lineList, this.tune);
     this.reviewWork += this.skim.work;
-    const t1 = performance.now();
+    p.skim += performance.now() - t0;
+    this.dirty.service = false;
+    this.refreshCover(trips);
+  }
+
+  // The buildings changed (or the service did): who is near which stop, zone-pair times and the
+  // trip tables. The skim stays as it is.
+  private refreshCover(trips = true) {
+    const p = this.timing.parts, t1 = performance.now();
     this.cover();
     const t2 = performance.now();
     this.pairs = new Pairs(this.zoneList, this.skim, this.oracles, this.tune, this.pairCache);
     this.reviewWork += this.pairs.work;
     const t3 = performance.now();
     if (trips) this.trips();
-    p.skim += t1 - t0; p.cover += t2 - t1; p.pairs += t3 - t2; p.trips += performance.now() - t3;
-    this.dirty.service = false;
+    p.cover += t2 - t1; p.pairs += t3 - t2; p.trips += performance.now() - t3;
+    this.dirty.cover = false;
   }
 
   private cover() {
@@ -849,8 +861,8 @@ export class Economy {
       work, shop, leisure, workSupply: za.work, shopSupply: za.shop, pendingCap,
       add: (z, kind, cleared) => this.requestAdd(z, kind, cleared),
       densify: (b, kind) => this.requestDensify(b, kind),
-      abandon: (b) => { b.abandoned = true; b.since = this.month; b.occ = 0; b.shown = 1; b.zone.town.done.lost += b.cap; this.actions.push({ t: 'abandon', building: b.id }); },
-      restore: (b) => { b.abandoned = false; b.occ = T.newOccupancy; b.shown = Math.round((1 - b.occ) * 100) / 100; b.zone.town.done.built += b.cap; this.actions.push({ t: 'restore', building: b.id }); },
+      abandon: (b) => { this.dirty.cover = true; b.abandoned = true; b.since = this.month; b.occ = 0; b.shown = 1; b.zone.town.done.lost += b.cap; this.actions.push({ t: 'abandon', building: b.id }); },
+      restore: (b) => { this.dirty.cover = true; b.abandoned = false; b.occ = T.newOccupancy; b.shown = Math.round((1 - b.occ) * 100) / 100; b.zone.town.done.built += b.cap; this.actions.push({ t: 'restore', building: b.id }); },
       demolish: (b) => { this.forget(b); b.zone.cleared[b.use]++; this.actions.push({ t: 'demolish', building: b.id }); },
       vacate: (b, fraction) => { if (!assess) this.actions.push({ t: 'vacate', building: b.id, fraction }); },
       service: (t) => this.svc.get(t) ?? { stops: 0, lines: 0 },
@@ -867,7 +879,9 @@ export class Economy {
     }
     const t2 = performance.now();
     this.timing.parts.towns += t2 - t1;
-    // the month's changes feed next month's trips
+    // the month's changes feed next month's trips, from the catchments of the towns as they now
+    // stand (as a game loaded now would rebuild them), so what went up counts at once
+    if (this.dirty.cover) this.refreshCover(false);
     this.trips();
     this.timing.parts.trips += performance.now() - t2;
   }

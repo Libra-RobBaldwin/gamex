@@ -118,8 +118,9 @@ everything".
 how full they are, each town's memory (what it's been fed, its hysteresis counters),
 industries' production, and the loads on your lines and stops. The game owns the geometry.
 Catchments, the transit skim, zone-pair times, reach and trip tables are derived, rebuilt at
-each monthly review or when service changes. Only the authority is saved (`save()` and
-`Economy.load()`).
+each monthly review or when service changes; catchments, zone pairs and trips are rebuilt too
+when buildings change (the review's own changes included, so what goes up at a review counts
+at once). Only the authority is saved (`save()` and `Economy.load()`), with the time of day.
 
 **Time.** It never runs per frame. `advance(gameMinutes)` steps it an hour at a time and
 reviews every town once a "month" (`tune.monthDays`, default 30). Rates are per hour and
