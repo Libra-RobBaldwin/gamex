@@ -6,7 +6,7 @@ import { DEFAULT_OPTS, Network, rng, type P } from './roads';
 import { design, landFits, legsAt, type Form, type Junction } from './junction';
 import { Traffic, type Places } from './traffic';
 import { laneSpan } from './xsection';
-import { motorwayWithJunction, type IxForm } from './interchange/build';
+import { motorwayWithJunction, type IxForm, type SlipStyle } from './interchange/build';
 
 const as = (type: string) => ({ ...DEFAULT_OPTS, type });
 const geo = (n: Network, node: number) => ({ fits: (polys: Parameters<typeof landFits>[2]) => landFits(n, node, polys) });
@@ -153,11 +153,11 @@ export const SCENARIOS: Scenario[] = [
   },
   // motorway junctions (interchange/build.ts): a pair of one-way carriageways, slip roads leaving and
   // joining them, and the local road they meet; trips run on and off the motorway at both ends
-  ...(['dumbbell', 'gsr', 'diamond'] as IxForm[]).map((form): Scenario => ({
-    name: `motorway junction: ${form}`, cars: 170, minTrips: 60, forms: undefined, through: true,
+  ...([['dumbbell', 'taper'], ['gsr', 'taper'], ['diamond', 'taper'], ['dumbbell', 'parallel']] as [IxForm, SlipStyle][]).map(([form, style]): Scenario => ({
+    name: `motorway junction: ${form}${style === 'parallel' ? ', parallel slip lanes' : ''}`, cars: 170, minTrips: 60, forms: undefined, through: true,
     build: (n) => {
       n.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
-      const r = motorwayWithJunction(n, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...n.segs.values()][0]);
+      const r = motorwayWithJunction(n, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...n.segs.values()][0], 0, style);
       if (!r.ok) throw new Error(r.reason);
       return { prefer: r.ix.prefer };
     },

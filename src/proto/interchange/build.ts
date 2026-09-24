@@ -30,7 +30,8 @@ export interface Interchange {
   nodes: number[]; // its junctions: the slip roads' merges and diverges, the roundabouts or give-ways
   segs: number[]; // the roads it built (slip roads, the bridge, the ring)
   prefer: Record<number, Form>; // the form each of its junctions has to take
-  slips: { seg: number; kind: 'merge' | 'diverge'; taper: number; nose: number }[];
+  slips: { seg: number; kind: 'merge' | 'diverge'; taper: number; nose: number; aux: number }[];
+  style: SlipStyle;
 }
 
 type V = { x: number; z: number };
@@ -104,7 +105,9 @@ function carriagewayAt(net: Network, p: P, w: V, type: string): RSeg | null {
 // Where a junction goes: the motorway's line (its middle, the way it was drawn), how far along it
 // the junction's centre is, and the local road it serves (an existing road crossing the line
 // there, or `road` null: a road of `roadType` to come, the junction's own link runs square across).
-export interface Site { mw: P[]; type: string; s: number; road: RSeg | null; roadType?: string }
+// style: taper merges and diverges, or (parallel) slip roads with an auxiliary lane alongside (STD.parallel)
+export type SlipStyle = 'taper' | 'parallel';
+export interface Site { mw: P[]; type: string; s: number; road: RSeg | null; roadType?: string; style?: SlipStyle }
 type Fail = { ok: false; reason: string };
 
 // The junction's layout: its centre and the motorway's direction there, the local road's
@@ -186,7 +189,7 @@ function buildTwo(net: Network, form: IxForm, site: Site, lay: Lay, [n1, n2]: [n
   }
   // (a roundabout's ring has its land clear: anything standing on it is bought and cleared)
   if (ring) for (const n of [n1, n2]) { const c = net.node(n); net.lots = net.lots.filter((l) => Math.hypot(l.x - c.x, l.z - c.z) > radius + 3 + Math.hypot(l.w, l.d) / 2); }
-  return { ok: true, ix: { id, form, at: X, type: site.type, nodes, segs, prefer, slips } };
+  return { ok: true, ix: { id, form, at: X, type: site.type, nodes, segs, prefer, slips, style: site.style ?? 'taper' } };
 }
 
 // A side's slip roads: the off-slip from its diverge to `offTo`, the on-slip from `onFrom` to its merge.
@@ -201,11 +204,13 @@ function slipRoads(net: Network, site: Site, sp: NonNullable<ReturnType<typeof s
   if (!mc) return { ok: false as const, reason: 'No carriageway where the slip road should join it' };
   const on = road(net, onFrom, { ...sp.on[sp.on.length - 1], seg: mc.id }, { ...DEFAULT_OPTS, type: 'slip', oneway: true, path: sp.on }, 'The on-slip');
   if (!on.ok) return on;
+  // (a slip road with an auxiliary lane says so: the merge or diverge lays it out from that)
+  if (sp.aux) for (const id of [off.segs[0], on.segs[on.segs.length - 1]]) { const sg = net.segs.get(id); if (sg) sg.aux = sp.aux; }
   const nodes: number[] = [];
   const dn = net.nearestNode(sp.off[0], 0.6), mn = net.nearestNode(sp.on[sp.on.length - 1], 0.6);
   if (dn) nodes.push(dn.id);
   if (mn) nodes.push(mn.id);
-  const slips: Interchange['slips'] = [{ seg: off.segs[0], kind: 'diverge', taper: sp.dv.taper, nose: sp.dv.nose }, { seg: on.segs[on.segs.length - 1], kind: 'merge', taper: sp.mg.taper, nose: sp.mg.nose }];
+  const slips: Interchange['slips'] = [{ seg: off.segs[0], kind: 'diverge', taper: sp.dv.taper - sp.aux, nose: sp.dv.nose, aux: sp.aux }, { seg: on.segs[on.segs.length - 1], kind: 'merge', taper: sp.mg.taper - sp.aux, nose: sp.mg.nose, aux: sp.aux }];
   return { ok: true as const, segs: [...off.segs, ...on.segs], nodes, slips };
 }
 
@@ -231,6 +236,8 @@ function slipPaths(site: Site, side: 1 | -1, R: P, radius: number, X: P, ring?: 
   // (the nose starts where the kerbs have parted by its tip, a little short of the point the slip road
   // is laid alongside from: laid a few metres longer, so the nose the junction finds meets the standard)
   const dv = { ...dv0, nose: dv0.nose + 5 }, mg = { ...mg0, nose: mg0.nose + 5 };
+  const par = site.style === 'parallel' ? STD.parallel(Dc.mph) : null, aux = par?.length ?? 0;
+  if (par) { dv.taper = par.taper + aux; mg.taper = par.taper + aux; } // (how far along the carriageway each reaches)
   for (const k of [1.1, 1.4, 1.8, 2.3]) {
     // the diverge: its node where the lanes part (td), the nose beyond, alongside, then round to the road
     const spanOff = Math.max(40, k * (lateral(Qoff) - eN)), td = along(Qoff) - spanOff - dv.nose - run;
@@ -239,7 +246,7 @@ function slipPaths(site: Site, side: 1 | -1, R: P, radius: number, X: P, ring?: 
     const spanOn = Math.max(40, k * (lateral(Qon) - eN)), tm = along(Qon) + spanOn + mg.nose + run;
     const on = [{ x: onFrom.x, z: onFrom.z }, ...curve(Qon, hOn, F(tm - mg.nose - run, eN), w), F(tm - mg.nose, eN), F(tm, 0)];
     if (minRadius(off.slice(1, -1)) >= S.minR && minRadius(on.slice(1, -1)) >= S.minR && outside(off, offTo) && outside(on, onFrom))
-      return { off, on, w, side, reach: [td - dv.taper - 20, tm + mg.taper + 20] as [number, number], dv, mg };
+      return { off, on, w, side, reach: [td - dv.taper - 20, tm + mg.taper + 20] as [number, number], dv, mg, aux };
   }
   return null;
 }
@@ -284,19 +291,19 @@ function buildGSR(net: Network, site: Site, lay: Lay, [rn1, rn2]: [number, numbe
     segs.push(...r.segs); nodes.push(...r.nodes); slips.push(...r.slips);
   }
   for (const r of around) { nodes.push(r.node); prefer[r.node] = 'priority'; }
-  return { ok: true, ix: { id, form: 'gsr', at: X, type: site.type, nodes, segs, prefer, slips } };
+  return { ok: true, ix: { id, form: 'gsr', at: X, type: site.type, nodes, segs, prefer, slips, style: site.style ?? 'taper' } };
 }
 
 // A new motorway drawn across a road, with a junction where it crosses: the local road is cut at
 // the junction's nodes, the pair of carriageways built through the gap, then the junction's pieces.
 // (Try it on scratch(net) first, for a blueprint that says what it costs and why it can't be built.)
-export function motorwayWithJunction(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id = 0) {
-  return allOrNothing(net, (n) => motorwayWithJunctionOn(n, form, mw, type, n.segs.get(road.id)!, id));
+export function motorwayWithJunction(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id = 0, style: SlipStyle = 'taper') {
+  return allOrNothing(net, (n) => motorwayWithJunctionOn(n, form, mw, type, n.segs.get(road.id)!, id, style));
 }
-function motorwayWithJunctionOn(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id = 0) {
+function motorwayWithJunctionOn(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id: number, style: SlipStyle) {
   const X = crossingOf(mw, net.path(road));
   if (!X) return { ok: false as const, reason: 'The motorway doesn’t cross that road' };
-  const site: Site = { mw, type, s: X.s, road };
+  const site: Site = { mw, type, s: X.s, road, style };
   const lay = layout(net, form, site);
   if (lay.sin < 0.6) return { ok: false as const, reason: 'The road crosses the motorway at too shallow an angle for a junction' };
   const ln = localNodes(net, site, lay.R1, lay.R2);

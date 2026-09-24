@@ -62,16 +62,17 @@ export function slipShape(net: Network, node: number, r: SlipRoles): Shape | nul
   const q0 = pointAt(sp, mouth), dir = merge ? -1 : 1; // (the slip road's travel along sp)
   const start: P = { x: q0.x + q0.uz * dir * s0, z: q0.z - q0.ux * dir * s0, y };
   const pn = proj(start), rhoN = pn.rho, eN = pn.lat;
-  const std = merge ? STD.merge(M.mph) : STD.diverge(M.mph), T = std.taper;
+  // a taper, or (a slip road with an auxiliary lane) a stretch alongside at full width, then a short taper
+  const P = sl.seg.aux ?? 0, T = P > 0 ? STD.parallel(M.mph).taper : (merge ? STD.merge(M.mph) : STD.diverge(M.mph)).taper, TP = T + P;
   // (the nose on the far side of the node from the taper, and both on the carriageway)
-  if (merge ? rhoN > -10 || -rhoN > Lin - 10 || T > Lout - 10 : rhoN < 10 || rhoN > Lout - 10 || T > Lin - 10) return null;
-  // where the slip lane's centre is, along the carriageway
-  // (the taper is straight, as CD 122 draws it; the lane eases across the nose)
+  if (merge ? rhoN > -10 || -rhoN > Lin - 10 || TP > Lout - 10 : rhoN < 10 || rhoN > Lout - 10 || TP > Lin - 10) return null;
+  // where the slip lane's centre is, along the carriageway (the taper is straight, as CD 122 draws it;
+  // the lane eases across the nose)
   const lin = (x: number) => Math.max(0, Math.min(1, x));
   const e = (rho: number) => merge
-    ? (rho < 0 ? eN + (ec - eN) * smooth((rho - rhoN) / -rhoN) : ec + (lane0 - ec) * lin(rho / T))
-    : (rho < 0 ? lane0 + (ec - lane0) * lin((rho + T) / T) : ec + (eN - ec) * smooth(rho / rhoN));
-  const [r0, r1] = merge ? [rhoN, T] : [-T, rhoN];
+    ? (rho < 0 ? eN + (ec - eN) * smooth((rho - rhoN) / -rhoN) : ec + (lane0 - ec) * lin((rho - P) / T))
+    : (rho < 0 ? lane0 + (ec - lane0) * lin((rho + TP) / T) : ec + (eN - ec) * smooth(rho / rhoN));
+  const [r0, r1] = merge ? [rhoN, TP] : [-TP, rhoN];
   const at: number[] = [];
   for (let rho = r0; rho < r1 - 0.5; rho += 2) at.push(rho);
   at.push(r1);
@@ -90,7 +91,7 @@ export function slipShape(net: Network, node: number, r: SlipRoles): Shape | nul
   // the markings
   const line = (r0: number, r1: number, off: (rho: number) => number) => { const pts: XZ[] = []; for (let rho = r0; rho < r1; rho += 2) pts.push(frame(rho, off(rho))); pts.push(frame(r1, off(r1))); return pts; };
   const W = M.mph >= 60 ? 0.15 : 0.1, edge = 0.1;
-  const [nose0, nose1] = merge ? [rhoN, 0] : [0, rhoN], [tap0, tap1] = merge ? [0, T] : [-T, 0];
+  const [nose0, nose1] = merge ? [rhoN, 0] : [0, rhoN], [tap0, tap1] = merge ? [0, TP] : [-TP, 0];
   const H = STD.hatch(M.mph), hatch: XZ[][] = [];
   const inner = (rho: number) => e(rho) - wS / 2;
   for (let c = nose0 + H.spacing / 2; c < nose1; c += H.spacing) {

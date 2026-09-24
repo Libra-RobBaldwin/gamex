@@ -26,7 +26,7 @@ import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
 import { starterStops } from './game/crowdsites';
-import { motorwayWithJunction, type Interchange, type IxForm } from './interchange/build'; // motorway junctions (docs/motorways.md)
+import { motorwayWithJunction, type Interchange, type IxForm, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -1425,13 +1425,13 @@ nav.onChange(() => {
   shell.syncView();
 });
 
-// A motorway junction on its own, to look at: /proto.html?junction=dumbbell (or gsr, diamond)
-function seedJunctionDemo(form: IxForm) {
-  const R = form === 'gsr' ? 780 : 510;
+// A motorway junction on its own, to look at: /proto.html?junction=dumbbell (or gsr, diamond; &slips=parallel)
+function seedJunctionDemo(form: IxForm, style: SlipStyle) {
+  const R = form === 'gsr' || style === 'parallel' ? 780 : 510;
   net.bound = Math.max(BOUND, R + 10); // (a grade-separated roundabout's slip roads reach past the town's edge)
   // (north of the lake)
   net.build({ x: -60, z: -510 }, { x: -60, z: 510 }, undefined, { ...DEFAULT_OPTS, type: 'dual' });
-  const r = motorwayWithJunction(net, form, [{ x: -R, z: 230 }, { x: R, z: 230 }], 'motorway', [...net.segs.values()][0], 1);
+  const r = motorwayWithJunction(net, form, [{ x: -R, z: 230 }, { x: R, z: 230 }], 'motorway', [...net.segs.values()][0], 1, style);
   if (r.ok) interchanges.push(r.ix); else console.warn(r.reason);
   commitRoads([...net.segs.keys()]);
   for (const l of queue.splice(0, Math.floor(queue.length * 0.8))) if (net.lotFree(l)) spawnLot(l, false);
@@ -1439,7 +1439,7 @@ function seedJunctionDemo(form: IxForm) {
 
 // ---------------- loop ----------------
 const demoJunction = new URLSearchParams(location.search).get('junction') as IxForm | null;
-if (demoJunction === 'dumbbell' || demoJunction === 'gsr' || demoJunction === 'diamond') seedJunctionDemo(demoJunction);
+if (demoJunction === 'dumbbell' || demoJunction === 'gsr' || demoJunction === 'diamond') seedJunctionDemo(demoJunction, new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper');
 else seedTown();
 starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
 rebuildRoads();

@@ -42,7 +42,7 @@ export type { HeightMode } from './grade';
 export interface RNode { id: number; x: number; z: number; y: number }
 // `mid` holds the interior points of a curved road, in order from a to b (empty when straight)
 // oneway: traffic only runs from a to b, on one carriageway (catalog.oneWay); a motorway is a pair of them
-export interface RSeg { id: number; a: number; b: number; mid: P[]; type: RoadType; stops: Stop[]; bridges?: SegBridge[]; oneway?: boolean } // bridges: game/bridges.ts
+export interface RSeg { id: number; a: number; b: number; mid: P[]; type: RoadType; stops: Stop[]; bridges?: SegBridge[]; oneway?: boolean; aux?: number } // bridges: game/bridges.ts; aux: a slip road's auxiliary lane (interchange/slips.ts)
 export type LotKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower' | 'industry' | 'civic';
 // `row` identifies the run of plots along one side of one street, so neighbours can share a style
 // The building sits at (x, z) facing the road; its plot (parcel) runs from the back of the pavement
@@ -339,6 +339,7 @@ export class Network {
     const sb = this.addSeg(n, s.b, subPath(path, c.s, L).slice(1, -1), s.type, keepB, !!s.oneway);
     // bridges (and the player's choice of type) go with whichever half they're on
     for (const [id, from, to] of [[sa, 0, c.s], [sb, c.s, L]]) { const x = this.segs.get(id); if (x && s.bridges) x.bridges = clipBridges(s.bridges, from, to); }
+    for (const id of [sa, sb]) { const x = this.segs.get(id); if (x && s.aux) x.aux = s.aux; }
     return n;
   }
 

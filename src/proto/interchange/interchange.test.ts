@@ -4,7 +4,7 @@ import { design, landFits, legsAt, type Junction } from '../junction';
 import { laneBase } from '../catalog';
 import { STD } from '../standards';
 import { simulate, type Scenario } from '../trafficsim';
-import { IX_FORMS, motorwayWithJunction } from './build';
+import { IX_FORMS, motorwayWithJunction, type SlipStyle } from './build';
 import * as THREE from 'three';
 import { SURFACES, drawRoads } from '../roaddraw';
 import { TriIndex, checkWindow, trisOf, type Defect, type Mat } from '../drawcheck';
@@ -15,10 +15,10 @@ g0.document ??= { createElement: () => ({ getContext: () => new Proxy({}, { get:
 const geo = (net: Network, node: number) => ({ fits: (p: P[][]) => landFits(net, node, p) });
 const as = (type: string, oneway = false) => ({ ...DEFAULT_OPTS, type, oneway });
 
-function junctionTown(form: (typeof IX_FORMS)[number]) {
+function junctionTown(form: (typeof IX_FORMS)[number], style: SlipStyle = 'taper') {
   const net = new Network(() => false, 900);
   net.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
-  const r = motorwayWithJunction(net, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...net.segs.values()][0]);
+  const r = motorwayWithJunction(net, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...net.segs.values()][0], 0, style);
   if (!r.ok) throw new Error(r.reason);
   const js = new Map<number, Junction>();
   for (const n of net.nodes.values()) if (legsAt(net, n.id).length >= 3) { const j = design(net, n.id, geo(net, n.id), undefined, r.ix.prefer[n.id] ? { form: r.ix.prefer[n.id] } : undefined); if (j) js.set(n.id, j); }
@@ -26,8 +26,8 @@ function junctionTown(form: (typeof IX_FORMS)[number]) {
 }
 
 describe('motorway junctions', () => {
-  for (const form of IX_FORMS) it(`${form}: every slip road meets the carriageway as a merge or diverge, with DMRB tapers and noses`, () => {
-    const { net, ix, js } = junctionTown(form);
+  for (const [form, style] of [...IX_FORMS.map((f) => [f, 'taper'] as const), ['dumbbell', 'parallel'] as const]) it(`${form} (${style}): every slip road meets the carriageway as a merge or diverge, with DMRB tapers and noses`, () => {
+    const { net, ix, js } = junctionTown(form, style);
     const slips = [...js.values()].filter((j) => j.form === 'merge' || j.form === 'diverge');
     expect(slips.length).toBe(4);
     expect(slips.filter((j) => j.form === 'merge').length).toBe(2);
@@ -42,7 +42,10 @@ describe('motorway junctions', () => {
       // (for a merge the out road starts at the node: s runs on from it; a diverge's in road ends there)
       const tapering = off.filter((q) => q.e > lane0 + 0.005 && q.e < lane0 + M.lane - 0.005);
       const taper = Math.max(...tapering.map((q) => q.s)) - Math.min(...tapering.map((q) => q.s));
-      const std = merge ? STD.merge(M.mph) : STD.diverge(M.mph);
+      const par = style === 'parallel' ? STD.parallel(M.mph) : null;
+      const std = { ...(merge ? STD.merge(M.mph) : STD.diverge(M.mph)), ...(par ? { taper: par.taper } : {}) };
+      // (with an auxiliary lane, it runs alongside at full width for the standard's length first)
+      if (par) { const full = off.filter((q) => Math.abs(q.e - (lane0 + M.lane)) < 0.005); expect(Math.max(...full.map((q) => q.s)) - Math.min(...full.map((q) => q.s))).toBeGreaterThanOrEqual(par.length - 4.01); }
       expect(taper, `${j.form} taper`).toBeGreaterThanOrEqual(std.taper - 4.01); // (its course is sampled every 2 m)
       // the nose: from where the slip road's own drawing stops (its kerb clear of the carriageway's) to
       // the node, where the lanes touch (measured along the carriageway on the nose's side of the node)
@@ -50,7 +53,7 @@ describe('motorway junctions', () => {
       const other = net.segs.get(j.major[merge ? 0 : 1])!, op = net.path(other);
       const m = closestOnPath(pointAt(net.pathFrom(slipSeg, j.node), mouth), op);
       expect(merge ? net.length(other) - m.s : m.s, `${j.form} nose`).toBeGreaterThanOrEqual(std.nose);
-      expect(sl.len!).toBeGreaterThanOrEqual(std.taper + std.nose - 1);
+      expect(sl.len!).toBeGreaterThanOrEqual(std.taper + std.nose + (par?.length ?? 0) - 1);
       // it starts (or ends) in the nearside lane itself, and never crosses to the offside of it
       const ends = merge ? off[off.length - 1] : off[0];
       expect(Math.abs(ends.e - lane0)).toBeLessThan(0.05);

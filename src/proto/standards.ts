@@ -44,6 +44,10 @@ export const STD = {
   // (CD 122 gives 120 kph: a 1:40 merge taper over a 3.65 m lane; the diverge is quicker.)
   merge(mph: number) { return mph >= 70 ? { taper: 150, nose: 100 } : mph >= 60 ? { taper: 125, nose: 85 } : mph >= 50 ? { taper: 100, nose: 70 } : { taper: 75, nose: 55 }; },
   diverge(mph: number) { return mph >= 70 ? { taper: 150, nose: 80 } : mph >= 60 ? { taper: 125, nose: 70 } : mph >= 50 ? { taper: 100, nose: 55 } : { taper: 75, nose: 45 }; },
+  // The parallel layout (CD 122 layout B, what a busy junction gets): the slip road's lane is a whole
+  // extra lane, an auxiliary lane, alongside the nearside lane for `length` before the nose (a
+  // diverge) or after it (a merge), with a short `taper` at its far end.
+  parallel(mph: number) { return mph >= 70 ? { length: 200, taper: 90 } : mph >= 60 ? { length: 170, taper: 80 } : mph >= 50 ? { length: 140, taper: 70 } : { length: 110, taper: 60 } },
   // the width of the hatched nose where the slip road's kerb and the carriageway's part
   noseTip: 1.2,
 };
