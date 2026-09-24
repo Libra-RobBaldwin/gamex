@@ -150,8 +150,13 @@ rw.sim.log                                    // every call: { train, line, stat
   - There's one line per route.
   - It was tried on seeds 1, 2, 3, 7 and 42 of `claude/work-region`'s generator: 4 stations and
     2 lines each, 6.7–8.3 km of track, trains calling and no reds.
-  - Lay the railway before the roads, with `cross: 'bridge'`. B roads laid across it afterwards
-    get level crossings where the rules allow.
+  - **In the game:** `seedTown()` lays it on a generated map before the streets. Streets built
+    afterwards cross it on the level where the rules allow, or bridge it. They're refused through
+    its stations (a rule for every road now). Each station slides along its straight to find
+    clear ground.
+  - On seed 7 (the default region) that gives 4 stations, 2 lines, 3 trains and 7 level crossings,
+    with no console errors. The region is still marked "Coming soon" in the menu (`maps.ts`, the
+    region session's to flip).
 
 ## Tests
 
@@ -193,6 +198,20 @@ rw.sim.log                                    // every call: { train, line, stat
 - The static parts of every station are merged into one mesh per material. Signal lamps, barrier
   arms and crossing lights are instanced and updated in place, and only when they change.
 
+## The interim M4 on the integration branch
+
+- **What happened:** the bus-loop session built its own M4 at the same time: stations in
+  `game/rail.ts`, trains kept apart in `traffic.ts`, and the line tool taking stations. Its commit
+  says it was a stand-in until R3.
+- **How the merge resolves it:** the game now uses this railway. Build > Stops > Railway station,
+  Transport > Railway, and taps on trains and stations all come here.
+- **What's left of the interim code:** its library code is still there and tested
+  (`game/trains.test.ts`). Its functions in `main.ts` are still wired in but can't be reached from
+  the HUD. It can be deleted, or its line-tool change (a line of stations in the same tool as bus
+  lines) moved over to `Railway`: `lines.isStation(id)` → `railway.stationAt`/`station(id)`, and
+  `lines.add` → `railway.addLine`.
+- **The e2e:** `e2e/rail.e2e.mjs` is this branch's.
+
 ## The adversarial review, and what it changed
 
 A separate review tried to break the railway, and found six bugs. All are fixed, with a test
@@ -222,5 +241,3 @@ station deleted its line and trains (now they wait until the track is back).
   steps across at the terminus.
 - There's no freight, and no timetables beyond "call at each station in turn".
 - A station can't be moved or resized, only demolished and rebuilt.
-- The region map calls `layRegionRail` once the region session's loader wants it; that's not
-  wired in here (`src/proto/region/` belongs to that session).

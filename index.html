@@ -8,10 +8,14 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>Untitled · a transport game</title>
+    <!-- the start menu's colours before any script runs, so the first frame is the brand, not white -->
+    <style>html,body{margin:0;height:100%;background:#0f3322;color:#f2f5ef}body[data-app="menu"] #c,body[data-app="menu"] #ui{display:none}</style>
   </head>
-  <body data-mode="look">
+  <body data-mode="look" data-app="menu">
+    <div id="app"></div>
     <canvas id="c"></canvas>
     <div id="ui"></div>
-    <script type="module" src="/src/proto/main.ts"></script>
+    <!-- the start menu (src/app); it loads the 3D game (src/proto/main.ts) only when a map is picked -->
+    <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>

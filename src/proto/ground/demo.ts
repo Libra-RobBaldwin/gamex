@@ -6,7 +6,7 @@ import '../ui/fonts';
 import { markSvg } from '../ui/brand';
 import { bandPolys, circlePoly } from '../land';
 import { CROP, type CropName } from './covers';
-import { Ground, setGroundQuality, type GroundInput, type GroundQuality, type XZ } from './index';
+import { Ground, setGroundQuality, type Covers, type GroundInput, type GroundQuality, type XZ } from './index';
 import { rng, worldNoise } from './noise';
 import { NavRig, SunFollow } from '../kit/camera';
 
@@ -173,7 +173,7 @@ function townEdge(): Built {
 }
 
 function hills(): Built {
-  const ground = new Ground({ hedges: false });
+  const ground = new Ground({ terrain: true });
   const H = (x: number, z: number) => {
     const n = worldNoise(x, z, 420, 3) * 0.6 + worldNoise(x, z, 160, 4) * 0.3 + worldNoise(x, z, 60, 5) * 0.1;
     const ridge = Math.max(0, 1 - Math.hypot(x - 80, z + 60) / 520);
@@ -197,23 +197,20 @@ function hills(): Built {
 }
 
 function gallery(): Built {
-  const ground = new Ground({ region: { x0: -150, z0: -150, size: 300 }, seed: 1, hedges: false });
+  const ground = new Ground({ region: { x0: -150, z0: -150, size: 300 }, seed: 1, hedges: false, terrain: true });
   const S = 56, G = 12, cols = 4;
-  type Sw = { t: string; a?: number[]; b?: number[]; crop?: CropName; y?: number; tilt?: boolean };
+  type Sw = { t: string; c?: Covers; y?: number; tilt?: boolean };
+  const F = (crop: CropName) => ({ field: 1, crop: CROP[crop], dir: 0.4 });
   const sw: Sw[] = [
-    { t: 'Pasture' }, { t: 'Rough grass', b: [0, 0, 255, 0] }, { t: 'Lawn', a: [255, 0, 0, 0] }, { t: 'Lawn, mown stripes', a: [255, 0, 0, 0], crop: 'stripes' },
-    { t: 'Wet grass', b: [0, 0, 0, 255] }, { t: 'Woodland floor', a: [0, 0, 255, 0] }, { t: 'Bare earth', a: [0, 0, 0, 255] }, { t: 'Grass field', a: [0, 255, 0, 0], crop: 'grass' },
-    { t: 'Wheat', a: [0, 255, 0, 0], crop: 'wheat' }, { t: 'Barley', a: [0, 255, 0, 0], crop: 'barley' }, { t: 'Ploughed', a: [0, 255, 0, 0], crop: 'plough' }, { t: 'Oilseed rape', a: [0, 255, 0, 0], crop: 'rape' },
-    { t: 'Ley', a: [0, 255, 0, 0], crop: 'ley' }, { t: 'Stubble', a: [0, 255, 0, 0], crop: 'stubble' }, { t: 'Rock and scree (steep)', tilt: true }, { t: 'Heather moor (high)', y: 110 },
+    { t: 'Pasture' }, { t: 'Rough grass', c: { rough: 1 } }, { t: 'Lawn', c: { lawn: 1 } }, { t: 'Lawn, mown stripes', c: { lawn: 1, crop: CROP.stripes, dir: 0.4 } },
+    { t: 'Wet grass', c: { wet: 1 } }, { t: 'Woodland floor', c: { wood: 1 } }, { t: 'Bare earth', c: { bare: 1 } }, { t: 'Grass field', c: F('grass') },
+    { t: 'Wheat', c: F('wheat') }, { t: 'Barley', c: F('barley') }, { t: 'Ploughed', c: F('plough') }, { t: 'Oilseed rape', c: F('rape') },
+    { t: 'Ley', c: F('ley') }, { t: 'Stubble', c: F('stubble') }, { t: 'Rock and scree (steep)', tilt: true }, { t: 'Heather moor (high)', y: 110 },
   ];
   const x0 = -((S + G) * cols - G) / 2, at = (i: number) => ({ x: x0 + (i % cols) * (S + G), z: x0 + Math.floor(i / cols) * (S + G) });
-  ground.paintWith((x, z, out) => {
+  ground.paintWith((x, z) => {
     const i = sw.findIndex((_, k) => { const p = at(k); return x >= p.x && x < p.x + S && z >= p.z && z < p.z + S; });
-    if (i < 0) return;
-    const s = sw[i];
-    if (s.a) out.set(s.a, 0);
-    if (s.b) out.set(s.b, 4);
-    if (s.crop) { out[4] = CROP[s.crop] * 32 + 16; out[5] = 40; }
+    return i < 0 ? null : sw[i].c ?? null;
   });
   const group = new THREE.Group(), labels: Built['labels'] = [];
   const grounds = [plane(700)];
@@ -323,5 +320,33 @@ setQuality('high');
 setDusk(false);
 resize();
 requestAnimationFrame(frame);
+// Cost per pixel: the ground filling the whole screen with nothing else drawn, old grass against
+// the new ground at each quality (ms per frame, waiting for the GPU each time). Ratios carry over
+// to a phone better than the absolute times from a software renderer do.
+function pixelCost(frames = 20) {
+  const gl = renderer.getContext(), px = new Uint8Array(4), s2 = new THREE.Scene();
+  s2.add(hemi.clone(), sun.clone());
+  const g = new THREE.PlaneGeometry(8000, 8000).rotateX(-Math.PI / 2);
+  const uv = g.getAttribute('uv') as THREE.BufferAttribute, pos = g.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / 22.5, pos.getZ(i) / 22.5);
+  const m = new THREE.Mesh(g);
+  m.position.set(view.x, view.y ?? 0, view.z); // (at the height the camera looks at)
+  s2.add(m);
+  const time = (mat: THREE.Material) => {
+    m.material = mat;
+    for (let i = 0; i < 3; i++) renderer.render(s2, cam);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const t = performance.now();
+    for (let i = 0; i < frames; i++) { renderer.render(s2, cam); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+    return (performance.now() - t) / frames;
+  };
+  const was = QS[qi], out: Record<string, number> = {};
+  out.old = time(oldMat);
+  for (const q of QS) { setGroundQuality(q); out[q] = time(cur!.ground.material); }
+  out.old2 = time(oldMat); // (again, to see the noise)
+  setGroundQuality(was);
+  g.dispose();
+  return out;
+}
 (window as unknown as { nav: NavRig }).nav = nav;
-(window as unknown as { groundDemo: unknown }).groundDemo = { setScene, setQuality, setDusk, view, nav, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };
+(window as unknown as { groundDemo: unknown }).groundDemo = { pixelCost, setScene, setQuality, setDusk, view, nav, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };

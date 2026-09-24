@@ -31,7 +31,7 @@ const open = async (opts) => {
   const page = await browser.newPage(opts);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(BASE + '/');
+  await page.goto(BASE + '/?map=town'); // (a deep link: straight into the starter town, past the start menu)
   await page.waitForFunction('!!window.proto', null, { timeout: 60000 });
   await page.waitForTimeout(WAIT);
   // Software rendering takes a second or more a frame: around taps the page's frame loop is

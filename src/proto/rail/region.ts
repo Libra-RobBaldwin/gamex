@@ -162,9 +162,15 @@ export function layRegionRail(rw: Railway, plan: RegionRailPlan, o: { mainTrains
     const tracks = net.def(sg.seg).tracks;
     const L = sp.route === 'main' ? (sp.settlement.kind === 'city' ? 215 : 130) : 60;
     const side: 1 | -1 = (sp.settlement.x - sg.x) * sg.uz - (sp.settlement.z - sg.z) * sg.ux > 0 ? 1 : -1;
-    const res = rw.plan(sg.seg.id, sg.s, side, L);
-    const pl = res.plans.find((p) => p.ok && (tracks === 2 ? p.layout === 'side' : p.loop)) ?? res.plans.find((p) => p.ok);
-    if (!pl) { problems.push(`${sp.settlement.name}: ${res.reason ?? res.plans[0]?.blocked ?? 'no layout fits'}`); continue; }
+    // (sliding along the straight until a layout fits clear of everything else)
+    let pl: ReturnType<typeof rw.plan>['plans'][number] | undefined, why = '';
+    for (const d of [0, 40, -40, 80, -80, 120, -120]) {
+      const res = rw.plan(sg.seg.id, sg.s + d, side, L);
+      pl = res.plans.find((p) => p.ok && (tracks === 2 ? p.layout === 'side' : p.loop)) ?? res.plans.find((p) => p.ok);
+      if (pl) break;
+      why ||= res.reason ?? res.plans[0]?.blocked ?? 'no layout fits';
+    }
+    if (!pl) { problems.push(`${sp.settlement.name}: ${why}`); continue; }
     pl.station.name = `${sp.settlement.name}${sp.settlement.kind === 'city' ? ' Central' : ''}`;
     made.set(sp.settlement.id, rw.build(pl).station);
   }

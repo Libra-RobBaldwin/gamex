@@ -65,6 +65,25 @@ the screenshots, and frame time no worse than before the milestone at the same q
 - **M2 and M3 are done** (`game/econ.ts`, `game/money.ts`). Checked by `e2e/loop.e2e.mjs`: the
   town is steady at the start; a new line through the housing makes it grow within a few days;
   withdrawing every line makes it decline.
+- **M4 is done** (`game/rail.ts`, train lines in `traffic.ts`). Checked by `e2e/rail.e2e.mjs`
+  and `game/trains.test.ts`.
+  - The main line is raised on a 2.5% hump through town, so platforms follow an even gradient
+    on solid embankment. They're refused over the road and on the crest.
+  - Trains reverse at the ends of a line.
+  - Rail costs more than a new game starts with: two stations and a train come to £520,000.
+    It's what bus profits save up for.
+  - **Trains keep apart until there's signalling:**
+    - a train brakes to stand 25 m behind any train in its way on the same track, looking into
+      the next section too;
+    - it won't enter a single-track section another train is on;
+    - it only turns round when the other track beside it is clear;
+    - no train is placed on top of another.
+  - **Waiting on signalling:**
+    - Two trains facing each other on a single track stop short and wait.
+    - A train turning round mid-line steps across to the other track without a crossover.
+    - Both wait for R3's block signalling and passing loops in `docs/region.md`
+      (`claude/work-rail`, not started yet). This rule is meant to be replaced by it.
+  - Trains don't open their doors, and nobody queues on the platforms yet.
 - **What it took to make the library play in this town.** All of it is in `GAME_TUNE` in
   `game/econ.ts`, measured with Playwright sweeps:
   - A review every game day, so a day is the town's month. Money runs at the same pace: each

@@ -14,7 +14,7 @@ npm run build    # typecheck + production build to dist/
 ```
 
 ## Layout
-- `index.html` → `src/proto/main.ts`: the game (3D, three.js). Its HUD is `src/proto/ui/shell.ts` (see `docs/hud.md`).
+- `index.html` → `src/app/main.ts`: the start menu (New game, How to play, Settings, About) and the guided start. It loads the game, `src/proto/main.ts` (3D, three.js), only when a map is picked; `/?map=<id>` deep links go straight in. The maps are listed in `src/proto/maps.ts`. The game's HUD is `src/proto/ui/shell.ts` (see `docs/hud.md`).
 - `src/proto/`: the game's systems: roads, junctions, traffic, economy, and the libraries (bridges, industries, vehicles, people, water, ground, terrain).
 - `*-demo.html`: a page per library, for trying it on its own. `places.html` is Real Town Plans (`src/places`).
 - `proto.html`: redirects old links to the front page.

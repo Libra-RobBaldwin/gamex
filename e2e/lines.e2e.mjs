@@ -2,7 +2,7 @@
 // three-stop line, watch its buses call at those stops only and in order, tap a bus for its sheet.
 // node e2e/lines.e2e.mjs [url] [shots dir]
 import { chromium } from 'playwright-core';
-const url = process.argv[2] ?? 'http://localhost:5173/proto.html';
+const url = process.argv[2] ?? 'http://localhost:5173/?map=town';
 const out = process.argv[3] ?? '.';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });

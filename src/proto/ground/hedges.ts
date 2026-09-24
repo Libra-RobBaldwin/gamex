@@ -63,7 +63,10 @@ export class Hedges {
   }
   private make(g: THREE.BufferGeometry, m: THREE.Material, n: number) {
     const x = new THREE.InstancedMesh(g, m, n);
-    x.castShadow = x.receiveShadow = true;
+    // hedges take shadows but don't cast them: thousands of metres of hedge in the shadow map,
+    // redrawn every frame at the top quality tiers, cost more than the thin shadow is worth
+    x.receiveShadow = true;
+    x.castShadow = g === this.treeGeo;
     x.count = 0;
     x.frustumCulled = false; // (instances spread over the whole map)
     this.group.add(x);

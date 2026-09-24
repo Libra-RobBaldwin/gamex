@@ -579,6 +579,11 @@ export class Network {
     cost = Math.round(cost);
     // buildings in the way are compulsorily purchased and demolished
     const band = bandOf(path, half);
+    // a railway station's platforms and building can't be driven through (rail/station.ts claims them)
+    if (def.cls === 'road') for (let i = 0; i < band.length; i++) {
+      const y = Math.min(Math.abs(path[i].y ?? 0), Math.abs(path[i + 1]?.y ?? 0));
+      if (y < 6 && this.land.hits(band[i].poly, (c) => c.owner !== 'station').length) return res('A railway station is in the way');
+    }
     for (const l of this.lots) if (hitsBand(band, rectCorners(l.x, l.z, l.rot, l.w, l.d), l, Math.hypot(l.w, l.d) / 2)) clears.push(l);
     // don't allow a new road to run almost on top of an existing one at the same level
     for (const s of this.segs.values()) {

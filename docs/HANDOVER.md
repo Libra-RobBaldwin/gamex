@@ -1,6 +1,31 @@
 # Handover: where everything stands
 
-## Latest: the second account's wrap-up (24 Sep 2026, ~14:00 UTC)
+## Latest: the bus loop is playable (24 Sep 2026, evening)
+
+Session https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. **Read `docs/loop.md`
+("Status")** for what was built and what's open.
+- **Merged:**
+  - PR #17 (traffic), with the conflict resolved;
+  - the fix for traffic give-ups with the library's true body lengths (21 give-ups over six
+    seeds became 1);
+  - PR #25 (terminals and CI).
+- **Loop:** M1–M4 are done and live at https://gamex-nu.vercel.app/:
+  - bus lines;
+  - the economy running the town, with one town panel;
+  - money;
+  - railway stations and rail lines, with trains kept apart until there's signalling.
+- **Tests:** tsc is clean. vitest has 922 passing and 2 failing: the economy's "well-served town
+  grows" and the bridges timing test. Phone tests: `e2e/lines.e2e.mjs`, `e2e/loop.e2e.mjs`,
+  `e2e/rail.e2e.mjs`.
+- **Open decisions for the user:**
+  - The economy growth test. A distance-decay fix passes 61 of 62; the last test samples runaway
+    office growth mid-way.
+  - Closing the old library PRs #1–#8.
+  - Whether R3 (`claude/work-rail`) replaces the loop's interim train separation with blocks.
+- **Other sessions are merging into this branch too** (PRs #26–#28). Fetch and merge before
+  every push.
+
+## Earlier: the second account's wrap-up (24 Sep 2026, ~14:00 UTC)
 
 The account running the coordinating session (https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ)
 ran low on credit, so the next session carries on from here. **Read "Focus" below first:
