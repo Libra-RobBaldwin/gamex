@@ -27,10 +27,7 @@ export const PARTS: Record<Kind, { a: number; b: number; hw: number }[]> = {
 // road. An articulated body (an artic, a bendy bus) is its first rigid part plus a trailer that
 // swings round on the hitch behind it, the way the vehicle library's follow() drags one, rather
 // than lying along the course: so it cuts the corner as a real semi-trailer does.
-// A real vehicle's part sits on its wheels: its front and rear axles (ax, metres from the
-// reference point) are on the course and the body overhangs them, so a long rigid lorry or bus
-// swings its ends out on a tight corner rather than lying across it from end to end.
-export interface Part { a: number; b: number; hw: number; ax?: [number, number] }
+export interface Part { a: number; b: number; hw: number }
 // hitch: the hitch point, metres ahead of the first part's middle (negative: behind it); front:
 // the trailer's hitch ahead of the trailer's middle; axle: its axle group, from its middle
 export interface Trailer { hitch: number; front: number; axle: number; len: number; hw: number }
@@ -59,10 +56,10 @@ export function bodyOf(kind: Kind | number, at: (d: number) => { x: number; z: n
   // (read before `out` is written: prev is usually last frame's trailer in the same array)
   const px = prev?.x ?? 0, pz = prev?.z ?? 0, phx = prev?.hx ?? 0, phz = prev?.hz ?? 0;
   out.length = parts.length + (B?.trailer ? 1 : 0);
-  parts.forEach(({ a, b, hw, ax }, i) => {
-    const [f, e] = ax ?? [b, a], p = at(e), q = at(f), dx = q.x - p.x, dz = q.z - p.z, l = Math.hypot(dx, dz) || 1;
-    const r = (out[i] ??= { x: 0, z: 0, hx: 1, hz: 0, hl: 0, hw: 0 }), o = (a + b - e - f) / 2; // (the middle, from between the axles)
-    r.hx = dx / l; r.hz = dz / l; r.x = (p.x + q.x) / 2 + r.hx * o; r.z = (p.z + q.z) / 2 + r.hz * o; r.hl = ((b - a) / 2) * k; r.hw = hw * k;
+  parts.forEach(({ a, b, hw }, i) => {
+    const p = at(a), q = at(b), dx = q.x - p.x, dz = q.z - p.z, l = Math.hypot(dx, dz) || 1;
+    const r = (out[i] ??= { x: 0, z: 0, hx: 1, hz: 0, hl: 0, hw: 0 });
+    r.x = (p.x + q.x) / 2; r.z = (p.z + q.z) / 2; r.hx = dx / l; r.hz = dz / l; r.hl = ((b - a) / 2) * k; r.hw = hw * k;
   });
   const T = B?.trailer;
   if (T) {

@@ -3,11 +3,13 @@ import * as THREE from 'three';
 import './proto.css';
 import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
 import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
-import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, type RoadFilter } from './catalog';
+import { PRESETS, RAIL_PRESETS, filterRoads, type RoadFilter } from './catalog';
 import { GRADES } from './grade';
 import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
 import { GRADE_STEPS } from './grade';
 import { Traffic, rushLabel, type Places } from './traffic';
+import { MODEL, purchaseList, type Offer } from './vehicles';
+import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CIVIC, makeBuilding as generate, makeRegion, USE } from './buildgen';
 import { CELL, findRegions, type Region } from './infill';
@@ -689,17 +691,31 @@ shell.addTransportTab({
 shell.addTransportTab({
   id: 'buy', label: 'Buy vehicles', icon: 'bus', sub: 'Buses, trains and how busy the roads are',
   render: (el) => {
+    // the vehicle library's fleet for the game year (game/fleet.ts); buses and trains run now
+    const year = gameYear(), list = purchaseList(year), fleet = traffic.fleet;
+    const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+    const facts = (o: Offer) => `${o.capacity ? `${o.capacity} ${o.unit === 'pax' ? 'seats' : 't'} · ` : ''}${Math.round(o.speedKmh / 1.609)} mph · ${money(o.cost)} · ${money(o.running)} a year to run`;
+    const row = (o: Offer, attr: string, ic: Icon, off = false) => `<button ${attr}${off ? ' disabled' : ''}><b>${icon(ic)}${esc(o.name)}</b><small>${facts(o)}</small></button>`;
+    const trainKind = (o: Offer) => (o.kind === 'tram' ? 'tram' : MODEL[o.models[0]].style === 'rack-car' ? 'rack' : MODEL[o.models[0]].stats.power === 'electric' ? 'hs' : 'dmu');
+    const buses = list.filter((o) => o.kind === 'bus' || o.kind === 'coach'), trains = list.filter((o) => o.kind === 'train' || o.kind === 'tram');
+    const later = list.filter((o) => !buses.includes(o) && !trains.includes(o));
     el.innerHTML = `
-      <div class="grp"><span class="tab">Buses</span><small>Wander the roads and call at every stop on their side</small><button data-add="bus" class="act primary">${icon('plus')}<span>Add a bus</span></button></div>
-      <div class="grp"><span class="tab">Trains</span><small>Each runs only on track it can manage: rack, electric wires, gradient</small>
-        ${Object.values(TRAINS).map((t) => `<button data-train="${t.id}"><b>${icon(trainIcon(t.id))}${t.label}</b><small>${t.blurb}</small></button>`).join('')}</div>
+      <div class="grp"><span class="tab">Buses and coaches</span><small>In your company's colours with fleet numbers. They wander the roads and call at every stop on their side.</small>
+        ${buses.map((o) => row(o, `data-bus="${o.id}"`, 'bus')).join('')}</div>
+      <div class="grp"><span class="tab">Trains and trams</span><small>Each runs only on track it can manage: rack, electric wires, gradient</small>
+        ${trains.map((o) => row(o, `data-set="${o.id}"`, trainIcon(trainKind(o)))).join('')}</div>
+      <div class="grp"><span class="tab">Lorries, vans, boats and planes</span><small>On sale in ${year}; not in the game yet</small>
+        ${later.map((o) => row(o, '', o.kind === 'boat' ? 'droplet' : o.kind === 'plane' ? 'route' : 'building', true)).join('')}</div>
       <div class="grp"><span class="tab">Background traffic</span><small>Cars come from homes, jobs, shops and works, and follow the clock</small>
         <div class="row3" role="group" aria-label="How busy">${LEVELS.map(([n], i) => `<button data-lvl="${i}" class="${i === level ? 'on' : ''}" aria-pressed="${i === level}">${n === 'Traffic' ? 'Normal' : n}</button>`).join('')}</div></div>`;
-    el.querySelector('[data-add="bus"]')!.addEventListener('click', () => { traffic.addBus(); hint('Bus added', 'bus'); });
-    el.querySelectorAll<HTMLButtonElement>('[data-train]').forEach((b) => b.addEventListener('click', () => {
-      const t = TRAINS[b.dataset.train!];
-      const ok = traffic.addTrain(t.id);
-      hint(ok ? `${t.label} added` : `No track a ${t.label.toLowerCase()} can use${t.needsWires ? ' — it needs electrified line' : t.rack ? '' : ' — too steep, or rack only'}`, ok ? trainIcon(t.id) : 'alert');
+    el.querySelectorAll<HTMLButtonElement>('[data-bus]').forEach((b) => b.addEventListener('click', () => {
+      const o = buses.find((x) => x.id === b.dataset.bus)!, c = traffic.addBus(o.id);
+      hint(c ? `${o.name} added · fleet number ${c.dress?.fleetNo ?? ''}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert');
+    }));
+    el.querySelectorAll<HTMLButtonElement>('[data-set]').forEach((b) => b.addEventListener('click', () => {
+      const o = trains.find((x) => x.id === b.dataset.set)!, t = fleet.defFor(o);
+      const ok = traffic.addTrain(t);
+      hint(ok ? `${o.name} added` : `No track the ${o.name} can use${t.needsWires ? ' — it needs electrified line' : t.rack ? '' : ' — too steep, or rack only'}`, ok ? trainIcon(trainKind(o)) : 'alert');
     }));
     el.querySelectorAll<HTMLButtonElement>('[data-lvl]').forEach((b) => b.addEventListener('click', () => { level = +b.dataset.lvl!; shell.refreshTransport(); }));
   },
@@ -1488,6 +1504,8 @@ function frame(now: number) {
   const hour = (clock / 60) % 24;
   // At 1× traffic steps once a frame as it always has; faster, it's cut into steps of at most
   // 1/30 s so cars don't jump through each other or past their stop lines. Paused, it holds still.
+  // the vehicles' levels of detail, culling and lamps (game/fleet.ts): how big a metre is on screen, and the hour
+  traffic.fleet.frame(cam, renderer.domElement.clientHeight / view.h, hour);
   if (speed > 0) {
     const n = speed > 1 ? Math.ceil(gdt * 30 - 1e-9) : 1, step = gdt / n;
     simNow = Math.max(simNow, now - gdt * 1000); // so it's caught up with real time by the last step

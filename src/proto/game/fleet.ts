@@ -97,28 +97,22 @@ export interface Driven {
 }
 
 const up = (x: number, q: number) => Math.ceil(x / q - 1e-9) * q;
-const r2 = (x: number) => Math.round(x * 100) / 100;
 const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 // The body the traffic uses for a chain: its true length and width (rounded up a touch, so near
 // enough the same sizes share a body and its conflict tables), and for an artic or a bendy bus
 // the trailer on its hitch. The reference point is the middle of the whole vehicle.
 export function bodyFor(chain: Model[]): Body {
   const lead = chain[0], tr = chain[1];
-  // the front axle, and the middle of the rear ones (a tandem pair turns about its middle)
-  const axles = (m: Model, off: number): [number, number] => {
-    const a = m.dims.axles, rear = a.filter((x) => x < 0);
-    return [r2(Math.max(...a) + off), r2((rear.length ? mean(rear) : Math.min(...a)) + off)];
-  };
   if (!tr || lead.hitch?.rear === undefined || tr.hitch?.front === undefined) {
-    const L = up(lead.dims.length, +(globalThis as any).QL || 0.25), hw = up(lead.dims.width / 2, 0.05) - (+(globalThis as any).HWM || 0);
-    return { parts: [{ a: -L / 2, b: L / 2, hw, ax: axles(lead, 0) }], front: L / 2, back: L / 2, hw };
+    const L = up(lead.dims.length, 0.25), hw = up(lead.dims.width / 2, 0.05);
+    return { parts: [{ a: -L / 2, b: L / 2, hw }], front: L / 2, back: L / 2, hw };
   }
   const Lt = up(lead.dims.length, 0.05), Ltr = up(tr.dims.length, 0.05), hwt = up(lead.dims.width / 2, 0.05), hwr = up(tr.dims.width / 2, 0.05);
   const hitch = lead.hitch.rear, front = tr.hitch.front, axle = mean(tr.dims.axles);
   // nose and tail, lined up, from the tractor's middle
   const nose = Lt / 2, tail = hitch - front - Ltr / 2, mid = (nose + tail) / 2, half = (nose - tail) / 2;
   return {
-    parts: [{ a: -Lt / 2 - mid, b: Lt / 2 - mid, hw: hwt, ax: axles(lead, -mid) }], trailer: { hitch, front, axle, len: Ltr, hw: hwr },
+    parts: [{ a: -Lt / 2 - mid, b: Lt / 2 - mid, hw: hwt }], trailer: { hitch, front, axle, len: Ltr, hw: hwr },
     front: half, back: half, hw: Math.max(hwt, hwr),
   };
 }
