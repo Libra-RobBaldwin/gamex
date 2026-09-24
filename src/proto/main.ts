@@ -5,17 +5,17 @@ import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, 
 import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
 import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, type RoadFilter } from './catalog';
 import { GRADES } from './grade';
-import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
+import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, GRASS_MATS, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
 import { GRADE_STEPS } from './grade';
 import { Traffic, rushLabel, type Places } from './traffic';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CIVIC, makeBuilding as generate, makeRegion, USE } from './buildgen';
+import { CIVIC, grassMats, makeBuilding as generate, makeRegion, USE } from './buildgen';
 import { CELL, findRegions, type Region } from './infill';
 import { GameGround } from './ground/game';
-import { setGroundQuality } from './ground';
+import { patchGround, setGroundQuality } from './ground';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
-import { NAME, markSvg, needleSvg, ridgeSvg } from './ui/brand';
+import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -96,6 +96,9 @@ const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees,
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND * 2.6, BOUND * 2.6), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
+// Grass drawn on top of the ground (verges, roundabout islands, cutting slopes, gardens, parks)
+// takes the ground's own look: the painter already paints those places as lawn or rough grass.
+for (const m of [...GRASS_MATS, ...grassMats()]) { m.color.set('#ffffff'); patchGround(m, gameGround.ground.uniforms); }
 // the ground leaves out any cutting a road or railway runs down into (they mark the stencil first)
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
 scene.add(gameGround.ground.hedges);
@@ -410,77 +413,27 @@ const opts: RoadOpts = { ...DEFAULT_OPTS };
 const lastType = { road: 'street', rail: 'rail-main' };
 const HEIGHTS = [['auto', 'Auto', 'heightAuto'], ['level', 'Level', 'minus'], ['up', 'Climb', 'trendUp']] as const;
 const CROSS = [['junction', 'Join', 'arrowsCross'], ['bridge', 'Over', 'bridge'], ['tunnel', 'Under', 'tunnel']] as const;
+const KINDS = [['straight', 'Straight', 'line'], ['curve', 'Curve', 'curve'], ['smooth', 'Smooth', 'smooth']] as const;
 const cls = () => (mode === 'rail' ? 'rail' : 'road') as 'road' | 'rail';
-const short = (id: string) => ({ street: 'Street', avenue: 'Avenue', dual: 'Dual', motorway: 'Motorway', 'rail-branch': 'Branch', 'rail-main': 'Main line', 'rail-hs': 'High speed', 'rail-light': 'Light rail', 'rail-rack': 'Rack' } as Record<string, string>)[id] ?? ROADS[id].family;
-// an icon with a label only screen readers hear (for readouts where the icon says it all)
-const said = (ic: Icon, words: string) => `${icon(ic)}<span class="vh">${words}</span>`;
 
-// The HUD. Three layers: the header (name, clock, game speed) and camera buttons at the top, a
-// dock at the bottom (hint, blueprint, the build drawer, the tools), and a side panel for detail.
-$('#ui').innerHTML = `
-  <div id="topbar">
-    <header id="info">
-      ${ridgeSvg()}
-      <div class="bar">
-        <div class="brand">${markSvg()}<span class="wm">${NAME}</span></div>
-        <div id="speed" role="group" aria-label="Game speed">
-          <button data-sp="0" aria-label="Pause" title="Pause">${icon('pause')}</button>
-          <button data-sp="1" aria-label="1× speed" title="Normal speed">1×</button>
-          <button data-sp="2" aria-label="2× speed" title="Double speed">2×</button>
-          <button data-sp="4" aria-label="4× speed" title="Four times speed">4×</button>
-        </div>
-      </div>
-      <button id="stats" title="Show or hide the performance readout" aria-controls="perf">
-        <span class="st clk">${said('clock', 'time')}<b id="st-clock">07:00</b><em id="st-rush"></em></span>
-        <span class="st">${said('car', 'cars')}<b id="st-cars">0</b></span>
-        <span class="st">${said('bus', 'buses')}<b id="st-buses">0</b></span>
-        <span class="st">${said('train', 'trains')}<b id="st-trains">0</b></span>
-        <span class="st">${said('users', 'population')}<b id="st-pop">0</b></span>
-        <span class="st pf">${said('activity', 'performance')}</span>
-      </button>
-      <div id="perf" class="hidden" role="status"><span class="tab">Performance</span><span id="perf-t">measuring…</span></div>
-    </header>
-    <div id="card" class="panel hidden"></div>
-  </div>
-  <div id="side">
-    <button id="compass" aria-label="Reset north and tilt" title="Reset north and tilt"><span id="needle">${needleSvg()}</span></button>
-    <button id="rotL" aria-label="Rotate left" title="Rotate left">${icon('rotL')}</button>
-    <button id="rotR" aria-label="Rotate right" title="Rotate right">${icon('rotR')}</button>
-    <button id="top" aria-label="Top-down view" title="Top-down view">${icon('map')}</button>
-  </div>
-  <div id="panel" class="panel hidden" role="dialog"></div>
-  <div id="dock">
-    <div id="hint" role="status" aria-live="polite"></div>
-    <div id="bp" class="panel hidden"></div>
-    <div id="build" class="panel hidden">
-      <span class="tab" id="build-tab">Road</span>
-      <div class="rows">
-        <div id="grade">
-          <button id="g-h"></button><button id="g-g"></button><span id="g-x" class="seg" role="group" aria-label="Where it crosses something"></span>
-        </div>
-        <div id="rtype" role="group" aria-label="Type"></div>
-        <div id="kinds" role="group" aria-label="Shape">
-          <button data-k="straight">${icon('line')}<span>Straight</span></button>
-          <button data-k="curve">${icon('curve')}<span>Curve</span></button>
-          <button data-k="smooth">${icon('smooth')}<span>Smooth</span></button>
-        </div>
-      </div>
-    </div>
-    <nav id="tools" aria-label="Tools">
-      <button data-t="look" aria-pressed="false">${icon('finger')}<span>Look</span></button>
-      <button data-t="road" aria-pressed="false">${icon('road')}<span>Road</span></button>
-      <button data-t="rail" aria-pressed="false">${icon('train')}<span>Rail</span></button>
-      <button data-t="stop" aria-pressed="false">${icon('busStop')}<span>Stop</span></button>
-      <button data-t="veh">${icon('bus')}<span>Vehicles</span></button>
-      <button data-t="reset">${icon('restore')}<span>Reset</span></button>
-    </nav>
-  </div>`;
+// The HUD is the shell (ui/shell.ts, docs/hud.md): a status strip, a compass and a bar of four
+// buttons (Build · Transport · Layers · Menu) at rest; sheets, a tool strip and a layers pop-over
+// when asked for. Everything below registers with it rather than adding markup of its own.
+const shell = new Shell($('#ui'), {
+  onCompass: () => { goal = { az: view.az + wrap(HOME.az - view.az), el: HOME.el }; },
+  onPause: () => togglePause(),
+  onRate: () => cycleRate(),
+  onPerf: () => togglePerf(),
+});
+// the tool in use (a road or rail type, or bus stops), if any
+let tool: ToolHandle | null = null;
 
 const ctrlOf = (d: Draft) => (roadKind === 'smooth' ? net.smoothCtrl(d.a, d.b) : d.c);
 function draftChanged() {
   draftCheck = draft ? net.check(draft.a, draft.b, ctrlOf(draft), opts) : null;
   drawGhost();
   renderBar();
+  tool?.setUndo(!!draft || picks.length > 0);
 }
 function clearDraft() { draft = null; picks = []; draftChanged(); hint(); }
 
@@ -488,49 +441,66 @@ function setMode(m: Mode) {
   const building = m === 'road' || m === 'rail';
   if (building && (mode === 'road' || mode === 'rail') && m !== mode) lastType[mode] = opts.type;
   mode = m;
-  // the four modes are toggles, pressed like the chips; Vehicles and Reset only open a panel
-  document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => {
-    b.classList.toggle('on', b.dataset.t === m);
-    if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', String(b.dataset.t === m));
-  });
   // each mode has its colourway (green roads, blue rail, orange stops); the HUD reads it from here
   document.body.dataset.mode = m;
-  $('#build').classList.toggle('hidden', !building);
-  $('#build-tab').textContent = m === 'rail' ? 'Rail' : 'Road';
-  closePanel();
-  if (building) {
-    if (m === 'rail' && opts.cross === 'junction') opts.cross = 'bridge';
-    setType(lastType[m]);
-  }
+  if (m === 'rail' && opts.cross === 'junction') opts.cross = 'bridge';
   clearDraft();
 }
 function setKind(k: RoadKind) {
   roadKind = k;
-  document.querySelectorAll<HTMLButtonElement>('#kinds button').forEach((b) => { b.classList.toggle('on', b.dataset.k === k); b.setAttribute('aria-pressed', String(b.dataset.k === k)); });
+  refreshOptions();
   clearDraft();
 }
-// The hint line under the map. It leads with the current tool's icon unless given its own.
+// The hint over the map. It leads with the current tool's icon unless given its own. With a tool
+// in use it stays until replaced; otherwise it's a short message that clears itself.
 const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop' };
 function hint(text?: string, ic?: Icon) {
   let t = text;
   if (t === undefined) {
+    if (!tool) return shell.hint(null);
     if (mode === 'stop') t = 'Tap a road, on the side you want the stop · the bus will call there';
-    else if (mode !== 'road' && mode !== 'rail') t = 'Drag to move · pinch to zoom · twist to turn · two fingers up/down to tilt · tap a building';
     else if (draft) t = 'Drag the white handles to adjust, then Build';
     else if (roadKind === 'straight') t = mode === 'rail' ? 'Drag to lay track · tap a junction to see how it works' : 'Drag to draw a road · tap a junction to redesign it';
     else if (roadKind === 'smooth') t = 'Drag from a road: the new one curves smoothly out of it';
     else t = ['Drag along the curve you want · or tap start, bend, end', '2/3 · Tap the bend point: the curve pulls towards it', '3/3 · Tap where the curve ends'][picks.length];
   }
-  $('#hint').innerHTML = t ? `${icon(ic ?? MODE_ICON[mode])}<span>${esc(t)}</span>` : '';
+  tool?.setUndo(!!draft || picks.length > 0);
+  shell.hint(t ? `${icon(ic ?? MODE_ICON[mode])}<span>${esc(t)}</span>` : null, tool ? 0 : 4000);
 }
-document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.addEventListener('click', () => {
-  const t = b.dataset.t!;
-  if (t === 'look' || t === 'road' || t === 'rail' || t === 'stop') return setMode(t);
-  if (t === 'veh') return openVehicles();
-  if (t === 'reset') return openReset();
-}));
 
-// ---- the options row: height, gradient, and what happens where the route crosses something ----
+// ---- tools: picking a card in the Build sheet swaps the bar for a tool strip ----
+const typeSpec = (t: RoadType) => { const d = ROADS[t]; return `${Math.round(halfOfType(t) * 2)} m wide · ${d.mph} mph · £${d.cost.toLocaleString('en-GB')}/m`; };
+function endTool() {
+  tool = null;
+  shell.endTool();
+  shell.closeSheet();
+  stopPreview = null;
+  setMode('look');
+}
+function startRoadTool(t: RoadType) {
+  const rail = ROADS[t].cls === 'rail';
+  tool = shell.startTool({
+    name: ROADS[t].label, spec: typeSpec(t), icon: roadIcon(ROADS[t]), tone: rail ? 'rail' : 'road',
+    options: roadOptions(), bind: bindRoadOptions, onUndo: undoStep, onDone: endTool, onCancel: endTool,
+  });
+  setMode(rail ? 'rail' : 'road');
+  setType(t);
+  lastType[cls()] = t;
+  hint();
+}
+function startStopTool() {
+  tool = shell.startTool({ name: 'Bus stop', spec: 'Kerbside, or a lay-by where there is room', icon: 'busStop', tone: 'stop', onDone: endTool, onCancel: endTool });
+  setMode('stop');
+  hint();
+}
+// Undo steps back through what's being placed: the blueprint, then the curve's taps.
+function undoStep() {
+  if (draft) { draft = null; picks = []; draftChanged(); }
+  else if (picks.length) { picks.pop(); drawGhost(); }
+  hint();
+}
+
+// ---- the tool's options: shape, height, gradient, and what happens where it crosses something ----
 function gradeSteps() {
   const d = ROADS[opts.type];
   const base = d.cls === 'rail' ? (d.rack ? [0.05, 0.1, 0.15, 0.2] : [0.01, 0.015, 0.025, 0.035, 0.06]) : GRADE_STEPS;
@@ -538,16 +508,20 @@ function gradeSteps() {
   return s.length ? s : [d.maxGrade];
 }
 const pctTxt = (g: number) => { const v = g * 100; return `${Math.abs(v - Math.round(v)) > 0.01 ? v.toFixed(1) : Math.round(v)}%`; };
-function renderGrade() {
+function roadOptions() {
   const [, hl, hi] = HEIGHTS.find((h) => h[0] === opts.height)!;
-  $('#g-h').innerHTML = `${icon(hi)}<span>${hl}</span>`;
-  $('#g-h').setAttribute('aria-label', `Height: ${hl}`);
-  $('#g-g').innerHTML = `${icon('angle')}<span>${pctTxt(opts.grade)}</span>`;
-  $('#g-g').setAttribute('aria-label', `Steepest gradient ${pctTxt(opts.grade)}`);
-  $('#g-x').innerHTML = CROSS.map(([k, label, ic]) => `<button data-x="${k}" class="${opts.cross === k ? 'on' : ''}" aria-pressed="${opts.cross === k}">${icon(ic)}<span>${label}</span></button>`).join('');
-  $('#g-x').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+  const on = (b: boolean) => `class="${b ? 'on' : ''}" aria-pressed="${b}"`;
+  return `<span class="og" role="group" aria-label="Shape">${KINDS.map(([k, label, ic]) => `<button data-k="${k}" ${on(roadKind === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span><span class="sep"></span>
+    <button id="g-h" aria-label="Height: ${hl}">${icon(hi)}<span>${hl}</span></button>
+    <button id="g-g" aria-label="Steepest gradient ${pctTxt(opts.grade)}">${icon('angle')}<span>${pctTxt(opts.grade)}</span></button><span class="sep"></span>
+    <span class="og" role="group" aria-label="Where it crosses something">${CROSS.map(([k, label, ic]) => `<button data-x="${k}" ${on(opts.cross === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span>`;
+}
+function refreshOptions() { if (mode === 'road' || mode === 'rail') tool?.set({ options: roadOptions() }); }
+function bindRoadOptions(el: HTMLElement) {
+  el.querySelectorAll<HTMLButtonElement>('[data-k]').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.k as RoadKind)));
+  el.querySelectorAll<HTMLButtonElement>('[data-x]').forEach((b) => b.addEventListener('click', () => {
     opts.cross = b.dataset.x as RoadOpts['cross'];
-    renderGrade(); draftChanged();
+    refreshOptions(); draftChanged();
     const sp = ROADS[opts.type].cls === 'rail' ? GRADES.rail : GRADES.road;
     hint({
       junction: mode === 'rail' ? 'Track you cross joins up (points); roads are always bridged' : 'Roads you cross at the same height become junctions (they design themselves)',
@@ -555,91 +529,78 @@ function renderGrade() {
       tunnel: `Goes under what it crosses — a cutting near the surface, a bored tunnel deeper, ${sp.under} m under water`,
     }[opts.cross]);
   }));
+  el.querySelector('#g-h')!.addEventListener('click', () => {
+    opts.height = HEIGHTS[(HEIGHTS.findIndex((h) => h[0] === opts.height) + 1) % HEIGHTS.length][0];
+    refreshOptions(); draftChanged();
+    hint({ auto: 'Auto: stays near the ground, climbing or diving only to clear what it crosses', level: 'Level: holds the starting height all the way', up: 'Climb: rises at the chosen gradient the whole way' }[opts.height]);
+  });
+  el.querySelector('#g-g')!.addEventListener('click', () => {
+    const steps = gradeSteps();
+    opts.grade = steps[(steps.indexOf(opts.grade) + 1) % steps.length];
+    refreshOptions(); draftChanged();
+    const d = ROADS[opts.type];
+    hint(d.cls === 'rail'
+      ? `Steepest ${pctTxt(opts.grade)} (this line allows ${pctTxt(d.maxGrade)}) · trains climb: intercity 3%, local 3.5%, light rail 7%, rack 20%`
+      : `Steepest ${pctTxt(opts.grade)} (a ${d.mph} mph road allows ${pctTxt(d.maxGrade)}) · gentler means longer ramps`);
+  });
 }
-$('#g-h').addEventListener('click', () => {
-  opts.height = HEIGHTS[(HEIGHTS.findIndex((h) => h[0] === opts.height) + 1) % HEIGHTS.length][0];
-  renderGrade(); draftChanged();
-  hint({ auto: 'Auto: stays near the ground, climbing or diving only to clear what it crosses', level: 'Level: holds the starting height all the way', up: 'Climb: rises at the chosen gradient the whole way' }[opts.height]);
-});
-$('#g-g').addEventListener('click', () => {
-  const steps = gradeSteps();
-  opts.grade = steps[(steps.indexOf(opts.grade) + 1) % steps.length];
-  renderGrade(); draftChanged();
-  const d = ROADS[opts.type];
-  hint(d.cls === 'rail'
-    ? `Steepest ${pctTxt(opts.grade)} (this line allows ${pctTxt(d.maxGrade)}) · trains climb: intercity 3%, local 3.5%, light rail 7%, rack 20%`
-    : `Steepest ${pctTxt(opts.grade)} (a ${d.mph} mph road allows ${pctTxt(d.maxGrade)}) · gentler means longer ramps`);
-});
 function setType(t: RoadType) {
   opts.type = t;
   const steps = gradeSteps();
   if (!steps.includes(opts.grade)) opts.grade = steps[steps.length - 1];
-  renderTypes();
-  renderGrade();
+  refreshOptions();
   draftChanged();
 }
-// presets as chips; anything else in the catalogue is a filter away
-function renderTypes() {
-  const ids = mode === 'rail' ? RAIL_PRESETS : PRESETS;
-  const chips = ids.includes(opts.type) ? ids : [opts.type, ...ids.slice(0, 3)];
-  $('#rtype').innerHTML = chips.map((k) => `<button data-r="${k}" class="${k === opts.type ? 'on' : ''}" aria-pressed="${k === opts.type}">${icon(roadIcon(ROADS[k]))}<span>${short(k)}</span></button>`).join('') + (mode === 'rail' ? '' : `<button data-more="1" aria-label="More road types">${icon('adjustments')}<span>More</span></button>`);
-  $('#rtype').style.gridTemplateColumns = `repeat(${chips.length + (mode === 'rail' ? 0 : 1)}, 1fr)`;
-  $('#rtype').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
-    if (b.dataset.more) return openRoadPicker();
-    setType(b.dataset.r!);
-    const d = ROADS[opts.type];
-    hint(`${d.label}: ${d.blurb} · ${Math.round(halfOfType(opts.type) * 2)} m wide · £${d.cost.toLocaleString('en-GB')}/m`);
-  }));
-}
-document.querySelectorAll<HTMLButtonElement>('#kinds button').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.k as RoadKind)));
-$('#rotL').addEventListener('click', () => { goal = { az: view.az - Math.PI / 4 }; });
-$('#rotR').addEventListener('click', () => { goal = { az: view.az + Math.PI / 4 }; });
-$('#compass').addEventListener('click', () => { goal = { az: view.az + wrap(HOME.az - view.az), el: HOME.el }; });
-$('#top').addEventListener('click', () => {
-  goal = { el: view.el > 1.2 ? HOME.el : EL_MAX };
-});
 
-// ---------------- the side panel ----------------
-// Detail opens in a column down the right; the camera turns so the thing you picked sits in the
-// clear space beside it (a road runs straight up the screen), so you can see what each choice does.
-let panelKind: 'junction' | 'stop' | 'roads' | 'vehicles' | 'reset' | null = null;
-// Where the clear map beside the panel runs from and to, in CSS pixels: from the left inset to the
-// panel's left edge. Read from the stylesheet (it answers even while the panel is hidden), so a
-// notch inset on either side moves the target with the panel.
-function clearSpan() {
-  const px = (el: Element, k: string) => parseFloat(getComputedStyle(el).getPropertyValue(k)) || 0;
-  const panel = $('#panel'), edge = px(document.documentElement, '--edge');
-  return { left: px($('#dock'), 'left') - edge, right: canvas.clientWidth - px(panel, 'right') - px(panel, 'width') };
-}
-// the colourway a panel wears: stops are orange, road work green, the rest the house green
-const TONE = { junction: 'road', roads: 'road', stop: 'stop', vehicles: 'look', reset: 'look' } as const;
-// A different panel, or a new thing in the same one (another junction), starts at the top; a
+// ---- the Build sheet: a tab per category, a card per thing ----
+shell.addBuildCategory({ id: 'roads', label: 'Roads', icon: 'road' });
+for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: `${ROADS[id].blurb} · ${typeSpec(id)}`, icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
+shell.addBuildItem('roads', { id: 'more', label: 'More road types', spec: 'Filter by lanes, speed, trees, bus and cycle lanes', icon: 'adjustments', tone: 'road', on: () => !PRESETS.includes(lastType.road), onPick: () => { openRoadPicker(true); return false; } });
+shell.addBuildCategory({ id: 'rail', label: 'Rail', icon: 'train' });
+for (const id of RAIL_PRESETS) shell.addBuildItem('rail', { id, label: ROADS[id].label, spec: ROADS[id].blurb, icon: roadIcon(ROADS[id]), tone: 'rail', on: () => lastType.rail === id, onPick: () => startRoadTool(id) });
+shell.addBuildCategory({ id: 'stops', label: 'Stops', icon: 'busStop' });
+shell.addBuildItem('stops', { id: 'bus-stop', label: 'Bus stop', spec: 'On any road; a lay-by where there is room', icon: 'busStop', tone: 'stop', onPick: () => startStopTool() });
+shell.addBuildItem('stops', { id: 'bus-station', label: 'Bus station', spec: 'Several bays, for busy routes', icon: 'bus', locked: 'Not in the game yet' });
+shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight run of track', icon: 'train', locked: 'Not in the game yet' });
+shell.addBuildItem('stops', { id: 'depot', label: 'Lorry depot', spec: 'Where your lorries start and are kept', icon: 'warehouse', locked: 'Not in the game yet' });
+shell.addBuildCategory({ id: 'freight', label: 'Freight', icon: 'warehouse', note: 'Terminals are bought for an industry; better ones unlock as it grows.' });
+shell.addBuildItem('freight', { id: 'terminals', label: 'Freight terminals', spec: 'Loading bays, sidings and jetties for industries', icon: 'warehouse', locked: 'Come with the terminals update' });
+shell.addBuildCategory({ id: 'bulldoze', label: 'Bulldoze', icon: 'bulldozer' });
+shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Tap or drag over what you want to remove; costs shown first', icon: 'bulldozer', locked: 'Not in the game yet: roads stay once built' });
+shell.addBuildCategory({ id: 'landscape', label: 'Landscape', icon: 'mountain' });
+shell.addBuildItem('landscape', { id: 'terrain', label: 'Raise and lower land', spec: 'Hills, cuttings and embankments', icon: 'mountain', locked: 'Needs terrain, which isn’t in the game yet' });
+
+// ---- the Layers pop-over: overlays (none are in the game yet) and the view ----
+shell.addLayer({ id: 'flow', label: 'Traffic flow', icon: 'lights', disabled: 'Not in the game yet' });
+shell.addLayer({ id: 'catchment', label: 'Stop catchments', icon: 'busStop', disabled: 'Not in the game yet' });
+shell.addLayer({ id: 'demand', label: 'Where people want to go', icon: 'users', disabled: 'Not in the game yet' });
+shell.addLayer({ id: 'landuse', label: 'Land use', icon: 'building', disabled: 'Not in the game yet' });
+const viewNow = () => { const el = goal?.el ?? view.el; return el > 1.2 ? 'plan' : el < 0.45 ? 'low' : '3d'; };
+shell.setViews({
+  options: [{ id: '3d', label: '3D' }, { id: 'low', label: 'Low' }, { id: 'plan', label: 'Plan' }],
+  current: viewNow,
+  pick: (id) => { goal = { el: id === 'plan' ? EL_MAX : id === 'low' ? EL_MIN : HOME.el }; },
+});
+shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it · pinch to zoom, twist to turn, two fingers up or down to tilt');
+
+// ---------------- sheets ----------------
+// Detail opens in a bottom sheet (a panel down the right in landscape); the camera turns so the
+// thing you picked sits in the clear map left above or beside it, so you can see what each choice does.
+type PanelKind = 'junction' | 'stop' | 'roads' | 'reset' | 'quality';
+// the colourway a sheet wears: stops are orange, road work green, the rest the house green
+const TONE = { junction: 'road', roads: 'road', stop: 'stop', reset: 'look', quality: 'look' } as const;
+// what closing each kind of sheet undoes: a junction being edited, a stop being planned
+const leaveJunction = () => { if (editJ !== null) { editJ = null; rebuildRoads(); } };
+const ON_CLOSE: Partial<Record<PanelKind, () => void>> = { junction: leaveJunction, stop: () => { stopPreview = null; drawGhost(); } };
+// A different sheet, or a new thing in the same one (another junction), starts at the top; a
 // re-render of the same one (a filter or a form tapped) keeps its place in the list.
-function openPanel(kind: NonNullable<typeof panelKind>, title: string, ic: Icon, body: string, fresh = false) {
-  if (kind !== panelKind) fresh = true;
-  panelKind = kind;
-  const el = $('#panel');
-  el.className = `panel tone-${TONE[kind]}`;
-  el.setAttribute('aria-label', title);
-  el.innerHTML = `<div class="ph">${ridgeSvg()}<span class="pt"><i class="badge">${icon(ic)}</i><span>${title}</span></span><button id="px" aria-label="Close" title="Close">${icon('x')}</button></div>${body}`;
-  el.classList.remove('hidden');
-  if (fresh) el.scrollTop = 0;
-  document.body.classList.add('paneled');
-  $('#px').addEventListener('click', closePanel);
-  $('#card').classList.add('hidden');
+function openPanel(kind: PanelKind, title: string, ic: Icon, body: string, fresh = false, extra: Partial<SheetSpec> = {}) {
+  return shell.openSheet({ key: kind, title, icon: ic, tone: TONE[kind], body, fresh, onClose: ON_CLOSE[kind], ...extra });
 }
-function closePanel() {
-  $('#panel').classList.add('hidden');
-  document.body.classList.remove('paneled');
-  panelKind = null;
-  stopPreview = null;
-  if (editJ !== null) { editJ = null; rebuildRoads(); }
-  drawGhost();
-}
+const closePanel = () => shell.closeSheet();
 const closeSheet = closePanel;
-// Put p in the middle of the free space; if `dir` is given, turn so it runs up the screen.
+// Put p in the middle of the clear map; if `dir` is given, turn so it runs up the screen.
 function focusOn(p: P, h: number, dir?: P, el?: number) {
-  const H = canvas.clientHeight;
   let az = view.az;
   if (dir) {
     const a = Math.atan2(-dir.x, -dir.z);
@@ -648,8 +609,8 @@ function focusOn(p: P, h: number, dir?: P, el?: number) {
   const save = { ...view };
   Object.assign(view, { az, h, x: p.x, z: p.z, el: el ?? view.el });
   placeCamera();
-  const c = clearSpan();
-  const g = groundAt((c.left + c.right) / 2, H * 0.44);
+  const c = shell.clearRect();
+  const g = groundAt((c.left + c.right) / 2, (c.top + c.bottom) / 2);
   Object.assign(view, save);
   placeCamera();
   goal = { az, h, x: p.x - (g.x - p.x), z: p.z - (g.z - p.z), ...(el ? { el } : {}) };
@@ -673,7 +634,8 @@ function roadSvg(d: RoadDef, W = 132, H = 14) {
   const rects = parts.filter((p) => p.w > 0).map((p) => { const r = `<rect x="${((x / tot) * W).toFixed(1)}" y="0" width="${((p.w / tot) * W + 0.3).toFixed(1)}" height="${H}" fill="${p.c}"/>`; x += p.w; return r; });
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="rs">${rects.join('')}</svg>`;
 }
-function openRoadPicker() {
+// (inside the Build sheet, with a way back to the cards; picking one starts drawing it)
+function openRoadPicker(fresh = false) {
   const chips = <T,>(label: string, key: keyof RoadFilter, vals: readonly T[], show: (v: T) => string) =>
     `<div class="fl" role="group" aria-label="${label}"><span class="lbl">${label}</span>${[undefined, ...vals].map((v) => `<button data-f="${String(key)}" data-v="${v === undefined ? '' : String(v)}" class="${filt[key] === v ? 'on' : ''}" aria-pressed="${filt[key] === v}">${v === undefined ? 'Any' : show(v)}</button>`).join('')}</div>`;
   // with, without, or either: tap to cycle
@@ -682,15 +644,15 @@ function openRoadPicker() {
     return `<button data-t3="${key}" class="${v === true ? 'on' : v === false ? 'no' : ''}" aria-label="${words}: ${state}" title="${words}: ${state}">${icon(ic)}${v === true ? icon('check', 'tick') : v === false ? icon('x', 'tick') : ''}</button>`;
   };
   const list = filterRoads(filt);
-  openPanel('roads', 'Choose a road', 'road', `
+  const el = openPanel('roads', 'Choose a road', 'road', `
     ${chips('Kind', 'family', FAMILIES, (f) => f)}
     ${chips('Lanes each way', 'lanes', [1, 2, 3, 4], (n) => String(n))}
     ${chips('Speed (mph)', 'mph', [20, 30, 40, 50, 60, 70], (n) => `${n}`)}
     <div class="fl" role="group" aria-label="With"><span class="lbl">With</span>${tri('trees', 'trees', 'Trees')}${tri('bus', 'bus', 'Bus lanes')}${tri('cycle', 'bike', 'Cycle lanes')}${tri('parking', 'parking', 'Parking')}</div>
     <div class="cnt">${list.length} of ${Object.values(ROADS).filter((d) => d.cls === 'road').length} road types</div>
     ${list.length ? '' : '<small>No road type has all of these. Set a filter back to Any, or tap a With chip until it’s plain.</small>'}
-    <div class="rl">${list.map((d) => `<button data-pick="${d.id}" class="${d.id === opts.type ? 'on' : ''}"><b>${icon(roadIcon(d))}${d.label}</b>${roadSvg(d)}<small>${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost.toLocaleString('en-GB')}/m · ${d.blurb}</small></button>`).join('')}</div>`);
-  const el = $('#panel');
+    <div class="rl">${list.map((d) => `<button data-pick="${d.id}" class="${d.id === lastType.road ? 'on' : ''}"><b>${icon(roadIcon(d))}${d.label}</b>${roadSvg(d)}<small>${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost.toLocaleString('en-GB')}/m · ${d.blurb}</small></button>`).join('')}</div>`,
+  fresh, { from: 'build', back: () => shell.openBuild('roads') });
   el.querySelectorAll<HTMLButtonElement>('[data-f]').forEach((b) => b.addEventListener('click', () => {
     const k = b.dataset.f as keyof RoadFilter, v = b.dataset.v!;
     (filt as Record<string, unknown>)[k] = v === '' ? undefined : k === 'family' ? v : Number(v);
@@ -702,39 +664,76 @@ function openRoadPicker() {
     openRoadPicker();
   }));
   el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => b.addEventListener('click', () => {
-    setType(b.dataset.pick!);
-    closePanel();
+    startRoadTool(b.dataset.pick!);
     const d = ROADS[opts.type];
-    hint(`${d.label} · ${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost}/m`);
+    hint(`${d.label} · ${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost}/m · drag to draw it`);
   }));
 }
 
-// ---- vehicles: buses, trains, how busy the roads are ----
-function openVehicles() {
-  openPanel('vehicles', 'Vehicles', 'bus', `
-    <div class="grp"><span class="tab">Buses</span><small>Wander the roads and call at every stop on their side</small><button data-add="bus" class="primary">${icon('plus')}Add a bus</button></div>
-    <div class="grp"><span class="tab">Trains</span><small>Each runs only on track it can manage: rack, electric wires, gradient</small>
-      ${Object.values(TRAINS).map((t) => `<button data-train="${t.id}"><b>${icon(trainIcon(t.id))}${t.label}</b><small>${t.blurb}</small></button>`).join('')}</div>
-    <div class="grp"><span class="tab">Background traffic</span><small>Cars come from homes, jobs, shops and works, and follow the clock</small>
-      <div class="row3" role="group" aria-label="How busy">${LEVELS.map(([n], i) => `<button data-lvl="${i}" class="${i === level ? 'on' : ''}" aria-pressed="${i === level}">${n === 'Traffic' ? 'Normal' : n}</button>`).join('')}</div></div>`);
-  const el = $('#panel');
-  el.querySelector('[data-add="bus"]')!.addEventListener('click', () => { traffic.addBus(); hint('Bus added', 'bus'); });
-  el.querySelectorAll<HTMLButtonElement>('[data-train]').forEach((b) => b.addEventListener('click', () => {
-    const t = TRAINS[b.dataset.train!];
-    const ok = traffic.addTrain(t.id);
-    hint(ok ? `${t.label} added` : `No track a ${t.label.toLowerCase()} can use${t.needsWires ? ' — it needs electrified line' : t.rack ? '' : ' — too steep, or rack only'}`, ok ? trainIcon(t.id) : 'alert');
-  }));
-  el.querySelectorAll<HTMLButtonElement>('[data-lvl]').forEach((b) => b.addEventListener('click', () => { level = +b.dataset.lvl!; openVehicles(); }));
-}
+// ---- Transport: lines (the stops buses call at) and buying vehicles ----
+function allStops() { return [...net.segs.values()].flatMap((seg) => seg.stops.map((stop) => ({ seg, stop }))); }
+shell.addTransportTab({
+  id: 'lines', label: 'Lines', icon: 'transport', sub: 'Your stops and lines',
+  render: (el) => {
+    const stops = allStops();
+    el.innerHTML = `<p class="note">Buses wander the roads and call at every stop on their side. ${stops.length ? `${stops.length} stop${stops.length === 1 ? '' : 's'} so far:` : 'There are no stops yet.'}</p>
+      ${stops.map(({ seg, stop }, i) => `<button class="lrow tone-stop" data-stop="${i}"><span class="num">${icon('busStop')}</span><b>${stop.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by'}</b><span>${esc(net.def(seg).label)} · tap to show it</span></button>`).join('')}
+      <div class="acts"><button class="act primary tone-stop" data-addstop="1">${icon('plus')}<span>Add a bus stop</span></button><button class="act" disabled>${icon('transport')}<span>New line</span></button></div>
+      <p class="note">New line (tap stops in order, then pick vehicles) comes with timetabled routes.</p>`;
+    el.querySelector('[data-addstop]')!.addEventListener('click', () => startStopTool());
+    el.querySelectorAll<HTMLButtonElement>('[data-stop]').forEach((b) => b.addEventListener('click', () => {
+      const { seg, stop } = stops[+b.dataset.stop!];
+      const at = pointAt(net.path(seg), stop.s);
+      showStopInfo(seg, stop);
+      focusOn(at, 75);
+    }));
+  },
+});
+shell.addTransportTab({
+  id: 'buy', label: 'Buy vehicles', icon: 'bus', sub: 'Buses, trains and how busy the roads are',
+  render: (el) => {
+    el.innerHTML = `
+      <div class="grp"><span class="tab">Buses</span><small>Wander the roads and call at every stop on their side</small><button data-add="bus" class="act primary">${icon('plus')}<span>Add a bus</span></button></div>
+      <div class="grp"><span class="tab">Trains</span><small>Each runs only on track it can manage: rack, electric wires, gradient</small>
+        ${Object.values(TRAINS).map((t) => `<button data-train="${t.id}"><b>${icon(trainIcon(t.id))}${t.label}</b><small>${t.blurb}</small></button>`).join('')}</div>
+      <div class="grp"><span class="tab">Background traffic</span><small>Cars come from homes, jobs, shops and works, and follow the clock</small>
+        <div class="row3" role="group" aria-label="How busy">${LEVELS.map(([n], i) => `<button data-lvl="${i}" class="${i === level ? 'on' : ''}" aria-pressed="${i === level}">${n === 'Traffic' ? 'Normal' : n}</button>`).join('')}</div></div>`;
+    el.querySelector('[data-add="bus"]')!.addEventListener('click', () => { traffic.addBus(); hint('Bus added', 'bus'); });
+    el.querySelectorAll<HTMLButtonElement>('[data-train]').forEach((b) => b.addEventListener('click', () => {
+      const t = TRAINS[b.dataset.train!];
+      const ok = traffic.addTrain(t.id);
+      hint(ok ? `${t.label} added` : `No track a ${t.label.toLowerCase()} can use${t.needsWires ? ' — it needs electrified line' : t.rack ? '' : ' — too steep, or rack only'}`, ok ? trainIcon(t.id) : 'alert');
+    }));
+    el.querySelectorAll<HTMLButtonElement>('[data-lvl]').forEach((b) => b.addEventListener('click', () => { level = +b.dataset.lvl!; shell.refreshTransport(); }));
+  },
+});
 
-// ---- reset: nothing is saved yet, so starting again throws the player's work away; ask first ----
-// (in a panel rather than confirm(), which a sandboxed artifact frame may block outright)
+// ---- Menu: quality, the performance readout, a new town ----
+shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
+shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
+shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
+shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
+shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
+// The game picks its own quality from how fast frames come (see judgeFrames); a tier chosen here holds.
+function openQuality() {
+  const el = openPanel('quality', 'Quality', 'sparkles', `<div class="grp"><small>Auto steps down if frames run slow and back up when there’s headroom. Pick a level to hold it.</small>
+    <button data-q="auto" class="${tierAuto ? 'on' : ''}" aria-pressed="${tierAuto}"><b>${icon('sparkles')}Auto</b><small>Now ${TIERS[tier].name}</small></button>
+    ${TIERS.map((q, i) => `<button data-q="${i}" class="${!tierAuto && tier === i ? 'on' : ''}" aria-pressed="${!tierAuto && tier === i}"><b>${q.name}</b><small>${q.pr}× pixels · ${q.shadow ? `${q.shadow} px shadows` : 'no shadows'}</small></button>`).join('')}</div>`,
+  false, { from: 'menu', back: () => shell.openMenu() });
+  el.querySelectorAll<HTMLButtonElement>('[data-q]').forEach((b) => b.addEventListener('click', () => {
+    const q = b.dataset.q!;
+    tierAuto = q === 'auto';
+    if (!tierAuto) setTier(+q);
+    openQuality();
+  }));
+}
+// ---- a new town: nothing is saved yet, so starting again throws the player's work away; ask first ----
+// (in a sheet rather than confirm(), which a sandboxed artifact frame may block outright)
 function openReset() {
-  openPanel('reset', 'Start again?', 'restore', `
+  const el = openPanel('reset', 'Start a new town?', 'restore', `
     <div class="grp"><small>Every road, rail line, stop and vehicle you have added goes, and the town starts again as it was. This can’t be undone.</small>
-      <button data-reset="1" class="danger">${icon('restore')}Start again</button>
-      <button data-keep="1"><b>${icon('play')}Keep playing</b></button></div>`);
-  const el = $('#panel');
+      <button data-reset="1" class="act danger">${icon('restore')}<span>Start again</span></button>
+      <button data-keep="1" class="act">${icon('play')}<span>Keep playing</span></button></div>`, true, { from: 'menu', back: () => shell.openMenu() });
   el.querySelector('[data-reset]')!.addEventListener('click', () => location.reload());
   el.querySelector('[data-keep]')!.addEventListener('click', closePanel);
 }
@@ -753,9 +752,9 @@ function junctionNear(p: P) {
 function openJunction(node: number) {
   editJ = node;
   const j = junctions.get(node)!, n = net.node(node);
-  focusOn(n, Math.max(70, j.R * 5), undefined, 1.15);
   rebuildRoads();
   renderJunction(true);
+  focusOn(n, Math.max(70, j.R * 5), undefined, 1.15);
 }
 const pctFull = (d: number) => `${Math.round(d * 100)}%`;
 function renderJunction(fresh = false) {
@@ -768,7 +767,7 @@ function renderJunction(fresh = false) {
   const auto = design(net, editJ, geo, seen)!;
   const alt = forms.map((f) => ({ f, j: rescore(net, j, geo, { form: f }) }));
   const bar = (dos: number) => `<i class="bar"><i style="width:${Math.min(100, dos * 100)}%;background:${dos < 0.7 ? '#35c46b' : dos < 0.9 ? '#e0a526' : '#e5483b'}"></i></i>`;
-  openPanel('junction', FORM_NAME[j.form], formIcon(j.form), `
+  const el = openPanel('junction', FORM_NAME[j.form], formIcon(j.form), `
     <div class="score">${bar(j.score.dos)}<div><b>Busiest lane ${pctFull(j.score.dos)} full</b><small>${j.score.busiest || 'all approaches'} · takes about ${Math.round(Math.min(j.score.capacity, 9999)).toLocaleString('en-GB')} vehicles an hour</small></div></div>
     <small class="sub">${j.auto ? `${icon('sparkles')}Designed automatically for the best flow` : `${icon('handStop')}Your design`} · ${counted > 60 ? `tuned on ${counted} vehicles counted here` : 'on estimated traffic (it retunes as cars are counted)'}</small>
     ${j.complex ? `<div class="warn">${icon('alert')}<span>A big junction: consider splitting it, or grade-separating the busiest road</span></div>` : ''}
@@ -778,8 +777,7 @@ function renderJunction(fresh = false) {
     </div>
     ${j.form === 'priority' || j.form === 'signals' ? `<button data-slip="1" class="${j.slip ? 'on' : ''}" aria-pressed="${!!j.slip}"><b>${icon('ramp')}Left-turn slip lane${j.slip ? icon('check', 'tick') : ''}</b></button>` : ''}
     <div class="grp"><span class="tab">Lanes</span><small>Tap an arrow on the road to change what a lane is for. The design above is already the best balance for the traffic.</small>
-      <button data-opt="1"><b>${icon('refresh')}Re-optimise lanes</b></button></div>`, fresh);
-  const el = $('#panel');
+      <button data-opt="1"><b>${icon('refresh')}Re-optimise lanes</b></button></div>`, fresh, { back: () => showJunctionInfo(editJ!) });
   el.querySelectorAll<HTMLButtonElement>('[data-form]').forEach((b) => b.addEventListener('click', () => {
     const f = b.dataset.form!;
     junctions.set(editJ!, f === 'auto' ? auto : rescore(net, j, geo, { form: f as Form }));
@@ -837,9 +835,13 @@ function demolitionSummary(lots: Lot[]) {
   return { list, people };
 }
 
+// The blueprint: a card above the tool strip (length, cost, anything it knocks down, its long
+// section), and the strip's main button turns into Build.
 function renderBar() {
-  const el = $('#bp');
-  if (!draft || !draftCheck) { el.classList.add('hidden'); return; }
+  if (!tool || (mode !== 'road' && mode !== 'rail')) return;
+  if (!draft || !draftCheck) { tool.setPanel(null); tool.setPrimary(null); return; }
+  // (a sheet opened from the tool, such as the junction editor, makes way for the blueprint)
+  if (shell.sheetKey) closeSheet();
   const c = draftCheck;
   const n = c.clears.length;
   const kind = ctrlOf(draft) ? 'Curved road' : 'New road';
@@ -847,22 +849,22 @@ function renderBar() {
   const pr = c.profile;
   const lift = pr && pr.maxY > 0.05
     ? `<div class="lift">${icon('mountain')}<span>${c.ok ? `up to <b>${pr.maxY.toFixed(1)} m</b> · steepest <b>${(pr.maxGrade * 100).toFixed(1)}%</b>${c.bridges ? ` · ${c.bridges} bridge${c.bridges > 1 ? 's' : ''}` : ''} · ${Math.round(c.raised)} m raised` : `would need <b>${pr.maxY.toFixed(1)} m</b> — red line shows the lowest it could go`}</span></div>${profileSvg(c)}` : '';
-  el.innerHTML = `<div class="row"><span class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(c.cost)}</b></span></span>
-    <span class="btns"><button id="bpc">Cancel</button><button id="bpb" class="${n ? 'danger' : 'primary'}" ${c.ok && !dragging ? '' : 'disabled'}>${n ? `${icon('bulldozer')}Demolish ${n} &amp; build` : `${icon('check')}Build`}</button></span></div>
+  tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(c.cost)}</b></span></div>
     ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(n * 6000)} compensation included</div></div>` : ''}
     ${lift}
-    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`;
-  el.classList.remove('hidden');
-  $('#bpc').addEventListener('click', clearDraft);
-  $('#bpb').addEventListener('click', () => {
-    if (!draft) return;
-    const doomed = new Set(draftCheck?.clears ?? []);
-    const summary = doomed.size ? demolitionSummary([...doomed]) : null;
-    buildRoad(draft.a, draft.b, ctrlOf(draft), opts);
-    draft = null;
-    draftChanged();
-    hint(summary ? `Demolished ${doomed.size}: ${summary.list}` : 'Built. New plots will fill in along it.', summary ? 'bulldozer' : 'check');
-  });
+    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`);
+  // (demolishing, it's red with the bulldozer; the card above says what goes)
+  tool.avoid(handles().map((h) => toScreen(h.p)));
+  tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging), onClick: buildDraft });
+}
+function buildDraft() {
+  if (!draft || !draftCheck?.ok) return;
+  const doomed = new Set(draftCheck.clears);
+  const summary = doomed.size ? demolitionSummary([...doomed]) : null;
+  buildRoad(draft.a, draft.b, ctrlOf(draft), opts);
+  draft = null;
+  draftChanged();
+  hint(summary ? `Demolished ${doomed.size}: ${summary.list}` : 'Built. New plots will fill in along it.', summary ? 'bulldozer' : 'check');
 }
 
 function buildRoad(a: End, b: End, ctrl: P | undefined, o: RoadOpts) {
@@ -988,13 +990,25 @@ function pickBuilding(sx: number, sy: number) {
   return live.find((b) => inside(b, 1.5, false)) ?? live.find((b) => inside(b, 0.2, true)) ?? null;
 }
 const CIVIC_USE = (a: string) => ({ label: `Community · ${CIVIC[a]?.label ?? a}`, pop: CIVIC[a]?.pop ?? 0, unit: CIVIC[a]?.unit ?? 'jobs' });
-function showCard(b: Built | null) {
-  const el = $('#card');
-  if (!b) { el.classList.add('hidden'); return; }
+// Tapping a building (or a park, a car park...) with no tool in use: an info sheet.
+function showBuildingInfo(b: Built) {
   const u = b.region ? { label: 'Open space', pop: 0, unit: '' } : b.lot.arch ? CIVIC_USE(b.lot.arch) : USE[b.lot.kind];
-  el.className = 'panel';
-  el.innerHTML = `<b>${b.name}</b><div>${b.detail}</div><div class="use">${u.label}${u.pop ? ` · ${u.pop} ${u.unit}` : ''}</div>`;
-  el.classList.remove('hidden');
+  const facts: [string, string][] = [['Use', u.label]];
+  if (u.pop) facts.push([u.unit.charAt(0).toUpperCase() + u.unit.slice(1), String(u.pop)]);
+  shell.openInfo({
+    key: `building:${b.lot.x},${b.lot.z}`, title: b.name, sub: b.detail, icon: b.region ? 'trees' : 'building', facts,
+    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }],
+  });
+}
+// a junction: how busy it is, and the way into its editor
+function showJunctionInfo(node: number) {
+  const j = junctions.get(node)!, legs = legsAt(net, node).length;
+  shell.openInfo({
+    key: `junction-info:${node}`, title: FORM_NAME[j.form], sub: `${legs} arms · ${j.auto ? 'designed automatically for the best flow' : 'your design'}`, icon: formIcon(j.form), tone: 'road',
+    facts: [['Busiest lane', `${pctFull(j.score.dos)} full`], ['Busiest approach', j.score.busiest || 'all approaches'], ['Takes', `about ${Math.round(Math.min(j.score.capacity, 9999)).toLocaleString('en-GB')} vehicles an hour`]],
+    meter: j.score.dos,
+    actions: [{ label: 'Edit junction', icon: formIcon(j.form), kind: 'primary', onClick: () => openJunction(node) }],
+  });
 }
 
 // ---------------- bus stops ----------------
@@ -1007,17 +1021,17 @@ function stopAt(p: P) {
   }
   return null;
 }
-function showStopCard(seg: RSeg, st: Stop) {
+function showStopInfo(seg: RSeg, st: Stop) {
   const d = net.def(seg), t = st.take;
   const bits = st.kind === 'kerb' ? ['buses stop in the lane'] : [
     `pavement ${(d.pave - t.pave).toFixed(1)} m (was ${d.pave.toFixed(1)} m)`,
     t.lane ? `lanes ${(d.lane - t.lane / (d.lanes > 1 ? d.lanes : 2)).toFixed(2)} m (was ${d.lane.toFixed(2)} m)` : '',
     t.land ? `${t.land.toFixed(1)} m of front gardens bought` : '',
   ].filter(Boolean);
-  const el = $('#card');
-  el.className = 'panel tone-stop';
-  el.innerHTML = `<b>${icon('busStop')}${st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by'}</b><div>${d.label} · ${bits.join(' · ')}</div><div class="use">Buses call here for about 7 seconds</div>`;
-  el.classList.remove('hidden');
+  shell.openInfo({
+    key: `stop:${seg.id}:${st.id}`, title: st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by', sub: d.label, icon: 'busStop', tone: 'stop',
+    facts: [['Buses call for', 'about 7 seconds']], note: bits.join(' · '),
+  });
 }
 
 // The cross-section at the stop, before and after, with the stop's side on the right.
@@ -1058,17 +1072,17 @@ function stopTap(p: P) {
   const res = net.planStop(q.seg.id, q.s, side);
   stopPreview = { seg: q.seg, t: q.s, side };
   drawGhost();
-  // turn the road to run up the screen beside the panel, so the lay-by can be seen as it's chosen
-  focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
-  if (res.reason) openPanel('stop', 'Can’t put a stop here', 'busStop', `<div class="bad">${icon('alert')}<span>${res.reason}</span></div>`, true);
+  let el: HTMLElement;
+  if (res.reason) el = openPanel('stop', 'Can’t put a stop here', 'busStop', `<div class="bad">${icon('alert')}<span>${res.reason}</span></div>`, true);
   else {
     const d = net.def(q.seg);
-    openPanel('stop', `Stop on this ${d.family.toLowerCase()}`, 'busStop',
+    el = openPanel('stop', `Stop on this ${d.family.toLowerCase()}`, 'busStop',
       res.plans.map((pl, i) => `<div class="plan${pl.ok ? '' : ' no'}"><div class="row"><span class="tab">${pl.title}</span><span class="cost">${money(pl.cost)}</span></div>
         ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${icon('alert')}<span>${pl.blocked}</span></div>` : ''}
-        <button class="primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</button></div>`).join(''), true);
+        <button class="act primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
   }
-  const el = $('#panel');
+  // turn the road to run up the screen in the clear map above the sheet, so the lay-by can be seen as it's chosen
+  focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
   el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
     const pl = res.plans[+b.dataset.plan!];
     net.addStop(q.seg.id, q.s, side, pl);
@@ -1077,6 +1091,31 @@ function stopTap(p: P) {
     rebuildRoads();
     hint(`${pl.title} built${pl.take.land ? ` · ${pl.lots.length} front garden${pl.lots.length === 1 ? '' : 's'} trimmed` : ''}`, 'check');
   }));
+}
+
+// A tap on the map. With a tool in use it goes to the tool; with none, it inspects whatever it
+// lands on (a stop, a junction, a building) and opens an info sheet, or closes the sheet if it
+// lands on nothing. Returns the mode it was handled in (double-tap zoom only applies to 'look').
+function tapMap(sx: number, sy: number): Mode {
+  shell.guardTap();
+  shell.dismissFirstRun();
+  shell.closeLayers();
+  const g = groundAt(sx, sy);
+  if (editJ !== null && arrowTap(sx, sy)) return 'road';
+  if (mode === 'road' || mode === 'rail') {
+    if (mode === 'road' && !draft && !picks.length && junctionNear(g) !== null) openJunction(junctionNear(g)!);
+    else if (roadKind === 'curve') curveTap(g);
+    return mode;
+  }
+  if (mode === 'stop') { stopTap(g); return mode; }
+  const st = stopAt(g);
+  const jn = st ? null : junctionNear(g);
+  const b = st || jn !== null ? null : pickBuilding(sx, sy) ?? infillCells.get(cellKey(g.x, g.z)) ?? null;
+  if (st) showStopInfo(st.seg, st.stop);
+  else if (jn !== null) showJunctionInfo(jn);
+  else if (b) showBuildingInfo(b);
+  else closeSheet();
+  return 'look';
 }
 
 // ---------------- input (Google Maps style) ----------------
@@ -1262,15 +1301,7 @@ const end = (e: PointerEvent) => {
     if (dt > 0 && now - b.t < 80) fling = { vx: (b.x - a.x) / dt, vz: (b.z - a.z) / dt };
   }
   if (gesture === 'maybe' && now - downAt.t < 400) {
-    const g0 = groundAt(e.clientX, e.clientY);
-    if ((mode === 'road' || mode === 'rail') && editJ !== null && arrowTap(e.clientX, e.clientY)) { /* lane changed */ }
-    else if (mode === 'road' && !draft && !picks.length && junctionNear(g0) !== null) openJunction(junctionNear(g0)!);
-    else if ((mode === 'road' || mode === 'rail') && roadKind === 'curve') curveTap(g0);
-    else if (mode === 'stop') stopTap(groundAt(e.clientX, e.clientY));
-    else if (mode === 'look') {
-      const g = groundAt(e.clientX, e.clientY), st = stopAt(g);
-      if (st) showStopCard(st.seg, st.stop);
-      else showCard(pickBuilding(e.clientX, e.clientY) ?? infillCells.get(cellKey(g.x, g.z)) ?? null);
+    if (tapMap(e.clientX, e.clientY) === 'look') {
       // double-tap zooms in on the spot
       if (now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
         animateZoom(0.5, e.clientX, e.clientY);
@@ -1324,7 +1355,7 @@ function stepCamera(dt: number) {
   const ang = Math.atan2(-(b.y - a.y) * canvas.clientHeight, (b.x - a.x) * canvas.clientWidth);
   // (the needle icon points up, so a quarter turn more than an arrow pointing right would need)
   $('#needle').style.transform = `rotate(${(ang * 180) / Math.PI + 90}deg)`;
-  $('#top').classList.toggle('on', view.el > 1.2);
+  shell.syncView();
 }
 
 // ---------------- loop ----------------
@@ -1372,17 +1403,22 @@ const GAME_MIN_PER_S = 4; // how fast the clock runs: game minutes per real seco
 // Game speed (pause, 1×, 2×, 4×) scales the clock, the town's growth and the traffic together.
 // Traffic keeps its own time base, which only ever runs ahead of real time: vehicles stamp some
 // moments with performance.now(), and a clock that fell behind would leave them stranded.
-let speed = 1, simNow = performance.now();
+// Game speed: pause, and a rate (1×, 2×, 4×) that one button cycles through.
+let speed = 1, rate = 1, simNow = performance.now();
 function setSpeed(s: number) {
   speed = s;
-  document.querySelectorAll<HTMLButtonElement>('#speed button').forEach((b) => { const on = Number(b.dataset.sp) === s; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
-  document.body.classList.toggle('paused', s === 0);
+  if (s) rate = s;
+  shell.setSpeed(s === 0, rate);
 }
-document.querySelectorAll<HTMLButtonElement>('#speed button').forEach((b) => b.addEventListener('click', () => {
-  const s = Number(b.dataset.sp);
-  setSpeed(s);
-  hint(s ? `Game speed ${s}×` : 'Paused · the clock, traffic and new buildings wait; you can still build', s ? 'play' : 'pause');
-}));
+function togglePause() {
+  setSpeed(speed ? 0 : rate);
+  hint(speed ? `Game speed ${speed}×` : 'Paused · the clock, traffic and new buildings wait; you can still build', speed ? 'play' : 'pause');
+}
+function cycleRate() {
+  const r = rate === 4 ? 1 : rate * 2;
+  setSpeed(r);
+  hint(`Game speed ${r}×`, 'play');
+}
 setSpeed(1);
 let lastH = view.h;
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
@@ -1397,7 +1433,7 @@ const TIERS = [
   { name: 'Fastest', pr: 1, shadow: 0, every: 0 },
 ];
 declare global { interface Window { __perf: unknown } }
-let statsAt = 0, tier = 0, tierHeldUntil = 0, perfOn = false, frameNo = 0;
+let statsAt = 0, tier = 0, tierHeldUntil = 0, perfOn = false, frameNo = 0, tierAuto = true;
 const perf = { frames: 0, frameMs: 0, simMs: 0, drawMs: 0, since: 0, worst: 0, worstSim: 0 };
 renderer.shadowMap.autoUpdate = false;
 function setTier(t: number) {
@@ -1411,11 +1447,12 @@ function setTier(t: number) {
   setGroundQuality(tier >= 3 ? 'low' : tier >= 1 ? 'medium' : 'high');
 }
 function judgeFrames(now: number) {
+  if (!tierAuto) return;
   const avg = perf.frameMs / Math.max(1, perf.frames);
   if (avg > 26 && tier < TIERS.length - 1) { setTier(tier + 1); tierHeldUntil = now + 30000; }
   else if (avg < 17.5 && tier > 0 && now > tierHeldUntil) { setTier(tier - 1); tierHeldUntil = now + 8000; }
 }
-$('#stats').addEventListener('click', () => { perfOn = !perfOn; $('#perf').classList.toggle('hidden', !perfOn); $('#stats').setAttribute('aria-expanded', String(perfOn)); });
+function togglePerf() { perfOn = !perfOn; shell.setPerf(perfOn); }
 
 function frame(now: number) {
   const rawMs = now - last;
@@ -1502,4 +1539,4 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
