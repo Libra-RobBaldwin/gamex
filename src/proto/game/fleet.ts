@@ -389,14 +389,16 @@ export class Fleet {
     return 0;
   }
   // one car of a train, at its place on the track; v for the wheels and the lamps
-  drawRail(d: Dress, i: number, x: number, y: number, z: number, heading: number, pitch: number, v: number, dt: number) {
+  // (doors: how far open its left and right doors are, as rail/draw.ts has them; `lead` and `tail`:
+  // the cars at the front and the back, for a train whose driver has changed ends)
+  drawRail(d: Dress, i: number, x: number, y: number, z: number, heading: number, pitch: number, v: number, dt: number, doors: [number, number] = [0, 0], lead = i === 0, tail = i === d.chain.length - 1 && i > 0) {
     if (i === 0) d.odo += v * dt;
-    const m = d.chain[i], flip = d.flip?.[i], last = i === d.chain.length - 1;
+    const m = d.chain[i], flip = d.flip?.[i];
     // white lamps lead and red ones trail; a driving car at the back is turned end for end
     let f = dark(this.hour, 0) ? FLAGS.interior : 0;
-    if (i === 0) f |= FLAGS.lights;
-    if (last && d.chain.length > 1) f |= FLAGS.brake;
-    this.put(m, x, y + RAIL_TOP, z, flip ? heading + Math.PI : heading, flip ? -pitch : pitch, 1, d.cols[i], f, flip ? -d.odo : d.odo);
+    if (lead) f |= FLAGS.lights;
+    if (tail) f |= FLAGS.brake;
+    this.put(m, x, y + RAIL_TOP, z, flip ? heading + Math.PI : heading, flip ? -pitch : pitch, 1, d.cols[i], f, flip ? -d.odo : d.odo, doors[0], doors[1]);
   }
   get stats() { return this.vr.stats; }
 }

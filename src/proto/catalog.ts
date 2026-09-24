@@ -102,14 +102,23 @@ export function filterRoads(f: RoadFilter) {
 
 // Rolling stock. Adhesion trains are limited by how steep the line is and slow on climbs; rack
 // railcars can take a rack railway's gradients, but crawl on the rack and are slow elsewhere.
-export interface TrainDef { id: string; label: string; icon: string; mph: number; maxGrade: number; rack: boolean; cars: number; carLen: number; color: string; stripe: string; needsWires: boolean; blurb: string }
+// accel and brake (m/s²): how hard it pulls away and how hard its service brake stops it; signals
+// are sighted and trains brake for them with these (rail/sim.ts). Sets from the vehicle library
+// leave them out and get their kind's usual figures (trainBraking).
+export interface TrainDef { id: string; label: string; icon: string; mph: number; maxGrade: number; rack: boolean; cars: number; carLen: number; color: string; stripe: string; needsWires: boolean; blurb: string; accel?: number; brake?: number }
 export const TRAINS: Record<string, TrainDef> = {
-  dmu: { id: 'dmu', label: 'Local diesel', icon: '🚃', mph: 75, maxGrade: 0.035, rack: false, cars: 2, carLen: 20, color: '#2f6f9e', stripe: '#e0c14a', needsWires: false, blurb: '75 mph · climbs up to 3.5%, slowing on the way up' },
-  intercity: { id: 'intercity', label: 'Intercity', icon: '🚄', mph: 125, maxGrade: 0.03, rack: false, cars: 5, carLen: 23, color: '#e8e6e0', stripe: '#c9302c', needsWires: false, blurb: '125 mph · up to 3% · heavy, loses speed on gradients' },
-  hs: { id: 'hs', label: 'High-speed', icon: '🚅', mph: 186, maxGrade: 0.035, rack: false, cars: 8, carLen: 25, color: '#f2f2f2', stripe: '#1f4f9e', needsWires: true, blurb: '186 mph on high-speed lines · electric only' },
-  tram: { id: 'tram', label: 'Light rail', icon: '🚋', mph: 50, maxGrade: 0.07, rack: false, cars: 2, carLen: 16, color: '#c9302c', stripe: '#f2f2f2', needsWires: true, blurb: '50 mph · climbs 7% · electric only' },
-  rack: { id: 'rack', label: 'Rack railcar', icon: '⛰️', mph: 35, maxGrade: 0.2, rack: true, cars: 2, carLen: 15, color: '#b0463a', stripe: '#f2e0a0', needsWires: false, blurb: '35 mph, 12 mph on the rack · climbs 20% · can use any line' },
+  dmu: { accel: 0.8, brake: 0.9, id: 'dmu', label: 'Local diesel', icon: '🚃', mph: 75, maxGrade: 0.035, rack: false, cars: 2, carLen: 20, color: '#2f6f9e', stripe: '#e0c14a', needsWires: false, blurb: '75 mph · climbs up to 3.5%, slowing on the way up' },
+  intercity: { accel: 0.5, brake: 0.7, id: 'intercity', label: 'Intercity', icon: '🚄', mph: 125, maxGrade: 0.03, rack: false, cars: 5, carLen: 23, color: '#e8e6e0', stripe: '#c9302c', needsWires: false, blurb: '125 mph · up to 3% · heavy, loses speed on gradients' },
+  hs: { accel: 0.6, brake: 0.75, id: 'hs', label: 'High-speed', icon: '🚅', mph: 186, maxGrade: 0.035, rack: false, cars: 8, carLen: 25, color: '#f2f2f2', stripe: '#1f4f9e', needsWires: true, blurb: '186 mph on high-speed lines · electric only' },
+  tram: { accel: 1.2, brake: 1.3, id: 'tram', label: 'Light rail', icon: '🚋', mph: 50, maxGrade: 0.07, rack: false, cars: 2, carLen: 16, color: '#c9302c', stripe: '#f2f2f2', needsWires: true, blurb: '50 mph · climbs 7% · electric only' },
+  rack: { accel: 0.6, brake: 0.9, id: 'rack', label: 'Rack railcar', icon: '⛰️', mph: 35, maxGrade: 0.2, rack: true, cars: 2, carLen: 15, color: '#b0463a', stripe: '#f2e0a0', needsWires: false, blurb: '35 mph, 12 mph on the rack · climbs 20% · can use any line' },
 };
+// How hard a train pulls away and brakes (m/s²), for sets that don't say: trams sharpest, heavy
+// expresses gentlest.
+export function trainBraking(t: TrainDef) {
+  const tram = t.maxGrade >= 0.06 && !t.rack, fast = t.mph >= 110;
+  return { accel: t.accel ?? (tram ? 1.2 : fast ? 0.5 : 0.8), brake: t.brake ?? (tram ? 1.3 : fast ? 0.7 : 0.9) };
+}
 // How fast a train can go on a stretch of track with a given climb.
 export function trainSpeed(t: TrainDef, track: RoadDef, grade: number) {
   let v = Math.min(t.mph, track.mph) * 0.447;

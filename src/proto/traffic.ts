@@ -155,6 +155,11 @@ export class Traffic {
   // People on a crossing now (game/crowds.ts), as points on each road, by the road's id. Vehicles
   // that haven't reached one stop short of it.
   crossing = new Map<number, P[]>();
+  // Level crossings shut to the road (rail/crossing.ts), by the road's id: stretches [from, to]
+  // along it (from its a end) that nobody drives onto; anyone already on one drives off it.
+  barriers = new Map<number, [number, number][]>();
+  // drawn along with the traffic, inside the fleet's frame (the railway's trains: rail/draw.ts)
+  onDraw?: (dt: number) => void;
   stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0 };
   // how many junction conflict tables have been worked out, and how long they took (ms)
   readonly conflictStats = tableStats;
@@ -1502,6 +1507,9 @@ export class Traffic {
       this.squeezed(c, ob);
       const xs = this.crossing.get(c.seg.id); // (people crossing)
       if (xs) for (const p of xs) { const x = closestOnPath(p, this.pathOf(c.seg, c.from)).s; if (x > c.s + c.front) ob(Math.max(0.1, x - 2 - c.s - c.front), 0, 0.3); }
+      const bs = this.barriers.get(c.seg.id); // (a level crossing, shut)
+      // (drawing up a metre short of it; one already on it, or nearly, drives on off it)
+      if (bs) for (const [z0, z1] of bs) { const x = c.from === c.seg.a ? z0 : L - z1; if (x > c.s + c.front + 0.5) ob(Math.max(0.05, x - 1 - c.s - c.front), 0, 0.3); }
       // and beyond the end of it
       if (!e || e.pos - c.s > this.horizon(c)) {
         if (pl) { if (admitted) this.onward(c, pl.next, pl.node, pl.path.exitLane, pl.path.outS, pl.path.lineS - c.s + (pl.path.ext1 - pl.path.ext0), 1, ob); }
@@ -2054,7 +2062,17 @@ export class Traffic {
         this.fleet.drawRail(d, i, (fx + bx) / 2, (f.q.y + b.q.y) / 2, (fz + bz) / 2, Math.atan2(fz - bz, fx - bx), Math.atan((f.q.grade + b.q.grade) / 2), tr.v, dt);
       }
     }
+    this.onDraw?.(dt);
     this.fleet.end(now);
+  }
+  // Is anybody on this stretch of road ([z0, z1] from its a end)? (a level crossing waiting to be clear)
+  onStretch(seg: number, z0: number, z1: number) {
+    for (const c of this.cars) {
+      if (c.gone !== undefined || c.turn || c.seg.id !== seg) continue;
+      const L = this.len(c.seg), a = c.from === c.seg.a ? c.s - c.back : L - c.s - c.front, b = c.from === c.seg.a ? c.s + c.front : L - c.s + c.back;
+      if (b > z0 && a < z1) return true;
+    }
+    return false;
   }
 
   // where every vehicle was last drawn, and which of them overlap (see footprint.ts)

@@ -1,9 +1,11 @@
-// The loop's rail milestone (docs/loop.md, M4), played by touch on a phone-sized page: build two
-// stations on the main line with the station tool, draw a rail line between them, and watch its
-// train call at both platforms and turn round; the economy counts the stations and the line.
+// Railway stations and lines (docs/rail.md), played by touch on a phone-sized page: the starter
+// town's trains call at their two stations; a branch line across the north road gets a level
+// crossing; two stations are built on it from Build > Stops and a line drawn between them by
+// tapping them; its trains call at both with their doors open, the barriers hold the road, and
+// nothing is logged as an error.
 // node e2e/rail.e2e.mjs [url] [shots dir]
 import { chromium } from 'playwright-core';
-const url = process.argv[2] ?? 'http://localhost:5173/?map=town';
+const url = process.argv[2] ?? 'http://localhost:5173/proto.html?map=town'; // (straight into the starter town, past the start menu)
 const out = process.argv[3] ?? '.';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -11,73 +13,114 @@ const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
 const fail = (m) => { console.log('FAIL', m); process.exitCode = 1; };
+const wait = (ms) => page.waitForTimeout(ms);
 await page.goto(url);
-await page.waitForFunction(() => window.proto?.stations, null, { timeout: 60000 });
-await page.waitForTimeout(3000);
+await page.waitForFunction(() => window.proto?.railway, null, { timeout: 90000 });
+await wait(2500);
+await page.evaluate(() => { window.proto.setSpeed(4); window.proto.purse.balance = 3_000_000; }); // (enough for two stations and their trains)
 
-// two places on the main line where platforms fit, well apart
-const spots = await page.evaluate(() => {
-  const P = window.proto, ok = [];
-  for (const x of [-200, 200, -150, 150, -250, 250]) { const pl = P.stations.plan({ x, z: 185 }); if (pl.ok && !ok.some((o) => Math.abs(o.x - pl.x) < 250)) ok.push({ x: pl.x, z: pl.z }); }
-  return ok;
+// the starter line: two stations, trains calling at both
+const starter = await page.evaluate(() => { const R = window.proto.railway; return { stations: R.stations.map((s) => s.name), lines: R.lines.length, trains: R.trains.length }; });
+console.log('starter', JSON.stringify(starter));
+if (starter.stations.length !== 2 || starter.lines !== 1) fail('the starter town should have two stations and a line');
+await page.evaluate(() => window.proto.focusOn({ x: -420, z: 185 }, 220));
+await wait(2500);
+await page.screenshot({ path: `${out}/rail-0-starter.png` });
+
+// a branch line across the north of the town: it crosses the road north on the level
+const laid = await page.evaluate(() => {
+  const P = window.proto;
+  P.buildRoad({ x: -480, z: 340 }, { x: 480, z: 340 }, 'rail-branch');
+  P.rebuild();
+  return { crossings: P.railway.crossings.length, balance: 0 };
 });
-console.log('station spots', JSON.stringify(spots));
-if (spots.length < 2) fail('no two places for stations on the main line');
-// (rail costs more than a new game starts with: it's what bus profits buy; top the bank up)
-await page.evaluate(() => { window.proto.purse.balance += 1_000_000; });
-const bal0 = await page.evaluate(() => window.proto.purse.balance);
-for (const sp of spots.slice(0, 2)) {
-  await page.evaluate(() => window.proto.startStationTool());
-  await page.evaluate((sp) => window.proto.focusOn(sp, 160), sp);
-  await page.waitForTimeout(3500); // (a tap while the camera is still flying only stops it)
-  const at = await page.evaluate((sp) => window.proto.toScreen(sp), sp);
-  await page.touchscreen.tap(at.x, at.y);
-  await page.waitForTimeout(1200);
-  // (the very first tap can go to dismissing the first-run hint)
-  if (!(await page.$('[data-build]'))) { await page.screenshot({ path: `${out}/rail-0-miss.png` }); console.log('missed; sheet:', await page.evaluate(() => document.querySelector('#sheet h2')?.textContent), 'mode', await page.evaluate(() => document.body.dataset.mode)); await page.touchscreen.tap(at.x, at.y); await page.waitForTimeout(1200); }
-  await page.screenshot({ path: `${out}/rail-0-plan.png` });
-  const btn = await page.$('[data-build]');
-  if (!btn) { fail(`no Build button for the station at ${sp.x}`); continue; }
+console.log('laid', JSON.stringify(laid));
+if (laid.crossings < 1) fail('no level crossing where the branch meets the road north');
+
+// Build > Stops > Railway station, then tap the track (twice, once for each station)
+async function buildStation(x) {
+  await page.tap('[data-bar="build"]'); await wait(400);
+  await page.tap('[data-tab="stops"]'); await wait(400);
+  const cards = await page.$$('[data-item]');
+  let hit = false;
+  for (const c of cards) if ((await c.getAttribute('aria-label'))?.startsWith('Railway station')) { await c.tap(); hit = true; break; }
+  if (!hit) { fail('no Railway station card'); return; }
+  await wait(500);
+  await page.evaluate((x) => window.proto.focusOn({ x, z: 340 }, 380), x);
+  await wait(1800);
+  const s = await page.evaluate((x) => window.proto.toScreen({ x, z: 337 }), x);
+  await page.touchscreen.tap(s.x, s.y);
+  await wait(1500);
+  await page.screenshot({ path: `${out}/rail-1-plan-${x}.png` });
+  const btn = await page.$('#sheet [data-build]:not([disabled])');
+  if (!btn) { fail(`no station can be built at x=${x}: ${(await page.textContent('#sheet').catch(() => ''))?.slice(0, 200)}`); return; }
   await btn.tap();
-  await page.waitForTimeout(600);
-  await page.tap('#t-cancel').catch(() => {});
-  await page.waitForTimeout(300);
+  await wait(1500);
 }
-const built = await page.evaluate(() => window.proto.stations.list.map((s) => ({ id: s.id, name: s.name, x: Math.round(s.x) })));
-console.log('stations', JSON.stringify(built));
-if (built.length < 2) fail('stations were not built');
-const bal1 = await page.evaluate(() => window.proto.purse.balance);
-if (!(bal1 < bal0)) fail('stations cost nothing');
-
-// a close look at a platform, for flicker
-await page.evaluate((st) => window.proto.focusOn({ x: st.x, z: 185 }, 45), built[0]);
-await page.waitForTimeout(2000);
-await page.screenshot({ path: `${out}/rail-1-platform.png` });
-
-// the line, by touch on the two station badges
-await page.evaluate(() => { window.proto.startLineTool(); window.proto.focusOn({ x: 0, z: 185 }, 700); });
-await page.waitForTimeout(2500);
-const taps = await page.evaluate((ids) => ids.map((id) => { const P = window.proto, m = P.markers.stationPlaces().find((x) => x.id === id); return P.toScreen(m.p); }), built.slice(0, 2).map((b) => b.id));
-for (const t of taps) { await page.touchscreen.tap(t.x, t.y); await page.waitForTimeout(400); }
-await page.screenshot({ path: `${out}/rail-2-drawing.png` });
-await page.tap('#t-prim button'); await page.waitForTimeout(1500);
-const line = await page.evaluate(() => { const P = window.proto, l = P.lines.list.find((x) => x.mode === 'rail'); return l ? { id: l.id, stops: l.stops, trains: P.lines.buses(l) } : null; });
-console.log('rail line', JSON.stringify(line));
-if (!line || !line.trains.length) fail('no rail line with a train');
-await page.screenshot({ path: `${out}/rail-3-line.png` });
-
-// its train calls at both stations (run the clock; the platform stops are logged)
-await page.evaluate(() => { const T = window.proto.traffic, orig = T.onTrainStop; window.__tcalls = []; T.onTrainStop = (st, tr) => { window.__tcalls.push(st); return orig(st, tr); }; window.proto.setSpeed(4); });
+await buildStation(-300);
 await page.tap('#sheet .close').catch(() => {});
-await page.waitForFunction(() => new Set(window.__tcalls).size >= 2 && window.__tcalls.length >= 3, null, { timeout: 240000, polling: 2000 }).catch(() => {});
-const calls = await page.evaluate(() => window.__tcalls);
-console.log('train calls', JSON.stringify(calls));
-if (new Set(calls).size < 2) fail('the train did not call at both stations');
-for (let i = 1; i < calls.length; i++) if (calls[i] === calls[i - 1]) fail(`called twice running at ${calls[i]}`);
-const econ = await page.evaluate((id) => { const T = window.proto.town; T.sync(); const s = T.econ.lineStats().find((x) => x.id === id); return s ? { ok: s.ok, vehicle: s.vehicle, problem: s.problem } : null; }, line?.id);
-console.log('economy line', JSON.stringify(econ));
-if (!econ?.ok) fail('the economy does not run the rail line');
-await page.evaluate(() => window.proto.setSpeed(1));
+await wait(300);
+await buildStation(300);
+const built = await page.evaluate(() => window.proto.railway.stations.map((s) => ({ id: s.id, name: s.name, x: Math.round(s.x) })));
+console.log('stations', JSON.stringify(built));
+if (built.length !== 4) fail('two stations were not built on the branch');
+
+// the second station's sheet is open: New line from here, then tap the first station, Create
+const newLine = await page.$$('#sheet button');
+let started = false;
+for (const b of newLine) if ((await b.textContent())?.includes('New line from here')) { await b.tap(); started = true; break; }
+if (!started) fail('no New line from here on the station sheet');
+await wait(600);
+await page.evaluate(() => window.proto.focusOn({ x: 0, z: 340 }, 900));
+await wait(2200);
+const first = built.find((s) => s.x < 0 && Math.abs(s.x) < 400);
+const fp = await page.evaluate((id) => { const P = window.proto, sh = P.railway.shapes.get(id); return P.toScreen(sh.mid); }, first.id);
+await page.touchscreen.tap(fp.x, fp.y);
+await wait(600);
+await page.screenshot({ path: `${out}/rail-2-line.png` });
+await page.tap('#t-prim button');
+await wait(1200);
+const line = await page.evaluate(() => { const R = window.proto.railway, l = R.lines[R.lines.length - 1]; return l ? { id: l.id, stops: l.stops, trains: R.trainsOn(l).length + R.sim.waiting, depot: l.depot ?? null } : null; });
+console.log('line', JSON.stringify(line));
+if (!line || line.stops.length !== 2) fail('the rail line was not created');
+
+// run: calls at both stations, doors open at a platform, the crossing shuts and holds the road
+await page.evaluate(() => window.proto.focusOn({ x: 0, z: 340 }, 160));
+let doorsSeen = false, closedSeen = false, carsHeld = 0, onTrack = 0;
+for (let i = 0; i < 90; i++) {
+  await wait(1000);
+  const s = await page.evaluate((lid) => {
+    const P = window.proto, R = P.railway, sim = R.sim, l = R.lines.find((x) => x.id === lid);
+    const doors = sim.trains.some((t) => t.line === l && t.state === 'dwell' && t.doors === 1);
+    const c = sim.crossings[0], held = sim.graph.blocks.some((b) => b.crossings.includes(0) && sim.owner[b.id] !== 0);
+    const on = c ? P.traffic.onStretch(c.site.road, c.site.z0, c.site.z1) : false;
+    const waitingCars = c ? (P.traffic.barriers.get(c.site.road)?.length ?? 0) : 0;
+    const calls = sim.log.filter((e) => e.line === lid).map((e) => e.station);
+    return { doors, closed: c?.down ?? false, held, on, waitingCars, calls, red: sim.stats.redPassed };
+  }, line.id);
+  if (s.doors && !doorsSeen) await page.screenshot({ path: `${out}/rail-3-doors.png` });
+  doorsSeen ||= s.doors;
+  closedSeen ||= s.closed;
+  if (s.held && s.on) onTrack++;
+  if (s.waitingCars) carsHeld++;
+  if (s.closed && i % 5 === 0) await page.screenshot({ path: `${out}/rail-4-crossing.png` });
+  if (new Set(s.calls).size >= 2 && doorsSeen && closedSeen) { console.log('after', i + 1, 's', JSON.stringify(s)); break; }
+  if (i === 89) { console.log('state', JSON.stringify(s)); fail('trains did not call at both stations, open their doors and shut the crossing'); }
+  if (s.red) fail('a train passed a red signal');
+}
+if (onTrack) fail(`a car was on the level crossing while a train held its block (${onTrack} samples)`);
+await page.evaluate(() => window.proto.focusOn({ x: 300, z: 340 }, 120));
+await wait(2500);
+await page.screenshot({ path: `${out}/rail-5-station.png` });
+// Transport > Railway lists both lines
+await page.tap('[data-bar="transport"]'); await wait(400);
+await page.tap('[data-tab="rail"]').catch(() => {});
+await wait(500);
+const rows = await page.$$('[data-rline]');
+if (rows.length < 2) fail(`Transport > Railway lists ${rows.length} lines`);
+await page.screenshot({ path: `${out}/rail-6-transport.png` });
+const perf = await page.evaluate(() => window.__perf);
+console.log('perf', JSON.stringify({ frameMs: perf && perf.frameMs / Math.max(1, perf.frames), calls: perf?.calls }));
 console.log('errors', JSON.stringify(errs));
 if (errs.length) fail('console errors');
 await browser.close();

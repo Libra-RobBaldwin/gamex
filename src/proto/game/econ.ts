@@ -34,8 +34,13 @@ export interface TownHooks {
   industrial(p: P): boolean;
   clock(): number; // game minutes since the start
   purse?: Purse; // fares and running costs go here as they happen (game/money.ts)
+  rail?: RailHooks; // the railway's stations and lines (rail/game.ts), alongside the bus stops and lines
   stations?: Stations; // railway stations (game/rail.ts)
 }
+// The railway as the economy sees it: stations as stops and rail lines as lines (their ids kept
+// clear of the buses'), how long a train takes between two stations (minutes), and what a train
+// costs to run for a game day.
+export interface RailHooks { stops(): StopIn[]; lines(): LineIn[]; time(a: number, b: number, v: VehicleKind): number | undefined; running(v: VehicleKind): number }
 
 // The library's tuning, set for this town (measured with the town as it starts, its starter line,
 // and a second line added or the first withdrawn):
@@ -114,12 +119,14 @@ export class TownEconomy {
       const p = this.h.net.path(seg), q = p[Math.min(p.length - 1, Math.max(0, Math.round((st.s / Math.max(1, this.h.net.length(seg))) * (p.length - 1))))];
       out.push({ id: k, kind: 'bus_stop', x: q.x, z: q.z, name: this.h.lines.name(k) });
     }
+    if (this.h.rail) out.push(...this.h.rail.stops());
     for (const st of this.h.stations?.list ?? []) out.push({ id: st.id, kind: 'rail_station', x: st.x, z: st.z, name: st.name });
     return out;
   }
   private lineList(): LineIn[] {
-    return this.h.lines.list.map((l) => ({ id: l.id, name: `Line ${l.num}`, stops: l.bus.seq.map((s) => this.key(s)), vehicle: l.mode === 'rail' ? trainKind(l.train?.id) : vehicleFor(l.offer, this.h.traffic, l.id), count: this.h.lines.buses(l).length }))
-      .filter((l) => l.count > 0 && l.stops.length >= 2);
+    return this.h.lines.list.map((l): LineIn => ({ id: l.id, name: `Line ${l.num}`, stops: l.bus.seq.map((s) => this.key(s)), vehicle: l.mode === 'rail' ? trainKind(l.train?.id) : vehicleFor(l.offer, this.h.traffic, l.id), count: this.h.lines.buses(l).length }))
+      .filter((l) => l.count > 0 && l.stops.length >= 2)
+      .concat((this.h.rail?.lines() ?? []).filter((l) => l.count > 0 && l.stops.length >= 2));
   }
   private sig() { return JSON.stringify([this.stopList().map((s) => s.id), this.lineList().map((l) => [l.id, l.stops, l.count, l.vehicle])]); }
 
@@ -127,6 +134,8 @@ export class TownEconomy {
     return {
       // along the roads the buses take, at a town pace
       travelTime: (a, b, v) => {
+        const rail = this.h.rail?.time(a, b, v);
+        if (rail !== undefined) return rail;
         // between stations: along the track, near enough the straight line
         const sa = this.h.stations?.byId(a), sb = this.h.stations?.byId(b);
         if (sa || sb) return sa && sb ? (Math.hypot(sa.x - sb.x, sa.z - sb.z) * 1.1) / ((VEHICLES[v].kmh * 0.7 * 1000) / 60) + 0.5 : Infinity;
@@ -194,6 +203,13 @@ export class TownEconomy {
       const buses = this.h.lines.buses(l).length, kind = l.mode === 'rail' ? trainKind(l.train?.id) : vehicleFor(l.offer, this.h.traffic, l.id);
       const run = buses * (RUNNING[kind as keyof typeof RUNNING] ?? RUNNING.bus) * (minutes / 1440);
       purse?.flow(l.id, riders * MONTH * FARE, run);
+    }
+    // the rail lines the same way, a train's running costs in place of a bus's
+    for (const l of this.h.rail?.lines() ?? []) {
+      const s = this.econ.line(l.id), was = this.carried.get(l.id) ?? 0, now = s?.carried ?? 0;
+      const riders = now >= was ? now - was : Math.max(0, (s?.carriedLastMonth ?? 0) - was) + now;
+      this.carried.set(l.id, now);
+      purse?.flow(l.id, riders * MONTH * FARE * 2, l.count * this.h.rail!.running(l.vehicle) * (minutes / 1440));
     }
   }
   takeEvents() { const e = this.events; this.events = []; return e; }
