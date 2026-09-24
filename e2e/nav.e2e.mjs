@@ -49,7 +49,13 @@ for (const name of names) {
   await page.waitForFunction(`!!(${P.rig})`, null, { timeout: 60000 });
   await page.waitForTimeout(WAIT);
   const cdp = await page.context().newCDPSession(page);
-  const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y, id]) => ({ x, y, id })) });
+  // Each touch carries its own time (UTC seconds). A loaded machine can deliver events a few
+  // hundred milliseconds late; a quick tap is stamped 30 ms after the event before it, so it is
+  // judged as the quick tap it is.
+  let stamp = 0;
+  const send = (type, pts, ts) => cdp.send('Input.dispatchTouchEvent', { type, timestamp: ts, touchPoints: pts.map(([x, y, id]) => ({ x, y, id })) });
+  const touch = (type, pts) => send(type, pts, (stamp = Math.max(stamp + 0.001, Date.now() / 1000)));
+  const quick = (type, pts) => send(type, pts, (stamp += 0.03));
   const rig = (fn, arg) => page.evaluate(([src, f, a]) => new Function('nav', 'a', `return (${f})(nav, a)`)(eval(src), a), [P.rig, fn.toString(), arg]);
   const view = () => rig((nav) => ({ ...nav.view }));
   // the rig's element may not sit at the page's top left (a phone frame on desktop)
@@ -213,9 +219,9 @@ for (const name of names) {
     // (the zoom centres on where the second tap lifted)
     const s = [cx + 30, cy + 20], g = await grab(s[0] - 3, s[1] + 3), h0 = (await view()).h;
     const tap = async (j) => {
-      await touch('touchStart', [[...at(s[0], s[1]), 1]]);
-      await touch('touchMove', [[...at(s[0] + j, s[1] - j), 1]]);
-      await touch('touchEnd', [[...at(s[0] + j, s[1] - j), 1]]);
+      await quick('touchStart', [[...at(s[0], s[1]), 1]]);
+      await quick('touchMove', [[...at(s[0] + j, s[1] - j), 1]]);
+      await quick('touchEnd', [[...at(s[0] + j, s[1] - j), 1]]);
     };
     await freeze();
     await tap(3);
@@ -286,7 +292,7 @@ for (const name of names) {
     const v1 = await view();
     // the drawn road waits in the blueprint bar: tap Build
     const btn = await page.evaluate(() => { const b = document.querySelector('#bpb'); if (!b || b.disabled) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
-    if (btn) { await freeze(); await touch('touchStart', [[btn.x, btn.y, 1]]); await touch('touchEnd', [[btn.x, btn.y, 1]]); await thaw(); await page.waitForTimeout(800); }
+    if (btn) { await freeze(); await quick('touchStart', [[btn.x, btn.y, 1]]); await quick('touchEnd', [[btn.x, btn.y, 1]]); await thaw(); await page.waitForTimeout(800); }
     const n1 = await page.evaluate(() => window.proto.net.segs.size);
     check(name, 'build-mode drag draws, no pan', Math.abs(v1.x - v0.x) + Math.abs(v1.z - v0.z) < 1e-6 && n1 > n0, { segs: [n0, n1] });
     // a two-finger pinch still works in build mode
@@ -317,8 +323,8 @@ for (const name of names) {
     if (!spot) check(name, 'tap a building opens its card', false, { reason: 'no building on screen' });
     else {
       await freeze();
-      await touch('touchStart', [[spot.x, spot.y, 1]]);
-      await touch('touchEnd', [[spot.x, spot.y, 1]]);
+      await quick('touchStart', [[spot.x, spot.y, 1]]);
+      await quick('touchEnd', [[spot.x, spot.y, 1]]);
       await thaw();
       await page.waitForTimeout(400);
       const shown = await page.evaluate(() => { const c = document.querySelector('#card'); const p = document.querySelector('#panel'); return (!!c && !c.classList.contains('hidden')) || (!!p && !p.classList.contains('hidden')); });
