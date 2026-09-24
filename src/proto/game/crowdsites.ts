@@ -197,7 +197,7 @@ export function lotSites(net: Network, regions: Region[], footways: FootwaySite[
   for (const l of net.lots) {
     const seg = net.segs.get(l.seg);
     const face = lotAt(l, 0, l.d / 2), facing = Math.atan2(-Math.cos(l.rot), Math.sin(l.rot));
-    if (l.arch === 'pub') venues.push({ id: `pub:${l.id}`, venue: 'pub', at: face, facing, width: l.w - 2, y: 0.05, lot: l.id });
+    if (l.arch === 'pub') venues.push({ id: `pub:${l.id}`, venue: 'pub', at: face, facing, width: l.w - 2, y: l.front < 4 ? PAVE_Y : 0.05, lot: l.id }); // (drinkers stand up to 4 m out: on the pavement where the forecourt is shallower)
     else if (l.kind === 'shop' || l.arch === 'cornershop') venues.push({ id: `shop:${l.id}`, venue: 'shop', at: face, facing, width: Math.max(3, l.w - 1.5), y: l.front < 2.5 ? PAVE_Y : 0.05, lot: l.id });
     else if (l.arch === 'school' && seg) {
       // buildgen: the building in the middle, a tarmac forecourt to the road, the playground behind
