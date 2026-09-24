@@ -15,7 +15,7 @@ import { BAY, bayWeight, closestOnPath, HALF, pathLength, pointAt, type Lot, typ
 import { legsAt, moveOf, type Junction, type Leg, type Move } from './junction';
 import { TRAINS, trainSpeed, type TrainDef } from './catalog';
 import { courseOf, laneSpan, sectionAt, taperOf, type Course, type Ends2 } from './xsection';
-import { BODIES, DIMS, bodyOf, overlapping, trailerOn, type Kind, type Pose } from './footprint';
+import { DIMS, bodyOf, overlapping, type Kind, type Pose } from './footprint';
 import { STEP, Track, View, table, tableStats, type Cls } from './conflicts';
 import { Fleet, type Dress, type Dressed } from './game/fleet';
 
@@ -352,8 +352,17 @@ export class Traffic {
   private canPlace(seg: RSeg, from: number, s: number, lane: number, dm: { front: number; back: number; hw: number }) {
     // (where a road narrows, the lane beside may be too close to be alongside anything in it)
     const lanes = [lane];
-    if (lane !== BUSLANE) for (const l of [lane - 1, lane + 1]) if (l >= 0 && l < this.net.def(seg).lanes && Math.abs(this.laneOff(seg, from, s, l) - this.laneOff(seg, from, s, lane)) < dm.hw + WIDEST + 0.4) lanes.push(l);
+    // (anywhere along its length: at its tail is where anything coming up the lane beside meets it)
+    // (and wherever those beside actually are: easing across as a lane opens out, they lag behind it)
+    const sep = (u: number, l: number) => Math.abs(this.laneOff(seg, from, u, l) - this.laneOff(seg, from, u, lane)), near = dm.hw + WIDEST + 0.4;
+    const beside: number[] = [];
+    if (lane !== BUSLANE) for (const l of [lane - 1, lane + 1]) if (l >= 0 && l < this.net.def(seg).lanes) {
+      lanes.push(l);
+      if (Math.min(sep(s, l), sep(Math.max(0, s - dm.back), l), sep(s + dm.front, l)) < near) beside.push(l);
+    }
+    const mine = this.laneOff(seg, from, s, lane);
     for (const l of lanes) for (const e of this.buckets.get(keyOf(seg, from, l)) ?? []) {
+      if (l !== lane && !beside.includes(l) && !(e.c.seg === seg && e.c.from === from && Math.abs(e.c.off - mine) < near)) continue;
       const pos = e.kind === 0 && e.c.seg === seg && e.c.from === from && !e.c.turn ? e.c.s : e.pos;
       if (pos >= s) { if (pos - e.c.back - (s + dm.front) < 3) return false; }
       else if (s - dm.back - (pos + e.c.front) < 3 + e.c.v + (e.c.v * e.c.v) / 5) return false;
@@ -1030,7 +1039,7 @@ export class Traffic {
     const n = this.net.def(c.seg).lanes, L = this.len(c.seg);
     // finish moving across before thinking again
     if (c.oldLane !== undefined) {
-      if (Math.abs(c.off - this.laneOff(c.seg, c.from, c.s, c.lane)) < 1.0 && this.tailIn(c)) c.oldLane = undefined;
+      if (Math.abs(c.off - this.laneOff(c.seg, c.from, c.s, c.lane)) < 1.0) c.oldLane = undefined;
       else return;
     }
     if (n < 2) { c.merge = undefined; return; }
@@ -1067,15 +1076,6 @@ export class Traffic {
     const here = this.laneAcc(c, c.lane), open = idmFree(c.v, c.v0 ?? c.vmax, DRIVE[c.kind]);
     if (ok(c.lane - 1) && this.laneAcc(c, c.lane - 1) >= Math.max(here, open) - 0.2 && this.canChange(c, c.lane - 1, false)) this.change(c, c.lane - 1, now);
     else if (ok(c.lane + 1) && here < open - 1 && this.laneAcc(c, c.lane + 1) > here + 0.8 && this.canChange(c, c.lane + 1, false)) this.change(c, c.lane + 1, now);
-  }
-  // An artic's trailer (or a bendy bus's rear) swings across after the front: until its tail is
-  // in the new lane too, the vehicle keeps its place in the old one.
-  private tailIn(c: Car) {
-    const ps = c.pose?.parts, r = ps && c.cls !== undefined && BODIES[c.cls].trailer ? ps[ps.length - 1] : undefined;
-    if (!r) return true;
-    const at = Math.max(0, c.s - c.back), q = pointAt(this.pathOf(c.seg, c.from), at), off = this.laneOff(c.seg, c.from, at, c.lane);
-    const dx = r.x - r.hx * r.hl - (q.x + q.uz * off), dz = r.z - r.hz * r.hl - (q.z - q.ux * off);
-    return Math.abs(dx * q.uz - dz * q.ux) < 1.0;
   }
   // Missed the lane for our turn: take a way this lane does go, and find a new route from there.
   private reroute(c: Car, pl: Plan) {
@@ -1209,8 +1209,10 @@ export class Traffic {
       const e = this.leader(keyOf(c.seg, c.from, l), c.s - c.back, c);
       if (!e || e.pos - e.c.back - c.s - c.front > 30) continue;
       // how far apart the two lanes are where we'd be alongside
-      const at = Math.max(c.s + c.front, e.pos - e.c.back);
-      const apart = Math.abs(this.laneOff(c.seg, c.from, at, l) - this.laneOff(c.seg, c.from, at, c.lane));
+      const at = Math.max(c.s + c.front, e.pos - e.c.back), L = this.len(c.seg);
+      // (and a little further on, where the lanes are closer still: wide vehicles need warning to stop)
+      const sep = (u: number) => Math.abs(this.laneOff(c.seg, c.from, u, l) - this.laneOff(c.seg, c.from, u, c.lane));
+      const apart = Math.min(sep(at), sep(Math.min(L, at + (c.v * c.v) / 5)));
       if (apart < me + (e.c.hw ?? DIMS[e.c.kind].hw) + 0.4) ob(e.pos - e.c.back - c.s - c.front, e.c.v);
     }
   }
@@ -1242,7 +1244,8 @@ export class Traffic {
       if (c.dwell <= 0) { c.served = ns.st.id; c.dwell = undefined; }
       return true;
     }
-    if (ns.st.kind === 'layby') {
+    // (a bus longer than a lay-by's stand, a bendy bus, calls there from the lane as at a kerbside stop)
+    if (ns.st.kind === 'layby' && c.front + c.back <= BAY.stand) {
       c.bay = ns.st;
       // it's out of the lane once its side is clear of anything in the lane
       if (c.off - this.laneOff(c.seg, c.from, c.s, this.laneIdx(c)) >= 2.6) { c.inBay = true; if (c.entry) c.entry.kind = 3; }
@@ -1418,13 +1421,11 @@ export class Traffic {
     this.fleet.begin();
     for (const c of this.cars) {
       let x: number, z: number, y: number, grade = 0, at: (d: number) => { x: number; z: number };
-      let on: { tr: Track; t: number } | undefined; // the course it's on, near or in a junction
       if (c.turn) {
         // in a junction the vehicle sits exactly where its conflicts were worked out
         const tr = c.turn.path.track, t = c.turn.t, q = tr.at(t);
         x = q.x; z = q.z; y = q.y;
         at = (d) => tr.point(t + d);
-        on = { tr, t };
       } else {
         const L = this.len(c.seg), path = this.pathOf(c.seg, c.from), q = pointAt(path, Math.min(c.s, L));
         // lane position, easing across on lane changes; buses swing into lay-bys
@@ -1438,19 +1439,16 @@ export class Traffic {
         const pl = c.plan && c.plan.path.lineS - s < E_IN && c.plan.path.inSeg === c.seg.id ? c.plan.path : undefined;
         const af = c.after && c.after.path.next === c.seg.id && c.after.path.exitLane === this.laneIdx(c) && c.s - c.after.path.outS < E_OUT ? c.after.path : undefined;
         const onCourse = Math.abs(off - want) < 0.3;
-        if (onCourse && pl) { const tr = pl.track, t = pl.ext0 - (pl.lineS - s); at = (d) => tr.point(t + d); on = { tr, t }; }
-        else if (onCourse && af) { const tr = af.track, t = af.ext1 + (s - af.outS); at = (d) => tr.point(t + d); on = { tr, t }; }
+        if (onCourse && pl) { const tr = pl.track, t = pl.ext0 - (pl.lineS - s); at = (d) => tr.point(t + d); }
+        else if (onCourse && af) { const tr = af.track, t = af.ext1 + (s - af.outS); at = (d) => tr.point(t + d); }
         else at = (d) => {
           const r = s + d, p = pointAt(path, Math.max(0, Math.min(L, r))), o = r < 0 ? r : r > L ? r - L : 0;
           return { x: p.x + p.uz * off + p.ux * o, z: p.z - p.ux * off + p.uz * o };
         };
       }
       const k = Math.min(1, Math.max(0, (now - c.born) / 500), c.gone !== undefined ? 1 - (now - c.gone) / 600 : 1);
-      // each part lies along its own chord; an artic's trailer or a bendy bus's rear swings round
-      // on its hitch from where it was last frame, and on a junction's course exactly as the
-      // course's conflict tables have it (see footprint.ts)
-      const pose = (c.pose ??= { x, z, y, k, kind: c.kind, id: c.id, parts: [] }), parts = bodyOf(c.cls ?? c.kind, at, k, pose.parts, pose.parts[1]);
-      if (on && c.cls !== undefined && BODIES[c.cls].trailer) trailerOn(on.tr, c.cls, on.t, k, parts[parts.length - 1]);
+      // each part lies along its own chord (an artic's trailer hangs on its hitch, see footprint.ts)
+      const pose = (c.pose ??= { x, z, y, k, kind: c.kind, id: c.id, parts: [] }), parts = bodyOf(c.cls ?? c.kind, at, k, pose.parts);
       pose.x = x; pose.z = z; pose.y = y; pose.k = k;
       c.heading = Math.atan2(parts[0].hz, parts[0].hx);
       this.fleet.drawCar(c, parts, y, Math.atan(grade), k, dt);

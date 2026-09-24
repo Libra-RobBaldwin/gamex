@@ -24,9 +24,10 @@ export const PARTS: Record<Kind, { a: number; b: number; hw: number }[]> = {
 
 // The bodies the traffic knows: 0–2 are the three kinds above, and the fleet (game/fleet.ts)
 // registers each real vehicle's body, at its true length and width, when it first takes to the
-// road. An articulated body (an artic, a bendy bus) is its first rigid part plus a trailer that
-// swings round on the hitch behind it, the way the vehicle library's follow() drags one, rather
-// than lying along the course: so it cuts the corner as a real semi-trailer does.
+// road. An articulated body (an artic, a bendy bus) is its first rigid part plus a trailer hung on
+// the hitch behind it, its tail on the course: on a bend it angles away from the tractor and
+// cuts inside, but never swings out of its lane, and it's the same wherever the vehicle has come
+// from, so the conflict tables (worked out from the course alone) allow for exactly what's drawn.
 export interface Part { a: number; b: number; hw: number }
 // hitch: the hitch point, metres ahead of the first part's middle (negative: behind it); front:
 // the trailer's hitch ahead of the trailer's middle; axle: its axle group, from its middle
@@ -49,12 +50,9 @@ export interface Pose { x: number; z: number; y: number; k: number; kind: Kind; 
 
 // The parts of a vehicle's body, given where the course is `d` metres along from the reference
 // point (d may be negative), with each part scaled by k about its own middle.
-// (Pass `out` to have its rectangles filled in rather than new ones made.) A trailer follows on
-// from `prev`, where it was a moment ago; without one it lines up straight behind.
-export function bodyOf(kind: Kind | number, at: (d: number) => { x: number; z: number }, k = 1, out: Rect[] = [], prev?: Rect): Rect[] {
+// (Pass `out` to have its rectangles filled in rather than new ones made.)
+export function bodyOf(kind: Kind | number, at: (d: number) => { x: number; z: number }, k = 1, out: Rect[] = []): Rect[] {
   const B = typeof kind === 'number' ? BODIES[kind] : undefined, parts: Part[] = B ? B.parts : PARTS[kind as Kind];
-  // (read before `out` is written: prev is usually last frame's trailer in the same array)
-  const px = prev?.x ?? 0, pz = prev?.z ?? 0, phx = prev?.hx ?? 0, phz = prev?.hz ?? 0;
   out.length = parts.length + (B?.trailer ? 1 : 0);
   parts.forEach(({ a, b, hw }, i) => {
     const p = at(a), q = at(b), dx = q.x - p.x, dz = q.z - p.z, l = Math.hypot(dx, dz) || 1;
@@ -63,14 +61,11 @@ export function bodyOf(kind: Kind | number, at: (d: number) => { x: number; z: n
   });
   const T = B?.trailer;
   if (T) {
-    // the trailer's axles are dragged towards the hitch: it swings round without sliding sideways
+    // the hitch on the tractor, and the trailer's tail on the course behind it (with the axles
+    // there, its overhang would swing the tail out across the next lane on a turn)
     const c = out[0], hx = c.x + c.hx * T.hitch, hz = c.z + c.hz * T.hitch;
-    let ux = c.hx, uz = c.hz;
-    if (prev) {
-      const rx = px + phx * T.axle, rz = pz + phz * T.axle, dx = hx - rx, dz = hz - rz, d = Math.hypot(dx, dz);
-      // (unless it has jumped: a bus turning round at a dead end lines straight up again)
-      if (Math.abs(d - (T.front - T.axle)) < 3 && dx * c.hx + dz * c.hz > 0) { ux = dx / d; uz = dz / d; }
-    }
+    const ax = at((parts[0].a + parts[0].b) / 2 + T.hitch - T.front - T.len / 2), dx = hx - ax.x, dz = hz - ax.z, l = Math.hypot(dx, dz);
+    const ux = l > 1e-6 ? dx / l : c.hx, uz = l > 1e-6 ? dz / l : c.hz;
     const r = (out[parts.length] ??= { x: 0, z: 0, hx: 1, hz: 0, hl: 0, hw: 0 });
     r.x = hx - ux * T.front; r.z = hz - uz * T.front; r.hx = ux; r.hz = uz; r.hl = (T.len / 2) * k; r.hw = T.hw * k;
   }
@@ -79,45 +74,10 @@ export function bodyOf(kind: Kind | number, at: (d: number) => { x: number; z: n
 
 // A course through a junction or round a bend (conflicts.ts's Track): its point t metres along.
 export interface Course { point(t: number): { x: number; z: number }; len: number; n: number }
-// An articulated body's trailer every quarter metre along a course, having driven it from the
-// start (lined up straight there, on the approach). The conflict tables sample it, and traffic.ts
-// draws a vehicle on the course with it, so what's drawn is exactly what the tables allowed for.
-const SUB = 0.25;
-const trails = new WeakMap<Course, Map<number, Float32Array>>();
-function trailAlong(c: Course, kind: number) {
-  let m = trails.get(c);
-  if (!m) trails.set(c, (m = new Map()));
-  let a = m.get(kind);
-  if (!a) {
-    const n = Math.ceil(c.len / SUB) + 1, parts: Rect[] = [];
-    a = new Float32Array(n * 4);
-    for (let i = 0; i < n; i++) {
-      const t = Math.min(i * SUB, c.len);
-      const r = bodyOf(kind, (d) => c.point(t + d), 1, parts, i ? parts[parts.length - 1] : undefined)[parts.length - 1];
-      a[i * 4] = r.x; a[i * 4 + 1] = r.z; a[i * 4 + 2] = r.hx; a[i * 4 + 3] = r.hz;
-    }
-    m.set(kind, a);
-  }
-  return a;
-}
-// the trailer of a vehicle t along a course, into `out` (scaled by k, as bodyOf does)
-export function trailerOn(c: Course, kind: number, t: number, k: number, out: Rect) {
-  const T = BODIES[kind].trailer!, a = trailAlong(c, kind), n = a.length / 4;
-  const f = Math.max(0, Math.min(n - 1, t / SUB)), i = Math.min(n - 2, Math.floor(f)), u = n > 1 ? f - i : 0, j = n > 1 ? i + 1 : i;
-  const hx = a[i * 4 + 2] * (1 - u) + a[j * 4 + 2] * u, hz = a[i * 4 + 3] * (1 - u) + a[j * 4 + 3] * u, l = Math.hypot(hx, hz) || 1;
-  out.x = a[i * 4] * (1 - u) + a[j * 4] * u; out.z = a[i * 4 + 1] * (1 - u) + a[j * 4 + 1] * u; out.hx = hx / l; out.hz = hz / l;
-  out.hl = (T.len / 2) * k; out.hw = T.hw * k;
-  return out;
-}
-
 // A body at every sample along a course (step apart), as the conflict tables need it.
 export function bodiesAlong(kind: number, c: Course, step: number): Rect[][] {
-  const out: Rect[][] = [], art = !!BODIES[kind].trailer;
-  for (let i = 0; i < c.n; i++) {
-    const t = Math.min(i * step, c.len), r = bodyOf(kind, (d) => c.point(t + d));
-    if (art) trailerOn(c, kind, t, 1, r[r.length - 1]);
-    out.push(r);
-  }
+  const out: Rect[][] = [];
+  for (let i = 0; i < c.n; i++) { const t = Math.min(i * step, c.len); out.push(bodyOf(kind, (d) => c.point(t + d))); }
   return out;
 }
 
@@ -144,7 +104,10 @@ export function posesOverlap(a: Pose, b: Pose, tol = 0.3) {
 // Every pair of vehicles overlapping at the same level (a bridge over a road doesn't count),
 // found through a coarse grid so it stays linear in the number of vehicles.
 export function overlapping(poses: Pose[], tol = 0.3): [Pose, Pose][] {
-  const cell = 16, grid = new Map<number, Pose[]>();
+  // (two vehicles can touch with their reference points as far apart as the two longest reaches)
+  let reach = 0;
+  for (const b of BODIES) reach = Math.max(reach, Math.max(b.front, b.back) + b.hw);
+  const cell = Math.max(16, 2 * reach), grid = new Map<number, Pose[]>();
   const key = (i: number, j: number) => (i + 4096) * 8192 + (j + 4096);
   for (const p of poses) {
     const k = key(Math.floor(p.x / cell), Math.floor(p.z / cell));
@@ -158,7 +121,7 @@ export function overlapping(poses: Pose[], tol = 0.3): [Pose, Pose][] {
     for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
       for (const q of grid.get(key(i + di, j + dj)) ?? []) {
         if (q.id <= p.id || Math.abs(q.y - p.y) > 2.5) continue;
-        if (Math.hypot(q.x - p.x, q.z - p.z) > 16) continue;
+        if (Math.hypot(q.x - p.x, q.z - p.z) > cell) continue;
         if (posesOverlap(p, q, tol)) out.push([p, q]);
       }
     }

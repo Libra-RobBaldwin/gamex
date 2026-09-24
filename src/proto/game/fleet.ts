@@ -45,13 +45,14 @@ export function slotOf(m: Model): string {
     case 'taxi': case 'police': case 'ambulance': case 'ice-cream': case 'tractor': case 'coach': case 'pickup': case 'suv': case 'estate': case 'van-luton': return m.style;
     case 'hatchback': case 'saloon': return m.style;
     case 'mpv': case 'coupe': case 'convertible': case 'sports': case 'supercar': case 'classic': return 'other-car';
-    case 'van-small': case 'van-panel': case 'minibus': return 'van';
+    case 'van-small': case 'van-panel': return 'van';
+    case 'minibus': return 'minibus';
     case 'refuse': case 'gritter': case 'mixer': case 'recovery': return 'special';
   }
   return m.category === 'lorry' ? 'rigid' : m.category;
 }
 const KEEP: Record<string, number> = {
-  hatchback: 2, saloon: 2, estate: 1, suv: 1, pickup: 1, 'other-car': 1, van: 2, 'van-luton': 1, rigid: 2, special: 1,
+  hatchback: 2, saloon: 2, estate: 1, suv: 1, pickup: 1, 'other-car': 1, van: 2, minibus: 1, 'van-luton': 1, rigid: 2, special: 1,
   tractor: 2, trailer: 3, bus: 1, coach: 1, taxi: 1, police: 1, ambulance: 1, 'ice-cream': 1,
 };
 const AREAS: [Area, number][] = [['suburb', 3], ['centre', 2], ['industrial', 1], ['rural', 1], ['motorway', 1]];
@@ -186,6 +187,12 @@ export class Fleet {
     const ok = (s?: { lead: Model }) => (heavy ? goods(s) : !(s?.lead.category === 'bus' && s.lead.style !== 'coach' && (area === 'suburb' || area === 'rural')));
     let sp = pickVehicle(this.rand, area, year);
     for (let i = 0; i < 12 && !ok(sp); i++) sp = pickVehicle(this.rand, area, year);
+    // (the area hardly sees goods vehicles: one of the year's, of a size for the area)
+    if (heavy && !goods(sp)) {
+      const big = area === 'industrial' || area === 'motorway' || area === 'rural';
+      const pool = (big ? ['tractor', 'rigid'] : ['van', 'van-luton', 'rigid']).flatMap((k) => this.palette.get(k) ?? []);
+      if (pool.length) sp = { lead: weighted(this.rand, pool), chain: [] } as unknown as typeof sp;
+    }
     if (!sp) return this.dressChain([this.snap(MODELS.find((m) => m.category === 'car' && year >= m.from)!)], year);
     const lead = this.snap(sp.lead), chain = [lead];
     if (lead.style === 'tractor') chain.push(this.snap(sp.chain[1] ?? MODELS.find((m) => m.category === 'trailer')!));
@@ -262,7 +269,8 @@ export class Fleet {
       tram: by((o) => o.kind === 'tram'),
       rack: by((o) => lead(o).style === 'rack-car'),
     };
-    return want[kind]?.[0] ?? (kind === 'intercity' || kind === 'dmu' ? by((o) => lead(o).style === 'dmu-car' || lead(o).style === 'emu-car')[0] : undefined);
+    // (before there are express sets, an intercity is a locomotive and coaches: see madeUp)
+    return want[kind]?.[0] ?? (kind === 'dmu' ? by((o) => lead(o).style === 'dmu-car' || lead(o).style === 'emu-car')[0] : undefined);
   }
   // what a set can manage: how fast, how steep, whether it needs wires or a rack
   defFor(o: Offer): TrainDef & { offer: string } {
@@ -276,11 +284,26 @@ export class Fleet {
       needsWires: o.models.some((id) => MODEL[id].stats.power === 'electric'), blurb: `${n} cars · ${mph} mph`,
     };
   }
+  // A train of one of the game's kinds when no set of the year fits: a locomotive of the day (a
+  // steam engine before the diesels) and its carriages, never electric unless the kind needs wires.
+  private madeUp(def: TrainDef, year: number): Model[] {
+    const offers = this.trainOffers(year).concat(purchaseList(year, ['locomotive', 'carriage']));
+    const ok = (o: Offer) => def.needsWires || o.models.every((id) => MODEL[id].stats.power !== 'electric');
+    const locos = offers.filter((o) => o.kind === 'locomotive' && ok(o) && MODEL[o.models[0]].style !== 'shunter');
+    const tank = locos.find((o) => MODEL[o.models[0]].style === 'steam-tank');
+    const loco = (def.id === 'dmu' ? tank : undefined) ?? locos.sort((a, b) => b.speedKmh - a.speedKmh)[0];
+    const coach = offers.find((o) => o.kind === 'carriage');
+    const chain = loco ? loco.models.map((id) => MODEL[id]) : [];
+    if (coach) for (let i = 0; i < (def.id === 'dmu' ? 2 : 5); i++) chain.push(MODEL[coach.models[0]]);
+    return chain.length ? chain : [MODELS.filter((m) => m.category === 'rail' && m.from <= year).sort((a, b) => b.from - a.from)[0] ?? MODELS.find((m) => m.category === 'rail')!];
+  }
   dressTrain(def: TrainDef): Dress {
     const year = this.yearNow();
     const offerId = (def as { offer?: string }).offer;
-    const o = (offerId && allTrain(year, offerId)) || this.offerFor(def.id, year);
-    const chain = o ? o.models.map((id) => MODEL[id]) : [MODELS.find((m) => m.style === 'dmu-car')!];
+    let o = (offerId && allTrain(year, offerId)) || this.offerFor(def.id, year);
+    // (a game kind that runs without wires is never drawn as an electric set)
+    if (o && !offerId && !def.needsWires && o.models.some((id) => MODEL[id].stats.power === 'electric')) o = undefined;
+    const chain = o ? o.models.map((id) => MODEL[id]) : this.madeUp(def, year);
     const seed = Math.floor(this.rand() * 2 ** 31), look = lookFor(chain[0], year, seed);
     // each type of vehicle in the set in the operator's livery for it (blue-and-grey coaches behind a blue engine)
     const cols = chain.map((m) => liveryColours((look.operator && liveryFor(look.operator, m.style, year)?.colours) || look.livery));
