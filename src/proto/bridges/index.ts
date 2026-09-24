@@ -6,3 +6,7 @@ export * from './choose';
 export * from './geometry';
 export * from './materials';
 export * from './scenario';
+export * from './track';
+export * from './earthworks';
+export * from './scene';
+export { findFights, type Fight } from './coplanar';
