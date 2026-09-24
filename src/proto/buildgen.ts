@@ -1196,6 +1196,7 @@ export const CIVIC: Record<string, { w: number; d: number; front: number; back: 
   hall: { w: 15, d: 10, front: 6, back: 6, label: 'Community hall', pop: 3, unit: 'jobs' },
   cornershop: { w: 9, d: 9, front: 3, back: 5, label: 'Corner shop', pop: 4, unit: 'jobs' },
   substation: { w: 6, d: 5, front: 2.5, back: 2.5, label: 'Electricity substation', pop: 0, unit: 'jobs' },
+  station: { w: 22, d: 10, front: 7, back: 0.5, label: 'Railway station', pop: 12, unit: 'jobs' }, // (only rail/draw.ts builds one, beside its platforms)
 };
 const SAINTS = ['St Mary’s', 'St John’s', 'All Saints', 'St Peter’s', 'Holy Trinity', 'St Michael’s', 'St Andrew’s'];
 const PUBS = ['The Red Lion', 'The Crown', 'The Railway', 'The Royal Oak', 'The Plough', 'The White Hart', 'The Bell', 'The Swan'];
@@ -1282,6 +1283,24 @@ function civic(k: Kit, l: Lot, r: () => number) {
       const mesh = M('fence', () => new THREE.MeshLambertMaterial({ color: '#9aa3a8', transparent: true, opacity: 0.4, depthWrite: false }));
       for (const [x0, z0, x1, z1] of [[X0, F - 0.2, X1, F - 0.2], [X0, Bk, X1, Bk], [X0, Bk, X0, F], [X1, Bk, X1, F]]) k.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.abs(x1 - x0) || 0.04, 2.2, Math.abs(z1 - z0) || 0.04, mesh);
       out.push('transformers behind a fence');
+      break;
+    }
+    case 'station': {
+      // a brick booking hall, its forecourt in front and a canopy on posts over the platform behind
+      const L = look(r, 'brick', 'sash', '#2d3338');
+      flat(k, X0, zf, X1, F, 0.05, slabsM());
+      k.block(0, 0, W, D, 0, 1, 4.4, 3.2, facade('shop', L.skin, L.wall[0], '#2d3338', '#1f5e3f'), fm(L), fm(L));
+      k.gable(0, 0, W, D, 4.4, 3.2, 0.35, roofM(pick(r, SLATE)[0]), blank(L));
+      chimney(k, -W / 2 + 1.2, 0, 8.4, blank(L));
+      const cz = -D / 2 - 1.9, green = plain('#1f5e3f'), cream = plain('#efe3c2');
+      k.box(0, 3.5, cz, W - 1, 0.25, 3.6, green);
+      k.box(0, 3.35, cz - 1.75, W - 1, 0.18, 0.12, cream); // (the valance)
+      for (let i = 0; i < 5; i++) k.box(-W / 2 + 1.5 + ((W - 3) * i) / 4, 0, cz - 1.2, 0.16, 3.5, 0.16, green);
+      // the name board over the door, in the company's colours
+      k.box(0, 3.1, D / 2 + 0.06, Math.min(9, W * 0.5), 0.7, 0.08, green);
+      k.box(0, 3.25, D / 2 + 0.11, Math.min(8.4, W * 0.46), 0.4, 0.04, cream);
+      name = 'Railway station';
+      out.push(L.wall[1], 'booking hall', 'platform canopy');
       break;
     }
     default: {
