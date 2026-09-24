@@ -107,9 +107,10 @@ function fitView(zoom = Number(q.get('zoom') ?? 0) || 0, ms = 0) {
   if (zoom) to = { ...to, h: zoom };
   if (ms > 0) nav.animateTo(to, ms); else nav.setView(to);
 }
-// the catchment ring is drawn a few pixels wide: redraw it when the zoom has changed a fair bit
+// the catchment ring is drawn a few pixels wide: redraw it when the zoom changes
 let ringH = 0;
-nav.onChange((v) => { if (showRing && Math.abs(v.h - ringH) > ringH * 0.15) drawOverlay(); });
+// (while it moves, only after a big change; once it comes to rest, exactly)
+nav.onChange((v) => { if (showRing && Math.abs(v.h - ringH) > ringH * (nav.busy ? 0.15 : 0.001)) drawOverlay(); });
 
 // ---------------- catchment ring and icons ----------------
 let showRing = q.get('ring') === '1';

@@ -153,6 +153,8 @@ export class NavCore {
   private anim: Anim | null = null;
   private keys = new Set<string>();
   private lastTap = { x: 0, y: 0, t: -Infinity };
+  // a quick two-finger touch waiting for its last finger to lift: then it zooms out
+  private twoTap: { x: number; y: number; t: number; qx: number; qy: number } | null = null;
   private longFired = false;
   private listeners = new Set<(v: View) => void>();
   private shown: View | null = null;
@@ -311,6 +313,7 @@ export class NavCore {
     this.interact();
     const p: Ptr = { id: e.id, x: e.x, y: e.y, px: e.x, py: e.y, t: e.t, pt: e.t, x0: e.x, y0: e.y, t0: e.t, v0: { ...this.view }, type: e.type ?? 'touch', button: e.button ?? 0 };
     if (gliding) p.stopper = true;
+    this.twoTap = null;
     this.ptrs.delete(e.id);
     this.ptrs.set(e.id, p);
     const n = this.ptrs.size;
@@ -454,10 +457,11 @@ export class NavCore {
       if (this.ptrs.size >= 2) { const [a, b] = [...this.ptrs.keys()]; this.startTwo(a, b, e.t); this.two!.moved = true; return; }
       if (this.ptrs.size === 1) {
         // a quick two-finger tap zooms out
-        // (both fingers quick: not a finger resting on the map while another brushes the screen)
-        if (why === 'up' && !g.moved && e.t - g.t0 < 300 && this.o.twoFingerTapZoom) this.zoomAt(g.m0.x, g.m0.y, this.o.twoFingerTapZoom);
         // carry on with the finger that's left, without a jump
         const [q] = [...this.ptrs.values()];
+        // a quick two-finger tap zooms out, once the other finger lifts too without moving (not a
+        // finger resting on the map while another brushes the screen, nor one that pans on)
+        if (why === 'up' && !g.moved && e.t - g.t0 < 300 && this.o.twoFingerTapZoom) this.twoTap = { x: g.m0.x, y: g.m0.y, t: g.t0, qx: q.x, qy: q.y };
         if (this.hooks.onRemaining?.(this.touch(q, event)) === true) { this.mode = 'claim'; this.primary = q.id; return; }
         if (this.o.oneFinger === 'orbit') this.startOrbit(q);
         else { this.mode = 'pan'; this.startPan(q, q.x, q.y); }
@@ -474,9 +478,14 @@ export class NavCore {
       }
       return;
     }
-    const mode = this.mode;
+    const mode = this.mode, tt = this.twoTap;
     this.mode = 'idle';
     this.orb = null;
+    this.twoTap = null;
+    if (tt && why === 'up' && e.t - tt.t < 450 && Math.hypot(p.x - tt.qx, p.y - tt.qy) <= this.o.tapSlop) {
+      this.zoomAt(tt.x, tt.y, this.o.twoFingerTapZoom);
+      return;
+    }
     if (mode === 'claim') { this.hooks.onClaimEnd?.(this.touch(p, event), why); return; }
     if (mode === 'pan' && why === 'up' && this.o.fling && this.vel.length >= 2) {
       const a = this.vel[0], b = this.vel[this.vel.length - 1], dt = (b.t - a.t) / 1000;
