@@ -110,3 +110,74 @@ everything".
    it.
 4. Add terrain height tiles (the grade solver already takes limits from anything).
 5. Add streaming tiles and the middle and far levels of detail.
+
+## The economy layer
+
+`economy.ts` (with `econdefs.ts`, `econlines.ts`, `econaccess.ts`, `econtowns.ts`) is the
+**demand model** authority from the diagram above. It owns what buildings are *used for* and
+how full they are, each town's memory (what it's been fed, its hysteresis counters),
+industries' production, and the loads on your lines and stops. The game owns the geometry.
+Catchments, the transit skim, zone-pair times, reach and trip tables are derived, rebuilt at
+each monthly review or when service changes. Only the authority is saved (`save()` and
+`Economy.load()`).
+
+**Time.** It never runs per frame. `advance(gameMinutes)` steps it an hour at a time and
+reviews every town once a "month" (`tune.monthDays`, default 30). Rates are per hour and
+changes are per review, so the live game can make a month one game day without retuning.
+
+**Simulate flows, show agents.** A line is a flow: each step moves the capacity its fleet
+brings past each stop (vehicles × seats × step / cycle) round the loop once. People get off
+(or change lines), then others get on. The cycle comes from the game's journey times plus
+dwell, and dwell grows with the crowd. `vehicles()` places each vehicle a headway apart along
+its line, with the load on its leg, for drawing buses, trains and lorries. A step costs lines ×
+stops + stops + industries. A review costs zones × zones within 25 km + stops², plus one pass
+over the buildings. Neither depends on population: a test counts the work. 50 towns, 500
+stops, 200 lines and 1,000 vehicles run a month in about 0.25 s in node.
+
+**How towns change.** Each month, each use of building in each town gets a demand:
+
+| Use | Grows with | Capped by |
+|---|---|---|
+| Homes | reach: workers who can get to a job within 30 min, shops within 20, leisure within 30 (by car via the car oracle, on foot, or by your lines), shared out among everyone competing for them | — |
+| Shops | customers and workers who can reach them | goods delivered |
+| Offices | workers who can reach them | passengers arriving |
+| Works | workers who can reach them | building materials delivered |
+
+A town finds some of what it needs for itself (about half of what it started with), so an
+unserved town shrinks towards a floor rather than vanishing. It is taken to be in balance
+when the map is made. Demand is smoothed, then set against capacity:
+
+- After two months above capacity it builds. It restores abandoned buildings first, then
+  uses a free plot in the zone where demand is keenest, or densifies (house → terrace →
+  flats → tower) where people most want to be and there's nowhere left to spread.
+- After three months well below capacity, people leave the emptiest, worst-placed
+  buildings. Those are abandoned, and cleared six months later.
+- Buildings come in lumps, so it never builds what it couldn't fill, or abandons what it
+  would want back: no oscillation.
+- Occupancy moves in quickly and out slowly, and only once low demand has lasted.
+
+Every town reports a status (growing, stable, stalling, declining), a headline, ranked
+reasons in plain words ("shops only 40% supplied with goods", "no bus or rail service") and
+the numbers for a town panel.
+
+**Plugging it into the live game.**
+
+1. *World.* Towns from the town centres. Zones are blocks of lots (the lots along one street
+   `row`, or ~150 m cells), with the free plots the queue still holds. Buildings are `Lot`s,
+   with capacity from `USE`. Stops come from `seg.stops`, lines from a line editor, industries
+   from the map.
+2. *Oracles.* `travelTime(stop, stop, vehicle)` and `carTime(zone, zone)` come from the traffic
+   graph, as skims rebuilt when `commitRoads()` runs (then call `networkChanged()`), not a
+   search per call.
+3. *Clock.* Call `advance(dt × GAME_MIN_PER_S)` from the frame loop. It only does work on hour
+   boundaries.
+4. *Actions* (`takeActions()`):
+   - `add`: queue a plot in that zone, then `addBuilding(lot, req)`, or `decline(req)` if
+     none fits.
+   - `densify`: rebuild the lot as the next kind, then `updateBuilding`.
+   - `vacate`, `abandon`, `restore`: change how the building looks.
+   - `demolish`: remove it.
+5. *Show it.* `traffic.ts` draws buses and trains from `vehicles()`, mapping each leg to its
+   route. Money events feed the HUD, and `town(id)` fills the town panel.
+6. *Next.* For many-city maps, pair distant zones at town level (the far level of detail),
+   and feed car trips from the trip tables into traffic spawning as link flows.
