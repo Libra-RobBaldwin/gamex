@@ -18,7 +18,15 @@ nothing should be built at the start, the HUD was too big, and the tools were to
   Join/Over/Under. With a blueprint down, the hint pill steps aside for the card. A Build that
   can't be pressed now looks disabled (before, it only faded under the primary colour). The
   climb errors say what to do.
-- **Line tool:** frames every stop when it starts.
+- **Line tool:** frames every stop when it starts. Once stops are picked, its card says what to
+  do next.
+- **Line sheet:** buses, riders a day and profit a day as three tiles (`Info.stats`), then the
+  stops and one row of actions. It's about half the height it was.
+- **Bulldoze** (Build > Bulldoze): tap a road or a stop, then Remove; half a road's price comes
+  back. It refuses a road buildings face, a stop a line calls at, and motorway junction parts.
+- **Build sheet:** the cards for things not in the game yet are gone (bus station, lorry depot,
+  Freight, Landscape). Add them back when they exist. Save and Load in the menu are left to the
+  save session.
 - **Parallel sessions** each push a `claude/work-*` branch; merge them here as they land:
   - traffic feel: `work-traffic-2`;
   - save and CI: `work-save`;
