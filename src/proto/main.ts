@@ -5,14 +5,14 @@ import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, 
 import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
 import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, type RoadFilter } from './catalog';
 import { GRADES } from './grade';
-import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
+import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, GRASS_MATS, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
 import { GRADE_STEPS } from './grade';
 import { Traffic, rushLabel, type Places } from './traffic';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CIVIC, makeBuilding as generate, makeRegion, USE } from './buildgen';
+import { CIVIC, grassMats, makeBuilding as generate, makeRegion, USE } from './buildgen';
 import { CELL, findRegions, type Region } from './infill';
 import { GameGround } from './ground/game';
-import { setGroundQuality } from './ground';
+import { patchGround, setGroundQuality } from './ground';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
 import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
@@ -96,6 +96,9 @@ const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees,
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND * 2.6, BOUND * 2.6), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
+// Grass drawn on top of the ground (verges, roundabout islands, cutting slopes, gardens, parks)
+// takes the ground's own look: the painter already paints those places as lawn or rough grass.
+for (const m of [...GRASS_MATS, ...grassMats()]) { m.color.set('#ffffff'); patchGround(m, gameGround.ground.uniforms); }
 // the ground leaves out any cutting a road or railway runs down into (they mark the stencil first)
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
 scene.add(gameGround.ground.hedges);
