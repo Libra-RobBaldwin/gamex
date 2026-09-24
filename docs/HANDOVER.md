@@ -8,6 +8,46 @@ carry on.
 Read this first, then `docs/ROADMAP.md` (direction), `docs/ENGINE.md` (architecture) and the
 per-library docs in `docs/`.
 
+## Second session (from 24 Sep, ~10:20 UTC): status
+
+A session on the user's other account picked this up:
+https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
+
+- **Integration branch:** `claude/cloud-session-history-rvqkm1`, with PR #9 into the main branch.
+- **Merged into it so far:**
+  - the handover (b8de12e);
+  - the vitest fix (known bug 3);
+  - all eight finished libraries (PRs #1–#8).
+- **Checks at cccd45c:** tsc is clean and 429 tests pass. Under heavy CPU load, `terrain/bench.test.ts` and one water test can time out; both pass on a re-run.
+- **The HUD redesign (approved by the user):** `docs/hud.md` and `docs/hud/mockup.html`.
+- **This session:**
+  - wiring the libraries into the game (workflow wf_ba6d60c5-e72):
+    - vehicles, people, industries, bridges and water, then a merge, an adversarial playtest and a fix;
+    - local branches `work/int-*`, then `work/integrate`;
+  - traffic, economy and terminals (workflow wf_3a219236-759; local branches `work/<stream>`).
+- **Cloud sessions:** each works on its own branch, pushes after every commit, and opens a PR into the integration branch.
+
+  | Stream | Branch | Session |
+  |---|---|---|
+  | New HUD in the game | `claude/work-hud` | session_01LHmZZcerrUyGq1TSiFcnKZ |
+  | One camera kit in the game and every demo | `claude/work-kit-nav` | session_01DCEbMvXXTVSr8K2R3gAvY8 |
+  | Bridge earthworks and track detail | `claude/work-bridges-track` | session_017X98YbhdPPReFEcpyd4diZ |
+  | Ground with character, shared by every demo | `claude/work-ground` | session_01Yc7nmze9XbVcixsU4xaTBj |
+  | Vehicle doors and moving parts | `claude/work-vehicles-moving` | session_012fqK9zWp7BH6mQXJMQ8S1Z |
+
+- **Dropped:** the UI fix stream for the old dock; the new HUD supersedes it.
+- **New preview links (this account):**
+
+  | What | Link |
+  |---|---|
+  | Game | https://claude.ai/artifact/Baau34269e5GgVfKquSesJ |
+  | Water | https://claude.ai/artifact/CuTMcGE9xTebEACgv2Hkyf |
+  | Vehicles | https://claude.ai/artifact/Vy1PUbSTHLMuScoL66fcLv |
+  | People | https://claude.ai/artifact/9FaghH7bkVoAN7bfWR9MqJ |
+  | Bridges | https://claude.ai/artifact/L72vN7hP41VjDp29fJnBLd |
+  | Industries | https://claude.ai/artifact/6JyuqJ7Tdb5m2p4hYyhJzR |
+  | HUD mock-up | https://claude.ai/artifact/WGbq3v6p161GpesZehQ1gW |
+
 ## The game and previews (published artifacts, owned by the org account)
 
 These links belong to the org account. A session on another account can't update them, so

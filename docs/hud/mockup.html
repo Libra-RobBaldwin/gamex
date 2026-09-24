@@ -1,0 +1,457 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Untitled HUD Mock-up</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=League+Spartan:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* One deliberate look: the game's HUD over its own map, so no light/dark switch. */
+  :root {
+    color-scheme: dark;
+    --forest: #1f5e3f;
+    --deep: #0f3322;
+    --panel: rgba(15, 51, 34, 0.95);
+    --panel-2: #174a31;
+    --lime: #5cb83a;
+    --lime-ink: #0f3322;
+    --gold: #b8964e;
+    --ink: #f2f5ef;
+    --muted: #a7c1b1;
+    --faint: rgba(242, 245, 239, 0.12);
+    --cut: 12px;
+    --display: 'League Spartan', 'Futura', 'Avenir Next', system-ui, sans-serif;
+    --body: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { background: var(--deep); color: var(--ink); font: 14px/1.4 var(--body); overflow: hidden; -webkit-tap-highlight-color: transparent; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
+  .i { width: 22px; height: 22px; flex: none; }
+  .i path, .i circle, .i rect, .i line, .i polyline { vector-effect: non-scaling-stroke; }
+
+  #app { position: relative; height: 100%; max-width: 480px; margin: 0 auto; overflow: hidden; background: #6f9e48; }
+  #map, #current { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; user-select: none; -webkit-user-drag: none; }
+  #current { z-index: 30; }
+
+  /* Faceted panels: the brand's cut corner, top-right. */
+  .facet { clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%); }
+
+  /* ---- slim status strip ---- */
+  #status { position: absolute; z-index: 10; top: 8px; left: 8px; right: 8px; display: flex; align-items: stretch; height: 44px; background: var(--panel); border-bottom: 2px solid var(--gold); }
+  #status .mark { width: 44px; display: grid; place-items: center; background: var(--lime); }
+  #status .mark svg { width: 26px; height: 26px; }
+  #stats-toggle { flex: 1; display: flex; align-items: center; gap: 10px; padding: 0 10px; min-width: 0; text-align: left; }
+  #stats-toggle .time { font: 700 17px/1 var(--display); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+  #stats-toggle .peak { font: 700 10px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--lime); }
+  #stats-toggle .money { margin-left: auto; font: 600 14px/1 var(--body); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+  #stats-toggle .chev { color: var(--muted); transition: transform 0.18s; }
+  #status[data-open] .chev { transform: rotate(180deg); }
+  .speed { display: flex; }
+  .speed button { width: 44px; display: grid; place-items: center; font: 700 14px/1 var(--display); border-left: 1px solid var(--faint); }
+  .speed button[aria-pressed="true"] { background: var(--lime); color: var(--lime-ink); }
+  #stats { position: absolute; z-index: 9; top: 54px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 12px; background: var(--panel); font-variant-numeric: tabular-nums; }
+  #stats span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+  #stats b { color: var(--ink); font-weight: 600; }
+  #stats .i { width: 18px; height: 18px; }
+
+  #compass { position: absolute; z-index: 8; top: 64px; right: 8px; width: 44px; height: 44px; display: grid; place-items: center; background: var(--panel); border-radius: 50%; }
+  #compass svg { width: 26px; height: 26px; }
+  #status[data-open] ~ #compass { top: 128px; }
+
+  /* ---- bottom bar ---- */
+  #bar { position: absolute; z-index: 12; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)); background: var(--panel); border-top: 2px solid var(--gold); }
+  #bar button { height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: 700 10.5px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  #bar button[aria-expanded="true"] { background: var(--lime); color: var(--lime-ink); clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
+  #bar .i { width: 24px; height: 24px; }
+
+  /* ---- bottom sheets ---- */
+  .sheet { position: absolute; z-index: 11; left: 0; right: 0; bottom: 66px; max-height: 60%; display: flex; flex-direction: column; background: var(--panel); border-top: 3px solid var(--lime); --cut: 18px; animation: up 0.18s ease-out; }
+  @keyframes up { from { transform: translateY(24px); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .sheet, #tool { animation: none; } }
+  .sheet header { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px 16px; }
+  .sheet h2 { margin: 0; font: 800 18px/1 var(--display); letter-spacing: 0.04em; text-transform: uppercase; text-wrap: balance; }
+  .sheet header .sub { color: var(--muted); font-size: 12.5px; }
+  .close { margin-left: auto; width: 44px; height: 44px; display: grid; place-items: center; color: var(--muted); }
+  .body { overflow-y: auto; padding: 4px 16px 16px; }
+  .tabs { display: flex; gap: 6px; padding: 0 12px 10px 16px; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; background: var(--panel-2); font: 700 11.5px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+  .tab .i { width: 18px; height: 18px; }
+  .tab[aria-selected="true"] { background: var(--lime); color: var(--lime-ink); }
+  .tab[disabled] { opacity: 0.45; cursor: default; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .card { display: flex; flex-direction: column; gap: 4px; min-height: 76px; padding: 10px 11px; text-align: left; background: var(--panel-2); border-left: 3px solid var(--forest); }
+  .card:active { background: var(--forest); }
+  .card b { font: 700 14px/1.15 var(--display); letter-spacing: 0.02em; }
+  .card span { color: var(--muted); font-size: 12px; line-height: 1.3; }
+  .card.locked { opacity: 0.55; border-left-color: var(--gold); }
+  .card.locked span:last-child { color: var(--gold); }
+  .note { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+
+  /* ---- tool strip: replaces the bottom bar while you draw ---- */
+  #tool { position: absolute; z-index: 13; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--panel); border-top: 3px solid var(--lime); animation: up 0.18s ease-out; }
+  #tool .row { display: flex; align-items: center; gap: 6px; }
+  #tool .what { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding-left: 4px; }
+  #tool .what b { font: 700 15px/1.1 var(--display); letter-spacing: 0.02em; }
+  #tool .what span { color: var(--muted); font-size: 12px; }
+  .seg { display: flex; background: var(--panel-2); }
+  .seg button { min-width: 44px; height: 40px; padding: 0 10px; font: 700 11px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: var(--forest); color: var(--ink); box-shadow: inset 0 -2px 0 var(--lime); }
+  .seg-label { font: 700 10px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); }
+  .act { height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; background: var(--panel-2); font: 700 12px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; }
+  .act.primary { background: var(--lime); color: var(--lime-ink); clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); }
+  #draw-hint { position: absolute; z-index: 7; left: 50%; bottom: 150px; transform: translateX(-50%); padding: 8px 14px; background: var(--panel); font-size: 13px; white-space: nowrap; }
+
+  /* ---- layers pop-over ---- */
+  #layers { position: absolute; z-index: 12; right: 8px; bottom: 74px; width: min(260px, calc(100% - 16px)); padding: 8px; background: var(--panel); border-top: 3px solid var(--lime); --cut: 14px; }
+  #layers h3 { margin: 4px 6px 8px; font: 800 13px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold); }
+  .toggle { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; text-align: left; }
+  .toggle .dot { margin-left: auto; width: 34px; height: 20px; border-radius: 10px; background: var(--panel-2); position: relative; }
+  .toggle .dot::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform 0.15s; }
+  .toggle[aria-pressed="true"] .dot { background: var(--lime); }
+  .toggle[aria-pressed="true"] .dot::after { transform: translateX(14px); background: var(--deep); }
+  #layers .seg { margin: 6px 6px 4px; }
+  #layers .seg button { flex: 1; }
+
+  /* ---- info sheet rows ---- */
+  .facts { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 2px 0 12px; font-variant-numeric: tabular-nums; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; text-align: right; font-weight: 600; }
+  .meter { height: 6px; background: var(--panel-2); margin-top: 4px; }
+  .meter i { display: block; height: 100%; background: var(--lime); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .line { display: grid; grid-template-columns: 34px 1fr; gap: 2px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--faint); }
+  .line .num { grid-row: span 2; width: 34px; height: 34px; display: grid; place-items: center; font: 800 15px/1 var(--display); background: var(--lime); color: var(--lime-ink); }
+  .line b { font: 700 14px/1.2 var(--display); }
+  .line span { color: var(--muted); font-size: 12px; }
+
+  /* ---- map hotspots ---- */
+  .hot { position: absolute; z-index: 5; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; }
+  .hot::before { content: ''; position: absolute; inset: 14px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 3px rgba(15, 51, 34, 0.7); }
+  .hot::after { content: ''; position: absolute; inset: 8px; border-radius: 50%; border: 2px solid var(--lime); animation: pulse 1.8s ease-out infinite; }
+  @keyframes pulse { from { transform: scale(0.6); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .hot::after { animation: none; } }
+  #tap-hint { position: absolute; z-index: 6; left: 50%; top: 64px; transform: translateX(-50%); padding: 7px 12px; background: var(--panel); font-size: 12.5px; white-space: nowrap; border-left: 3px solid var(--lime); }
+
+  #compare-bar { position: absolute; z-index: 31; left: 8px; right: 8px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; background: var(--panel); border-top: 3px solid var(--gold); }
+  #compare-bar p { margin: 0; flex: 1; font-size: 12.5px; }
+  #compare-bar b { color: var(--gold); }
+</style>
+
+<div id="app">
+  <img id="map" src="map.jpg" alt="The town from above: terraces, office blocks, a roundabout and a railway">
+  <img id="current" src="current.jpg" alt="The game with the current HUD" hidden>
+
+  <button class="hot" data-info="tower" aria-label="Inspect the office tower"></button>
+  <button class="hot" data-info="roundabout" aria-label="Inspect the roundabout"></button>
+  <button class="hot" data-info="terrace" aria-label="Inspect the terraced houses"></button>
+  <div id="tap-hint">Tap anything on the map to inspect it</div>
+
+  <header id="status" class="facet">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32"><path fill="#0f3322" d="M3 25L12 8.5L11 25Z"/><path fill="#1f5e3f" d="M12 8.5L17 17L11 25Z"/><path fill="#174a31" d="M11 25L17 17L22 25Z"/><path fill="#0f3322" d="M17 17L22 11.5L22 25Z"/><path fill="#2a7a50" d="M22 11.5L29 25H22Z"/></svg>
+    </div>
+    <button id="stats-toggle" aria-expanded="false" aria-controls="stats">
+      <span class="time">07:05</span><span class="peak">AM peak</span>
+      <span class="money">£250,000</span>
+      <span class="chev"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6l6 -6" /></svg></span>
+    </button>
+    <div class="speed" role="group" aria-label="Game speed">
+      <button id="pause" aria-pressed="false" aria-label="Pause"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12" /> <path d="M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12" /></svg></button>
+      <button id="rate" aria-pressed="true" aria-label="Speed: normal">1×</button>
+    </div>
+  </header>
+  <div id="stats" hidden>
+    <span><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" /> <path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" /> <path d="M16 3.13a4 4 0 0 1 0 7.75" /> <path d="M21 21v-2a4 4 0 0 0 -3 -3.85" /></svg><b>1,369</b> people</span>
+    <span><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M15 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M5 17h-2v-6l2 -5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5" /></svg><b>29</b> cars</span>
+    <span><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M16 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M4 17h-2v-11a1 1 0 0 1 1 -1h14a5 7 0 0 1 5 7v5h-2m-4 0h-8" /> <path d="M16 5l1.5 7l4.5 0" /> <path d="M2 10l15 0" /> <path d="M7 5l0 5" /> <path d="M12 5l0 5" /></svg><b>4</b> buses</span>
+    <span><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 13c0 -3.87 -3.37 -7 -10 -7h-8" /> <path d="M3 15h16a2 2 0 0 0 2 -2" /> <path d="M3 6v5h17.5" /> <path d="M3 11v4" /> <path d="M8 11v-5" /> <path d="M13 11v-4.5" /> <path d="M3 19h18" /></svg><b>2</b> trains</span>
+  </div>
+  <button id="compass" aria-label="Point north">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="#a7c1b1" stroke-width="1.5"/><path d="M16 5l4 11h-8z" fill="#e2574c"/><path d="M16 27l-4-11h8z" fill="#f2f5ef"/></svg>
+  </button>
+
+  <!-- BUILD -->
+  <section class="sheet facet" id="sheet-build" aria-label="Build" hidden>
+    <header><h2>Build</h2><span class="sub">Pick something, then draw it on the map</span><button class="close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6l-12 12" /> <path d="M6 6l12 12" /></svg></button></header>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-cat="roads" aria-selected="true"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19l4 -14" /> <path d="M16 5l4 14" /> <path d="M12 8v-2" /> <path d="M12 13v-2" /> <path d="M12 18v-2" /></svg>Roads</button>
+      <button class="tab" role="tab" data-cat="rail" aria-selected="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 13c0 -3.87 -3.37 -7 -10 -7h-8" /> <path d="M3 15h16a2 2 0 0 0 2 -2" /> <path d="M3 6v5h17.5" /> <path d="M3 11v4" /> <path d="M8 11v-5" /> <path d="M13 11v-4.5" /> <path d="M3 19h18" /></svg>Rail</button>
+      <button class="tab" role="tab" data-cat="stops" aria-selected="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -4" /> <path d="M16 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M10 5h7c2.761 0 5 3.134 5 7v5h-2" /> <path d="M16 17h-8" /> <path d="M16 5l1.5 7h4.5" /> <path d="M9.5 10h7.5" /> <path d="M12 5v5" /> <path d="M5 9v11" /></svg>Stops</button>
+      <button class="tab" role="tab" data-cat="freight" aria-selected="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21v-13l9 -4l9 4v13" /> <path d="M13 13h4v8h-10v-6h6" /> <path d="M13 21v-9a1 1 0 0 0 -1 -1h-2a1 1 0 0 0 -1 1v3" /></svg>Freight</button>
+      <button class="tab" role="tab" data-cat="bulldoze" aria-selected="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 17a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M12 17a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M19 13v4a2 2 0 0 0 2 2h1" /> <path d="M14 19h-10" /> <path d="M4 15h10" /> <path d="M9 11v-5h2a3 3 0 0 1 3 3v6" /> <path d="M5 15v-3a1 1 0 0 1 1 -1h8" /> <path d="M19 17h-3" /></svg>Bulldoze</button>
+      <button class="tab" role="tab" disabled aria-selected="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18l-6.921 -14.612a2.3 2.3 0 0 0 -4.158 0l-6.921 14.612" /> <path d="M7.5 11l2 2.5l2.5 -2.5l2 3l2.5 -2" /></svg>Landscape</button>
+    </div>
+    <div class="body" id="build-items"></div>
+  </section>
+
+  <!-- TRANSPORT -->
+  <section class="sheet facet" id="sheet-transport" aria-label="Transport" hidden>
+    <header><h2>Transport</h2><span class="sub">Your lines and vehicles</span><button class="close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6l-12 12" /> <path d="M6 6l12 12" /></svg></button></header>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tt="lines" aria-selected="true"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 19a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M19 7a2 2 0 1 0 0 -4a2 2 0 0 0 0 4" /> <path d="M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5" /></svg>Lines</button>
+      <button class="tab" role="tab" data-tt="fleet" aria-selected="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M16 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M4 17h-2v-11a1 1 0 0 1 1 -1h14a5 7 0 0 1 5 7v5h-2m-4 0h-8" /> <path d="M16 5l1.5 7l4.5 0" /> <path d="M2 10l15 0" /> <path d="M7 5l0 5" /> <path d="M12 5l0 5" /></svg>Buy vehicles</button>
+    </div>
+    <div class="body" id="tt-lines">
+      <div class="line"><span class="num">1</span><b>High Street – Station</b><span>3 Paradeway single-deckers · every 12 min · 64% full</span></div>
+      <div class="line"><span class="num">2</span><b>Mill Lane – Market Square</b><span>2 Kerbline double-deckers · every 20 min · 41% full</span></div>
+      <p class="note">Example lines. A new line starts from here: tap its stops on the map in order, then pick vehicles.</p>
+      <div class="actions" style="margin-top:10px"><button class="act primary"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5l0 14" /> <path d="M5 12l14 0" /></svg>New line</button></div>
+    </div>
+    <div class="body" id="tt-fleet" hidden>
+      <div class="grid">
+        <button class="card"><b>Tallyman</b><span>Minibus</span></button>
+        <button class="card"><b>Paradeway</b><span>Single-deck bus</span></button>
+        <button class="card"><b>Kerbline</b><span>Double-deck bus</span></button>
+        <button class="card"><b>Stargazer</b><span>Coach</span></button>
+        <button class="card"><b>Local diesel</b><span>2 cars · 75 mph</span></button>
+        <button class="card"><b>Light rail</b><span>2 cars · 50 mph · electric</span></button>
+        <button class="card"><b>Intercity</b><span>5 cars · 125 mph</span></button>
+        <button class="card locked"><b>High-speed</b><span>8 cars · 186 mph</span><span>Needs an electrified high-speed line</span></button>
+      </div>
+      <p class="note">What's on sale depends on the year: this list is 2025's.</p>
+    </div>
+  </section>
+
+  <!-- INFO (filled in from the tapped thing) -->
+  <section class="sheet facet" id="sheet-info" aria-label="Details" hidden>
+    <header><h2 id="info-title"></h2><span class="sub" id="info-sub"></span><button class="close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6l-12 12" /> <path d="M6 6l12 12" /></svg></button></header>
+    <div class="body" id="info-body"></div>
+  </section>
+
+  <!-- MENU -->
+  <section class="sheet facet" id="sheet-menu" aria-label="Menu" hidden>
+    <header><h2>Untitled</h2><span class="sub">Mock-up · figures are examples</span><button class="close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6l-12 12" /> <path d="M6 6l12 12" /></svg></button></header>
+    <div class="body">
+      <div class="grid">
+        <button class="card" id="compare"><b>Compare with today's HUD</b><span>Show the current layout on the same map</span></button>
+        <button class="card"><b>Quality</b><span>Auto · steps down if frames slow</span></button>
+        <button class="card"><b>Save town</b><span>Kept on this phone</span></button>
+        <button class="card"><b>New town</b><span>Starts again from the seed town</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- LAYERS -->
+  <div id="layers" class="facet" hidden>
+    <h3>Map layers</h3>
+    <button class="toggle" aria-pressed="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7a5 5 0 0 1 5 -5a5 5 0 0 1 5 5v10a5 5 0 0 1 -5 5a5 5 0 0 1 -5 -5l0 -10" /> <path d="M11 7a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M11 17a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /></svg>Traffic flow<span class="dot"></span></button>
+    <button class="toggle" aria-pressed="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -4" /> <path d="M16 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M10 5h7c2.761 0 5 3.134 5 7v5h-2" /> <path d="M16 17h-8" /> <path d="M16 5l1.5 7h4.5" /> <path d="M9.5 10h7.5" /> <path d="M12 5v5" /> <path d="M5 9v11" /></svg>Stop catchments<span class="dot"></span></button>
+    <button class="toggle" aria-pressed="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" /> <path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" /> <path d="M16 3.13a4 4 0 0 1 0 7.75" /> <path d="M21 21v-2a4 4 0 0 0 -3 -3.85" /></svg>Where people want to go<span class="dot"></span></button>
+    <button class="toggle" aria-pressed="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21l18 0" /> <path d="M9 8l1 0" /> <path d="M9 12l1 0" /> <path d="M9 16l1 0" /> <path d="M14 8l1 0" /> <path d="M14 12l1 0" /> <path d="M14 16l1 0" /> <path d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16" /></svg>Land use<span class="dot"></span></button>
+    <div class="seg" role="group" aria-label="View">
+      <button aria-pressed="true">3D</button><button aria-pressed="false">Low</button><button aria-pressed="false">Plan</button>
+    </div>
+  </div>
+
+  <!-- TOOL STRIP -->
+  <div id="tool" hidden>
+    <div class="row">
+      <div class="what"><span id="tool-icon"></span><div><b id="tool-name"></b><br><span id="tool-spec"></span></div></div>
+      <button class="act" id="tool-cancel" aria-label="Cancel"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6l-12 12" /> <path d="M6 6l12 12" /></svg></button>
+    </div>
+    <div class="row">
+      <span class="seg-label">Height</span>
+      <div class="seg" role="group" aria-label="Height"><button aria-pressed="true">Auto</button><button aria-pressed="false">Level</button><button aria-pressed="false">Raise</button></div>
+      <button class="act" aria-label="Undo" style="margin-left:auto"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14l-4 -4l4 -4" /> <path d="M5 10h11a4 4 0 1 1 0 8h-1" /></svg></button>
+      <button class="act primary" id="tool-done"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5l10 -10" /></svg>Done</button>
+    </div>
+  </div>
+  <div id="draw-hint" hidden>Drag on the map to draw · bridges are chosen for you</div>
+
+  <nav id="bar" aria-label="Main">
+    <button data-open="sheet-build" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.414 10l-7.383 7.418a2.091 2.091 0 0 0 0 2.967a2.11 2.11 0 0 0 2.976 0l7.407 -7.385" /> <path d="M18.121 15.293l2.586 -2.586a1 1 0 0 0 0 -1.414l-7.586 -7.586a1 1 0 0 0 -1.414 0l-2.586 2.586a1 1 0 0 0 0 1.414l7.586 7.586a1 1 0 0 0 1.414 0" /></svg>Build</button>
+    <button data-open="sheet-transport" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 19a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M19 7a2 2 0 1 0 0 -4a2 2 0 0 0 0 4" /> <path d="M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5" /></svg>Transport</button>
+    <button data-open="layers" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l-8 4l8 4l8 -4l-8 -4" /> <path d="M4 12l8 4l8 -4" /> <path d="M4 16l8 4l8 -4" /></svg>Layers</button>
+    <button data-open="sheet-menu" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l16 0" /> <path d="M4 12l16 0" /> <path d="M4 18l16 0" /></svg>Menu</button>
+  </nav>
+
+  <div id="compare-bar" hidden>
+    <p>Today's HUD covers about <b>a quarter</b> of the height plus a column of side buttons. The proposal covers about <b>12%</b>.</p>
+    <button class="act primary" id="compare-back">Back</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+  const ICON = {"map-pin": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0\" /> <path d=\"M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0\" /></svg>", "bulldozer": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M2 17a2 2 0 1 0 4 0a2 2 0 0 0 -4 0\" /> <path d=\"M12 17a2 2 0 1 0 4 0a2 2 0 0 0 -4 0\" /> <path d=\"M19 13v4a2 2 0 0 0 2 2h1\" /> <path d=\"M14 19h-10\" /> <path d=\"M4 15h10\" /> <path d=\"M9 11v-5h2a3 3 0 0 1 3 3v6\" /> <path d=\"M5 15v-3a1 1 0 0 1 1 -1h8\" /> <path d=\"M19 17h-3\" /></svg>", "arrow-roundabout-right": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 9h-8a5 5 0 1 0 -5 5v7\" /> <path d=\"M17 5l4 4l-4 4\" /></svg>", "traffic-lights": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M7 7a5 5 0 0 1 5 -5a5 5 0 0 1 5 5v10a5 5 0 0 1 -5 5a5 5 0 0 1 -5 -5l0 -10\" /> <path d=\"M11 7a1 1 0 1 0 2 0a1 1 0 1 0 -2 0\" /> <path d=\"M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0\" /> <path d=\"M11 17a1 1 0 1 0 2 0a1 1 0 1 0 -2 0\" /></svg>", "bus-stop": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 4a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -4\" /> <path d=\"M16 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0\" /> <path d=\"M10 5h7c2.761 0 5 3.134 5 7v5h-2\" /> <path d=\"M16 17h-8\" /> <path d=\"M16 5l1.5 7h4.5\" /> <path d=\"M9.5 10h7.5\" /> <path d=\"M12 5v5\" /> <path d=\"M5 9v11\" /></svg>", "road": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 19l4 -14\" /> <path d=\"M16 5l4 14\" /> <path d=\"M12 8v-2\" /> <path d=\"M12 13v-2\" /> <path d=\"M12 18v-2\" /></svg>", "train": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 13c0 -3.87 -3.37 -7 -10 -7h-8\" /> <path d=\"M3 15h16a2 2 0 0 0 2 -2\" /> <path d=\"M3 6v5h17.5\" /> <path d=\"M3 11v4\" /> <path d=\"M8 11v-5\" /> <path d=\"M13 11v-4.5\" /> <path d=\"M3 19h18\" /></svg>", "building-warehouse": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 21v-13l9 -4l9 4v13\" /> <path d=\"M13 13h4v8h-10v-6h6\" /> <path d=\"M13 21v-9a1 1 0 0 0 -1 -1h-2a1 1 0 0 0 -1 1v3\" /></svg>", "droplet": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M7.502 19.423c2.602 2.105 6.395 2.105 8.996 0c2.602 -2.105 3.262 -5.708 1.566 -8.546l-4.89 -7.26c-.42 -.625 -1.287 -.803 -1.936 -.397a1.376 1.376 0 0 0 -.41 .397l-4.893 7.26c-1.695 2.838 -1.035 6.441 1.567 8.546\" /></svg>", "player-play": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M7 4v16l13 -8l-13 -8\" /></svg>", "player-pause": "<svg class=\"i\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12\" /> <path d=\"M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12\" /></svg>"};
+
+  // Catalogue entries as the game names them (catalog.ts, the terminals catalogue).
+  const BUILD = {
+    roads: [
+      ['road', 'Street', '1+1 · 30 mph · pavements'],
+      ['road', 'Avenue', '1+1 · 30 mph · wide pavements'],
+      ['road', 'Boulevard', '2+2 · tree-lined middle'],
+      ['road', 'Arterial', '1+1 or 2+2 · 30–40 mph · bus lanes'],
+      ['road', 'Rural road', '1+1 · 40–60 mph · verges'],
+      ['road', 'Dual carriageway', '2+2 · 50 mph · barrier'],
+      ['road', 'Motorway', '3+3 · 70 mph · hard shoulders'],
+      ['road', 'More road types', 'Filter by lanes, speed, bus and cycle lanes'],
+    ],
+    rail: [
+      ['train', 'Branch line', 'Single track · 60 mph · up to 3.5%'],
+      ['train', 'Main line', 'Double, electrified · 100 mph · up to 2.5%'],
+      ['train', 'High speed', 'Double, electrified · 186 mph'],
+      ['train', 'Light rail', '50 mph · up to 6% · tight curves'],
+      ['train', 'Rack railway', 'Toothed rack · climbs up to 20%'],
+    ],
+    stops: [
+      ['bus-stop', 'Bus stop', 'On any street; a lay-by where there is room'],
+      ['bus-stop', 'Bus station', 'Several bays, for busy routes'],
+      ['train', 'Railway station', 'Platforms on a straight run of track'],
+      ['building-warehouse', 'Lorry depot', 'Where your lorries start and are kept'],
+    ],
+    freight: [
+      ['building-warehouse', 'Loading bay', 'Road · starter tier at any industry'],
+      ['building-warehouse', 'Lorry depot', 'Road · more bays, faster loading', 'Unlocks as the industry grows'],
+      ['train', 'Private sidings', 'Rail · needs a line to the site'],
+      ['train', 'Rail freight terminal', 'Rail · loading gantry, longer sidings', 'Unlocks as the industry grows'],
+      ['droplet', 'Jetty', 'Water · waterside industries only', 'Needs water'],
+    ],
+    bulldoze: [
+      ['bulldozer', 'Bulldoze', 'Tap or drag over what you want to remove; costs shown first'],
+    ],
+  };
+
+  const INFO = {
+    tower: {
+      title: 'Office tower', sub: 'Market Street',
+      html: `<dl class="facts"><dt>Storeys</dt><dd>18</dd><dt>Jobs</dt><dd>420</dd><dt>Filled</dt><dd>86%</dd><dt>Nearest stop</dt><dd>High Street · 140 m</dd></dl>
+             <p class="note" style="margin:0 0 12px">Workers who can reach it in 30 min: 71%. A stop nearer the door would raise that.</p>
+             <div class="actions"><button class="act">${ICON['map-pin']}Show catchment</button><button class="act">${ICON['bulldozer']}Demolish</button></div>`,
+    },
+    roundabout: {
+      title: 'Roundabout', sub: '4 arms · Station Road',
+      html: `<dl class="facts"><dt>Busiest arm</dt><dd>North · 78% full</dd><dt>Average wait</dt><dd>14 s</dd></dl>
+             <div class="meter" aria-hidden="true"><i style="width:78%"></i></div>
+             <div class="actions" style="margin-top:14px"><button class="act primary">${ICON['arrow-roundabout-right']}Edit junction</button><button class="act">${ICON['traffic-lights']}Try signals</button></div>`,
+    },
+    terrace: {
+      title: 'Terraced houses', sub: 'Mill Lane · 6 homes',
+      html: `<dl class="facts"><dt>Residents</dt><dd>14</dd><dt>Reach work in 30 min</dt><dd>64%</dd><dt>Bus stop</dt><dd>None within 300 m</dd></dl>
+             <p class="note" style="margin:0 0 12px">Growing slowly: no bus within walking distance.</p>
+             <div class="actions"><button class="act primary">${ICON['bus-stop']}Add a stop nearby</button></div>`,
+    },
+  };
+
+  const HOT = { tower: [0.777, 0.306], roundabout: [0.437, 0.445], terrace: [0.206, 0.732] };
+  const app = $('#app');
+  const openers = $$('#bar button');
+  let current = null;
+
+  function placeHotspots() {
+    // The map image is object-fit: cover, so work out where its pixels land.
+    const W = app.clientWidth, H = app.clientHeight, s = Math.max(W / 412, H / 915);
+    const iw = 412 * s, ih = 915 * s, ox = (W - iw) / 2, oy = (H - ih) / 2;
+    for (const b of $$('.hot')) {
+      const [fx, fy] = HOT[b.dataset.info];
+      b.style.left = `${ox + fx * iw}px`;
+      b.style.top = `${oy + fy * ih}px`;
+    }
+  }
+
+  function closeAll() {
+    for (const id of ['sheet-build', 'sheet-transport', 'sheet-info', 'sheet-menu', 'layers']) $('#' + id).hidden = true;
+    for (const b of openers) b.setAttribute('aria-expanded', 'false');
+    current = null;
+  }
+
+  function open(id) {
+    const was = current;
+    closeAll();
+    if (was === id) return;
+    $('#' + id).hidden = false;
+    const b = openers.find((x) => x.dataset.open === id);
+    if (b) b.setAttribute('aria-expanded', 'true');
+    current = id;
+    $('#tap-hint').hidden = true;
+  }
+
+  function renderBuild(cat) {
+    const items = BUILD[cat];
+    const note = cat === 'freight' ? '<p class="note">Terminals are bought for an industry; better ones unlock as it grows.</p>' : '';
+    $('#build-items').innerHTML = `<div class="grid">${items.map(([ic, name, spec, lock], k) =>
+      `<button class="card${lock ? ' locked' : ''}" data-k="${k}"><b>${name}</b><span>${spec}</span>${lock ? `<span>${lock}</span>` : ''}</button>`).join('')}</div>${note}`;
+    for (const c of $$('#build-items .card')) c.onclick = () => {
+      if (c.classList.contains('locked')) return;
+      const [ic, name, spec] = items[+c.dataset.k];
+      startTool(ic, name, spec);
+    };
+  }
+
+  function startTool(ic, name, spec) {
+    closeAll();
+    $('#tool-icon').innerHTML = ICON[ic];
+    $('#tool-name').textContent = name;
+    $('#tool-spec').textContent = spec;
+    $('#tool').hidden = false;
+    $('#bar').hidden = true;
+    $('#draw-hint').hidden = false;
+    $('#draw-hint').textContent = name === 'Bulldoze' ? 'Tap or drag over things to remove them' : 'Drag on the map to draw · bridges are chosen for you';
+  }
+  function endTool() { $('#tool').hidden = true; $('#bar').hidden = false; $('#draw-hint').hidden = true; }
+
+  for (const b of openers) b.onclick = () => open(b.dataset.open);
+  for (const c of $$('.close')) c.onclick = closeAll;
+  $('#tool-cancel').onclick = endTool;
+  $('#tool-done').onclick = endTool;
+
+  for (const t of $$('#sheet-build .tab:not([disabled])')) t.onclick = () => {
+    for (const x of $$('#sheet-build .tab')) x.setAttribute('aria-selected', String(x === t));
+    renderBuild(t.dataset.cat);
+  };
+  for (const t of $$('#sheet-transport .tab')) t.onclick = () => {
+    for (const x of $$('#sheet-transport .tab')) x.setAttribute('aria-selected', String(x === t));
+    $('#tt-lines').hidden = t.dataset.tt !== 'lines';
+    $('#tt-fleet').hidden = t.dataset.tt !== 'fleet';
+  };
+  for (const s of $$('.seg')) for (const b of s.querySelectorAll('button')) b.onclick = () => {
+    for (const x of s.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b));
+  };
+  for (const t of $$('.toggle')) t.onclick = () => t.setAttribute('aria-pressed', String(t.getAttribute('aria-pressed') !== 'true'));
+
+  for (const h of $$('.hot')) h.onclick = (e) => {
+    e.stopPropagation();
+    const d = INFO[h.dataset.info];
+    $('#info-title').textContent = d.title;
+    $('#info-sub').textContent = d.sub;
+    $('#info-body').innerHTML = d.html;
+    closeAll();
+    $('#sheet-info').hidden = false;
+    current = 'sheet-info';
+    $('#tap-hint').hidden = true;
+  };
+  $('#map').onclick = () => { if (current) closeAll(); };
+
+  $('#stats-toggle').onclick = () => {
+    const open = $('#stats').hidden;
+    $('#stats').hidden = !open;
+    $('#stats-toggle').setAttribute('aria-expanded', String(open));
+    $('#status').toggleAttribute('data-open', open);
+  };
+  const RATES = ['1×', '2×', '4×'];
+  let r = 0;
+  $('#rate').onclick = () => {
+    if ($('#pause').getAttribute('aria-pressed') === 'true') { $('#pause').setAttribute('aria-pressed', 'false'); }
+    else r = (r + 1) % RATES.length;
+    $('#rate').textContent = RATES[r];
+    $('#rate').setAttribute('aria-pressed', 'true');
+    $('#rate').setAttribute('aria-label', `Speed: ${RATES[r]}`);
+  };
+  $('#pause').onclick = () => {
+    const p = $('#pause').getAttribute('aria-pressed') !== 'true';
+    $('#pause').setAttribute('aria-pressed', String(p));
+    $('#rate').setAttribute('aria-pressed', String(!p));
+    $('#pause').innerHTML = p ? ICON['player-play'] : ICON['player-pause'];
+  };
+
+  $('#compare').onclick = () => { closeAll(); $('#current').hidden = false; $('#compare-bar').hidden = false; };
+  $('#compare-back').onclick = () => { $('#current').hidden = true; $('#compare-bar').hidden = true; };
+
+  renderBuild('roads');
+  placeHotspots();
+  addEventListener('resize', placeHotspots);
+})();
+</script>

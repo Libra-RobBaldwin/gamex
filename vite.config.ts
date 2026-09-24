@@ -7,6 +7,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         proto: resolve(__dirname, 'proto.html'),
+        ground: resolve(__dirname, 'ground-demo.html'),
       },
     },
   },
