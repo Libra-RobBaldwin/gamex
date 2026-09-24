@@ -88,6 +88,9 @@ const handle = fx.add(model, state);  // moving parts
   converts.
 - `model.dyn` is plain data for the moving parts: piles, rotors, emitters, movers, lamps, berths
   (where a lorry, wagon or ship would stand) and decay spots.
+- `{ bare: true }` leaves out the site's own lorry bays, rail sidings and loading canopies but
+  still records their anchors, for a site whose loading facilities are bought as terminals and
+  drawn by them (see [terminals.md](terminals.md)). Everything else is drawn as before.
 
 ## Production visuals
 
@@ -157,6 +160,8 @@ planning hints.
    is true. The station kind must be in `type.serve`. `anchors.lorry`, `anchors.rail` and
    `anchors.quay` are good default spots to suggest when the player drags a station near a site.
    Loading moves stock between the site's output store and the station, as `sim.ts` does now.
+   Terminals ([terminals.md](terminals.md)) take this further: a site's station for each mode is
+   a terminal bought for it, placed at these anchors, whose throughput caps the site's growth.
 4. **Visual state from ticks.** After each economy tick, or each game minute (it doesn't need
    more), build an `IndustryVisualState` from the site's stock against its capacity, the
    production multiplier, whether it ran this tick, whether a vehicle loaded in the last few game

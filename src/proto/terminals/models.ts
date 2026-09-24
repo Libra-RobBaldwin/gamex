@@ -221,7 +221,7 @@ const alongFrom = (P: Placement) => (u: number) => (P.connect > 0 ? P.pad.x1 - u
 
 // Three roads on a loop: two to load on, one to run round. The fit's kit stands in the strip
 // beyond them. `P` may be the inner part of a marshalling yard.
-function railTerminal(c: Ctx, withSidings = true) {
+function railTerminal(c: Ctx) {
   const { s, P } = c, k = s.k, b = P.pad, L = b.x1 - b.x0, at = alongFrom(P), T = P.tracks;
   s.pad((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, L, b.z1 - b.z0, GRAVEL, 0.05);
   const lo = (u0: number, u1: number) => [Math.min(at(u0), at(u1)), Math.max(at(u0), at(u1))] as const;
@@ -280,7 +280,7 @@ function railTerminal(c: Ctx, withSidings = true) {
   s.block(at(8), sz, 6, 5, 3.2, '#d8d2c4', PAL.roof, 1);
   for (const u of [L * 0.2, L * 0.55, L * 0.85]) s.floodlight(at(u), sz + P.grow * 2, 12);
   // the sidings inside the plot stay in use as part of the terminal
-  if (withSidings && P.side === 'back') {
+  if (P.side === 'back') {
     const line = c.m.anchors.rail.filter((r) => Math.abs(r.x0 - c.m.anchors.rail[0]?.x0) < 0.5);
     for (const r of line.slice(0, 2)) track(s, r.x0, r.x1, r.z, -1);
   }
@@ -420,7 +420,7 @@ function portTerminal(c: Ctx) {
 
 const DRAW: Record<TierId, (c: Ctx) => void> = {
   loading_bay: loadingBay, lorry_depot: lorryDepot, road_terminal: roadTerminal,
-  sidings, rail_terminal: (c) => railTerminal(c), marshalling_yard: marshallingYard,
+  sidings, rail_terminal: railTerminal, marshalling_yard: marshallingYard,
   jetty, quay, port_terminal: portTerminal,
 };
 

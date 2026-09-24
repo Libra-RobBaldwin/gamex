@@ -10,7 +10,6 @@ import type { CargoId, ServeKind } from '../industries/catalogue';
 import type { StationKind } from '../../defs';
 
 export const SIM_SECONDS_PER_HOUR = 60;
-export const HOURS_PER_DAY = 24;
 
 export type Mode = 'road' | 'rail' | 'water';
 export const MODES: Mode[] = ['road', 'rail', 'water'];

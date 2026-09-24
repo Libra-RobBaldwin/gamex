@@ -103,7 +103,7 @@ function placeOne(m: IndustryModel, want: Wanted, o: LayoutOpts, taken: Box[]): 
     // no siding space inside (or a bigger yard): land behind the works, or off the far side
     // from the road when the back is water
     const fp = T.footprint ?? { w: Math.max(50, Math.min(90, B.x1 - B.x0 - 10)), d: 12 };
-    const n = T.rank === 1 ? 2 : T.rank === 2 ? 3 : 3; // loading roads; a yard's fan is drawn beyond them
+    const n = T.rank === 1 ? 2 : 3; // loading roads; a marshalling yard's fan is drawn beyond them
     if (wet) {
       const side = -rs as 1 | -1, zStart = (line?.tracks[0] ?? B.z0 + 6) - 3;
       const pad = clear(beside(B, side, fp.w, zStart, fp.d), side > 0 ? 'right' : 'left', taken);
@@ -142,7 +142,7 @@ export function roomCheck(m: IndustryModel, current: Wanted[], o: LayoutOpts = {
     const wanted = [...current.filter((w) => w.mode !== mode), { mode, tier }];
     const p = place(m, wanted, o).find((x) => x.mode === mode)!;
     if (!p.land || !landFree || landFree(p.land, mode)) return null;
-    const { w, d } = { w: Math.round(p.pad.x1 - p.pad.x0), d: Math.round(p.pad.z1 - p.pad.z0) };
+    const w = Math.round(p.pad.x1 - p.pad.x0), d = Math.round(p.pad.z1 - p.pad.z0);
     const where = mode === 'road' ? 'beside the site' : mode === 'rail' ? (p.side === 'back' ? 'behind the site' : 'beside the site') : 'along the water';
     return `No room ${where} (it needs ${w} × ${d} m)`;
   };

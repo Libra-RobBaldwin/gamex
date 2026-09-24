@@ -7,7 +7,7 @@
 // berth, or growth held back), the next rank of terminal becomes available to buy, and suggest()
 // says why in plain words. Terminals left without traffic are warned about, mothballed, then cut
 // back a rank, and a starter terminal is finally closed.
-import { CARGO, INDUSTRY_TYPES, TOWN_ACCEPTS, type CargoId, type IndustryId, type IndustryType, type Role, type Variant } from '../industries/catalogue';
+import { INDUSTRY_TYPES, TOWN_ACCEPTS, type CargoId, type IndustryId, type IndustryType, type Role, type Variant } from '../industries/catalogue';
 import {
   CARGO_CLASS, FITS, LADDER, MODE_NAME, MODE_OF, MODES, REFERENCE_LOAD, SIM_SECONDS_PER_HOUR, STOP_HOURS, TIERS,
   inEra, suitOf, tierAt, tierCost, type FitId, type Mode, type Rank, type TierId,
@@ -86,7 +86,8 @@ const openOnes = (st: SiteTerminals) => st.terminals.filter((t) => t.status === 
 const ownedRank = (st: SiteTerminals) => Math.max(0, ...st.terminals.map((t) => TIERS[t.tier].rank));
 
 // ---------------- capacity ----------------
-type Handling = { tier: TierId; fit: FitId };
+// A tier and its handling kit: all the rates need to know about a terminal.
+export type Handling = { tier: TierId; fit: FitId };
 // t/h one berth moves of a cargo
 export const berthRate = (h: Handling, c: CargoId) => TIERS[h.tier].perBerth * suitOf(h.fit, CARGO_CLASS[c]);
 
@@ -284,6 +285,7 @@ const upper = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 export const called = (tier: TierId) => (tier === 'sidings' ? lc(TIERS[tier].name) : `a ${lc(TIERS[tier].name)}`);
 const times = (g: number) => (g >= 10 ? `${Math.round(g)}x` : `${(Math.round(g * 10) / 10).toString()}x`);
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+const tph = (n: number) => `${Math.round(n).toLocaleString('en-GB')} t/h`;
 
 export function modeOffered(spec: SiteSpec, ctx: SiteContext, mode: Mode): string | null {
   const who = spec.role === 'town' ? spec.name : `A ${lc(spec.name)}`;
@@ -325,7 +327,7 @@ export function offers(spec: SiteSpec, st: SiteTerminals, ctx: SiteContext): Off
         o.cost = 0;
         o.status = cur.status === 'building' || pendingHere ? 'building' : 'owned';
         const ready = pendingHere ? cur.pending!.ready : cur.ready;
-        o.reason = o.status === 'building' ? `Being built: opens on day ${ready}` : cur.status === 'mothballed' ? 'Mothballed: reopen it to use it' : `Moves ${Math.round(tphAt(spec, cur))} t/h`;
+        o.reason = o.status === 'building' ? `Being built: opens on day ${ready}` : cur.status === 'mothballed' ? 'Mothballed: reopen it to use it' : `Moves ${tph(tphAt(spec, cur))}`;
       } else if (T.rank < curRank) { o.status = 'superseded'; o.block = 'superseded'; o.reason = `Part of the ${lc(TIERS[cur!.tier].name)}`; }
       else if (!inEra(T.era, ctx.year)) { o.status = 'era'; o.block = 'era'; o.reason = `From ${T.era[0]}`; }
       else if (T.rank > st.grade) {
@@ -336,7 +338,7 @@ export function offers(spec: SiteSpec, st: SiteTerminals, ctx: SiteContext): Off
       else {
         const room = ctx.room?.(mode, tier);
         if (room) { o.status = 'blocked'; o.block = 'room'; o.reason = room; }
-        else o.reason = now > 0 ? `Moves ${Math.round(o.tph)} t/h: ${times(gain)} what the site can move now` : `Moves ${Math.round(o.tph)} t/h`;
+        else o.reason = now > 0 ? `Moves ${tph(o.tph)}: ${times(gain)} what the site can move now` : `Moves ${tph(o.tph)}`;
       }
       const busy = cur?.pending?.tier ?? (cur?.status === 'building' ? cur.tier : null);
       if (busy && !pendingHere && o.status === 'available') { o.status = 'blocked'; o.block = 'busy'; o.reason = `Wait for the ${lc(TIERS[busy].name)} to open`; }
@@ -380,16 +382,21 @@ export function suggest(spec: SiteSpec, st: SiteTerminals, ctx: SiteContext, lev
     const stuck = all.filter((o) => (o.status === 'blocked' || o.status === 'era') && o.gain > 1).sort((a, b) => a.rank - b.rank || b.gain - a.gain)[0];
     return { reason: 'stuck', text: stuck ? `${why.head}. ${TIERS[stuck.tier].name}: ${lc(stuck.reason)}` : `${why.head}, and its terminals are as big as they come` };
   }
-  // the cheapest that lets the site keep growing; failing that, the one that moves most
+  // the cheapest that lets the site keep growing; failing that, the one that moves most. Vehicles
+  // queueing at one terminal are answered with a bigger one of the same mode where there is one.
   const nextStep = Math.min(4, Math.max(1, level) * 1.12);
-  const clears = avail.filter((o) => (cap > 0 ? cap * o.gain : levelsAt(spec, o)) >= nextStep).sort((a, b) => a.cost - b.cost);
-  const best = clears[0] ?? [...avail].sort((a, b) => b.gain - a.gain || a.cost - b.cost)[0];
-  const would = cap > 0 ? `would move ${times(best.gain)} more` : `would move ${Math.round(best.tph)} t/h`;
+  const pick = (list: Offer[]) => {
+    const clears = list.filter((o) => (cap > 0 ? cap * o.gain : levelsAt(spec, o)) >= nextStep).sort((a, b) => a.cost - b.cost);
+    return clears[0] ?? [...list].sort((a, b) => b.gain - a.gain || a.cost - b.cost)[0];
+  };
+  const sameMode = why?.reason === 'queueing' ? avail.filter((o) => o.mode === pr!.queueing) : [];
+  const best = pick(sameMode.length ? sameMode : avail);
+  const would = cap > 0 ? `would move ${times(best.gain)} more` : `would move ${tph(best.tph)}`;
   const what = `${called(best.tier)} ${would}`;
   if (cap === 0 && makesAny(spec)) return { reason: 'unserved', offer: best, text: `Nothing collects from the ${lc(name)} yet: ${what}` };
   if (cap === 0) return { reason: 'unserved', offer: best, text: `Nothing can unload at the ${lc(name)} yet: ${what}` };
   if (!why) return null;
-  if (why.reason === 'queueing') return { reason: 'queueing', offer: best, text: `${why.head}: ${called(best.tier)} serves ${TIERS[best.tier].berths} at once` };
+  if (why.reason === 'queueing') return { reason: 'queueing', offer: best, text: sameMode.length ? `${why.head}: ${called(best.tier)} serves ${TIERS[best.tier].berths} at once` : `${why.head}: ${what}` };
   return { reason: why.reason, offer: best, text: `${why.head}: ${what}` };
 }
 
@@ -557,5 +564,3 @@ export function report(spec: SiteSpec, st: SiteTerminals, ctx: SiteContext, leve
     suggestion: suggest(spec, st, ctx, level, flows),
   };
 }
-
-export const cargoName = (c: CargoId) => CARGO[c].name;

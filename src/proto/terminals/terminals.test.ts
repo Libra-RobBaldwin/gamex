@@ -196,7 +196,7 @@ describe('capacity and growth', () => {
     const f = estimateFlows(ps, st, 1, { supply: 1 });
     const r = review(ps, st, CTX, 1, f);
     expect(r.pressure.queueing).toBe('rail');
-    expect(r.suggestion?.text).toMatch(/^Trains are queueing at the private sidings: /);
+    expect(r.suggestion?.text).toBe('Trains are queueing at the private sidings: a rail freight terminal serves 2 at once');
   });
 
   it('only offers the modes a site can use, and says why not', () => {
@@ -480,10 +480,12 @@ describe('models', () => {
       // every vertex stands on the plot, on the terminal's own pad, or reaches out over its water
       const B = bounds(m), P = t.placements[0], pos = (t.group.children[0] as THREE.Mesh).geometry.getAttribute('position');
       const zones = [B, P.pad, ...(P.over ? [P.over] : [])].map((b) => ({ ...b, x0: b.x0 - 3, x1: b.x1 + 3, z0: b.z0 - (P.water ? 30 : 3), z1: b.z1 + 3 }));
-      for (let i = 0; i < pos.count; i++) {
+      let stray: string | null = null;
+      for (let i = 0; i < pos.count && !stray; i++) {
         const x = pos.getX(i), z = pos.getZ(i);
-        expect(zones.some((b) => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1), `${label} vertex ${x.toFixed(1)},${z.toFixed(1)}`).toBe(true);
+        if (!zones.some((b) => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1)) stray = `${x.toFixed(1)},${z.toFixed(1)}`;
       }
+      expect(stray, `${label}: a vertex off its ground`).toBeNull();
     }
     expect(Math.max(...sizes)).toBeLessThanOrEqual(2600);
   });
