@@ -731,7 +731,8 @@ export function mountNavControls(rig: NavCore, o: { parent?: HTMLElement; side?:
   box.className = 'kit-nav';
   const side = o.side ?? 'right';
   Object.assign(box.style, {
-    position: 'fixed', [side]: `calc(8px + env(safe-area-inset-${side}, 0px))`,
+    // inside a host element (a phone frame) it sits in that element's corner
+    position: o.parent ? 'absolute' : 'fixed', [side]: `calc(8px + env(safe-area-inset-${side}, 0px))`,
     ...(o.top !== undefined ? { top: `calc(${o.top}px + env(safe-area-inset-top, 0px))` } : { bottom: `calc(${o.bottom ?? 16}px + env(safe-area-inset-bottom, 0px))` }),
     display: 'flex', flexDirection: 'column', gap: '6px', zIndex: '20', userSelect: 'none', touchAction: 'manipulation',
   });

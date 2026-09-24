@@ -12,6 +12,7 @@ import { Coastal } from './coast';
 import { patchGroundMaterial, reedGeometry, reedMaterial, reedMesh, rippleTexture, setWaterLight, waterGeometry, waterMaterial, WATER_LIGHT, type WaterLight } from './material';
 import { reedSpots, shoreColours, waterSurface } from './surface';
 import { WaterSystem } from './water';
+import { NavRig, mountNavControls } from '../kit/camera';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const Q = new URLSearchParams(location.search);
@@ -51,17 +52,17 @@ const hemi = new THREE.HemisphereLight('#e8f3ff', '#5d7040', 1.25);
 const sun = new THREE.DirectionalLight('#fff3dc', 2.3);
 scene.add(hemi, sun, sun.target);
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 5000);
-const view = { x: 0, z: 0, y: 0, az: Math.PI / 4, el: 0.6, h: 300 };
-
-function place() {
-  const w = canvas.clientWidth, h = canvas.clientHeight, a = w / h;
-  cam.left = (-view.h * a) / 2; cam.right = (view.h * a) / 2; cam.top = view.h / 2; cam.bottom = -view.h / 2;
-  cam.updateProjectionMatrix();
-  const d = 1500;
-  cam.position.set(view.x + Math.sin(view.az) * Math.cos(view.el) * d, view.y + Math.sin(view.el) * d, view.z + Math.cos(view.az) * Math.cos(view.el) * d);
-  cam.lookAt(view.x, view.y, view.z);
-}
-function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); place(); }
+// the shared camera (kit/camera.ts): the game's gestures, on the terrain
+const nav = new NavRig(cam, canvas, {
+  view: { x: 0, z: 0, h: 300, az: Math.PI / 4, el: 0.6 },
+  limits: { hMin: 60, hMax: 1400 },
+  distance: 1500,
+  // what's under the pointer (desktop): the water system's answers at that spot
+  onHover: (p) => showProbe(p.ground),
+});
+const view = nav.view;
+mountNavControls(nav, { parent: $('#phone'), top: 92 });
+function resize() { renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); nav.apply(); }
 window.addEventListener('resize', resize);
 
 // grass, as in the game (a speckled canvas texture)
@@ -135,11 +136,12 @@ function build(key: string) {
     world.add(...trees(ti, tj));
   }
   timings.tiles = tiles.length; timings.wet = wetTiles;
-  view.x = at[0]; view.z = at[1]; view.y = ground.heightAt(at[0], at[1]);
-  view.h = Number(Q.get('h')) || P.h; view.az = Q.has('az') ? Number(Q.get('az')) : P.az;
+  nav.setGround((x, z) => ground.heightAt(x, z), [-120, 700]);
+  nav.setView({ x: at[0], z: at[1], h: Number(Q.get('h')) || P.h, az: Q.has('az') ? Number(Q.get('az')) : P.az });
+  // keep the camera over the tiles that were built
+  nav.setLimits({ bounds: { minX: at[0] - 700, maxX: at[0] + 700, minZ: at[1] - 700, maxZ: at[1] + 700 } });
   $('#title').textContent = P.name; $('#desc').textContent = P.desc;
   document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((b) => b.classList.toggle('on', b.dataset.preset === key));
-  place();
 }
 
 // Bare rock and heather on steep upland slopes, so fells read as fells (demo only: the water
@@ -182,51 +184,18 @@ function light(l: WaterLight) {
   setWaterLight(waterMat, l);
   hemi.color.copy(l.hemiSky); hemi.groundColor.copy(l.hemiGround); hemi.intensity = l.hemi;
   sun.color.copy(l.sun); sun.intensity = l.sunIntensity;
-  sun.position.copy(l.sunDir).multiplyScalar(500).add(new THREE.Vector3(view.x, view.y, view.z)); sun.target.position.set(view.x, view.y, view.z);
+  sun.position.copy(l.sunDir).multiplyScalar(500).add(new THREE.Vector3(view.x, view.y ?? 0, view.z)); sun.target.position.set(view.x, view.y ?? 0, view.z);
   scene.background = l.background.clone();
   $('#light').textContent = lightName === 'day' ? 'Dusk' : 'Day';
 }
 
-// ---------- input ----------
-let drag: { x: number; y: number } | null = null;
-const pointers = new Map<number, { x: number; y: number }>();
-let pinch = 0;
-canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); drag = { x: e.clientX, y: e.clientY }; pinch = 0; });
-canvas.addEventListener('pointermove', (e) => {
-  if (!pointers.has(e.pointerId)) { showProbe(e); return; }
-  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pointers.size === 2) {
-    const [a, b] = [...pointers.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinch) view.h = Math.max(60, Math.min(1400, (view.h * pinch) / d));
-    pinch = d; place(); return;
-  }
-  if (!drag) return;
-  const k = view.h / canvas.clientHeight, dx = (e.clientX - drag.x) * k, dy = (e.clientY - drag.y) * k / Math.sin(view.el);
-  view.x -= dx * Math.cos(view.az) + dy * Math.sin(view.az);
-  view.z -= -dx * Math.sin(view.az) + dy * Math.cos(view.az);
-  drag = { x: e.clientX, y: e.clientY };
-  view.y = ground.heightAt(view.x, view.z);
-  place();
-});
-const up = (e: PointerEvent) => { pointers.delete(e.pointerId); if (!pointers.size) drag = null; pinch = 0; };
-canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
-canvas.addEventListener('wheel', (e) => { view.h = Math.max(60, Math.min(1400, view.h * Math.exp(e.deltaY * 0.001))); place(); e.preventDefault(); }, { passive: false });
-$('#rotl').onclick = () => { view.az += Math.PI / 4; place(); };
-$('#rotr').onclick = () => { view.az -= Math.PI / 4; place(); };
-$('#zin').onclick = () => { view.h = Math.max(60, view.h / 1.4); place(); };
-$('#zout').onclick = () => { view.h = Math.min(1400, view.h * 1.4); place(); };
+// ---------- input: the shared camera above; the demo's own buttons ----------
 document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((b) => (b.onclick = () => { build(b.dataset.preset!); light(WATER_LIGHT[lightName]); }));
 $('#light').onclick = () => { lightName = lightName === 'day' ? 'dusk' : 'day'; light(WATER_LIGHT[lightName]); };
 $('#bench').onclick = () => bench();
 
-// What's under the pointer (desktop): the water system's answers at that spot.
-const ray = new THREE.Raycaster();
-function showProbe(e: PointerEvent) {
-  const r = canvas.getBoundingClientRect();
-  ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), cam);
-  const hit = ray.intersectObjects(world.children.filter((o) => (o as THREE.Mesh).material === groundMat))[0];
-  if (!hit) return;
-  const { x, z } = hit.point, p = water.probe(x, z), wc = water.watercourseAt(x, z), f = water.flowAt(x, z);
+function showProbe(g: { x: number; z: number }) {
+  const { x, z } = g, p = water.probe(x, z), wc = water.watercourseAt(x, z), f = water.flowAt(x, z);
   $('#probe').innerHTML = p.level === null
     ? `Dry · ${water.distanceToShore(x, z).toFixed(0)} m to water`
     : `${p.kind} · depth ${(p.level - p.ground).toFixed(1)} m${f.speed ? ` · flow ${f.speed.toFixed(1)} m/s` : ''}${wc ? `<br>${wc.cls}, ${wc.width.toFixed(0)} m wide · bridge clearance ${wc.clearance} m${wc.channel ? ` · keep ${(2 * wc.channel).toFixed(0)} m clear` : ''}` : ''}`;
@@ -280,7 +249,7 @@ function pixelCost(frames: number) {
     const g = new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2);
     extra(g);
     const m = new THREE.Mesh(g, mat);
-    m.position.set(view.x, view.y, view.z);
+    m.position.set(view.x, view.y ?? 0, view.z);
     return m;
   };
   const w = quad(waterMat, (g) => {
@@ -311,6 +280,7 @@ function frame(now: number) {
   fps = fps * 0.95 + (dt > 0 ? 1 / dt : 60) * 0.05;
   const t = fixedT ?? now / 1000;
   waterMat.uniforms.uTime.value = t; reedMat.userData.time.value = t;
+  nav.update(dt, now);
   renderer.render(scene, cam);
   const i = renderer.info.render;
   $('#stats').textContent = `${fps.toFixed(0)} fps · ${i.calls} draws · ${(i.triangles / 1000).toFixed(0)}k tris · region ${timings.region.toFixed(0)} ms · water ${(timings.water / timings.tiles).toFixed(0)} ms/tile · ground ${(timings.mesh / timings.tiles).toFixed(0)} ms/tile`;
@@ -322,4 +292,5 @@ resize();
 light(WATER_LIGHT[lightName]);
 requestAnimationFrame(frame);
 if (Q.has('bench')) setTimeout(() => bench(), 500);
-(window as unknown as { demoReady: boolean }).demoReady = true;
+(window as unknown as { demoReady: boolean; nav: NavRig }).demoReady = true;
+(window as unknown as { nav: NavRig }).nav = nav;
