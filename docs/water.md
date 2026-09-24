@@ -11,10 +11,10 @@ water system").
 
 **In the game** (`src/proto/game/water.ts`, `GameWater`): steps 1, 2 and 5 below are done, on
 today's flat map.
-- **The lake:** a noise-warped hollow in an `FnHeight` (a 16 m beach falling 3% to the water, then
-  shelving to 4 m deep), filled by the water system at −0.3 m. No rivers or basins are worked out
+- **The lake:** a noise-warped hollow in an `FnHeight` (an 8 m beach falling 4% to the water, then
+  shelving to 4 m deep), drawn at −0.3 m; the water system gets −0.2 m, so what it counts as water (8 cm deep) reaches just past the drawn waterline. No rivers or basins are worked out
   from the flat.
-- **Roads:** `isWater` is the water system's, keeping 4 m off the waterline.
+- **Roads:** `isWater` is the water system's, keeping 9.5 m off the waterline (a street's band clear of the reeds).
 - **Land:** the lake claims its land as `'water'`, 3 m past the waterline.
 - **Drawing:** the ground mesh dips into the bed with the shore colours, `patchGroundMaterial` is
   chained after the ground's patch, and the water and reeds take two draw calls. The light blends
@@ -22,9 +22,9 @@ today's flat map.
 - **For bridges:** `crossings`, `navLimits` and `pierBans` (step 3 and 4) are exposed on
   `GameWater`, and `window.proto.water` gives it to tests.
 
-By still water the tile's shore distance is refined below the raster from the depth over the
-ground's slope, so the foam line and beaches are smooth. Still water in the game is drawn flat,
-10 cm under the level, so the ground cuts the waterline.
+By still water the tile's shore distance is the distance to the waterline interpolated between
+raster points (marching squares on the depth), so the foam line and beaches are smooth. Still water in the game is drawn flat,
+at the level, so the ground cuts the waterline. The ground mesh is a ring over the bank (2 m across the beach), a fan over the flat bed and 100 m cells elsewhere. `light(scene, sun)` turns the scene's sun, sky and background towards dusk with the water.
 
 ## Conventions
 
@@ -145,7 +145,8 @@ The shader: turquoise over the bed in the shallows, dark with depth (from the ve
 no depth texture and no extra pass); two scales of ripple, each at two phases of a flow cycle so
 the texture scrolls along the current without stretching; foam at the waterline, washing in on
 the sea and in fast water; a fresnel sky reflection warmer towards the sun, and a sun glint. Four
-texture reads a pixel. The ground mesh carries on under the water, so the bed shows through.
+texture reads a pixel (two with `waterMaterial(ripple, light, { still: true })`, for water that
+never flows, like the game's lake). The ground mesh carries on under the water, so the bed shows through.
 
 **Two draw calls per tile**: the water mesh and the reeds.
 

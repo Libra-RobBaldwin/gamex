@@ -99,7 +99,7 @@ export class GameWater {
     // drainage is arbitrary, and the water system would start streams across it). Small regions,
     // as there's no catchment to follow: 2 km with 200 m of margin builds in a few ms, not 200.
     this.water = new WaterSystem(new FnHeight(lakeGround, () => WATER_LEVEL), { riverArea: 1e9, basinArea: 1e9, sea: null, region: 2000, margin: 200 });
-    this.material = waterMaterial(rippleTexture(), WATER_LIGHT.day);
+    this.material = waterMaterial(rippleTexture(), WATER_LIGHT.day, { still: true }); // (only a lake: no current)
     const t0 = Math.floor(-half / TILE), t1 = Math.floor(half / TILE);
     for (let ti = t0; ti <= t1; ti++) for (let tj = t0; tj <= t1; tj++) {
       // (a tile the lake's bowl doesn't reach is dry: don't build its rasters)
@@ -149,10 +149,12 @@ export class GameWater {
   pierBans(cs: Crossing[]) { return pierBans(cs); }
 
   // The map's ground as one mesh, fine only where it isn't flat:
-  //   - the bank, a ring of about 2 m cells round the lake from where the bed levels off to where
-  //     the beach meets the flat (the waterline runs round it, so it comes out smooth);
+  //   - the bank, a ring round the lake from where the bed levels off to where the beach meets the
+  //     flat: 2 m rings across the waterline and beach, 5 m down the shelf, 128 pieces round (the
+  //     waterline runs along a ring, so it comes out smooth; small cells cost a heavy ground shader
+  //     dear, so there are no more than the shape needs);
   //   - the flat lake bed inside it, a fan;
-  //   - the flat map outside, a grid of 40 m cells, with the box round the lake triangulated between
+  //   - the flat map outside, a grid of 100 m cells, with the box round the lake triangulated between
   //     the grid's vertices and the ring's outer edge.
   // Every edge is shared whole (no T-junctions, so no cracks). It carries the shore colours (RGBA)
   // for patchGroundMaterial. It's in a PlaneGeometry's frame (x east, y north, z up), so it drops in
@@ -175,14 +177,16 @@ export class GameWater {
       const a = j * NX + i, b = a + 1, c = a + NX, d = c + 1;
       tris.push(a, c, b, b, c, d);
     }
-    // the bank: a ring from where the bed levels off to the top of the beach
-    const N = ANGLES, span = (a: number) => lakeRadius(a) * SHELF + RIM;
-    let M = 0;
-    for (let i = 0; i < N; i++) M = Math.max(M, Math.ceil(span((i / N) * Math.PI * 2) / STEP));
+    // the bank: a ring from where the bed levels off to the top of the beach, in STEP rings across
+    // the waterline and the beach (where the shape shows) and about 5 m ones down the shelf
+    const N = ANGLES, near: number[] = [];
+    for (let u = NEAR; u >= -RIM - 1e-6; u -= STEP) near.push(u);
+    const deep = Math.ceil((LAKE.r * 1.155 * SHELF - NEAR) / 5), M = deep + near.length - 1;
     const r0 = NX * NZ;
     for (let i = 0; i < N; i++) {
-      const a = (i / N) * Math.PI * 2, R = lakeRadius(a), rin = R * (1 - SHELF), c = Math.cos(a), s = Math.sin(a);
-      for (let k = 0; k <= M; k++) { const r = rin + ((R + RIM - rin) * k) / M; vert(LAKE.x + c * r, LAKE.z + s * r); }
+      const a = (i / N) * Math.PI * 2, R = lakeRadius(a), c = Math.cos(a), s = Math.sin(a);
+      for (let k = 0; k < deep; k++) { const u = R * SHELF + ((NEAR - R * SHELF) * k) / deep; vert(LAKE.x + c * (R - u), LAKE.z + s * (R - u)); }
+      for (const u of near) vert(LAKE.x + c * (R - u), LAKE.z + s * (R - u));
     }
     const ring = (i: number, k: number) => r0 + (i % N) * (M + 1) + k;
     for (let i = 0; i < N; i++) for (let k = 0; k < M; k++) tris.push(ring(i, k), ring(i + 1, k), ring(i, k + 1), ring(i, k + 1), ring(i + 1, k), ring(i + 1, k + 1));
@@ -275,4 +279,4 @@ export class GameWater {
   }
 }
 // ground mesh: the bank ring's cells (m) and how many round, and the flat map's grid (m)
-const STEP = 2, ANGLES = 320, GRID = 40;
+const STEP = 2, NEAR = 2, ANGLES = 128, GRID = 100; // (fine rings from NEAR m inside the waterline out; 128 round: 4.7 m chords, 3 cm off the curve)

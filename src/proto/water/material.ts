@@ -93,11 +93,18 @@ void main() {
   // ripples drift with the current (rivers) or a light breeze (still water), in two phases half a
   // cycle apart and crossfaded, so the texture never stretches however long it has been flowing
   vec2 drift = flow * 0.55 + vec2(0.05, 0.03) * (1.0 + sea);
+#ifdef STILL
+  // (only still water: nothing flows, so the ripples just drift with the breeze, one read each;
+  // wrapped every 319 m, a whole number of both ripple tiles, so it never jumps)
+  vec2 o0 = mod(drift * uTime, 319.0);
+  vec4 fine = texture2D(uRipple, (p - o0) / 11.0), broad = texture2D(uRipple, (p - o0 * 0.6) / 29.0 + vec2(0.37, 0.11));
+#else
   float ph0 = fract(uTime * 0.25), ph1 = fract(uTime * 0.25 + 0.5), w0 = 1.0 - abs(2.0 * ph0 - 1.0);
   vec2 o0 = drift * ph0 * 4.0, o1 = drift * ph1 * 4.0;
   vec4 a0 = texture2D(uRipple, (p - o0) / 11.0), a1 = texture2D(uRipple, (p - o1) / 11.0 + 0.5);
   vec4 b0 = texture2D(uRipple, (p - o0 * 0.6) / 29.0 + vec2(0.37, 0.11)), b1 = texture2D(uRipple, (p - o1 * 0.6) / 29.0 + vec2(0.87, 0.61));
   vec4 fine = mix(a1, a0, w0), broad = mix(b1, b0, w0);
+#endif
   float speed = length(flow);
   float rough = mix(0.28, 0.5, sea) * (1.0 - 0.35 * still) + 0.12 * min(speed, 2.0);
   vec2 slope = ((fine.xy - 0.5) * 0.65 + (broad.xy - 0.5)) * rough;
@@ -133,8 +140,11 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-export function waterMaterial(ripple: THREE.Texture, light: WaterLight = WATER_LIGHT.day) {
+// `still`: for water that never flows (lakes, a still sea: every mesh drawn with it): half the
+// texture reads, the ripples drifting with the breeze instead of crossfading along a current.
+export function waterMaterial(ripple: THREE.Texture, light: WaterLight = WATER_LIGHT.day, o: { still?: boolean } = {}) {
   const m = new THREE.ShaderMaterial({
+    defines: o.still ? { STILL: '' } : {},
     vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false,
     uniforms: {
       uRipple: { value: ripple }, uTime: { value: 0 }, uReflect: { value: light.reflect }, uGlint: { value: light.glint },
