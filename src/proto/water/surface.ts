@@ -9,7 +9,7 @@
 import type { MeshData } from '../terrain/mesh';
 import { hash32 } from '../terrain/noise';
 import { KIND_CODE } from './types';
-import type { WaterTile } from './water';
+import { rasterAt, type WaterTile } from './water';
 
 export interface WaterMesh {
   positions: Float32Array; // relative to offset; y is the water level
@@ -84,9 +84,11 @@ export function shoreColours(t: WaterTile, m: MeshData): Float32Array {
     const k = fj * g.nx + fi, kind = t.nearKind[k];
     // nothing by the water is coloured further than 25 m from it
     if (!kind || t.shore[k] < -25) continue;
-    const level = t.nearLevel[k], above = y - level, slope = 1 - Nm[v * 3 + 1];
-    // distance from the waterline along the ground, from height where it's steep, from the raster where it's flat
-    const dist = Math.max(0, -t.shore[k]);
+    // smooth reads (the raster is coarser than the ground mesh), and a slow wobble in every band's
+    // width so the edges of beaches and banks don't follow the raster
+    const level = rasterAt(t, t.nearLevel, x, z), above = y - level, slope = 1 - Nm[v * 3 + 1];
+    const wob = 1 + 0.3 * Math.sin(x * 0.071 + 1.7 * Math.sin(z * 0.043)) * Math.sin(z * 0.067 + 1.3 * Math.sin(x * 0.029));
+    const dist = Math.max(0, -rasterAt(t, t.shore, x, z)) / wob;
     let c: number[], w = 0;
     if (above < 0) {
       // the bed, seen through the water: sand in lakes and the sea, gravel and silt in rivers, darker deeper
@@ -140,7 +142,7 @@ export function reedSpots(t: WaterTile, o: { density?: number; seed?: number } =
     const p = (kind === KIND_CODE.lake ? 0.5 : kind === KIND_CODE.estuary ? 0.35 : 0.6) * dens * (clump < 0.45 ? 0.15 : 1);
     if ((h & 0xffff) / 65536 >= p) continue;
     const jx = (((h >>> 16) & 0xff) / 255 - 0.5) * g.step, jz = (((h >>> 24) & 0xff) / 255 - 0.5) * g.step;
-    out.push(g.x0 + (mg + a) * g.step + jx, t.ground[k], g.z0 + (mg + b) * g.step + jz, ((h >>> 5) & 0x3ff) / 1024 * Math.PI * 2, 0.7 + (((h >>> 11) & 0xff) / 255) * 0.6);
+    out.push(g.x0 + (mg + a) * g.step + jx, t.ground[k], g.z0 + (mg + b) * g.step + jz, ((h >>> 5) & 0x3ff) / 1024 * Math.PI * 2, 0.9 + (((h >>> 11) & 0xff) / 255) * 0.7);
   }
   return Float32Array.from(out);
 }
