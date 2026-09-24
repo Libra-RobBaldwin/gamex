@@ -108,7 +108,9 @@ export class Economy {
   private pairCache: PairCache = { places: [], cars: [] }; // who pairs with whom, and car times, between rebuilds
   private pairs: Pairs | null = null;
   private svc = new Map<TState, { stops: number; lines: number }>();
-  private lastReach: { work: Reach; shop: Reach; leisure: Reach } | null = null;
+  // the last review's reach, by the zone order of that review (zones added since renumber the
+  // rest, so `at` maps each zone reviewed to its place in these arrays)
+  private lastReach: { work: Reach; shop: Reach; leisure: Reach; zones: ZState[]; at?: Map<ZState, number> } | null = null;
   private dirty = { times: true, service: true };
   private fareStops: SState[] = []; // stops that took fares this step
   private paxStops: SState[] = []; // passenger stops with lines calling
@@ -782,7 +784,7 @@ export class Economy {
     const work = reach(p, za.workers, za.work, za.car, T.workMin, true, T.reachCap);
     const shop = reach(p, za.residents, za.shop, za.car, T.shopMin, true, T.reachCap);
     const leisure = reach(p, za.residents, za.leisure, za.car, T.leisureMin, false, T.reachCap);
-    this.lastReach = { work, shop, leisure };
+    this.lastReach = { work, shop, leisure, zones: this.zoneList };
     const t1 = performance.now();
     this.timing.parts.reach += t1 - t0;
     const pendingCap = (t: TState, u: Use) => { let s = 0; for (const q of this.pending.values()) if (q.zone.town === t && q.use === u) s += q.gain; return s; };
@@ -891,8 +893,11 @@ export class Economy {
   // without (on foot or your lines), to work, shops and leisure; and its pressure for homes.
   zoneReach(id: number) {
     const z = this.zoneMap.get(id), r = this.lastReach;
-    if (!z || !r || z.idx < 0 || z.idx >= r.work.car.length) return null;
-    const pick = (x: Reach) => ({ car: x.car[z.idx], noCar: x.nc[z.idx], transit: x.pt[z.idx] });
+    if (!z || !r) return null;
+    r.at ??= new Map(r.zones.map((q, i) => [q, i]));
+    const i = r.at.get(z);
+    if (i === undefined) return null; // added since the review
+    const pick = (x: Reach) => ({ car: x.car[i], noCar: x.nc[i], transit: x.pt[i] });
     return { work: pick(r.work), shop: pick(r.shop), leisure: pick(r.leisure), labour: z.labour, customers: z.customers, homes: z.pHome, cover: z.cov };
   }
 
