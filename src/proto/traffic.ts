@@ -925,7 +925,7 @@ export class Traffic {
     // away (gently, up to what its course allows): taken as holding the crawl it's at now, it would look
     // as if it would leave us standing, and a queue would go onto the ring one car at a time with a gap
     // after each. Anyone else is taken to carry on as they are.
-    const ahead = yieldTo.map(({ x }) => ({ p: x.t, v: x.v, ax: ring && x.adm !== Infinity && x.v > 1 ? DRIVE[x.c.kind].a * 0.3 : 0 }));
+    const ahead = yieldTo.map(({ x }) => ({ p: x.t, v: x.v, ax: ring && x.adm !== Infinity && x.v > 0.3 ? DRIVE[x.c.kind].a * 0.5 : 0 }));
     let q = q0, vq = c.v;
     out[0] = q;
     for (let k = 1; k <= 60; k++) {
