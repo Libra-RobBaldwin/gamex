@@ -1132,7 +1132,7 @@ export class Traffic {
     // (people: a bus with a stop ahead gets into the nearside lane for it, so it pulls up at the kerb)
     if (c.bus && c.lane > 0) {
       const ns = this.nextStop(c), sn = this.span(c.seg, c.from, c.lane - 1);
-      if (ns && ns.at - c.s < 250 && sn[0] <= c.s - c.back - 1 && sn[1] >= ns.at + c.front + 1) { want = c.lane - 1; by = ns.at - 30; }
+      if (ns && ns.at - c.s < 250 && sn[0] <= c.s - c.back - 1 && sn[1] >= ns.at + c.front + 1) { want = c.lane - 1; end = Math.min(end, ns.at - 30); }
     }
     if (want !== undefined) {
       // missing the lane for a turn, a driver goes the way their lane goes and finds another way
@@ -1609,7 +1609,7 @@ export class Traffic {
 
   private draw(dt: number, now: number) {
     const net = this.net;
-    this.fleet.begin();
+    this.fleet.begin(dt);
     for (const c of this.cars) {
       let x: number, z: number, y: number, grade = 0, at: (d: number) => { x: number; z: number };
       if (c.turn) {

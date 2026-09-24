@@ -319,13 +319,19 @@ export class TownCrowds {
     // (as long as the last of them takes to reach the door, then a moment to close up and pull away)
     return Math.max(7, Math.min(30, Math.max(a.until, b.until) - now + 1.5));
   }
-  // The doors where this bus actually stands: the front one by its front, the rear one behind its
-  // middle, just outside its kerb side. (Until the vehicle library's doors land in the game; see
-  // docs/people.md.) Without a pose, the site's doors at the kerb stand.
+  // The doors where this bus actually stands, on its kerb side: people board at its front door and
+  // get off at the one furthest back (the vehicle library's own doors, game/fleet.ts). Without a
+  // pose, the site's doors at the kerb stand.
   private doorsOf(s: StopSite, bus: number) {
-    const r = this.t.traffic.cars.find((c) => c.id === bus)?.pose?.parts[0];
-    if (!r) return;
-    const at = (al: number, lat: number): XZ => ({ x: r.x + r.hx * al + r.hz * lat, z: r.z + r.hz * al - r.hx * lat });
+    const tr = this.t.traffic, c = tr.cars.find((c) => c.id === bus), parts = c?.pose?.parts;
+    if (!c || !parts?.length) return;
+    const ds = tr.fleet.kerbDoors(c, parts);
+    if (ds.length) {
+      s.door = { x: ds[0].x, z: ds[0].z };
+      s.exit = { x: ds[ds.length - 1].x, z: ds[ds.length - 1].z };
+      return;
+    }
+    const r = parts[0], at = (al: number, lat: number): XZ => ({ x: r.x + r.hx * al + r.hz * lat, z: r.z + r.hz * al - r.hx * lat });
     s.door = at(DIMS.bus.front - 0.9, DIMS.bus.hw + 0.15);
     s.exit = at(-1, DIMS.bus.hw + 0.15);
   }

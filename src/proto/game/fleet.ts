@@ -7,8 +7,8 @@
 // level of detail on screen, so the fleet on the road is kept to a few dozen models a year.
 import * as THREE from 'three';
 import {
-  FLAGS, MODEL, MODELS, OPERATOR, VehicleRenderer, consistOffsets, liveryColours, liveryFor, lodFor, lookFor, operatorsFor, pickVehicle, purchaseList,
-  type Area, type Livery, type Look, type Model, type Offer, type Operator,
+  DoorStates, FLAGS, MODEL, MODELS, OPERATOR, VehicleRenderer, doorPositions, consistOffsets, liveryColours, liveryFor, lodFor, lookFor, operatorsFor, pickVehicle, purchaseList,
+  type Area, type DoorPlace, type Livery, type Look, type Model, type Offer, type Operator,
 } from '../vehicles';
 import { hash, rng, weighted, type Rand } from '../vehicles/util';
 import { registerBody, type Body, type Kind, type Rect } from '../footprint';
@@ -126,6 +126,7 @@ const RAIL_TOP = 0.44; // the railhead above the path (roaddraw.ts)
 
 export class Fleet {
   readonly vr = new VehicleRenderer({ shadows: true });
+  readonly doors = new DoorStates(); // buses' doors, by the traffic's vehicle id
   readonly group = this.vr.group;
   company: Company = { name: 'Untitled Transport', code: 'UT', livery: OWN_LIVERY };
   // set by the game each frame: how many screen pixels a metre is, the hour, and what's in view
@@ -316,7 +317,14 @@ export class Fleet {
   }
 
   // ---------- drawing ----------
-  begin() { this.vr.begin(); }
+  begin(dt = 0) { this.vr.begin(); if (dt > 0) this.doors.update(dt); }
+  // Where a road vehicle's doors are on its kerb side (the driver's left), front first, from the
+  // body parts traffic.ts last drew it with: where people get on and off a bus.
+  kerbDoors(c: Driven, parts: Rect[]): DoorPlace[] {
+    const m = c.dress?.chain[0], r = parts[0];
+    if (!m || !r) return [];
+    return doorPositions(m, { x: r.x, z: r.z, heading: Math.atan2(r.hz, r.hx) }, 'left').sort((a, b) => (b.x - a.x) * r.hx + (b.z - a.z) * r.hz);
+  }
   end(nowMs: number) {
     this.time = nowMs / 1000;
     this.vr.end(this.time);
@@ -326,13 +334,13 @@ export class Fleet {
   private seen(x: number, y: number, z: number, r: number) {
     return !this.frustum || this.frustum.intersectsSphere(this.sphere.set(this.p.set(x, y, z), r + 6));
   }
-  private put(m: Model, x: number, y: number, z: number, heading: number, pitch: number, k: number, cols: THREE.Color[], flags: number, odo: number) {
+  private put(m: Model, x: number, y: number, z: number, heading: number, pitch: number, k: number, cols: THREE.Color[], flags: number, odo: number, dl = 0, dr = 0) {
     if (!this.seen(x, y, z, m.dims.length / 2)) return;
     this.e.set(0, -heading, pitch);
     this.q.setFromEuler(this.e);
     const s = Math.max(0.01, k);
     this.m4.compose(this.p.set(x, y, z), this.q, this.sc.set(s, s, s));
-    this.vr.add(m, lodFor(m.dims.length, this.ppm), this.m4, cols, flags, odo);
+    this.vr.add(m, lodFor(m.dims.length, this.ppm), this.m4, cols, flags, odo, dl, dr);
   }
   // one road vehicle, on the body parts traffic.ts worked out for it (the trailer, if any, last)
   drawCar(c: Driven, parts: Rect[], y: number, pitch: number, k: number, dt: number) {
@@ -351,9 +359,15 @@ export class Fleet {
     if (dark(this.hour, d.lampAt)) f |= FLAGS.lights | (lead.category === 'bus' ? FLAGS.interior : 0);
     if (d.beacons) f |= FLAGS.beacons;
     if (d.sign) f |= FLAGS.sign;
+    // a bus's doors open on the kerb side (the driver's left) while it stands at a stop
+    let dl = 0;
+    if (c.bus) {
+      if (dt > 0) { this.doors.setDoors(c.id, c.dwell !== undefined && c.gone === undefined ? 1 : 0, 'left', { model: lead }); }
+      dl = this.doors.get(c.id)[0];
+    }
     for (let i = 0; i < d.chain.length && i < parts.length; i++) {
       const r = parts[i];
-      this.put(d.chain[i], r.x, y + LIFT, r.z, Math.atan2(r.hz, r.hx), pitch, k, d.cols[i], f, d.odo);
+      this.put(d.chain[i], r.x, y + LIFT, r.z, Math.atan2(r.hz, r.hx), pitch, k, d.cols[i], f, d.odo, dl, 0);
     }
   }
   // Indicators for what the driver is about to do: moving over (lane 0 is the nearside; we drive
