@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { EARTH_COLOURS } from '../bridges/earthworks';
 import { kerbOf } from '../catalog';
-import { GROUND, STD } from '../standards';
+import { STD } from '../standards';
 import type { Network } from '../roads';
 
 // bands by depth below the surface (m); the edges between them wander a little, as real strata do
@@ -26,7 +26,7 @@ export interface EdgeCrossing { side: number; u: number; half: number; kerb: num
 // at `edge` where they'd reach it running straight on.
 export function edgeCrossings(net: Network, edge: number): EdgeCrossing[] {
   const out: EdgeCrossing[] = [], near = net.bound - STD.mapEdge - 1;
-  if (net.bound * GROUND < edge - 1) return out; // (roads running off the map are drawn only as far as that: they don't reach this edge)
+  if (net.edge < edge - 1) return out; // (roads running off the map are drawn only as far as that: they don't reach this edge)
   for (const s of net.segs.values()) {
     const path = net.path(s);
     if (path.length < 2) continue;

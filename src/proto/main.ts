@@ -31,6 +31,7 @@ import { Stations, STATION_LIST_PRICE } from './game/rail';
 import type { TrainDef } from './catalog';
 import { starterStops } from './game/crowdsites';
 import { edgeCrossings, edgeMesh } from './game/edge';
+import { STD } from './standards';
 import { Loading } from './loading';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
 
@@ -58,12 +59,14 @@ await loading.stage(MAP.water.rivers.length ? 'Filling the rivers and lakes' : '
 const BOUND = MAP.bound;
 // the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
 // A big map (the region) is drawn more coarsely until it streams (docs/region.md R4); the town, even
-// widened, is drawn in full.
-const BIG = BOUND > 1000;
-const gameWater = new GameWater(BOUND * (BIG ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
+// widened, is drawn in full. The town's ground ends just past where you can build (the region's runs
+// on further, for its rivers), and the camera goes right out to it.
+const BIG = BOUND > 2000;
+const gameWater = new GameWater(BIG ? BOUND * 1.5 : BOUND + STD.mapEdge + 10, MAP.water); // (the ground's half-width)
 const isWater = (p: P) => gameWater.isWater(p);
 const EDGE = gameWater.half; // (where the ground ends, in a cut face: game/edge.ts)
 const net = new Network(isWater, BOUND, 11);
+net.edge = EDGE; // (roads running off the map run on to the ground's edge)
 gameWater.claim(net.land); // the water's land ('water', 3 m past the waterline): plots and parks keep off it
 // the map's industrial estates (the town's is south of the centre)
 const INDUSTRIAL = (p: P) => zoneOf(MAP, p) === 'industrial';
@@ -99,7 +102,7 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const nav = new NavRig(cam, canvas, {
   view: { ...MAP.view, ...HOME },
   distance: 1200 * SCALE,
-  limits: { hMin: 35, hMax: 900 * SCALE, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
+  limits: { hMin: 35, hMax: 900 * SCALE, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -EDGE, maxX: EDGE, minZ: -EDGE, maxZ: EDGE } },
   shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
 });
 const view = nav.view;
