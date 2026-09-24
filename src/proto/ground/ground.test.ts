@@ -211,15 +211,19 @@ describe('budgets', () => {
     const A = town(), g = new Ground({ region: REGION });
     // (the first few paints run cold, before the JIT has compiled the painter: start-up pays that
     // once; these budgets are for painting during play)
+    // Timed in CPU time spent by this process, so other tests and other work on the machine
+    // running at the same time don't count against the painter (it's single-threaded: on its
+    // own, CPU time and wall-clock time agree).
+    const proc = (globalThis as unknown as { process: { cpuUsage(p?: { user: number; system: number }): { user: number; system: number } } }).process;
+    const cpu = (f: () => void) => { const a = proc.cpuUsage(); f(); const d = proc.cpuUsage(a); return (d.user + d.system) / 1000; };
     const full: number[] = [];
-    for (let i = 0; i < 8; i++) { g.paint(A); full.push(g.stats.paint); }
+    for (let i = 0; i < 8; i++) full.push(cpu(() => g.paint(A)));
     const inc: number[] = [];
     let cur = A;
     for (let i = 0; i < 15; i++) {
       const x = -240 + i * 30, z = 330, poly = [{ x, z }, { x: x + 14, z }, { x: x + 14, z: z + 28 }, { x, z: z + 28 }];
       cur = { ...cur, plots: [...cur.plots!, { poly, kind: 'garden' }] };
-      g.change(cur, [{ x0: x, z0: z, x1: x + 14, z1: z + 28 }]);
-      inc.push(g.stats.change);
+      inc.push(cpu(() => g.change(cur, [{ x0: x, z0: z, x1: x + 14, z1: z + 28 }])));
     }
     expect(median(full.slice(3))).toBeLessThan(30);
     expect(median(inc)).toBeLessThan(2);

@@ -3,7 +3,7 @@
 // for a gateway in most of them and the odd hedgerow tree (oak, ash) standing out of the line.
 // Plain numbers, no three.js (hedges.ts turns this into instanced meshes).
 import { hash2 } from './noise';
-import { bbox, Layout, toGrid, type Cell, type GroundInput, type XZ } from './layout';
+import { bbox, gridU, gridV, Layout, toGrid, type Cell, type GroundInput, type XZ } from './layout';
 import type { Spot } from './paint';
 
 export interface Piece { x: number; z: number; a: number; len: number; h: number; w: number } // centre, angle, size
@@ -105,7 +105,7 @@ export function planHedges(layout: Layout, box: { x0: number; z0: number; x1: nu
   // The parcel of cell c at a point (which side of its split, if it has one), and what it is.
   const parcelOf = (c: Cell, x: number, z: number) => {
     let side = 0;
-    if (c.split) { const [u, v] = toGrid(x, z); side = c.split.nu * u + c.split.nv * v - c.split.c > 0 ? 1 : 0; }
+    if (c.split) side = c.split.nu * gridU(x, z) + c.split.nv * gridV(x, z) - c.split.c > 0 ? 1 : 0;
     hit.id = P.owner(c, side);
     return hit.id;
   };

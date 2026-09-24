@@ -227,8 +227,8 @@ export class CoverMap {
       const ia = Math.max(0, Math.floor((x - r - x0) / t)), ib = Math.min(W - 1, Math.floor((x + r - x0) / t));
       const ja = Math.max(0, Math.floor((z - r - z0) / t)), jb = Math.min(H - 1, Math.floor((z + r - z0) / t));
       for (let j = ja; j <= jb; j++) for (let i = ia; i <= ib; i++) {
-        const k = j * W + i, d = Math.hypot(x0 + (i + 0.5) * t - x, z0 + (j + 0.5) * t - z) / r;
-        if (d < 1 && !town[k]) layer[k] = Math.max(layer[k], v * (1 - d * d));
+        const k = j * W + i, dx = x0 + (i + 0.5) * t - x, dz = z0 + (j + 0.5) * t - z, d2 = (dx * dx + dz * dz) / (r * r);
+        if (d2 < 1 && !town[k]) { const u = v * (1 - d2); if (u > layer[k]) layer[k] = u; }
       }
     };
     for (const p of inp.trees ?? []) dab(wood, p.x, p.z, 5.5, 0.75);

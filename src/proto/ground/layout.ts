@@ -45,6 +45,8 @@ const JIT = 0.3; // seeds stay within ±0.3 of their cell's middle, so the 3x3 c
 const CA = Math.cos(ANGLE), SA = Math.sin(ANGLE);
 // world -> grid coordinates (cells are unit squares)
 export const toGrid = (x: number, z: number): [number, number] => [(x * CA + z * SA) / SX, (-x * SA + z * CA) / SZ];
+export const gridU = (x: number, z: number) => (x * CA + z * SA) / SX; // (the same, one at a time, for hot loops)
+export const gridV = (x: number, z: number) => (-x * SA + z * CA) / SZ;
 export const fromGrid = (u: number, v: number): XZ => ({ x: u * SX * CA - v * SZ * SA, z: u * SX * SA + v * SZ * CA });
 
 export interface Cell {
@@ -298,7 +300,7 @@ export class Layout {
       for (const p of poly) { x0 = Math.min(x0, p.x); z0 = Math.min(z0, p.z); x1 = Math.max(x1, p.x); z1 = Math.max(z1, p.z); }
       for (let x = x0 + 8; x < x1; x += 16) for (let z = z0 + 8; z < z1; z += 16) {
         if (!inPoly(x, z, poly)) continue;
-        if (c.split) { const [u, v] = toGrid(x, z); if ((c.split.nu * u + c.split.nv * v - c.split.c > 0 ? 1 : 0) !== side) continue; }
+        if (c.split && (c.split.nu * gridU(x, z) + c.split.nv * gridV(x, z) - c.split.c > 0 ? 1 : 0) !== side) continue;
         n++;
         const f = this.coarse.at(x, z);
         if (f & TOWN) town++;
