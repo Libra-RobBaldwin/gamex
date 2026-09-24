@@ -807,7 +807,10 @@ export class Traffic {
       if (c.bus) {
         // anywhere but back, and not down a road that only leads off the map if there's a choice
         const g = this.adj(), opts = (g.get(at) ?? []).filter((e) => e.seg.id !== c.seg.id && this.net.def(e.seg).family !== 'Motorway');
-        const on = opts.filter((e) => (g.get(e.to)?.length ?? 0) > 1), pick = on.length ? on : opts;
+        const on = opts.filter((e) => (g.get(e.to)?.length ?? 0) > 1);
+        // (people: most often a road with a stop on its side, so buses call where people wait)
+        const served = on.filter((e) => e.seg.stops.some((st) => st.side === (e.seg.a === at ? 1 : -1)));
+        const pick = served.length && this.rand() < 0.75 ? served : on.length ? on : opts;
         c.nextSeg = (pick.length ? pick[Math.floor(this.rand() * pick.length)].seg : c.seg).id;
       } else c.nextSeg = c.route[0];
     }
