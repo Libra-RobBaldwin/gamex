@@ -60,6 +60,26 @@ The region is rolling by default (`relief=rolling`). `relief` goes from `flat` t
 - **Menu → Places** lists every settlement, nearest first, with its kind, its people and how far away it is. Tap
   one to go there.
 
+## Trips between towns (`game/econ.ts`, `econaccess.ts` `townFlows`)
+
+On a map with more than one place, each settlement is a town of its own in the economy (id =
+settlement id + 1). Each zone belongs to the town whose middle it's nearest, the same rule as
+`settlementAt`. Out of town, drives go at 60 km/h after the first 2 km at the town's 28 km/h, so
+neighbouring places trade trips by road. The town map, with one settlement, is unchanged (and so
+is its economy, byte for byte).
+
+After each trip assignment the economy adds up where each town's people go: `townFlows` shares
+out every zone's trips the same way `assignTrips` does. `all` counts trips by any means and
+`lines` the share of them on the player's lines. A block of far zones counts as the town of its
+middle zone. The figures are only for display and change nothing in the economy.
+
+The town panel is for the town you're looking at. "Where people go" lists the five busiest other
+places, how many go there each day, and how many of those ride your lines. Tap one to go there.
+Measured on the default region (seed 1, 10 places), with a DMU line of three trains between
+Harrowley and its neighbour Dornewood: trips from Harrowley to Dornewood rose from 1,683 a day to
+3,235, and 2,187 of those went by train. `economy.towns.test.ts` checks the same thing in the
+library.
+
 ## Loading the region (why it's about a minute)
 
 With the motorway, A and B roads (`interchange/region.ts`, wired in by this stream) the region first took over 6

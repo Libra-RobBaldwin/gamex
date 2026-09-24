@@ -13,7 +13,7 @@ import {
   type Tune, type Use, type VehiclePos, type WorldIn, type ZoneIn,
 } from './econdefs';
 import { LineState, NC, type LineCtx, type StopPos } from './econlines';
-import { Pairs, Skim, assignTrips, installTrips, reach, type PairCache, type Reach, type ZoneAccess } from './econaccess';
+import { Pairs, Skim, assignTrips, installTrips, reach, townFlows, type PairCache, type TownFlow, type Reach, type ZoneAccess } from './econaccess';
 import { newTown, perUse, reviewTown, type BState, type Crowding, type TState, type TownCtx, type ZState } from './econtowns';
 
 export { LineState } from './econlines';
@@ -94,6 +94,7 @@ export class Economy {
   private nextReview: number;
   private rand: Rand;
   private townMap = new Map<number, TState>();
+  private flows: Map<number, Map<number, TownFlow>> | null = null;
   private zoneMap = new Map<number, ZState>();
   private zoneList: ZState[] = [];
   private buildingMap = new Map<number, BState>();
@@ -833,6 +834,8 @@ export class Economy {
     const t = assignTrips(this.pairs, this.skim, a.residents, a.attraction, a.visit, a.car, a.cover, a.homeCover, this.tune);
     installTrips(this.lineList, t);
     this.reviewWork += t.work;
+    // with more than one town, where each town's people go (for the panels)
+    this.flows = this.townMap.size > 1 ? townFlows(this.pairs, a.residents, a.attraction, a.car, a.cover, a.homeCover, Int32Array.from(this.zoneList, (z) => z.town.id), this.tune) : null;
   }
 
   // ---------------- the monthly review ----------------
@@ -953,6 +956,14 @@ export class Economy {
   takeEvents(): EconEvent[] { const e = this.events; this.events = []; return e; }
 
   town(id: number): TownReport | null { return this.townMap.get(id)?.report ?? null; }
+  // Where a town's people go a day, the other towns busiest first: by any means, and by your lines.
+  townTrips(id: number): { town: number; name: string; all: number; lines: number }[] {
+    const row = this.flows?.get(id);
+    if (!row) return [];
+    return [...row.entries()].filter(([to]) => to !== id && this.townMap.has(to))
+      .map(([to, f]) => ({ town: to, name: this.townMap.get(to)!.name, all: f.all, lines: f.lines }))
+      .sort((a, b) => b.all - a.all || a.town - b.town);
+  }
   townReports(): TownReport[] { return [...this.townMap.values()].sort((a, b) => a.id - b.id).map((t) => t.report!).filter(Boolean); }
 
   line(id: number): LineStats | null {

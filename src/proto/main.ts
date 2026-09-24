@@ -1047,8 +1047,13 @@ shell.addTransportTab({
 
 // ---- the town panel: how the town is doing, and why (game/econ.ts) ----
 const STATUS_WORD = { growing: 'Growing', stable: 'Steady', stalling: 'Stalling', declining: 'Declining' } as const;
-function showTown() {
-  const r = townRef?.report;
+// On a map with many places it's the one you're looking at (or the one asked for), with where its
+// people go: the other places busiest first, and how many of them ride your lines.
+let shownTown = 0;
+function showTown(id?: number) {
+  if (!townRef) return;
+  shownTown = id ?? (shell.sheetKey === 'town' && shownTown ? shownTown : townRef.townAt(view.x, view.z));
+  const r = townRef.reportFor(shownTown);
   if (!r) return;
   const n = (x: number) => Math.round(x).toLocaleString('en-GB');
   const hist = [...r.history, r.residents], lo = Math.min(...hist), hi = Math.max(...hist), span = Math.max(1, hi - lo);
@@ -1057,8 +1062,10 @@ function showTown() {
     <div class="spark-cap"><span>${hist.length - 1} days ago · ${n(hist[0])}</span><span>now · ${n(r.residents)}</span></div>` : '';
   const reasons = r.reasons.slice(0, 5).map((x) => `<li class="${x.good ? 'good' : 'bad'}">${icon(x.good ? 'check' : 'alert')}<span>${esc(x.text.charAt(0).toUpperCase() + x.text.slice(1))}</span></li>`).join('');
   const lineRows = lines.list.map((l) => { const s = townRef!.line(l.id); return s ? `<button class="lrow tone-stop" data-tl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${n(s.carriedLastMonth || s.carried)} carried a day · ${Math.round(s.loadFactor * 100)}% full · ${n(s.waiting)} waiting</span></button>` : ''; }).join('');
+  const trips = townRef.trips(shownTown).slice(0, 5);
+  const tripRows = trips.map((t) => `<button class="lrow tone-stop" data-tt="${t.town}"><span class="num">${icon('pin')}</span><b>${esc(t.name)}</b><span>${n(t.all)} trips a day${t.lines >= 0.5 ? ` · ${n(t.lines)} by your lines` : ''}</span></button>`).join('');
   const el = shell.openInfo({
-    key: 'town', title: TOWN_NAME, sub: `${n(r.residents)} people · ${n(r.jobs)} jobs`, icon: 'building',
+    key: 'town', title: townRef.townName(shownTown), sub: `${n(r.residents)} people · ${n(r.jobs)} jobs`, icon: 'building',
     html: `<div class="townhead"><span class="pill ${r.status}">${STATUS_WORD[r.status]}</span></div>
       <p class="note">${esc(r.headline.replace(/^\w+: /, ''))}</p>${spark}
       <dl class="facts" style="margin-top:10px">
@@ -1072,15 +1079,21 @@ function showTown() {
       </dl>
       <ul class="why">${reasons}</ul>
       <p class="note" style="margin-top:10px">A day here is a month in the town's life: it reviews how it's doing each day, and fares and running costs come and go at a month's pace.</p>
+      ${tripRows ? `<div class="grp" style="margin-top:12px"><span class="tab">Where people go</span>${tripRows}</div><p class="note">Link places with a coach or a railway and more people travel between them.</p>` : ''}
       ${lineRows ? `<div class="grp" style="margin-top:12px"><span class="tab">Your lines</span>${lineRows}</div>` : ''}`,
   });
+  el.querySelectorAll<HTMLButtonElement>('[data-tt]').forEach((b) => b.addEventListener('click', () => {
+    const t = +b.dataset.tt!, st = MAP.settlements.find((x) => x.id + 1 === t);
+    if (st) focusOn(st, Math.max(260, st.r * 2.6));
+    showTown(t);
+  }));
   el.querySelectorAll<HTMLButtonElement>('[data-tl]').forEach((b) => b.addEventListener('click', () => { const l = lines.list.find((x) => x.id === +b.dataset.tl!); if (l) showLineInfo(l); }));
 }
 
 // ---- Menu: quality, the performance readout, a new town ----
 shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
 shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
-shell.addMenuItem({ id: 'town', label: TOWN_NAME, icon: 'building', sub: () => (townRef?.report ? `${STATUS_WORD[townRef.report.status]} · ${Math.round(townRef.report.residents).toLocaleString('en-GB')} people` : 'The town panel'), onClick: () => showTown() });
+shell.addMenuItem({ id: 'town', label: MAP.settlements.length > 1 ? 'Town panel' : TOWN_NAME, icon: 'building', sub: () => { const r = townRef?.reportFor(townRef.townAt(view.x, view.z)); return r ? `${MAP.settlements.length > 1 ? `${r.name} · ` : ''}${STATUS_WORD[r.status]} · ${Math.round(r.residents).toLocaleString('en-GB')} people` : 'The town panel'; }, onClick: () => showTown() });
 shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
 shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
 shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
@@ -1496,7 +1509,7 @@ function showBuildingInfo(b: Built) {
   if (u.pop) facts.push([u.unit.charAt(0).toUpperCase() + u.unit.slice(1), String(u.pop)]);
   shell.openInfo({
     key: `building:${b.lot.x},${b.lot.z}`, title: b.name, sub: b.detail, icon: b.region ? 'trees' : 'building', facts,
-    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }, { label: TOWN_NAME, icon: 'building', onClick: () => showTown() }],
+    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }, { label: townRef?.townName(townRef.townAt(b.lot.x, b.lot.z)) ?? TOWN_NAME, icon: 'building', onClick: () => showTown(townRef?.townAt(b.lot.x, b.lot.z)) }],
   });
 }
 // a junction: how busy it is, and the way into its editor
@@ -1951,6 +1964,7 @@ shell.addTransportTab({ id: 'rail', label: 'Railway', icon: 'train', sub: 'Your 
 // many wait at the stops
 const town = new TownEconomy({
   net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, rail: railGame.econ(),
+  towns: MAP.settlements.length > 1 ? MAP.settlements : undefined, // (each place a town of its own: docs/region.md R5)
   standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
   free: () => queue,
   build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); },
