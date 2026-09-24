@@ -20,6 +20,8 @@ import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
 import { Industries, townWishes, type IndustrySite } from './game/industry'; // industrial sites (docs/industries.md)
 import { PLAIN_MAT } from './buildgen';
 import { BridgeLayer, type BuiltBridge } from './game/bridges';
+import { TownCrowds } from './game/crowds';
+import { starterStops } from './game/crowdsites';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -1100,7 +1102,7 @@ function showStopInfo(seg: RSeg, st: Stop) {
   ].filter(Boolean);
   shell.openInfo({
     key: `stop:${seg.id}:${st.id}`, title: st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by', sub: d.label, icon: 'busStop', tone: 'stop',
-    facts: [['Buses call for', 'about 7 seconds']], note: bits.join(' · '),
+    facts: [['Buses call for', 'about 7 seconds, longer while people board'], ...people.stopFacts(seg, st)], note: bits.join(' · '),
   });
 }
 
@@ -1298,6 +1300,7 @@ nav.onChange(() => {
 
 // ---------------- loop ----------------
 seedTown();
+starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
 rebuildRoads();
 refreshTrees();
 setMode('look');
@@ -1360,6 +1363,9 @@ function cycleRate() {
 }
 setSpeed(1);
 let lastH = view.h;
+// the town's people: on the footways, at the stops, in the parks (see game/crowds.ts)
+const people = new TownCrowds({ scene, net, junctions, traffic, regions: () => infill }, GAME_MIN_PER_S);
+(window as unknown as { people: TownCrowds }).people = people;
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
 // Phones differ enormously, so rather than guess, the game watches its own frame times: if
 // frames run slow it steps down (fewer pixels, then cheaper shadows, then none), and when
@@ -1384,6 +1390,7 @@ function setTier(t: number) {
   if (q.shadow && sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
   renderer.shadowMap.needsUpdate = true;
   setGroundQuality(tier >= 3 ? 'low' : tier === 2 ? 'medium' : 'high');
+  people.setTier(tier); // fewer, simpler figures on the lower tiers, and no shadows from them
 }
 function judgeFrames(now: number) {
   if (!tierAuto) return;
@@ -1450,6 +1457,7 @@ function frame(now: number) {
     }
   }
   for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, simNow) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
+  people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
   if (now - statsAt > 250) {
     statsAt = now;
@@ -1475,6 +1483,7 @@ function frame(now: number) {
     if (perfOn) {
       const n = Math.max(1, perf.frames), r = renderer.info.render;
       $('#perf-t').textContent = `${Math.round(1000 / (perf.frameMs / n))} fps · frame ${(perf.frameMs / n).toFixed(1)} ms (worst ${perf.worst.toFixed(0)}) · sim ${(perf.simMs / n).toFixed(1)} (worst ${perf.worstSim.toFixed(0)}) · draw ${(perf.drawMs / n).toFixed(1)} ms · ${r.calls} calls · ${Math.round(r.triangles / 1000)}k tris · ${TIERS[tier].name}`;
+      $('#perf-t').textContent += ` · ${people.readout()}`;
     }
     window.__perf = { ...perf, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, tier: TIERS[tier].name };
     Object.assign(perf, { frames: 0, frameMs: 0, simMs: 0, drawMs: 0, since: now, worst: 0, worstSim: 0 });
