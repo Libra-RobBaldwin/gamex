@@ -2,6 +2,8 @@
 // this turns its output into a World the game can start from, and deals with what the game can't
 // represent yet:
 //   - roads run on past the snapshot's box (Overpass returns whole ways): cut at the map's edge;
+//   - a road that stops a metre or two short of another (two OSM ways that don't share a node)
+//     is joined to it;
 //   - unnamed service roads (car-park and yard access, alleys) are left out: the game's plots
 //     have their own access, and at full street width they'd run through half the buildings;
 //   - one-way streets are built two-way and one-way slips are left out (the importer lists both);
@@ -17,16 +19,17 @@ import { ATTRIBUTION, importOsm, type OsmImport } from '../osm/import';
 import { inArea } from '../osm/landuse';
 import type { OsmElement, OsmNode, OsmWay, OverpassJson } from '../osm/overpass';
 import banbury from '../osm/fixtures/banbury.json';
+import horley from '../osm/fixtures/horley.json';
 import type { Tree, World, WorldHint, WorldZone } from './world';
 
 export interface RealTown { name: string; data: OverpassJson; standIn?: string }
 /**
- * The real town the game starts in. Horley's snapshot couldn't be fetched from this environment
- * (Overpass is blocked), so Banbury stands in for it. To switch, fetch Horley with
- * `node src/proto/osm/fetch-fixture.mjs horley` and change this one line to
- * `{ name: 'Horley', data: horley }` (importing fixtures/horley.json).
+ * The real town the game starts in: Horley town centre (fixtures/horley.json, fetched with
+ * `node src/proto/osm/fetch-fixture.mjs horley`). Banbury's snapshot is the importer's own test
+ * fixture and still makes a good second town.
  */
-export const REAL_TOWN: RealTown = { name: 'Banbury', data: banbury, standIn: 'Horley' };
+export const REAL_TOWN: RealTown = { name: 'Horley', data: horley };
+export const BANBURY: RealTown = { name: 'Banbury', data: banbury };
 
 const MARGIN = 30; // roads run this far past the edge of the map before they stop
 
@@ -66,7 +69,9 @@ export function realWorld(town: RealTown = REAL_TOWN): World {
     names: new Map([...imp.roads.values()].filter((r) => r.name || r.ref).map((r) => [r.seg, r.name ?? r.ref!])),
     hints, standing,
     growAlong: () => sparse(net, standing),
-    growNow: 0,
+    // streets the map has no buildings on are mostly ones nobody has drawn yet, not empty ones:
+    // the game builds its own houses along them at the start, leaving the farthest to grow
+    growNow: 0.85,
     canGrow: (p) => { const k = imp.zoneAt(p)?.kind; return k !== 'park' && k !== 'water' && !imp.isWater(p); },
     invent: false,
     trees: treesOf(imp, bound),
@@ -127,7 +132,64 @@ export function prepare(src: OverpassJson): OverpassJson {
     if (run.length) runs.push(run);
     return runs.filter((r) => r.length >= 2).map((r, k): OsmWay => ({ ...el, id: k ? nextWay-- : el.id, nodes: r }));
   });
-  return { ...src, elements: [...els, ...added] };
+  els = [...els, ...added];
+  stitch(els);
+  return { ...src, elements: els };
+}
+
+/**
+ * Mapping gaps: a way that ends within STITCH metres of another road (or railway) without sharing a
+ * node with it. Its end snaps to the other's nearest vertex, or is added to the other's line
+ * there. Changes the ways in place.
+ */
+const STITCH = 2;
+export function stitch(els: OsmElement[]) {
+  const nodes = new Map<number, OsmNode>();
+  for (const el of els) if (el.type === 'node') nodes.set(el.id, el);
+  const kind = (w: OsmWay) => (w.tags?.highway ? 'road' : w.tags?.railway ? 'rail' : null);
+  const ways = els.filter((el): el is OsmWay => el.type === 'way' && !!kind(el));
+  if (!ways.length) return 0;
+  const lat0 = nodes.get(ways[0].nodes[0])?.lat ?? 0, mLat = 111_320, mLon = 111_320 * Math.cos((lat0 * Math.PI) / 180);
+  const xy = (id: number) => { const q = nodes.get(id)!; return { x: q.lon * mLon, z: -q.lat * mLat }; };
+  const uses = new Map<number, number>();
+  for (const w of ways) for (const id of w.nodes) uses.set(id, (uses.get(id) ?? 0) + 1);
+  // every piece of every way, on a 20 m grid
+  const C = 20, grid = new Map<string, { w: OsmWay; i: number }[]>();
+  for (const w of ways) for (let i = 1; i < w.nodes.length; i++) {
+    if (!nodes.has(w.nodes[i - 1]) || !nodes.has(w.nodes[i])) continue;
+    const a = xy(w.nodes[i - 1]), b = xy(w.nodes[i]);
+    for (let gx = Math.floor((Math.min(a.x, b.x) - STITCH) / C); gx <= Math.floor((Math.max(a.x, b.x) + STITCH) / C); gx++)
+      for (let gz = Math.floor((Math.min(a.z, b.z) - STITCH) / C); gz <= Math.floor((Math.max(a.z, b.z) + STITCH) / C); gz++) {
+        const k = `${gx},${gz}`;
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k)!.push({ w, i });
+      }
+  }
+  let joined = 0;
+  const inserts: { o: OsmWay; i: number; id: number }[] = [];
+  for (const w of ways) for (const end of [0, w.nodes.length - 1]) {
+    const id = w.nodes[end];
+    if (!nodes.has(id) || (uses.get(id) ?? 0) > 1 || (w.nodes.length > 2 && w.nodes[0] === w.nodes[w.nodes.length - 1])) continue;
+    const p = xy(id);
+    let best: { w: OsmWay; i: number; t: number; d: number } | null = null;
+    for (const c of grid.get(`${Math.floor(p.x / C)},${Math.floor(p.z / C)}`) ?? []) {
+      if (c.w === w || kind(c.w) !== kind(w) || c.w.nodes.includes(id)) continue;
+      const a = xy(c.w.nodes[c.i - 1]), b = xy(c.w.nodes[c.i]), dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.z - a.z) * dz) / L2));
+      const d = Math.hypot(p.x - a.x - dx * t, p.z - a.z - dz * t);
+      if (d <= STITCH && (!best || d < best.d)) best = { ...c, t, d };
+    }
+    if (!best) continue;
+    const { w: o, i } = best, a = o.nodes[i - 1], b = o.nodes[i];
+    const da = Math.hypot(xy(a).x - p.x, xy(a).z - p.z), db = Math.hypot(xy(b).x - p.x, xy(b).z - p.z);
+    if (Math.min(da, db) <= STITCH) w.nodes[end] = da <= db ? a : b; // snap onto its nearest vertex
+    else inserts.push({ o, i, id }); // or join its line there
+    uses.set(id, 2);
+    joined++;
+  }
+  // (from the back of each way, so earlier positions still hold)
+  for (const { o, i, id } of inserts.sort((x, y) => y.i - x.i)) o.nodes.splice(i, 0, id);
+  return joined;
 }
 
 // ---- trees: woods and parks from the map, a few in gardens ----

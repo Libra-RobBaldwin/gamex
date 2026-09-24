@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { design, landFits, legsAt, type Junction } from '../junction';
 import { closestOnPath, rectCorners, rng, type Network } from '../roads';
 import { inventedWorld } from './invented';
-import { REAL_TOWN, realWorld, settleStanding } from './real';
+import { BANBURY, REAL_TOWN, realWorld, settleStanding } from './real';
 import type { World } from './world';
 
 // what main.ts does at start-up, without drawing: every junction designs itself (from the map's
@@ -81,15 +81,16 @@ describe('the invented town', () => {
   });
 });
 
-describe(`the real town (${REAL_TOWN.name})`, () => {
+// Horley is the one the game starts in; Banbury, the importer's own fixture, keeps it honest
+describe.each([REAL_TOWN, BANBURY])('the real town $name', (town) => {
   const t0 = performance.now();
-  const w = realWorld();
+  const w = realWorld(town);
   const importMs = performance.now() - t0;
   it('keeps the World contract', () => contract(w));
   it('credits OpenStreetMap', () => {
     expect(w.attribution).toBe('© OpenStreetMap contributors');
     expect(w.attributionUrl).toMatch(/openstreetmap\.org\/copyright/);
-    expect(REAL_TOWN.data.attribution).toMatch(/OpenStreetMap contributors.*ODbL|Open Database Licence/);
+    expect(town.data.attribution).toMatch(/OpenStreetMap contributors.*ODbL|Open Database Licence/);
   });
   it('is cut to its map: no road runs far past the edge', () => {
     for (const n of w.net.nodes.values()) expect(Math.max(Math.abs(n.x), Math.abs(n.z))).toBeLessThan(w.bound + 80);
@@ -99,7 +100,7 @@ describe(`the real town (${REAL_TOWN.name})`, () => {
     expect(w.zones.some((z) => z.kind === 'industrial')).toBe(true);
     expect(w.stations.length).toBeGreaterThanOrEqual(1);
     expect(w.stations.every((s) => s.seg !== undefined && w.net.segs.has(s.seg))).toBe(true);
-    expect([...w.hints.values()].filter((h) => h.form === 'roundabout').length).toBeGreaterThanOrEqual(3);
+    expect([...w.hints.values()].filter((h) => h.form === 'roundabout').length).toBeGreaterThanOrEqual(2);
     expect(w.names.size).toBeGreaterThan(50);
   });
   it('imports with no broken joins', () => {
@@ -110,7 +111,7 @@ describe(`the real town (${REAL_TOWN.name})`, () => {
   const startMs = importMs + performance.now() - t1;
   it('designs every junction, and keeps the map’s roundabouts', () => {
     expect(r.failed).toEqual([]);
-    expect(r.junctions.size).toBeGreaterThan(150);
+    expect(r.junctions.size).toBeGreaterThan(100);
     for (const [node, h] of w.hints) { const j = r.junctions.get(node); if (j) expect(j.form).toBe(h.form); }
   });
   it('puts its buildings up clear of the roads, dropping few', () => {

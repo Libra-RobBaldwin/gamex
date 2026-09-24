@@ -4,3 +4,7 @@ declare module '*/fixtures/banbury.json' {
   const data: import('./overpass').OverpassJson;
   export default data;
 }
+declare module '*/fixtures/horley.json' {
+  const data: import('./overpass').OverpassJson;
+  export default data;
+}

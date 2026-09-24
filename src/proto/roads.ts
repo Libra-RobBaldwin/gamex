@@ -654,10 +654,32 @@ export class Network {
     l.pw -= Math.abs(l.px) * 2; l.px = 0;
     return this.tryParcel(l, extra);
   }
+  // Plots that could be within r of a point (and some that aren't), from a grid over `lots` by building position. The grid is rebuilt whenever
+  // the list is replaced or changes length (plots are only ever added, or filtered out); anything
+  // within `r` of p, plus the biggest plot's reach, is in the cells returned.
+  private lotGrid: { of: Lot[]; n: number; cells: Map<string, Lot[]>; reach: number } | null = null;
+  lotsNear(p: P, r: number): Lot[] {
+    const C = 50;
+    let g = this.lotGrid;
+    if (!g || g.of !== this.lots || g.n !== this.lots.length) {
+      const cells = new Map<string, Lot[]>();
+      let reach = 0;
+      for (const l of this.lots) {
+        const k = `${Math.floor(l.x / C)},${Math.floor(l.z / C)}`;
+        let c = cells.get(k); if (!c) cells.set(k, (c = [])); c.push(l);
+        reach = Math.max(reach, 2 * Math.hypot(l.pw, l.d + l.front + Math.max(l.back, BACK[l.kind])) / 2 + 1);
+      }
+      g = this.lotGrid = { of: this.lots, n: this.lots.length, cells, reach };
+    }
+    const R = r + g.reach, out: Lot[] = [];
+    for (let i = Math.floor((p.x - R) / C); i <= Math.floor((p.x + R) / C); i++)
+      for (let j = Math.floor((p.z - R) / C); j <= Math.floor((p.z + R) / C); j++) { const c = g.cells.get(`${i},${j}`); if (c) out.push(...c); }
+    return out;
+  }
   private tryParcel(l: Lot, extra: Lot[]) {
     // (only plots that could touch this one at its deepest garden are worth checking below)
     const reach = Math.hypot(l.pw, l.d + l.front + BACK[l.kind]) + 1;
-    const others = [...this.lots, ...extra].filter((o) => o !== l && dist(this.parcelCentre(o), l) < reach + this.parcelR(o));
+    const others = [...this.lotsNear(l, reach), ...extra].filter((o) => o !== l && dist(this.parcelCentre(o), l) < reach + this.parcelR(o));
     for (let back = BACK[l.kind]; back >= 0; back -= 1.5) {
       l.back = Math.max(0.5, back);
       const poly = this.parcelRect(l, -0.3), c = this.parcelCentre(l), r = this.parcelR(l);
@@ -680,7 +702,7 @@ export class Network {
     if (!this.land.free(poly)) return false;
     // a building can't go on somebody else's plot (neighbouring plots may touch)
     const foot = rectCorners(l.x, l.z, l.rot, l.w - 0.4, l.d - 0.4);
-    for (const o of [...this.lots, ...extra]) {
+    for (const o of [...this.lotsNear(l, r), ...extra]) {
       if (dist(this.parcelCentre(o), l) > r + this.parcelR(o)) continue;
       if (polysOverlap(foot, this.parcelRect(o))) return false;
     }

@@ -52,7 +52,7 @@ export interface World {
   standing: Lot[];
   /** Plots the town grows along: road segments whose frontage fills in over time. */
   growAlong: () => number[];
-  /** Share of the growth queue built before the first frame (the invented town is mostly built). */
+  /** Share of the growth queue built at the start, nearest the centre first (most of it, in both towns). */
   growNow: number;
   /** Whether a new plot may go here (a real town's parks, water and railway land stay as they are). */
   canGrow: (p: P) => boolean;

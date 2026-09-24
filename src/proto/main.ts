@@ -155,7 +155,7 @@ function refreshTrees(only?: Lot) {
     const c = net.parcelCentre(only), r = net.parcelR(only) + 3;
     trees = trees.filter((t) => Math.abs(t.x - c.x) > r || Math.abs(t.z - c.z) > r || !treeBlocked(t, [only]));
     if (trees.length === before) return;
-  } else trees = trees.filter((t) => !treeBlocked(t, net.lots));
+  } else trees = trees.filter((t) => !treeBlocked(t, net.lotsNear(t, 3)));
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
   let nc = 0, np = 0;
   trees.forEach((t, i) => {
@@ -360,10 +360,35 @@ function queuePlots(segs: number[]) {
 // room; then the invented town builds most of its growth queue at once.
 function seedTown() {
   commitRoads(world.growAlong());
-  for (const l of settleStanding(net, world.standing).placed) spawnLot(l, false);
+  // (a big town's buildings out of view are only registered now, and drawn over the first seconds)
+  const standUp = (l: Lot) => {
+    if (Math.hypot(l.x - view.x, l.z - view.z) < NEAR) spawnLot(l, false);
+    else { net.fitParcel(l); net.lots.push(l); later.push(l); }
+  };
+  for (const l of settleStanding(net, world.standing).placed) standUp(l);
   if (world.standing.length) queue = queue.filter((l) => net.lotFree(l));
   const now = Math.floor(queue.length * world.growNow);
-  for (const l of queue.splice(0, now)) if (net.lotFree(l)) spawnLot(l, false);
+  for (const l of queue.splice(0, now)) if (net.lotFree(l)) standUp(l);
+  later.sort((a, b) => Math.hypot(a.x - view.x, a.z - view.z) - Math.hypot(b.x - view.x, b.z - view.z));
+}
+
+// Standing buildings still to be drawn, nearest first. Each frame bakes a few (about 8 ms' worth);
+// a chunk joins the scene only once all its buildings are baked, so it's merged once, not piecemeal.
+const NEAR = 450;
+const later: Lot[] = [];
+const baking = new Map<string, { left: number; done: Built[] }>();
+function buildLater(budgetMs: number) {
+  if (!later.length) return;
+  const t0 = performance.now();
+  if (!baking.size) for (const l of later) { const k = `${Math.floor(l.x / CH)},${Math.floor(l.z / CH)}`; const c = baking.get(k) ?? { left: 0, done: [] }; c.left++; baking.set(k, c); }
+  while (later.length && performance.now() - t0 < budgetMs) {
+    const l = later.shift()!, c = baking.get(`${Math.floor(l.x / CH)},${Math.floor(l.z / CH)}`)!;
+    c.left--;
+    // (a road may have been built over it meanwhile)
+    if (net.lots.includes(l) && net.land.free(rectCorners(l.x, l.z, l.rot, l.w, l.d))) c.done.push({ lot: l, born: 0, solo: null, chunk: null, ...bake(l) });
+    else net.lots = net.lots.filter((x) => x !== l);
+    if (!c.left) { for (const b of c.done) { buildings.push(b); toChunk(b); } c.done = []; placesDirty = true; }
+  }
 }
 
 // ---------------- UI ----------------
@@ -1469,7 +1494,8 @@ function frame(now: number) {
       if (b.solo.scale.y >= 1) toChunk(b); // settled: merge into its chunk
     }
   }
-  if (infillDue && !queue.length && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
+  buildLater(8);
+  if (infillDue && !queue.length && !later.length && !buildings.some((b) => b.solo)) { infillDue = false; refreshInfill(); }
   // merge at most a couple of changed chunks a frame
   let merged = 0;
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
