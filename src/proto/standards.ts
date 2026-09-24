@@ -23,6 +23,9 @@ export const STD = {
   splitter: { length: 12, width: 2.2 },
   // how far back from the edge of a junction's land a building's plot must stay
   junctionSetback: 0.5,
+  // where a road changes to a narrower one (a dual carriageway ending, say), how long the
+  // change takes: the reservation closes into hatching, then the offside lane tapers away
+  taperLength(mph: number) { return mph <= 30 ? 45 : mph <= 40 ? 70 : mph <= 50 ? 100 : 130; },
 };
 
 export const fastest = (...ds: RoadDef[]) => Math.max(...ds.map((d) => d.mph));
