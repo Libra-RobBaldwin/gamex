@@ -332,3 +332,14 @@ body.paused #st-rush { color: var(--gold); }
 .spark path { fill: none; stroke: var(--lime); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .spark .area { fill: var(--mode-soft); stroke: none; }
 .spark-cap { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+
+/* a choice of two (or three) ways to build, each with its price: the bus stop's kerbside or lay-by */
+#tpanel .choice { display: flex; gap: 8px; }
+#tpanel .choice button { flex: 1 1 0; min-height: 54px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 8px 12px; background: rgba(0, 0, 0, 0.22); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); color: var(--paper); text-align: left; }
+#tpanel .choice button b { font: 700 13px/1 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; }
+#tpanel .choice button span { font-weight: 600; color: var(--money); font-variant-numeric: tabular-nums; }
+#tpanel .choice button.on { background: var(--mode); color: var(--mode-ink); box-shadow: none; }
+#tpanel .choice button.on span { color: var(--mode-ink); }
+#tpanel .choice button:disabled { background: transparent; color: var(--muted); }
+#tpanel .choice button:disabled span { color: var(--muted); }
+#tpanel .why { margin: 0; font-size: 12px; line-height: 1.35; color: var(--muted); }

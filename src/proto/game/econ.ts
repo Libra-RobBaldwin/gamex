@@ -42,24 +42,26 @@ export interface TownHooks {
 // costs to run for a game day.
 export interface RailHooks { stops(): StopIn[]; lines(): LineIn[]; time(a: number, b: number, v: VehicleKind): number | undefined; running(v: VehicleKind): number }
 
-// The library's tuning, set for this town (measured with the town as it starts, its starter line,
-// and a second line added or the first withdrawn):
+// The library's tuning, set for this town (measured with Playwright: the town as it starts with
+// no service of yours, a line through the housing added, then withdrawn):
 //  - a review each game day, so the town's month passes while you watch;
 //  - it's taken to be in balance as it starts even though it has more jobs than workers (so it's
 //    propped up further than the library's default allows), and plenty of jobs in reach keeps
 //    counting towards where people want to live, so homes follow the jobs your service brings;
 //  - the town finds its own goods and materials until freight is in the game;
-//  - its offices live on visitors, and most of them come by your buses: the starter line about
-//    holds the town steady, a second line through the housing makes it grow within a few days,
-//    and withdrawing the starter line makes it decline;
+//  - it stands on its own as the map made it: you start with no transport at all, and the
+//    visitors your buses bring its offices are what make it grow (and withdrawing the service
+//    lets it fall back);
 //  - taking the bus carries no penalty beyond its walk, wait and ride (the town is small enough
-//    to walk across, so otherwise hardly anyone would).
+//    to walk across, so otherwise hardly anyone would), and only stops facing each other across
+//    the road count as one interchange (the library's 250 m would join every stop in this town
+//    by a walk, and no one would ever ride);
 //  - and it answers sooner than a real town would: a day of demand a little above what stands is
 //    enough to build, two days well below it to start emptying.
 const GAME_TUNE = {
-  monthDays: 1, calibrateMax: 3, reachCap: 4, visitsPerOfficeJobDay: 0.1, ptBiasMin: 0,
+  monthDays: 1, calibrateMax: 3, reachCap: 4, visitsPerOfficeJobDay: 0.1, ptBiasMin: 0, transferWalkM: 60,
   growAt: 1.02, growAfter: 1, declineAt: 0.95, declineAfter: 2, recoverAt: 0.98,
-  local: { homes: 0.5, goods: 1, materials: 1, visitors: 0.3 },
+  local: { homes: 0.5, goods: 1, materials: 1, visitors: 1 },
 };
 const zoneKey = (x: number, z: number) => (Math.floor(x / CELL) + 500) * 1000 + (Math.floor(z / CELL) + 500);
 const kindOf = (k: LotKind): BuildingKind => k;
