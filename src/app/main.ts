@@ -10,7 +10,8 @@
 import './app.css';
 import '../proto/ui/fonts';
 import { icon } from '../proto/ui/icons';
-import type { MapInfo } from '../proto/maps';
+import { mapById, type MapInfo } from '../proto/maps';
+import { deleteSave, listSaves, saveSearch, type SaveEntry } from '../proto/game/savedb';
 import type { Shell } from '../proto/ui/shell';
 import { loading, render, type MenuHost } from './menu';
 import { gameSearch, route, screenOf, type Screen } from './route';
@@ -22,9 +23,15 @@ const root = document.querySelector<HTMLElement>('#app')!;
 const menuUrl = () => location.pathname;
 let inGame = false, leaving = false, gameUrl = '';
 
-// Continue appears once the game can save. Nothing saves yet (in a game, Menu > Save town says
-// "Not in the game yet"); when it does, return the latest save here and Continue opens it.
-function latestSave(): MenuHost['save'] { return null; }
+// Saved towns (game/savedb.ts) are read as the menu opens; Continue and Saved towns appear once
+// they're in (a moment later: IndexedDB answers after the first paint).
+let current: Screen = 'home';
+function readSaves() {
+  listSaves().then((list) => {
+    host.saves = list;
+    if (!inGame && (current === 'home' || current === 'saves')) show(current);
+  }, () => { /* no storage here: no saves to offer */ });
+}
 
 const host: MenuHost = {
   go(screen) {
@@ -42,10 +49,22 @@ const host: MenuHost = {
     history.pushState({ app: 'game' } satisfies AppState, '', gameUrl);
     void startGame(map, guide || !guideSeen());
   },
-  save: latestSave(),
+  saves: [],
+  open(e: SaveEntry) {
+    if (inGame) return;
+    const map = mapById(new URLSearchParams(e.map.query).get('map') ?? e.map.id) ?? mapById(e.map.id);
+    if (!map) return;
+    gameUrl = `${menuUrl()}${saveSearch(e)}`;
+    history.pushState({ app: 'game' } satisfies AppState, '', gameUrl);
+    void startGame(map, false);
+  },
+  remove(e: SaveEntry) {
+    deleteSave(e.id).then(readSaves, readSaves);
+  },
 };
 
 function show(screen: Screen, notice?: string) {
+  current = screen;
   render(root, screen, host, notice);
   if (!performance.getEntriesByName('menu-shown').length) performance.mark('menu-shown'); // (for e2e/menu.e2e.mjs)
   root.scrollTop = 0;
@@ -88,17 +107,23 @@ async function startGame(map: MapInfo, guide: boolean) {
 
 const shell = () => (window as unknown as { proto?: { shell?: Shell } }).proto?.shell;
 
-// Leaving loses the town (nothing saves yet), so ask; a second press of back while asked leaves.
+// Leaving saves the town first (Continue on the menu opens it again), so ask; a second press of
+// back while asked leaves.
+const saveNow = () => (window as unknown as { proto?: { saveGame?: (why: string) => Promise<boolean> } }).proto?.saveGame?.('auto') ?? Promise.resolve(false);
 function askLeave() {
   const s = shell();
   if (!s) return leave();
   const el = s.openSheet({
     key: 'leave', title: 'Back to the start menu?', icon: 'home', from: 'menu',
-    body: `<div class="grp"><small>Saving isn’t in the game yet, so this town won’t be kept: every road, stop and line you’ve added goes.</small>
-      <button data-leave class="act danger">${icon('home')}<span>Leave for the menu</span></button>
+    body: `<div class="grp"><small>Your town is saved as you go. Continue on the start menu opens it again where you left it.</small>
+      <button data-leave class="act primary">${icon('home')}<span>Save and leave</span></button>
       <button data-stay class="act">${icon('play')}<span>Keep playing</span></button></div>`,
   });
-  el.querySelector('[data-leave]')!.addEventListener('click', () => leave());
+  el.querySelector('[data-leave]')!.addEventListener('click', async (e) => {
+    (e.currentTarget as HTMLButtonElement).disabled = true;
+    await saveNow();
+    leave();
+  });
   el.querySelector('[data-stay]')!.addEventListener('click', () => s.closeSheet());
 }
 const asking = () => shell()?.sheetKey === 'leave';
@@ -116,7 +141,7 @@ function leave() {
 window.addEventListener('popstate', (e) => {
   const st = e.state as AppState | null;
   if (inGame) {
-    if (leaving || asking()) { leaving = true; location.reload(); return; }
+    if (leaving || asking()) { leaving = true; void saveNow().finally(() => location.reload()); return; }
     // back from a game: stay on the game's entry while asking
     history.pushState({ app: 'game' } satisfies AppState, '', gameUrl);
     askLeave();
@@ -143,6 +168,7 @@ if (r.kind === 'game') {
   const keep = (history.state as AppState | null)?.app === 'menu' ? history.state : { app: 'menu', depth: 0 };
   history.replaceState(keep, '', r.notice ? `${menuUrl()}#new` : location.pathname + location.hash);
   show(r.notice ? 'new' : r.screen, r.notice);
+  readSaves();
 }
 
 // the site's offline worker (public/sw.js), registered from the menu so a visit that never

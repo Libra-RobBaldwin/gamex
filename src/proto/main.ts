@@ -39,6 +39,8 @@ import { edgeCrossings, edgeMesh } from './game/edge';
 import { STD } from './standards';
 import { Loading } from './loading';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
+import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
+import { deleteSave, getSave, listSaves, putSave, saveSearch } from './game/savedb';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
@@ -50,8 +52,17 @@ const short = (need: number) => `Not enough money · ${money(need)} needed, ${mo
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // ---------------- world ----------------
+// A saved town (game/save.ts) is `?save=<id>`: read first, since it says which map it was made on.
+const PARAMS = new URLSearchParams(location.search);
+let SAVED: GameSave | null = null, saveProblem = '';
+if (PARAMS.get('save')) {
+  try { SAVED = await getSave(PARAMS.get('save')!); if (!SAVED) saveProblem = 'That saved town isn’t on this device any more · here’s a new one'; }
+  catch (e) { saveProblem = `${e instanceof SaveError ? e.message : 'The saved town couldn’t be read'} · here’s a new one`; console.warn('save', e); }
+}
 // The map is data (region/mapspec.ts): ?map= picks it (a region with its options), the invented town by default.
-const MAP = mapFromQuery(new URLSearchParams(location.search));
+const MAP = mapFromQuery(SAVED ? new URLSearchParams(SAVED.map.query) : PARAMS);
+// (the query that makes this map, kept with its saves)
+const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(PARAMS); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
 // the loading screen, while the map is built (it goes once the first frame is drawn)
 const loading = new Loading(MAP.name, mapLine());
@@ -353,14 +364,15 @@ function siteUnder(sx: number, sy: number, g: P) {
 }
 
 let queue: Lot[] = [];
+let keepQueue = false; // (loading a save: the plots stay as saved, whatever the roads' first redraws make of them)
 let placesDirty = true;
 let onRoadsChanged = () => {};
 let townRef: TownEconomy | null = null; // (made once the town is laid out, below)
 const LEVELS = [['Traffic', 1], ['Busy', 2], ['Quiet', 0.4]] as const;
 let level = 0;
-function spawnLot(l: Lot, animate = true) {
-  net.fitParcel(l);
-  net.lots.push(l);
+// (standing: a saved lot, already on the network as it was)
+function spawnLot(l: Lot, animate = true, standing = false) {
+  if (!standing) { net.fitParcel(l); net.lots.push(l); }
   const b: Built = { lot: l, born: performance.now(), solo: null, chunk: null, ...bake(l) };
   buildings.push(b);
   if (animate) { b.solo = soloGroup(b); b.solo.scale.y = 0.01; cityGroup.add(b.solo); }
@@ -393,7 +405,7 @@ function evictFromWorks() {
     if (!net.land.free(rectCorners(l.x, l.z, l.rot, l.w, l.d))) { net.lots = net.lots.filter((x) => x !== l); demolish(b); continue; }
     if (!net.land.free(net.parcelRect(l, -0.3), works)) { const was = l.back; net.fitParcel(l); if (l.back !== was) regenerate(b); }
   }
-  queue = queue.filter((l) => net.lotFree(l));
+  if (!keepQueue) queue = queue.filter((l) => net.lotFree(l));
 }
 
 
@@ -484,6 +496,30 @@ async function seedTown() {
   for (const [i, l] of start.entries()) {
     if (net.lotFree(l)) spawnLot(l, false);
     if (i % 16 === 0) await loading.tick(i / start.length);
+  }
+}
+
+// ---------------- a saved town ----------------
+// The town as it was saved (game/save.ts), on the land, water and trees its map makes: the network
+// and the land it claims, industrial sites, the railway, the junctions the player designed and the
+// motorway junctions, the buildings and the plots still free. Lines, the economy, the purse and
+// the clock are put back once the traffic exists (below).
+async function restoreTown(s: GameSave) {
+  await loading.stage('Laying out your roads', 0.06);
+  restoreNetwork(net, s.net);
+  rand.state = s.rand;
+  industries.restore(s.industries);
+  railway.restore(s.railway);
+  for (const j of s.junctions) junctions.set(j.node, j);
+  interchanges.push(...s.interchanges);
+  queue = s.queue;
+  keepQueue = true;
+  await loading.stage('Designing the junctions', 0.05);
+  commitRoads();
+  await loading.stage(`Putting up ${net.lots.length.toLocaleString('en-GB')} buildings`, 0.22);
+  for (const [i, l] of [...net.lots].entries()) {
+    spawnLot(l, false, true);
+    if (i % 16 === 0) await loading.tick(i / net.lots.length);
   }
 }
 
@@ -1118,8 +1154,8 @@ shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () =
 shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
 shell.addMenuItem({ id: 'town', label: TOWN_NAME, icon: 'building', sub: () => (townRef?.report ? `${STATUS_WORD[townRef.report.status]} · ${Math.round(townRef.report.residents).toLocaleString('en-GB')} people` : 'The town panel'), onClick: () => showTown() });
 shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
-shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
-shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
+shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', sub: () => (lastSaved ? `Saved ${when(lastSaved)} · it saves itself every few hours too` : 'It saves itself every few game hours too'), onClick: () => { void saveGame('manual'); } });
+shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'clock', sub: 'Your saved towns, on this device', onClick: () => { void openLoad(); } });
 // The game picks its own quality from how fast frames come (see judgeFrames); a tier chosen here holds.
 function openQuality() {
   const el = openPanel('quality', 'Quality', 'sparkles', `<div class="grp"><small>Auto steps down if frames run slow and back up when there’s headroom. Pick a level to hold it.</small>
@@ -1138,10 +1174,14 @@ function openQuality() {
 // (in a sheet rather than confirm(), which a sandboxed artifact frame may block outright)
 function openReset() {
   const el = openPanel('reset', 'Start a new town?', 'restore', `
-    <div class="grp"><small>Every road, rail line, stop and vehicle you have added goes, and the town starts again as it was. This can’t be undone.</small>
+    <div class="grp"><small>A new town on this map, as it starts. This one is saved first, and stays in Load town.</small>
       <button data-reset="1" class="act danger">${icon('restore')}<span>Start again</span></button>
       <button data-keep="1" class="act">${icon('play')}<span>Keep playing</span></button></div>`, true, { from: 'menu', back: () => shell.openMenu() });
-  el.querySelector('[data-reset]')!.addEventListener('click', () => location.reload());
+  el.querySelector<HTMLButtonElement>('[data-reset]')!.addEventListener('click', async (e) => {
+    (e.currentTarget as HTMLButtonElement).disabled = true;
+    await saveGame('auto');
+    location.assign(`${location.pathname}?${MAP_QUERY}`); // (the map without the save: a new town)
+  });
   el.querySelector('[data-keep]')!.addEventListener('click', closePanel);
 }
 
@@ -1886,7 +1926,8 @@ const sandbox = new URLSearchParams(location.search).get('map') === 'sandbox';
 // (or a motorway junction on its own, to look at: /proto.html?junction=dumbbell, see seedJunctionDemo)
 const demoJunction = new URLSearchParams(location.search).get('junction');
 const demo = demoJunction === 'blank' || demoJunction === 'cloverleaf' || (IX_FORMS as string[]).includes(demoJunction ?? '');
-if (demo) seedJunctionDemo(demoJunction === 'blank' ? null : (demoJunction as IxForm), new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper', new URLSearchParams(location.search).get('size') === 'tight' ? 'tight' : 'open');
+if (SAVED) await restoreTown(SAVED);
+else if (demo) seedJunctionDemo(demoJunction === 'blank' ? null : (demoJunction as IxForm), new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper', new URLSearchParams(location.search).get('size') === 'tight' ? 'tight' : 'open');
 else if (!sandbox) await seedTown();
 await loading.stage('Adding bus stops and drawing the roads', 0.1);
 // (no stops, lines, stations or trains to start with: every bit of the transport is the player's to build)
@@ -1919,8 +1960,14 @@ traffic.onTrainStop = () => 30; // seconds at the platform
 const lines = new Lines(traffic, stations);
 const markers = new StopMarkers(net, traffic, stations);
 scene.add(markers.group);
+// a saved town's own lines and stations, put back now the traffic is here to run them
+if (SAVED) {
+  stations.restore(SAVED.stations);
+  if (SAVED.lines.list.some((l) => l.mode === 'rail')) traffic.clearOtherTrains();
+  if (!lines.restore(SAVED.lines)) console.info('save: a vehicle had no room to start');
+}
 const dbSize = new THREE.Vector2();
-let clock = 7 * 60; // minutes since midnight: a day passes in six minutes
+let clock = SAVED?.clock ?? 7 * 60; // minutes since midnight: a day passes in six minutes
 let places: Places | null = null;
 function getPlaces(): Places {
   if (places && !placesDirty) return places;
@@ -1961,7 +2008,7 @@ function cycleRate() {
   setSpeed(r);
   hint(`Game speed ${r}×`, 'play');
 }
-setSpeed(1);
+if (SAVED) { rate = SAVED.rate || 1; setSpeed(SAVED.speed); } else setSpeed(1);
 let lastH = view.h;
 // the town's people: on the footways, at the stops, in the parks (see game/crowds.ts)
 const people = new TownCrowds({ scene, net, junctions, traffic, regions: () => infill }, GAME_MIN_PER_S);
@@ -1978,6 +2025,7 @@ rebuildRoads();
 shell.addTransportTab({ id: 'rail', label: 'Railway', icon: 'train', sub: 'Your rail lines and stations', render: (el) => railGame.renderTab(el) });
 // the economy runs the town from here on (game/econ.ts): it decides what gets built, and how
 // many wait at the stops
+if (SAVED) purse.load(SAVED.purse);
 const town = new TownEconomy({
   net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, rail: railGame.econ(),
   standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
@@ -1985,8 +2033,9 @@ const town = new TownEconomy({
   build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); },
   rebuild: (l, kind) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; l.kind = kind; regenerate(b); placesDirty = true; },
   clear: (l) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; net.lots = net.lots.filter((x) => x !== l); demolish(b); queue.push(l); },
-});
+}, 1, SAVED?.town);
 townRef = town;
+keepQueue = false;
 people.numbers = town.numbers();
 // The game starts with nothing of the player's, so a card under the status strip says what to
 // do next, and tapping it gets on with it: stops, then a line through them, then the town panel
@@ -2011,6 +2060,74 @@ function updateGoal() {
 }
 let goalTick = 0;
 let syncAt = 2;
+// ---------------- saving (game/save.ts, game/savedb.ts) ----------------
+// A town keeps one save, made when it starts and kept up to date: every few game hours, when the
+// page is hidden (the phone locks, another app comes up, the tab closes) and from Menu > Save town.
+// A loaded town goes on saving over the save it came from. (The junction pages are demos: no saves.)
+const SAVE_ID = SAVED?.id ?? (globalThis.crypto?.randomUUID?.() ?? `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
+const SAVE_NAME = SAVED?.name ?? MAP.name;
+const AUTOSAVE_EVERY = 4 * 60; // game minutes
+const canSave = !demo;
+let autoAt = clock + AUTOSAVE_EVERY, lastSaved = SAVED?.savedAt ?? 0, saving: Promise<boolean> | null = null;
+function snapshot(): GameSave {
+  const t = town.save(); // (first: a save is a round trip for the economy too, see TownEconomy.save)
+  return {
+    v: SAVE_VERSION, id: SAVE_ID, name: SAVE_NAME, savedAt: Date.now(), map: { id: MAP.id, query: MAP_QUERY },
+    summary: { residents: Math.round(town.report?.residents ?? 0), balance: Math.round(purse.balance), lines: lines.list.length + railway.lines.length, day: Math.floor(clock / 1440) + 1, time: hhmm(clock) },
+    clock, speed, rate, rand: rand.state,
+    net: saveNetwork(net), queue,
+    junctions: [...junctions.values()].filter((j) => !j.auto), interchanges,
+    industries: industries.save(), railway: railway.save(), stations: stations.save(), lines: lines.save(), town: t, purse: purse.save(),
+  };
+}
+// Save now (the town is copied as it's written, so play carries straight on). False if it couldn't.
+function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
+  if (!canSave) return Promise.resolve(false);
+  if (saving) return saving; // (one at a time: a second asks for the same)
+  const t0 = performance.now();
+  let s: GameSave;
+  try { s = snapshot(); } catch (e) { console.warn('save', e); return Promise.resolve(false); }
+  const put = putSave(s), ms = performance.now() - t0; // (storage copies the town as it's put: that's in the time too)
+  saving = put.then(() => {
+    lastSaved = s.savedAt;
+    (window as unknown as { __saved: unknown }).__saved = { why, at: s.savedAt, ms, clock: s.clock }; // (for e2e/save.e2e.mjs)
+    if (why === 'manual') hint(`Town saved · ${describeSave(s.summary)}`, 'floppy');
+    return true;
+  }, (e) => {
+    console.warn('save', e);
+    if (why !== 'hide') hint('Couldn’t save · this browser isn’t keeping storage for the game', 'alert');
+    return false;
+  }).finally(() => { saving = null; });
+  return saving;
+}
+if (canSave) {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void saveGame('hide'); });
+  window.addEventListener('pagehide', () => { void saveGame('hide'); });
+}
+// Menu > Load town: every save on this device, newest first. Opening one saves this town first.
+async function openLoad() {
+  let list: Awaited<ReturnType<typeof listSaves>>;
+  try { list = await listSaves(); } catch { hint('Saved towns can’t be read in this browser', 'alert'); return; }
+  const el = shell.openSheet({
+    key: 'load', title: 'Load town', icon: 'clock', from: 'menu', fresh: true,
+    body: `<div class="grp">${list.length ? '' : '<small>No saved towns yet. This one saves itself every few game hours, and from Menu > Save town.</small>'}
+      ${list.map((e) => `<div class="saverow"><button data-open="${esc(e.id)}" class="lrow"${e.id === SAVE_ID ? ' disabled' : ''}><span class="num">${icon(e.id === SAVE_ID ? 'check' : 'clock')}</span><b>${esc(e.name)}${e.id === SAVE_ID ? ' · this town' : ''}</b><span>${esc(describeSave(e.summary))} · saved ${esc(when(e.savedAt))}</span></button>${e.id === SAVE_ID ? '' : `<button data-del="${esc(e.id)}" class="act" aria-label="Delete ${esc(e.name)}, saved ${esc(when(e.savedAt))}">${icon('trash')}</button>`}</div>`).join('')}</div>`,
+  });
+  el.querySelectorAll<HTMLButtonElement>('[data-open]').forEach((b) => b.addEventListener('click', async () => {
+    const e = list.find((x) => x.id === b.dataset.open);
+    if (!e) return;
+    b.disabled = true;
+    await saveGame('auto');
+    location.assign(`${location.pathname}${saveSearch(e)}`);
+  }));
+  el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.classList.add('danger'); b.innerHTML = `${icon('trash')}<span>Delete?</span>`; return; }
+    await deleteSave(b.dataset.del!).catch(() => {});
+    void openLoad();
+  }));
+}
+if (saveProblem) setTimeout(() => hint(saveProblem, 'alert'), 1500);
+
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
 // Phones differ enormously, so rather than guess, the game watches its own frame times: if
 // frames run slow it steps down (fewer pixels, then cheaper shadows, then none), and when
@@ -2078,6 +2195,7 @@ function frame(now: number) {
   let merged = 0;
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
   clock += gdt * GAME_MIN_PER_S;
+  if (clock >= autoAt) { autoAt = clock + AUTOSAVE_EVERY; void saveGame('auto'); } // (every few game hours)
   const hour = (clock / 60) % 24;
   gameWater.update(now / 1000, hour); // ripples and reeds, and the water's light from the clock
   // industrial sites: state once a game minute, moving parts at their own low rate, lamps at night;
@@ -2148,7 +2266,7 @@ loading.finish();
 let loaded = false;
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
 Object.assign((window as unknown as { proto: object }).proto, { interchanges, blueprint: (a: P, b: P) => { draft = { a: net.snapStart(a, 4), b: net.snapEnd(net.snapStart(a, 4), b, 4, true) }; draftChanged(); } });

@@ -124,7 +124,11 @@ at once). Only the authority is saved (`save()` and `Economy.load()`), with the 
 and what the derived tables were last worked out from: each line's dwells when its ride times
 and fares were last timed (daily), and the ride times and headway the network was last planned
 on. A load rebuilds the tables from those, so a game loaded at any moment carries on exactly as
-the saved one would have (a test checks the whole save matches, months later).
+the saved one would have (a test checks the whole save matches, months later). The save also
+keeps each zone's last review tallies, each building's site score and the order a town met its
+zones. Even so, tables rebuilt mid-month differ from the running game's in the last digits, so
+the game makes a save a round trip: the game that saved carries on from a freshly loaded
+economy too (game/econ.ts `save()`, docs/save.md).
 
 **Time.** It never runs per frame. `advance(gameMinutes)` steps it an hour at a time and
 reviews every town once a "month" (`tune.monthDays`, default 30). Rates are per hour and

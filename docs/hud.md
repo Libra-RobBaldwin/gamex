@@ -79,7 +79,7 @@ A small pop-over above the bar:
 - quality (the adaptive tiers);
 - the perf readout;
 - New town (the old Reset);
-- save and load, when they exist.
+- Save town and Load town (docs/save.md).
 
 ## One shell for everything
 
@@ -160,6 +160,7 @@ purchase list is a `render` in the `buy` Transport tab.
   background traffic.
 - **Layers.** The four overlays are disabled ("Not in the game yet"). View is 3D, Low or Plan.
 - **Menu.** Quality (Auto, or hold one tier), Performance (the readout, which shows in the
-  stats drawer), New town (confirm step), Save and Load (disabled).
+  stats drawer), New town (confirm step; the old town is saved and stays in Load town), Save
+  town and Load town (docs/save.md).
 - **Speed.** Pause, and one button that cycles 1×, 2× and 4×. The old blinking clock is gone:
   "paused" shows in gold instead.

@@ -15,6 +15,7 @@ const HEIGHT = 0.9, WIDTH = 3.5;
 export const STATION_LIST_PRICE = 1_200_000;
 
 export interface Station { id: number; name: string; x: number; z: number; len: number; group: THREE.Group }
+export type StationSave = Omit<Station, 'group'>;
 export interface StationPlan { ok: boolean; reason?: string; seg?: RSeg; s?: number; x: number; z: number; heading: number }
 
 const NAMES = ['Ashcombe', 'Ashcombe Parkway', 'Millbrook Halt', 'Ashcombe North', 'Fairfield Road', 'Wharfside', 'Ashcombe East', 'Brookside'];
@@ -79,6 +80,21 @@ export class Stations {
   private claim(st: Station, pl: StationPlan) {
     const off = this.edge(pl.seg!) + WIDTH / 2, polys = [1, -1].map((side) => rectCorners(pl.x - Math.sin(pl.heading) * off * side, pl.z + Math.cos(pl.heading) * off * side, pl.heading, PLATFORM, WIDTH + 1));
     this.net.land.claim(`station:${st.id}`, 'station', polys);
+  }
+  // ---------- saving (game/save.ts) ----------
+  save(): StationSave[] { return this.list.map(({ id, name, x, z, len }) => ({ id, name, x, z, len })); }
+  // (onto the restored network: each stands where it stood, on the track there)
+  restore(list: StationSave[]) {
+    for (const x of list) {
+      const q = this.net.nearestSeg({ x: x.x, z: x.z }, 10, (sg) => this.net.def(sg).cls === 'rail');
+      if (!q) continue;
+      const s = closestOnPath({ x: x.x, z: x.z }, this.net.path(q.seg)).s, c = pointAt(this.net.path(q.seg), s);
+      const pl: StationPlan = { ok: true, seg: q.seg, s, x: x.x, z: x.z, heading: Math.atan2(c.uz, c.ux) };
+      const st: Station = { ...x, group: this.build(pl) };
+      this.list.push(st);
+      this.group.add(st.group);
+      this.claim(st, pl);
+    }
   }
   // where a station is on today's network (the road ids may have changed since it was built)
   spot(id: number): StationSpot | null {

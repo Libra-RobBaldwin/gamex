@@ -1,6 +1,21 @@
 # Handover: where everything stands
 
-## Latest: the player builds everything, and simpler tools (24 Sep 2026, night)
+## Latest: saving and loading (24 Sep 2026, night)
+
+Session https://claude.ai/code/session_01PQ93PyRyTyLaPDoybw2MMw. **Read `docs/save.md`.**
+- **Save and load work:**
+  - versioned saves in IndexedDB with a migration chain;
+  - autosave every 4 game hours and when the page is hidden;
+  - Menu > Save town and Load town;
+  - the start menu's Continue and Saved towns;
+  - a loaded town continues exactly as saved (`game/save.test.ts`, `e2e/save.e2e.mjs`).
+- **The economy library changed slightly (`economy.ts`):** its save also keeps each zone's review
+  tallies, each building's site score and the order its town met its zones. The game makes a save
+  a round trip for its own economy too (docs/ENGINE.md).
+- **CI:** timing budgets scale with the machine, and the phone tests run in CI. That's a second
+  PR from `claude/work-save-ci`.
+
+## Earlier: the player builds everything, and simpler tools (24 Sep 2026, night)
 
 Session https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8, on the user's feedback:
 nothing should be built at the start, the HUD was too big, and the tools were too complicated.

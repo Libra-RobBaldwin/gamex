@@ -208,6 +208,11 @@ body.tooling #goal, #drawer:not([hidden]) ~ #goal { display: none; }
 .lrow .num .ic { width: 20px; height: 20px; }
 .lrow b { font: 700 14px/1.2 var(--font-display); }
 .lrow span:not(.num) { color: var(--muted); font-size: 12px; }
+.lrow:disabled { opacity: 1; cursor: default; }
+/* Menu > Load town: a saved town, and a delete button beside it (tap twice) */
+.saverow { display: flex; align-items: stretch; gap: 6px; }
+.saverow .lrow { flex: 1; min-width: 0; }
+.saverow .act { flex: none; min-width: 48px; }
 
 /* sheet content carried over from the old side panel: groups, list rows, filters, plans */
 .sb small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; line-height: 1.35; }
