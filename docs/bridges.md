@@ -2,8 +2,8 @@
 
 `src/proto/bridges/` is a self-contained library for bridges. It holds a catalogue of bridge
 types, a chooser that picks one for a crossing, a support layout that places piers and prices
-the result, and low-poly three.js geometry for each type. The game doesn't use it yet. This page
-covers the API and the plan for plugging it in. `docs/reports/bridges.md` describes what was
+the result, and low-poly three.js geometry for each type. The game uses it through
+`src/proto/game/bridges.ts` (see **In the game**). This page covers the API and the plan for plugging it in. `docs/reports/bridges.md` describes what was
 built and why.
 
 Try it with `npx vite --port 5173`, then open `/bridges-demo.html`. It has two modes: a gallery
@@ -145,6 +145,54 @@ The layout works like this:
 
 Afterwards, piers taller than `maxPier` are refused, as is structure reaching the ground and any
 span steeper than its type allows.
+
+## In the game
+
+Steps 1–7 of the plan below are in. The glue is `src/proto/game/bridges.ts`:
+
+- `crossingOf(net, path, road)` makes the `Crossing`. It uses:
+  - the water sampled along the path;
+  - roads and railways underneath, found by walking the deck: wherever a pier (a line across the
+    deck's width) would touch a road's full width below, that stretch is kept clear, so skewed
+    crossings, junction arms and roads running along under a viaduct are all covered;
+  - keep-outs for other junctions' land under a raised deck.
+- `extents()` reaches 6 m past each obstacle (it used to be 2 m), so there's room for the
+  abutment's footing and setback.
+- `check()` refuses a blueprint when:
+  - no type fits one of its bridges;
+  - a bridge already built overhead would have no room for its piers.
+
+  When a new road only takes a built bridge's headroom below standard, the bridge is re-laid as
+  a low bridge, with a note, instead of being refused. Over a railway, the height solver uses
+  the railway's clearance, for the overhead wires.
+- The game refuses types shorter than their `length.min`, such as a suspension bridge over a
+  pond. The earthworks outside the bridges are priced on the path that's actually built.
+- `check()` in `roads.ts` calls `priceBridges()`. Inside each extent, the chooser's cost
+  replaces `RAISE_COST`. It passes a `resolve` that re-runs `solveProfile` with the over-limits
+  raised or the gradient eased. If the chosen type needs it, the raised path is the one that
+  gets built.
+- `Check.choices` lists the bridges. The blueprint card shows each one's type, length, cost and
+  first notes.
+- `RSeg.bridges` holds `{ s0, s1, type, override }` for each bridge, and nothing else is
+  stored. `build()` fills it from the blueprint. `split()` carries it to both halves.
+- `BridgeLayer.sync(net)` runs in `commitRoads()` before `drawRoads()`. It lays out each
+  segment whose path, obstacles or stored types changed, keeping the stored type while it still
+  fits. A built bridge keeps its type after that type's era ends.
+- The drawing is one merged mesh per material for every bridge together. The seed town's three
+  bridges take 3 draw calls, and all twelve types together could take at most about 15. The
+  bascule leaves are extra.
+- `structures()` in `roaddraw.ts` skips the extents. The ramps outside them get retaining walls
+  down to the ground, and the thin 24 m piers are gone.
+- To edit a bridge, tap it. Its info sheet has **Change bridge type**, which opens a sheet
+  listing this year's types: the cost and upkeep of each, the recommended one marked, and
+  refused ones greyed out with their reason. Picking one sets the override and re-commits
+  through `commitRoads()`. The editor offers only types that fit the deck as it's built.
+- `Traffic.speedCap` caps cars at the type's `roadMph`, slowing them from 40 m before the bridge.
+  Trains are capped at `railMph`, and brake for it in time.
+
+Not done yet: bascule closures in traffic, abnormal loads, charging for a change of type, water classes and channels (for
+water's `navLimits` and `pierBans`), and land claims for piers (steps 8–11). Money is shown but
+not charged, because the economy isn't wired in yet.
 
 ## Integration plan
 

@@ -12,6 +12,9 @@ export { lookFor, operatorFor, type Look } from './appearance';
 export { pickVehicle, pickTrain, mixSummary, type Area, type Spawn } from './spawn';
 export { follow, articulationAngle, consistOffsets, ahead, type Pose } from './articulation';
 export { purchaseList, allOffers, type Offer, type OfferKind } from './economy';
+// doors and moving parts: where every door is, how to open them, where they are in the world
+export { doorsOf, DoorStates, dwellDoors, doorSeconds, doorPositions, platformSide, type Door, type DoorKind, type DoorPlace, type Side, type Placed } from './doors';
+export { MOTION, DOOR_SECONDS, packDoors, unpackDoors, wheelAngle, bogieYaw, steerAngle, moveVertex, type MotionState } from './motion';
 
 import { MODEL } from './models';
 // True lengths for car-following: the gap to leave behind a vehicle is its length plus a margin

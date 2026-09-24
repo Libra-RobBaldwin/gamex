@@ -102,6 +102,23 @@ coming onto the screen appears at once, because it's culled with a margin and so
 screen when it appears. A count change eases in one figure at a time. Figures are numbered, and
 only the first *count* show, so going from 12 to 13 adds one person and nobody else moves.
 
+## In the game now
+
+`src/proto/game/crowds.ts` (`TownCrowds`) and `crowdsites.ts` carry out steps 1 to 9 below, except
+rail platforms (there are no stations in the game yet). Counts come through `CrowdNumbers`; until
+the economy feeds it, `TownNumbers` works them out from the traffic's daily curve, the homes and
+jobs along each street, and bus use. Notes:
+
+- Buses: `traffic.onBusStop` returns the dwell, so a bus waits for its boarders. The bus pulls in to
+  the stop's own kerb (across parking or a cycle lane, or to the lay-by's real depth) and uses the
+  nearside lane for its stop. People board at a front door by the bus's front and get off at a
+  middle door, both worked out from where the bus stands. Replace these with the vehicle library's
+  door positions when they reach the game.
+- Crossings: people cross when nothing can reach them before they're over, and
+  `traffic.crossing` holds traffic short of the crossing while they're on it.
+- The perf readout (Menu, Performance) ends with the people's line: figures by level, draw calls,
+  triangles and ms. At the default phone view that's about 300 far cards, 1 draw call and 0.5 ms.
+
 ## Integration plan
 
 The steps, in order. Each is small and can be tested on its own.

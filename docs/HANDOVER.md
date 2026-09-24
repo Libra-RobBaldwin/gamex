@@ -42,6 +42,7 @@ https://claude.ai/code/session_019K7UAChLqLhMzXsaSczdtJ.
   | Freight terminals and supply chains | `claude/work-terminals` | session_01CE6XJ8Bv6zXW5sTZM9iCLw |
   | A real town (Horley) instead of the invented one, from the OSM importer | `claude/work-real-town` | session_019665XqqPm9U1NRR99GLvBm |
   | Junctions and joins that line up, on the invented town and on real OSM networks | `claude/work-junctions` | session_0185VszrHr5qQCJHYZH7rSeq |
+  | Real Town Plans as a standalone web page for Vercel | `claude/work-places-page` | session_01GtT32NAQuqxrCU1YcEtfSw |
 
 - **Network:** full access was enabled at ~12:30. The Overpass servers were "too busy" at first, so the Horley data is being fetched in tiles with polite retries.
 - **Next wave (not started):**
@@ -235,6 +236,21 @@ directory and are gone.
 - Commit trailers used so far:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` and a `Claude-Session:` line
   (use the new session's link). No model IDs in code, commits or PRs.
+
+## Estimating time (the user asked for this)
+
+Give wall-clock estimates from how fast AI sessions have actually worked on this project, never
+from how long a human developer would take. These timings were measured on 24 Sep:
+
+| Work | Measured | Examples |
+|---|---|---|
+| A focused change the coordinator makes directly | 5–15 min | grass matching the ground; the lawn colour |
+| A cloud session, from start to its first working PR | 15–30 min | integrations 15–28 min; traffic 21; ground in the game 28 |
+| A cloud session, including its adversarial review and fixes | 45–90 min | terminals 22 min; the camera kit and bridge track about 60–90; the HUD about 85 |
+| Merging a finished stream, checking it and republishing the link | about 5 min | |
+
+- **Parallel streams:** the wall-clock is the slowest stream plus merging, not the sum.
+- **Name the waits separately.** Examples: busy map servers, the user's own steps (Vercel, settings) and usage limits. Say which part of an estimate is ours and which is a wait.
 
 ## Tools
 
