@@ -143,13 +143,29 @@ export function legFrameOf(n: XZ, l: ShapeLeg, p: XZ) {
   let best = { a: 0, b: Infinity, d: Infinity }, acc = 0;
   for (let i = 1; i < path.length; i++) {
     const q = path[i - 1], r = path[i], L = Math.hypot(r.x - q.x, r.z - q.z) || 1e-9, u = { x: (r.x - q.x) / L, z: (r.z - q.z) / L };
-    const t = (p.x - q.x) * u.x + (p.z - q.z) * u.z, tc = i === path.length - 1 ? Math.max(0, t) : Math.max(0, Math.min(L, t));
+    // (run on straight both ways: behind the node `a` goes negative)
+    const t = (p.x - q.x) * u.x + (p.z - q.z) * u.z, tc = Math.max(i === 1 ? -Infinity : 0, i === path.length - 1 ? t : Math.min(L, t));
     const c = add(q, u, tc), d = Math.hypot(p.x - c.x, p.z - c.z);
     // (+b is W's side: (-u.z, u.x))
     if (d < best.d) best = { a: acc + tc, b: (p.x - c.x) * -u.z + (p.z - c.z) * u.x, d };
     acc += L;
   }
   return { a: best.a, b: best.b };
+}
+// Where two roads leave a junction close together, the thin V of ground between their footways is
+// paved over, out to where the footways are NOSE metres apart: a paved nose, not a sliver of grass.
+const NOSE = 0.8;
+function nose(n: XZ, l: ShapeLeg, nx: ShapeLeg, bl: number, bn: number, from: number): XZ[] | null {
+  if (gapOf(l, nx) > 1.3) return null;
+  const P: XZ[] = [], Q: XZ[] = [];
+  for (let a = from; a < Math.min(l.len, 90); a += 0.5) {
+    const p = legAt(n, l, a, bl), f = legFrameOf(n, nx, p);
+    if (f.a < 0 || f.a > nx.len) break;
+    const gap = -f.b - bn;
+    if (gap > NOSE) break;
+    P.push(p); Q.push(gap > 0 ? legAt(n, nx, f.a, -bn) : p);
+  }
+  return P.length > 1 ? [n, ...P, ...Q.reverse()] : null;
 }
 // where the line b across leg l reaches radius R from the node (going out from it)
 export function ringA(n: XZ, l: ShapeLeg, b: number, R: number) {
@@ -396,6 +412,7 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     // (the footway's outline crosses each road no nearer than its road's footway starts)
     const pv = ringOutline(n, legs, R + F, B, Math.max(1, std.entryRadius - F), (l) => Math.max(...paveTrim[l.id]));
     const apron = kerb.pts, pave = pv.pts, aprons = kerb.pieces, paves = pv.pieces;
+    legs.forEach((l, i) => { const nx = legs[(i + 1) % N], q = nose(n, l, nx, B(l), B(nx), pv.at[i].m); if (q) paves.push(q); });
     const claims = paves;
     // splitter islands at single-lane entries: only where one fits on its own road, clear of the
     // next road's carriageway (where mapped roads meet the ring close together, say)
@@ -459,6 +476,8 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     // (a slip road's corner: the footway runs out to the kerbs' corner, the island sitting on it)
     const kb = c.isSlip && c.kerb.x ? [legAt(n, l, 0, B(l)), legAt(n, l, Math.max(m, tp), B(l)), c.kerb.x, legAt(n, nx, Math.max(mouth[nx.id], paveTrim[nx.id][1]), -B(nx)), legAt(n, nx, 0, -B(nx)), n] : round(c.back, l, nx, B(l), B(nx));
     if (kb) paves.push(kb);
+    const q = c.isSlip ? null : nose(n, l, nx, B(l), B(nx), Math.max(m, tp));
+    if (q) paves.push(q);
   });
   // (along a curving road the outlines follow its kerb and footway between the corners and the mouth)
   legs.forEach((l, i) => {
