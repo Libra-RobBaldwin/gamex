@@ -1,5 +1,39 @@
 # Handover: where everything stands
 
+## Latest: the player builds everything, and simpler tools (24 Sep 2026, night)
+
+Session https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8, on the user's feedback:
+nothing should be built at the start, the HUD was too big, and the tools were too complicated.
+- **Empty start:** no starter stops, bus line, stations or rail lines; the region's track is laid
+  bare (`layRegionRail(..., { trackOnly: true })`). The economy holds a town steady with no
+  service (`GAME_TUNE.local.visitors: 1`), so the player's service is what makes it grow.
+  `transferWalkM: 60` fixed zero riders.
+- **Next-step card** (`shell.goal`, `updateGoal` in `main.ts`): under the status strip. It reads
+  "build 2 stops", then "draw a line", then "watch the town grow". Tapping it opens the right
+  tool. It goes once the first line has run two days.
+- **Bus stop tool:** tap a road, and a blueprint goes down. Kerbside and Lay-by are two buttons
+  with prices, and Build confirms. The blueprint shows faintly through buildings in front of it.
+- **Road tool:** one row, showing the type name and price. The chevron or the sliders button
+  opens a drawer: row 1 holds the common types plus More, row 2 the shape, height, gradient and
+  Join/Over/Under. With a blueprint down, the hint pill steps aside for the card. A Build that
+  can't be pressed now looks disabled (before, it only faded under the primary colour). The
+  climb errors say what to do.
+- **Line tool:** frames every stop when it starts. Once stops are picked, its card says what to
+  do next.
+- **Line sheet:** buses, riders a day and profit a day as three tiles (`Info.stats`), then the
+  stops and one row of actions. It's about half the height it was.
+- **Bulldoze** (Build > Bulldoze): tap a road or a stop, then Remove; half a road's price comes
+  back. It refuses a road buildings face, a stop a line calls at, and motorway junction parts.
+- **Build sheet:** the cards for things not in the game yet are gone (bus station, lorry depot,
+  Freight, Landscape). Add them back when they exist. Save and Load in the menu are left to the
+  save session.
+- **Parallel sessions** each push a `claude/work-*` branch; merge them here as they land:
+  - traffic feel: `work-traffic-2`;
+  - save and CI: `work-save`;
+  - region streaming: `work-streaming`;
+  - stations on curves, bridges and underground: `work-stations-2`;
+  - region generator: `work-region`.
+
 ## Traffic that feels right (work-traffic-2, 24 Sep 2026, late)
 
 Session https://claude.ai/code/session_018DK8CF7BYZZHj49auA1MyH, production.md §3.
@@ -15,7 +49,7 @@ Session https://claude.ai/code/session_018DK8CF7BYZZHj49auA1MyH, production.md �
 - Bench: `src/proto/*.local.test.ts` in this session only; to rebuild it, run `simulate` over the
   scenarios with `{ gaps: true }` on seeds 11–13.
 
-## Latest: the bus loop is playable (24 Sep 2026, evening)
+## Earlier: the bus loop is playable (24 Sep 2026, evening)
 
 Session https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. **Read `docs/loop.md`
 ("Status")** for what was built and what's open.

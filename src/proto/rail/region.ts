@@ -135,7 +135,8 @@ function meet(p: P, u: P, q: P, v: P): P | null {
 
 // Build the plan on the railway's network, then its stations and lines. Returns what it made, and
 // whatever it couldn't (in words), so the region can say so rather than fail.
-export function layRegionRail(rw: Railway, plan: RegionRailPlan, o: { mainTrains?: TrainDef[]; branchTrains?: TrainDef[] } = {}) {
+// (`trackOnly`: lay the track and leave the stations and lines to the player)
+export function layRegionRail(rw: Railway, plan: RegionRailPlan, o: { mainTrains?: TrainDef[]; branchTrains?: TrainDef[]; trackOnly?: boolean } = {}) {
   const net = rw.net, problems: string[] = [];
   const build = (a: End, b: End, ctrl: P | undefined, type: string) => {
     const opts = { ...DEFAULT_OPTS, type, cross: 'bridge' as const, grade: ROADS[type].maxGrade };
@@ -156,7 +157,7 @@ export function layRegionRail(rw: Railway, plan: RegionRailPlan, o: { mainTrains
   rw.rebuild();
   // the stations: on each, a plan for the layout it recommends
   const made = new Map<string | number, Station>();
-  for (const sp of plan.stations) {
+  for (const sp of o.trackOnly ? [] : plan.stations) {
     const sg = net.nearestSeg(sp, 3, (s) => net.def(s).cls === 'rail');
     if (!sg) { problems.push(`no track at ${sp.settlement.name}`); continue; }
     const tracks = net.def(sg.seg).tracks;
@@ -175,7 +176,7 @@ export function layRegionRail(rw: Railway, plan: RegionRailPlan, o: { mainTrains
     made.set(sp.settlement.id, rw.build(pl).station);
   }
   const lines: RailLine[] = [];
-  for (const l of plan.lines) {
+  for (const l of o.trackOnly ? [] : plan.lines) {
     const stops = l.stops.map((id) => made.get(id)?.id).filter((x): x is number => x !== undefined);
     if (stops.length < 2) { problems.push(`line ${l.name}`); continue; }
     const trains = l.route === 'main' ? (o.mainTrains ?? [TRAINS.intercity, TRAINS.dmu]) : (o.branchTrains ?? [TRAINS.dmu]);

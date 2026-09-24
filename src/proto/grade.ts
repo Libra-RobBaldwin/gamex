@@ -83,8 +83,10 @@ export function solveProfile(L: number, y0: number, yL: number | undefined, G: n
     const climb = up - down;
     if (hiWhy[k] === 'start' && loWhy[j] === 'end') return out(`The far end is ${m1(climb)} higher: needs ${need(climb)} m of route at ${pct(G)}`);
     if (loWhy[j] === 'start' && hiWhy[k] === 'end') return out(`The far end is ${m1(climb)} lower: needs ${need(climb)} m of route at ${pct(G)}`);
-    if (hiWhy[k] === 'start') return out(`Can't climb ${m1(climb)} to clear ${loWhy[j]} in ${dist} m at ${pct(G)} (needs ${need(climb)} m) — start further back or steepen`);
-    if (loWhy[j] === 'start') return out(`Can't dive ${m1(climb)} to get under ${hiWhy[k]} in ${dist} m at ${pct(G)} (needs ${need(climb)} m) — start further back or steepen`);
+    // (said plainly, with what to do about it: the gradient is in the tool's options)
+    const within = dist < 5 ? 'straight from the start' : `in ${dist} m`, fix = 'Start further back, or allow a steeper climb in the options';
+    if (hiWhy[k] === 'start') return out(`Can't climb ${m1(climb)} to clear ${loWhy[j]} ${within}: at ${pct(G)} it needs ${need(climb)} m. ${fix}`);
+    if (loWhy[j] === 'start') return out(`Can't dive ${m1(climb)} to get under ${hiWhy[k]} ${within}: at ${pct(G)} it needs ${need(climb)} m. ${fix}`);
     if (hiWhy[k] === 'end') return out(`Can't come back down ${m1(climb)} to meet the end after ${loWhy[j]} (needs ${need(climb)} m at ${pct(G)})`);
     if (loWhy[j] === 'end') return out(`Can't come back up ${m1(climb)} to meet the end after ${hiWhy[k]} (needs ${need(climb)} m at ${pct(G)})`);
     if (hiWhy[k] === 'the junction') return out(`Too high to join the crossing road here (${m1(up)} vs ${m1(down)}) — try going over it`);

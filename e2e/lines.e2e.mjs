@@ -17,19 +17,33 @@ const frameMs = () => page.evaluate(() => new Promise((res) => { const t = []; l
 console.log('median frame ms (before)', (await frameMs()).toFixed(1));
 await page.screenshot({ path: `${out}/m1-0-start.png` });
 
-// Transport > Lines: the starter line is listed
+// nothing to start with: no stops and no lines; place three stops (as the stop tool does)
+const none = await page.evaluate(() => ({ lines: window.proto.lines.list.length, stops: [...window.proto.net.segs.values()].reduce((a, s) => a + s.stops.length, 0) }));
+if (none.lines || none.stops) fail('the game starts with stops or lines already built');
+await page.evaluate(() => {
+  const P = window.proto, net = P.net;
+  for (const q of [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }]) {
+    const n = net.nearestSeg(q, 30, (s) => net.def(s).cls === 'road' && net.def(s).family !== 'Motorway');
+    if (n) for (const side of [1, -1]) for (const d of [0, 15, -15, 30, -30]) { const { plans } = net.planStop(n.seg.id, n.s + d, side); const pl = plans.find((x) => x.ok && x.kind === 'kerb') ?? plans.find((x) => x.ok); if (pl) { net.addStop(n.seg.id, n.s + d, side, pl); break; } }
+  }
+  P.rebuild();
+});
+// Transport > Lines: empty, with New line ready
 await page.tap('[data-bar="transport"]');
 await page.waitForTimeout(400);
 const tabs = await page.$$('[data-tab]');
 for (const t of tabs) if ((await t.textContent()).includes('Lines')) await t.tap();
 await page.waitForTimeout(400);
 await page.screenshot({ path: `${out}/m1-1-lines.png` });
-if (!(await page.$('[data-line="0"]'))) fail('the starter line is not listed');
+if (await page.$('[data-line="0"]')) fail('a line is listed before one was drawn');
 
 // New line: frame the town, tap three stop badges
 await page.tap('[data-newline]');
 await page.evaluate(() => window.proto.focusOn({ x: 0, z: -60 }, 900));
 await page.waitForTimeout(2500);
+// (the camera glides there; under SwiftShader that can outlast the wait, and screen points read
+// mid-glide are stale by the time they're tapped)
+await page.waitForFunction(() => !window.proto.nav.busy, null, { timeout: 30000 });
 const targets = [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }];
 const picks = await page.evaluate((targets) => {
   const P = window.proto, places = P.markers.places();
