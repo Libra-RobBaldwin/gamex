@@ -5,7 +5,7 @@
 import { CLEAR_COST, DEFAULT_OPTS, RAISE_COST, ROADS, closestOnPath, halfOf, kerbOf, pathLength, pointAt, type End, type Lot, type Network, type P, type RSeg } from '../roads';
 import { isSlip, laneBase } from '../catalog';
 import { STD } from '../standards';
-import { crossingOf, motorwayWithJunction, scratch, type IxForm, type IxSize, type SlipStyle } from './build';
+import { crossingOf, motorwayCloverleaf, motorwayWithJunction, scratch, type IxForm, type IxSize, type SlipStyle } from './build';
 
 export interface IxPlan { ok: boolean; reason?: string; cost: number; clears: Lot[]; ghost: { path: P[]; half: number }[] }
 
@@ -23,18 +23,27 @@ export function roadCrossed(net: Network, mw: P[]): RSeg | null {
 }
 
 export function planJunction(net: Network, form: IxForm, style: SlipStyle, mw: P[], type: string, road: RSeg, size: IxSize = 'open'): IxPlan {
+  return planOn(net, (s) => motorwayWithJunction(s, form, mw, type, s.segs.get(road.id)!, 0, style, size), road);
+}
+// the same for a cloverleaf, where the blueprint crosses another motorway (build.pairCrossed)
+export function planCloverleaf(net: Network, mw: P[], type: string, size: IxSize = 'open'): IxPlan {
+  return planOn(net, (s) => motorwayCloverleaf(s, mw, type, 0, size), null);
+}
+function planOn(net: Network, build: (s: Network) => { ok: true } | { ok: false; reason: string }, road: RSeg | null): IxPlan {
   const s = scratch(net), had = new Set(net.segs.keys());
-  const r = motorwayWithJunction(s, form, mw, type, s.segs.get(road.id)!, 0, style, size);
+  const r = build(s);
   if (!r.ok) return { ok: false, reason: r.reason, cost: 0, clears: [], ghost: [] };
   // every new road's price by the metre, and its embankments and bridges as check() prices a raised road
   let cost = 0;
   const ghost: IxPlan['ghost'] = [];
-  const old = net.path(road);
+  const old = road ? net.path(road) : null;
   for (const x of s.segs.values()) {
     if (had.has(x.id)) continue;
     const path = s.path(x), d = s.def(x);
-    // (what's left of the local road, split where the junction meets it, is already paid for)
-    if (x.type === road.type && !x.oneway && path.every((p) => closestOnPath(p, old).d < 1 && Math.abs(p.y ?? 0) < 0.1)) continue;
+    // (what's left of the local road, or of the motorway it crosses, split where the junction meets
+    // it, is already paid for)
+    if (road && old && x.type === road.type && !x.oneway && path.every((p) => closestOnPath(p, old).d < 1 && Math.abs(p.y ?? 0) < 0.1)) continue;
+    if (!road && x.oneway && !isSlip(x.type) && [...net.segs.values()].some((o) => o.oneway && o.type === x.type && closestOnPath(path[Math.floor(path.length / 2)], net.path(o)).d < 0.5)) continue;
     cost += pathLength(path) * d.cost;
     for (let i = 1; i < path.length; i++) { const ym = ((path[i].y ?? 0) + (path[i - 1].y ?? 0)) / 2; if (ym > 0) cost += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z) * ym * RAISE_COST; }
     ghost.push({ path, half: s.half(x) });

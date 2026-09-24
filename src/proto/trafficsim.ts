@@ -6,17 +6,18 @@ import { DEFAULT_OPTS, Network, rng, type P } from './roads';
 import { design, landFits, legsAt, type Form, type Junction } from './junction';
 import { Traffic, type Places } from './traffic';
 import { laneSpan } from './xsection';
-import { motorwayWithJunction, pairUpMotorways, type IxForm, type IxSize, type SlipStyle } from './interchange/build';
+import { motorwayCloverleaf, motorwayWithJunction, pairToNode, pairUpMotorways, type IxForm, type IxSize, type SlipStyle } from './interchange/build';
 
 const as = (type: string) => ({ ...DEFAULT_OPTS, type });
 const geo = (n: Network, node: number) => ({ fits: (polys: Parameters<typeof landFits>[2]) => landFits(n, node, polys) });
 
 // build: lays the roads out; it may say which form some junctions must take (an interchange's)
 // through: no works on the map, so its lorries come from roads off the map (along a motorway, say)
-export interface Scenario { name: string; build: (n: Network) => void | { prefer?: Record<number, Form> }; through?: boolean; forms?: string[]; prefer?: Form; cars: number; buses?: number; stops?: boolean; minTrips: number; minChanges?: number }
+// (bound: the map's half-size, for a scenario that needs more room than most)
+export interface Scenario { name: string; build: (n: Network) => void | { prefer?: Record<number, Form> }; bound?: number; through?: boolean; forms?: string[]; prefer?: Form; cars: number; buses?: number; stops?: boolean; minTrips: number; minChanges?: number }
 
 export function town(sc: Scenario) {
-  const net = new Network(() => false, 900);
+  const net = new Network(() => false, sc.bound ?? 900);
   const built = sc.build(net) ?? {};
   const junctions = new Map<number, Junction>();
   for (const nd of net.nodes.values()) {
@@ -162,6 +163,21 @@ export const SCENARIOS: Scenario[] = [
       const r = motorwayWithJunction(n, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...n.segs.values()][0], 0, style, size);
       if (!r.ok) throw new Error(r.reason);
       return { prefer: r.ix.prefer };
+    },
+  })),
+  // a cloverleaf: two motorways, trips on and off both at every end
+  ...(['tight', 'open'] as IxSize[]).map((size): Scenario => ({
+    name: `motorway junction: cloverleaf, ${size}`, cars: 200, minTrips: 60, forms: undefined, through: true, bound: 1600,
+    build: (n) => {
+      // (the motorway it crosses ends at a roundabout into a town of streets: its trips to and from
+      // the motorways' other ends all go through the cloverleaf)
+      const end = { x: 1400, z: 0 };
+      pairToNode(n, [{ x: -1500, z: 0 }, end], 'motorway', end);
+      const town = n.nearestNode(end, 1)!;
+      for (const [x, z] of [[1400, 450], [1400, -450]]) n.build({ x: town.x, z: town.z, node: town.id }, { x, z }, undefined, { ...DEFAULT_OPTS, type: 'street' });
+      const r = motorwayCloverleaf(n, [{ x: 0, z: -1500 }, { x: 0, z: 1500 }], 'motorway', 0, size);
+      if (!r.ok) throw new Error(r.reason);
+      return { prefer: { ...r.ix.prefer, [town.id]: 'roundabout' } };
     },
   })),
   {

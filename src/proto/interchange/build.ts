@@ -19,7 +19,8 @@ import { GRADES } from '../grade';
 import type { Form } from '../junction';
 import { Land, bandPolys } from '../land';
 
-export type IxForm = 'dumbbell' | 'gsr' | 'diamond' | 'trumpet';
+export type IxForm = 'dumbbell' | 'gsr' | 'diamond' | 'trumpet' | 'cloverleaf';
+// (the forms for a motorway crossing a road; a cloverleaf is for one motorway crossing another)
 // how much room it takes: tight, for a town (the motorway dips into a cutting under it, the local
 // road climbs steeply over it, slip roads at 40 mph), or open, out in the country (everything at
 // ground level, gentle gradients, 50 mph slip roads)
@@ -30,19 +31,20 @@ export const IX_SIZE_BLURB: Record<IxSize, string> = { tight: 'Compact, for a to
 // depth: room for a deeper deck than the height solver allows for (a beam's, over a 30 m span); cut: how deep the motorway goes under it; grade: the local road's (or ring's) steepest; flat: how
 // far the local road is level either side of a roundabout, past its ring; ringFlat: a ring's level
 // stretch either side of each road meeting it; slip: the slip roads' type
-// loop, ramp: a trumpet's loop's radius and its other ramps' curves
-const SIZE: Record<IxSize, { cut: number; grade: number; flat: number; ringFlat: number; slip: string; depth: number; loop: number; ramp: number }> = {
-  tight: { cut: 4, grade: 0.08, flat: 6, ringFlat: 12, slip: 'slip-40', depth: 1, loop: 48, ramp: 55 },
-  open: { cut: 0, grade: 0.06, flat: 16, ringFlat: 22, slip: 'slip', depth: 2, loop: 90, ramp: 95 },
+// loop, ramp: a trumpet's loop's radius and its other ramps' curves; cloop, cramp: a cloverleaf's
+const SIZE: Record<IxSize, { cut: number; grade: number; flat: number; ringFlat: number; slip: string; depth: number; loop: number; ramp: number; cloop: number; cramp: number }> = {
+  tight: { cut: 4, grade: 0.08, flat: 6, ringFlat: 12, slip: 'slip-40', depth: 1, loop: 48, ramp: 55, cloop: 45, cramp: 50 },
+  open: { cut: 0, grade: 0.06, flat: 16, ringFlat: 22, slip: 'slip', depth: 2, loop: 90, ramp: 95, cloop: 85, cramp: 90 },
 };
 const MW_GRADE = 0.045; // how steeply the motorway dips into its cutting (DMRB: 3–4%, a little over at the limit)
 export const IX_FORMS: IxForm[] = ['dumbbell', 'gsr', 'diamond', 'trumpet'];
-export const IX_NAME: Record<IxForm, string> = { dumbbell: 'Dumbbell', gsr: 'Grade-separated roundabout', diamond: 'Diamond', trumpet: 'Trumpet' };
+export const IX_NAME: Record<IxForm, string> = { dumbbell: 'Dumbbell', gsr: 'Grade-separated roundabout', diamond: 'Diamond', trumpet: 'Trumpet', cloverleaf: 'Cloverleaf' };
 export const IX_BLURB: Record<IxForm, string> = {
   dumbbell: 'A roundabout either side, joined by a bridge over the motorway',
   gsr: 'One big roundabout, carried over the motorway on two bridges',
   diamond: 'Give-way junctions either side, joined by a bridge',
   trumpet: 'The road meets the motorway from one side only: a loop and a ramp round it, no traffic lights or give-ways on the motorway side',
+  cloverleaf: 'Two motorways: a loop in each quarter for the right turns, a ramp round it for the left, on roads alongside each carriageway',
 };
 
 // A junction built, as the junction designer and the player see it: one thing, many nodes.
@@ -107,8 +109,8 @@ export function buildPair(net: Network, mw: P[], type: string, opts: Partial<Roa
   const ab = offsetPath(mw, g), ba = offsetPath(mw, -g).reverse();
   const along = (path: P[], s: number) => closestOnPath(pointAt(mw, s), path).s;
   const lim = (path: P[]) => heights.map((h) => { const [s0, s1] = [along(path, h.s0), along(path, h.s1)].sort((x, y) => x - y); return { ...h, s0, s1 }; });
-  // (a motorway in a cutting is built in 'tunnel' mode, which lets it go below the ground)
-  const oc = heights.length ? { ...o, cross: 'tunnel' as const } : o;
+  // (a motorway in a cutting is built in 'tunnel' mode, which lets it go below the ground, unless told otherwise)
+  const oc = heights.length && opts.cross === undefined ? { ...o, cross: 'tunnel' as const } : o;
   const A = road(net, at(net, ab[0]), at(net, ab[ab.length - 1]), { ...oc, path: ab, limits: [...(o.limits ?? []), ...lim(ab)] }, 'One carriageway');
   if (!A.ok) return A;
   const B = road(net, at(net, ba[0]), at(net, ba[ba.length - 1]), { ...oc, path: ba, limits: [...(o.limits ?? []), ...lim(ba)] }, 'The other carriageway');
@@ -526,6 +528,178 @@ function buildTrumpet(net: Network, site: Site, [nr]: [number, number], id: numb
     { seg: semiSeg, kind: 'diverge', taper: dvA.taper, nose: dvA.nose, aux: 0 }, { seg: net.segsAt(nodeAt(m3.node).node ?? -1).find((x) => x.b === nodeAt(m3.node).node && isSlip(x.type))?.id ?? loopSeg, kind: 'merge', taper: mgA.taper, nose: mgA.nose, aux: 0 },
   );
   return { ok: true, ix: { id, form: 'trumpet', at: T.X, type: site.type, nodes, segs, prefer: { [nr]: 'roundabout' }, slips, style: site.style ?? 'taper', size: site.size ?? 'open' } };
+}
+
+// ---- the cloverleaf ----
+// One motorway (B, built here) crossing another (A, already there as a pair) on a bridge. Each of
+// the four carriageways has a one-lane collector–distributor road alongside it through the junction
+// (the CD: off the carriageway before it, back on after it), and every turn is made from one CD to
+// another, so the motorways themselves have only the one diverge and merge each way. In each quarter
+// (for left-hand traffic):
+//   loop   the right turn: 270° to the left, from the CD of the carriageway leaving that quarter
+//          (Dn, whose downstream half it is) to the CD of the one arriving (U)
+//   outer  the left turn: from U's CD round the outside of the loop to Dn's CD
+// On a CD the loop in and the loop out are either side of the crossing, far enough apart for both
+// tapers (DMRB CD 122 at the CD's speed). A's roads stay at ground level; B's CDs climb over A only
+// between their loops' tapers, and are level wherever anything joins or leaves them.
+type Cway = { name: 'A+' | 'A-' | 'B+' | 'B-'; w: V; m: V; g: number; type: string; seg: RSeg; road: 'A' | 'B' };
+
+// The carriageways of a motorway pair the line mw crosses, and where: A's middle there, its
+// direction (A+ running that way, on its left), and its half-gap between the carriageways.
+export function pairCrossed(net: Network, mw: P[]) {
+  const hits: { seg: RSeg; x: P; u: V }[] = [];
+  for (const sg of net.segs.values()) {
+    const d = net.def(sg);
+    if (!sg.oneway || d.family !== 'Motorway' || isSlip(sg.type) || d.cls !== 'road') continue;
+    const path = net.path(sg), x = crossingOf(mw, path);
+    if (!x) continue;
+    const c = closestOnPath(x, path);
+    hits.push({ seg: sg, x: { x: x.x, z: x.z }, u: { x: c.ux, z: c.uz } });
+  }
+  if (hits.length !== 2 || dot(hits[0].u, hits[1].u) > -0.95) return null;
+  const [p, q] = dot(sub(hits[1].x, hits[0].x), left(hits[0].u)) < 0 ? [hits[0], hits[1]] : [hits[1], hits[0]];
+  const X = { x: (p.x.x + q.x.x) / 2, z: (p.x.z + q.x.z) / 2 };
+  return { X, u: p.u, g: dist(p.x, X), plus: p.seg, minus: q.seg, type: p.seg.type };
+}
+
+export function motorwayCloverleaf(net: Network, mw: P[], type: string, id = 0, size: IxSize = 'open') {
+  return allOrNothing(net, (n) => cloverleafOn(n, mw, type, id, size));
+}
+function cloverleafOn(net: Network, mwB: P[], typeB: string, id: number, size: IxSize): { ok: true; ix: Interchange; carriageways: number[] } | Fail {
+  const A = pairCrossed(net, mwB);
+  if (!A) return { ok: false, reason: 'A cloverleaf is where a motorway crosses another motorway' };
+  const X = A.X, uA = A.u, nA = left(uA), xB = crossingOf(mwB, [add(X, uA, -1e4), add(X, uA, 1e4)]);
+  if (!xB) return { ok: false, reason: 'The motorways don’t cross' };
+  const qB = pointAt(mwB, xB.s);
+  let vB = { x: qB.ux, z: qB.uz };
+  if (Math.abs(dot(vB, nA)) < 0.95) return { ok: false, reason: 'A cloverleaf needs the motorways to cross nearly square' };
+  // (B's line as drawn runs across A towards A+ or away: built so its carriageway B+ runs towards A+'s side)
+  let mw = mwB, sB = xB.s;
+  if (dot(vB, nA) < 0) { mw = [...mwB].reverse(); sB = pathLength(mwB) - sB; vB = { x: -vB.x, z: -vB.z }; }
+  const SZ = SIZE[size], LT = SZ.slip, DL = ROADS[LT], Ks = kerbOf(DL);
+  const DMA = oneWay(ROADS[A.type]), DMB = oneWay(ROADS[typeB]), gA = pairGap(A.type) / 2, gB = pairGap(typeB) / 2;
+  const plus5 = (x: { taper: number; nose: number }) => ({ ...x, nose: x.nose + 5 });
+  const dvL = plus5(STD.diverge(DL.mph)), mgL = plus5(STD.merge(DL.mph));
+  // (ecd: a CD's centreline from its carriageway's: a clear strip of ground between their verges)
+  const eNL = Ks + STD.noseTip + Ks, eNM = (D: RoadDef) => kerbOf(D) + STD.noseTip + Ks, ecd = (D: RoadDef) => eNM(D) + 6;
+  const R = SZ.cloop, Rr = SZ.cramp, G = Math.min(SZ.grade, DL.maxGrade), rise = GRADES.road.clear + SZ.depth;
+  // where the loops join and leave the CDs, from the crossing: A's as near as both tapers allow; B's
+  // beyond where its CDs climb over A's roads
+  const WA = gA + ecd(DMA) + halfOf(DL) + 5;
+  const tnA = (mgL.taper + dvL.taper + 10) / 2, tnB = Math.max(tnA, WA + rise / G + Math.max(mgL.taper, dvL.taper) + 10);
+  const cw: Cway[] = [
+    { name: 'A+', w: uA, m: nA, g: gA, type: A.type, seg: A.plus, road: 'A' },
+    { name: 'A-', w: { x: -uA.x, z: -uA.z }, m: { x: -nA.x, z: -nA.z }, g: gA, type: A.type, seg: A.minus, road: 'A' },
+  ];
+  const tn = (c: Cway) => (c.road === 'A' ? tnA : tnB), hOf = (c: Cway) => c.g + ecd(c.road === 'A' ? DMA : DMB) + eNL;
+  // B's carriageways (their segments once built); the quarters, each with the carriageway whose
+  // upstream half is in it (U) and whose downstream half is (Dn)
+  const bW = vB, bM = left(vB); // (B+ runs along vB, its nearside left of that)
+  const Bp: Omit<Cway, 'seg'> = { name: 'B+', w: bW, m: bM, g: gB, type: typeB, road: 'B' }, Bm: Omit<Cway, 'seg'> = { name: 'B-', w: { x: -bW.x, z: -bW.z }, m: { x: -bM.x, z: -bM.z }, g: gB, type: typeB, road: 'B' };
+  // each quarter: the two carriageways bounding it, U and Dn (a carriageway's downstream half runs
+  // away from the crossing on the side its travel points)
+  const quarters: { U: string; Dn: string }[] = [];
+  for (const a of [cw[0], cw[1]]) for (const b of [Bp, Bm]) {
+    // (the quarter on a's nearside and b's nearside: a heads into it or out of it)
+    const aOut = dot(a.w, b.m) > 0; // (a's travel points into b's nearside half: this quarter is a's downstream half)
+    quarters.push(aOut ? { U: b.name, Dn: a.name } : { U: a.name, Dn: b.name });
+  }
+  // the loops and outer ramps in each quarter's frame: x out along -dU (away from Dn's line into the
+  // quarter), y along dDn; and from them, how far along each carriageway its outer ramps leave and join
+  const all = [...cw, { ...Bp, seg: null as unknown as RSeg }, { ...Bm, seg: null as unknown as RSeg }];
+  const byName = (n: string) => all.find((c) => c.name === n)!;
+  const plans = quarters.map(({ U, Dn }) => {
+    const u = byName(U), d = byName(Dn), hD = hOf(d), hU = hOf(u), tD = tn(d) + dvL.nose, tU = tn(u) + mgL.nose;
+    const xR = Math.max(tU + R, hD + 2 * R), yTop = tD + R, xs = xR + 25 + Rr, yT = yTop + 25, ye = yT + Rr;
+    return { U: u, Dn: d, hD, hU, tD, tU, xR, yTop, xs, yT, ye, dOuter: xs + dvL.nose, mOuter: ye + mgL.nose };
+  });
+  const dOuter = (c: Cway) => plans.find((p) => p.U.name === c.name)!.dOuter, mOuter = (c: Cway) => plans.find((p) => p.Dn.name === c.name)!.mOuter;
+  // each CD: off its carriageway (D0) before the outer ramp leaves it, back on (M0) after the other joins
+  const dvM = (c: Cway) => plus5(STD.diverge((c.road === 'A' ? DMA : DMB).mph)), mgM = (c: Cway) => plus5(STD.merge((c.road === 'A' ? DMA : DMB).mph));
+  const T0 = (c: Cway) => dOuter(c) + dvL.taper + 10 + dvM(c).nose + 60, T1 = (c: Cway) => mOuter(c) + mgL.taper + 10 + mgM(c).nose + 60;
+  const LA = pathLength(net.path(A.plus));
+  for (const c of cw) { const sX = closestOnPath(add(X, c.m, c.g), net.path(c.seg)).s; if (sX - T0(c) - dvM(c).taper - 10 < 0 || sX + T1(c) + mgM(c).taper + 10 > pathLength(net.path(c.seg))) return { ok: false, reason: 'The motorway it crosses needs to run further either side for the cloverleaf' }; }
+  const LB = pathLength(mw), reachB = Math.max(T0(byName('B+')), T1(byName('B+')), T0(byName('B-')), T1(byName('B-'))) + 170;
+  if (sB - reachB < 0 || sB + reachB > LB) return { ok: false, reason: 'The motorway needs to run further either side of the cloverleaf' };
+  void LA;
+  const segs: number[] = [], nodes: number[] = [], slips: Interchange['slips'] = [];
+  const o = (path: P[], extra: Partial<RoadOpts> = {}): RoadOpts => ({ ...DEFAULT_OPTS, type: LT, oneway: true, path, grade: SZ.grade, ...extra });
+  const level = (s0: number, s1: number): Limit => ({ s0, s1, lo: -0.02, hi: 0.02, why: 'the slip roads there' });
+  const cdPath = new Map<string, P[]>(), ends: { c: Cway; d0: P; m0: P }[] = [];
+  // a CD alongside carriageway c: its line e out from c's centreline, t along c from the crossing
+  const cdLine = (c: Cway, t: number) => add(add(X, c.w, t), c.m, c.g + ecd(c.road === 'A' ? DMA : DMB));
+  const buildCD = (c: Cway, pC: P[], cross: RoadOpts['cross'], limits: (path: P[]) => Limit[]) => {
+    const D = c.road === 'A' ? DMA : DMB, sX = closestOnPath(add(X, c.m, c.g), pC).s, t0 = T0(c), t1 = T1(c);
+    const d0 = noseOn(pC, sX - t0, 1, D, DL, dvM(c).nose), m0 = noseOn(pC, sX + t1, -1, D, DL, mgM(c).nose);
+    const path = [d0.node, d0.mid, ...through([{ p: d0.tip, h: d0.h }, { p: cdLine(c, -t0 + dvM(c).nose + 60), h: c.w }]), ...through([{ p: cdLine(c, t1 - mgM(c).nose - 60), h: c.w }, { p: m0.tip, h: { x: -m0.h.x, z: -m0.h.z } }]), m0.mid, m0.node];
+    // (the far end first, as a node, so both ends aren't on the one road)
+    const cm = carriagewayAt(net, m0.node, c.w, c.type), ca = carriagewayAt(net, d0.node, c.w, c.type);
+    if (!cm || !ca) return { ok: false as const, reason: `No carriageway where the road alongside ${c.name} should leave or join it` };
+    const nM = net.split(cm.id, m0.node), cd = carriagewayAt(net, d0.node, c.w, c.type)!;
+    const r = road(net, { ...d0.node, seg: cd.id }, { ...net.node(nM), node: nM }, o(path, { cross, limits: limits(path) }), `The road alongside ${c.name}`);
+    if (!r.ok) return r;
+    segs.push(...r.segs);
+    for (const p of [d0.node, m0.node]) { const nd = net.nearestNode(p, 0.6, 'road'); if (nd) nodes.push(nd.id); }
+    ends.push({ c, d0: d0.node, m0: m0.node });
+    cdPath.set(c.name, path);
+    return { ok: true as const };
+  };
+  // 1. A's CDs, at ground level
+  for (const c of cw) { const r = buildCD(c, net.path(c.seg), 'junction', () => []); if (!r.ok) return r; }
+  // 2. B, over A and its CDs; level where its own CDs leave and join it
+  const climbM = rise / Math.min(DEFAULT_OPTS.grade, DMB.maxGrade), keep = WA + climbM + 20;
+  const pair = buildPair(net, mw, typeB, { cross: 'bridge' }, [{ s0: 0, s1: sB - keep, lo: -0.05, hi: 0.05, why: 'the slip roads' }, { s0: sB + keep, s1: LB, lo: -0.05, hi: 0.05, why: 'the slip roads' }]);
+  if (!pair.ok) return pair;
+  const pB = { 'B+': net.path(carriagewayAt(net, add(X, bM, gB), bW, typeB) ?? net.segs.get(pair.ab[0])!), 'B-': net.path(carriagewayAt(net, add(X, bM, -gB), { x: -bW.x, z: -bW.z }, typeB) ?? net.segs.get(pair.ba[0])!) };
+  // 3. B's CDs, over A's roads between their loops' tapers
+  for (const b of [Bp, Bm]) {
+    const c = byName(b.name), seg = carriagewayAt(net, add(X, c.m, c.g), c.w, typeB);
+    if (!seg) return { ok: false, reason: 'No carriageway for the road alongside the new motorway' };
+    c.seg = seg;
+    const inner = tnB - Math.max(mgL.taper, dvL.taper) - 5;
+    const r = buildCD(c, pB[b.name as 'B+' | 'B-'], 'bridge', (path) => { const sAt = (t: number) => closestOnPath(cdLine(c, t), path).s; return [level(0, sAt(-inner)), level(sAt(inner), pathLength(path))]; });
+    if (!r.ok) return r;
+  }
+  // 4. each quarter's loop and outer ramp, CD to CD
+  for (const q of plans) {
+    const { U, Dn } = q, dU = U.w, dDn = Dn.w, ex = { x: -dU.x, z: -dU.z }, W = (x: number, y: number) => add(add(X, ex, x), dDn, y);
+    const pathOf = (c: Cway) => cdPath.get(c.name)!, sOf = (c: Cway, t: number) => closestOnPath(cdLine(c, t), pathOf(c)).s;
+    const lt = (c: Cway, t: number) => carriagewayAt(net, cdLine(c, t), c.w, LT);
+    const back = (h: V) => ({ x: -h.x, z: -h.z });
+    // the loop
+    const lo = noseOn(pathOf(Dn), sOf(Dn, tn(Dn)), 1, DL, DL, dvL.nose), li = noseOn(pathOf(U), sOf(U, -tn(U)), -1, DL, DL, mgL.nose);
+    const up = dDn, rt = ex, dn = back(dDn), lf = dU;
+    const wp: { p: P; h: V }[] = [{ p: lo.tip, h: lo.h }, { p: W(q.hD + R, q.yTop), h: rt }];
+    if (q.xR - R > q.hD + R + 1) wp.push({ p: W(q.xR - R, q.yTop), h: rt });
+    wp.push({ p: W(q.xR, q.yTop - R), h: dn });
+    if (q.yTop - R > q.hU + R + 1) wp.push({ p: W(q.xR, q.hU + R), h: dn });
+    wp.push({ p: W(q.xR - R, q.hU), h: lf });
+    wp.push({ p: li.tip, h: back(li.h) });
+    const cDn = lt(Dn, tn(Dn)), cU = lt(U, -tn(U));
+    if (!cDn || !cU) return { ok: false, reason: 'No road alongside the carriageway where the loop should leave or join it' };
+    let r = road(net, { ...lo.node, seg: cDn.id }, { ...li.node, seg: cU.id }, o([lo.node, lo.mid, ...through(wp), li.mid, li.node]), `The loop from ${Dn.name} to ${U.name}`);
+    if (!r.ok) return r;
+    segs.push(...r.segs);
+    // the outer ramp, round outside the loop
+    const oo = noseOn(pathOf(U), sOf(U, -q.dOuter), 1, DL, DL, dvL.nose), oi = noseOn(pathOf(Dn), sOf(Dn, q.mOuter), -1, DL, DL, mgL.nose);
+    const x1 = q.xs - Rr;
+    const ow: { p: P; h: V }[] = [{ p: oo.tip, h: oo.h }, { p: W(x1, q.hU + Rr), h: up }, { p: W(x1, q.yT - Rr), h: up }, { p: W(x1 - Rr, q.yT), h: back(rt) }, { p: W(q.hD + Rr, q.yT), h: back(rt) }, { p: W(q.hD, q.yT + Rr), h: up }, { p: oi.tip, h: back(oi.h) }];
+    const cU2 = lt(U, -q.dOuter), cDn2 = lt(Dn, q.mOuter);
+    if (!cU2 || !cDn2) return { ok: false, reason: 'No road alongside the carriageway where the outer ramp should leave or join it' };
+    r = road(net, { ...oo.node, seg: cU2.id }, { ...oi.node, seg: cDn2.id }, o([oo.node, oo.mid, ...through(ow), oi.mid, oi.node]), `The ramp from ${U.name} to ${Dn.name}`);
+    if (!r.ok) return r;
+    segs.push(...r.segs);
+    for (const p of [lo.node, li.node, oo.node, oi.node]) { const nd = net.nearestNode(p, 0.6, 'road'); if (nd) nodes.push(nd.id); }
+  }
+  // (the slip roads off and onto the motorways themselves: each CD's first and last stretch, once
+  // everything that splits them is built)
+  for (const { c, d0, m0 } of ends) {
+    const nd = net.nearestNode(d0, 0.6, 'road'), nm = net.nearestNode(m0, 0.6, 'road');
+    const off = nd && net.segsAt(nd.id).find((x) => x.type === LT && x.a === nd.id), on = nm && net.segsAt(nm.id).find((x) => x.type === LT && x.b === nm.id);
+    if (off) slips.push({ seg: off.id, kind: 'diverge', taper: dvM(c).taper, nose: dvM(c).nose, aux: 0 });
+    if (on) slips.push({ seg: on.id, kind: 'merge', taper: mgM(c).taper, nose: mgM(c).nose, aux: 0 });
+  }
+  return { ok: true, ix: { id, form: 'cloverleaf', at: X, type: typeB, nodes, segs, prefer: {}, slips, style: 'taper', size }, carriageways: [...pair.ab, ...pair.ba] };
 }
 
 // A new motorway drawn across a road, with a junction where it crosses: the local road is cut at

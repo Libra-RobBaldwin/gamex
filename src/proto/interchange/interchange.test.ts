@@ -4,7 +4,7 @@ import { design, landFits, legsAt, type Junction } from '../junction';
 import { laneBase } from '../catalog';
 import { STD } from '../standards';
 import { simulate, type Scenario } from '../trafficsim';
-import { IX_FORMS, buildPair, motorwayWithJunction, type IxSize, type SlipStyle } from './build';
+import { IX_FORMS, buildPair, motorwayCloverleaf, motorwayWithJunction, type IxForm, type IxSize, type SlipStyle } from './build';
 import { buildSlip, planSlip } from './plan';
 import * as THREE from 'three';
 import { SURFACES, drawRoads } from '../roaddraw';
@@ -16,10 +16,12 @@ g0.document ??= { createElement: () => ({ getContext: () => new Proxy({}, { get:
 const geo = (net: Network, node: number) => ({ fits: (p: P[][]) => landFits(net, node, p) });
 const as = (type: string, oneway = false) => ({ ...DEFAULT_OPTS, type, oneway });
 
-function junctionTown(form: (typeof IX_FORMS)[number], style: SlipStyle = 'taper', size: IxSize = 'open') {
-  const net = new Network(() => false, 900);
-  net.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
-  const r = motorwayWithJunction(net, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...net.segs.values()][0], 0, style, size);
+function junctionTown(form: IxForm, style: SlipStyle = 'taper', size: IxSize = 'open') {
+  const net = new Network(() => false, 1600);
+  // (a cloverleaf: two motorways; the rest: a motorway across a dual carriageway)
+  if (form === 'cloverleaf') buildPair(net, [{ x: -1500, z: 0 }, { x: 1500, z: 0 }], 'motorway');
+  else net.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
+  const r = form === 'cloverleaf' ? motorwayCloverleaf(net, [{ x: 0, z: -1500 }, { x: 0, z: 1500 }], 'motorway', 0, size) : motorwayWithJunction(net, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...net.segs.values()][0], 0, style, size);
   if (!r.ok) throw new Error(r.reason);
   const js = new Map<number, Junction>();
   for (const n of net.nodes.values()) if (legsAt(net, n.id).length >= 3) { const j = design(net, n.id, geo(net, n.id), undefined, r.ix.prefer[n.id] ? { form: r.ix.prefer[n.id], slip: false } : undefined); if (j) js.set(n.id, j); }
@@ -27,14 +29,16 @@ function junctionTown(form: (typeof IX_FORMS)[number], style: SlipStyle = 'taper
 }
 
 describe('motorway junctions', () => {
-  for (const [form, style, size] of [...IX_FORMS.map((f) => [f, 'taper', 'open'] as const), ...IX_FORMS.map((f) => [f, 'taper', 'tight'] as const), ['dumbbell', 'parallel', 'open'] as const]) it(`${form} (${style}, ${size}): every slip road meets the carriageway as a merge or diverge, with DMRB tapers and noses`, () => {
+  const FORMS: IxForm[] = [...IX_FORMS, 'cloverleaf'];
+  for (const [form, style, size] of [...FORMS.map((f) => [f, 'taper', 'open'] as const), ...FORMS.map((f) => [f, 'taper', 'tight'] as const), ['dumbbell', 'parallel', 'open'] as const]) it(`${form} (${style}, ${size}): every slip road meets the carriageway as a merge or diverge, with DMRB tapers and noses`, () => {
     const { net, ix, js } = junctionTown(form, style, size);
     const slips = [...js.values()].filter((j) => j.form === 'merge' || j.form === 'diverge');
-    // (four on the motorway; a trumpet's links have a merge and a diverge of their own as well)
-    const extra = form === 'trumpet' ? 2 : 0;
+    // (four on the motorway; a trumpet's links have a merge and a diverge of their own as well; a
+    // cloverleaf has one of each on each of four carriageways, and four on each road alongside them)
+    const extra = form === 'trumpet' ? 2 : form === 'cloverleaf' ? 20 : 0;
     expect(slips.length).toBe(4 + extra);
     expect(slips.filter((j) => j.form === 'merge').length).toBe(2 + extra / 2);
-    expect(ix.slips.length).toBe(4);
+    expect(ix.slips.length).toBe(form === 'cloverleaf' ? 8 : 4);
     for (const j of slips) {
       // measured from the course the traffic drives: along the carriageway, where the slip lane runs
       // alongside the nearside lane, closes into it (the taper), and where it parts (the nose)
@@ -68,9 +72,9 @@ describe('motorway junctions', () => {
       const at = net.segsAt(n.id);
       if (at.some((s) => s.type === 'motorway') && at.length > 2) expect(['merge', 'diverge']).toContain(js.get(n.id)?.form);
     }
-  });
+  }, 120_000);
 
-  for (const [form, size] of [...IX_FORMS.map((f) => [f, 'open'] as const), ...IX_FORMS.map((f) => [f, 'tight'] as const)]) it(`${form} (${size}): drawn with no holes, stray markings or surfaces fighting`, () => {
+  for (const [form, size] of [...FORMS.map((f) => [f, 'open'] as const), ...FORMS.map((f) => [f, 'tight'] as const)]) it(`${form} (${size}): drawn with no holes, stray markings or surfaces fighting`, () => {
     const { net, ix, js } = junctionTown(form, 'taper', size);
     const g = new THREE.Group(), m = new THREE.MeshLambertMaterial();
     drawRoads(net, g, js, m, m);
@@ -87,7 +91,7 @@ describe('motorway junctions', () => {
     // (specks under 0.05 m², a few cells of the raster, are its resolution: the town's own junctions have
     // them; and a give-way corner on the ring's curve leaves a hairline of asphalt, 5 cm wide, along it)
     expect(bad.filter((d) => d.area >= (d.kind === 'spur' ? 0.15 : 0.05)).map((d) => `${d.kind} at ${d.at.x.toFixed(0)},${d.at.z.toFixed(0)} (${d.area.toFixed(2)} m²) node ${d.node}`)).toEqual([]);
-  }, 60_000);
+  }, 240_000);
 
   it('a junction that can’t be built is not built at all', () => {
     // (a motorway too short for its slip roads: found only after its carriageways are built)
