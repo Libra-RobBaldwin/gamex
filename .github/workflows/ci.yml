@@ -23,7 +23,51 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      # One test file at a time: several files assert their own time budgets (bridges, terrain and
-      # water benchmarks), which only hold when nothing else is running beside them.
+      # One test file at a time: several files assert their own time budgets (bridges, terrain,
+      # water, ground, world and economy benchmarks). Each budget is for a reference machine and
+      # scales with this runner's measured speed (src/proto/test/speed.ts), so a slow runner
+      # doesn't fail them and a real 2x slowdown still does.
       - name: Tests
         run: npx vitest run --no-file-parallelism
+
+  # The phone tests: the game played by touch at 412x915, DPR 2, in Chromium with SwiftShader
+  # (the same flags as a local run). Each is its own step, so the log says which one failed.
+  phone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Chromium
+        run: |
+          npx playwright-core install --with-deps chromium
+          echo "CHROME=$(node -e "console.log(require('playwright-core').chromium.executablePath())")" >> "$GITHUB_ENV"
+      - name: Build
+        run: npm run build
+      - name: Dev server
+        run: |
+          mkdir -p shots
+          npx vite --port 5173 --strictPort --host 127.0.0.1 > vite.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:5173/ > /dev/null && exit 0; sleep 1; done
+          cat vite.log; exit 1
+      - name: Bus lines (e2e/lines.e2e.mjs)
+        run: node e2e/lines.e2e.mjs "http://127.0.0.1:5173/?map=town" shots
+      - name: The loop (e2e/loop.e2e.mjs)
+        run: node e2e/loop.e2e.mjs "http://127.0.0.1:5173/?map=town" shots
+      - name: Rail (e2e/rail.e2e.mjs)
+        run: node e2e/rail.e2e.mjs "http://127.0.0.1:5173/proto.html?map=town" shots
+      - name: Saving and loading (e2e/save.e2e.mjs)
+        run: if [ -f e2e/save.e2e.mjs ]; then node e2e/save.e2e.mjs "http://127.0.0.1:5173/?map=town" shots; else echo "not on this branch yet"; fi
+      - name: Start menu (e2e/menu.e2e.mjs, on the build)
+        run: node e2e/menu.e2e.mjs shots
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-shots
+          path: shots
+          if-no-files-found: ignore

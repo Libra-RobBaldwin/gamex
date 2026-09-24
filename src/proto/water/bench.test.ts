@@ -1,6 +1,9 @@
 // Timings for the report (docs/reports/water.md). The assertions are loose so a slow CI box
-// doesn't fail the build; the printed numbers are what matter.
+// doesn't fail the build; the printed numbers are what matter. Budgets are for the reference
+// machine and scale with this one's speed (test/speed.ts); times are CPU time, so a busy machine's
+// other work doesn't count.
 import { expect, it } from 'vitest';
+import { budget, cpuMs } from '../test/speed';
 import { ProceduralTerrain, TERRAIN_PRESETS, tileGrid, tileMesh, type HeightSource } from '../terrain';
 import { waterClaims } from './claims';
 import { Coastal } from './coast';
@@ -10,7 +13,7 @@ import { WaterSystem } from './water';
 // median of several runs (garbage collection makes single runs noisy)
 const time = (f: () => void, reps = 7) => {
   const t: number[] = [];
-  for (let r = 0; r < reps; r++) { const a = performance.now(); f(); t.push(performance.now() - a); }
+  for (let r = 0; r < reps; r++) t.push(cpuMs(f));
   t.sort((a, b) => a - b);
   return t[Math.floor(reps / 2)];
 };
@@ -61,5 +64,5 @@ it('performance', () => {
   const shore = time(() => { for (const [x, z] of pts) w.distanceToShore(x, z); }, 3) / N;
   out.push(`point queries: probe (isWater, depthAt, waterLevelAt, flowAt) ${(probe * 1e6).toFixed(0)} ns; groundAt ${(ground * 1e6).toFixed(0)} ns; distanceToShore ${(shore * 1e6).toFixed(0)} ns`);
   console.log(out.join('\n'));
-  expect(worstWarm).toBeLessThan(200);
+  expect(worstWarm).toBeLessThan(budget(200));
 }, 120000);

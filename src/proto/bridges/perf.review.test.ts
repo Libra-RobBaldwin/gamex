@@ -1,6 +1,7 @@
 // Adversarial performance and robustness review of the track, earthworks and scene work.
 // Every test here failed on the commit reviewed (c808761); each names the problem it shows.
 import { describe, expect, it } from 'vitest';
+import { budget, cpuMs } from '../test/speed';
 import * as THREE from 'three';
 import { ROADS } from '../catalog';
 import type { P } from '../roads';
@@ -66,9 +67,9 @@ describe('review: build cost', () => {
     const { sc, c, lay } = galleryCrossing('suspension');
     bridgeScene(sc, c, lay); // warm up
     const ms: number[] = [];
-    for (let i = 0; i < 3; i++) { const t0 = performance.now(); bridgeScene(sc, c, lay); ms.push(performance.now() - t0); }
+    for (let i = 0; i < 3; i++) ms.push(cpuMs(() => bridgeScene(sc, c, lay)));
     ms.sort((a, b) => a - b);
-    expect(ms[1]).toBeLessThan(150);
+    expect(ms[1]).toBeLessThan(budget(150)); // (on the reference machine, scaled to this one's speed: test/speed.ts)
   }, 60000);
 });
 

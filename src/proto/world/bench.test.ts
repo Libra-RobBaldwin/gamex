@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateTile, runBenchmark, saveSizeEstimate } from './bench';
 import { tileSeed } from './seed';
+import { slowness } from '../test/speed';
 
 const f = (n: number, d = 1) => n.toFixed(d);
 
@@ -11,7 +12,7 @@ describe('streaming benchmark: 50 × 50 km, camera flying corner to corner', () 
   });
   for (const speed of [100, 400]) {
     it(`keeps to its budget at ${speed} m/s`, async () => {
-      const r = await runBenchmark({ speed });
+      const r = await runBenchmark({ speed, slowness: slowness() }); // (its real time scaled to the reference machine: test/speed.ts)
       console.log([
         `\n  ${speed} m/s: ${f(r.km)} km in ${f(r.seconds)} s (${r.frames} frames)`,
         `  loads ${r.loads} (${f(r.loadsPerSec)}/s), unloads ${r.unloads} (${f(r.unloadsPerSec)}/s), cancels ${r.cancels}`,
