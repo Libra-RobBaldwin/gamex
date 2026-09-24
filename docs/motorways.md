@@ -10,7 +10,8 @@ and `roaddraw.ts`.
   Add `&slips=parallel` for slip roads with a long parallel lane.
 - `/proto.html?junction=blank`: a north–south dual carriageway on an empty map. Build a motorway
   across it (Build › Roads › Motorway) and the blueprint card offers **Junction here**.
-- The starter town (`/proto.html`): its motorway along the south edge is now a pair of carriageways.
+- The starter town (`/proto.html?map=town`): its motorway along the south edge is now a pair of
+  carriageways (`pairUpMotorways`, run after the town's streets are built).
 
 ## One-way roads
 
@@ -83,6 +84,30 @@ Lengths come from `standards.ts`, following DMRB CD 122:
 - Traffic through a merge or diverge keeps to the roads' own speed. The 15 m/s limit only applies
   inside ordinary junctions.
 
+- **Keep left to leave.** A slip road at a merge or diverge is reached only from the nearside lane
+  (`slipOnly` in `traffic.ts`). A car in another lane that wants the slip road plans it anyway, but
+  the plan is marked `wrong`: it isn't entered, and holds nobody up, until the car has changed down
+  into the nearside lane. Without this a car in lane 1 took a long curve across lane 0.
+
+## Chevrons and ghost islands (TSRGD diagram 1042)
+
+- Where a motorway's two carriageways splay into a roundabout, the gap between them is a **ghost
+  island** on the tarmac, not a grass triangle (`jshape.ghostIslands`): solid chevrons between the
+  roads' own edge lines, with a small rounded grass nose at the wide end.
+- The same chevrons fill the nose of every slip road (`slips.ts`).
+- `jshape.chevronsIn` lays them: solid V bars, their points towards the narrow end where the two edges come together, sized by
+  `standards.chevron(mph)` (1.0 m bars 1.6 m apart at 60 mph and over, 0.8/1.4 at 40, 0.6/1.2 below).
+
+## Pedestrian crossings
+
+- `jshape.crossingAt(shape, form, leg, y)` says where people cross each arm of a junction. The
+  crowds (`game/crowdsites.ts`) and the drawing both read it, so people cross where the crossing is
+  drawn.
+- Drawn at both kerbs: tactile paving, buff blister for an uncontrolled crossing, red with studs
+  across the carriageway at signals.
+- Only on single-carriageway arms with footways, a little way back from the corner and clear of a
+  roundabout's splitter island. None on dual carriageways, motorways or merges.
+
 ## Grade-separated junctions (`interchange/build.ts`)
 
 | Form | Built from |
@@ -147,7 +172,8 @@ b, road: 'A' | 'B' }[] }`. That is the shape `src/proto/region` gives as `map.se
 - **B roads** (`rural-50`) to the villages. Where they cross the motorway they bridge it.
 
 It's tested on a made-up region: every place reaches every other, and one-way roads are respected.
-Wiring it into `?map=region` is the region session's step, once their generator has merged.
+The generator has merged (`src/proto/region`); wiring `layRegionRoads` into `?map=region` is left to
+the region session, since this stream doesn't touch `src/proto/region/`.
 
 ## Tests
 
@@ -163,5 +189,7 @@ Wiring it into `?map=region` is the region session's step, once their generator 
 - **The grade-separated roundabout's ring can queue back** at the local road's give-ways when the
   local traffic is heavy. In the harness that's up to 2 give-ups in about 200 trips; the limit is 1 in 100.
 - **Junction design:** the give-way corners on the ring's curve leave a 5 cm hairline of asphalt.
+- **No mid-block zebras or refuges yet.** Crossings are only at junctions. Zebras near bus stops and
+  refuges in splitter islands are the obvious next step.
 - **Merges and diverges are laid out on the carriageway as it runs.** A tight curve through one
   would bend its taper with it. The builders use straight motorways at their junctions.

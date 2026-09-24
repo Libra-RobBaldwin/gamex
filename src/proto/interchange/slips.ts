@@ -94,7 +94,7 @@ export function slipShape(net: Network, node: number, r: SlipRoles): Shape | nul
   const [nose0, nose1] = merge ? [rhoN, 0] : [0, rhoN], [tap0, tap1] = merge ? [0, TP] : [-TP, 0];
   const inner = (rho: number) => e(rho) - wS / 2;
   // the nose: chevrons (TSRGD 1042) between the carriageway's edge line and the slip lane's, their
-  // points towards the wide end (its own edge lines are drawn below, with the rest)
+  // points towards the node, where the lanes come together (its own edge lines are drawn below)
   const ch = chevronsIn((rho) => frame(rho, gen + edge), (rho) => frame(rho, inner(rho) - edge), 0, rhoN, M.mph);
   const hatch: XZ[][] = ch.bars;
   const marks: SlipMarks = {

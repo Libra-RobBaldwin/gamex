@@ -507,10 +507,11 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
 // footway where there is one, which stays as it is) run close together out from the ring, from the
 // ring's edge out to where they're GHOST metres apart (GHOST_PAIR for a motorway's two carriageways
 // splaying in: out to where its reservation's barriers start). Chevrons (TSRGD diagram 1042) point
-// at the ring from where its arms' own flares end, CHEVRON apart, each stroke inset from the edges.
-// Chevrons (TSRGD diagram 1042) filling an area between two edges P(a) and Q(a), from a0 to a1: a
-// solid line along each edge, and V's of solid bars inside, their points towards a1 (the wide end, as
-// they're laid), each arm meeting the edge a half-width back. Returns quads.
+// at the ring, where the arms come together, from where its arms' own flares end.
+// Chevrons (TSRGD diagram 1042) filling an area between two edges P(a) and Q(a), from a0 (the narrow
+// end, where the edges come together) to a1: a solid line along each edge, and V's of solid bars
+// inside, their points towards a0, each arm meeting the edge a half-width further on (cut off at a1).
+// Returns quads.
 export function chevronsIn(P: (a: number) => XZ, Q: (a: number) => XZ, a0: number, a1: number, mph: number): { bars: XZ[][]; lines: XZ[][] } {
   const c = STD.chevron(mph), bars: XZ[][] = [], lines: XZ[][] = [];
   const dir = Math.sign(a1 - a0) || 1, len = Math.abs(a1 - a0);
@@ -524,16 +525,17 @@ export function chevronsIn(P: (a: number) => XZ, Q: (a: number) => XZ, a0: numbe
     const s0 = f ? 1 - i0 : i0, s1 = f ? 1 - i1 : i1;
     lines.push([at(u0, f), at(u1, f), at(u1, s1), at(u0, s0)]);
   }
-  // the bars: an apex on the middle at a, arms back to each edge (inside its line) half a width back
-  for (let d = c.bar + c.gap; d < len; d += c.bar + c.gap) {
-    const a = a0 + dir * d, w = width(a);
+  // the bars: an apex on the middle at d, arms on out to each edge (inside its line) half a width
+  // further on; an arm that would run past a1 stops there
+  const arm = (d: number, back: number, f: number) => {
+    const t = Math.min(1, (len - d) / back);
+    return at(a0 + dir * (d + back * t), 0.5 + (f - 0.5) * t);
+  };
+  for (let d = c.bar + c.gap; d + c.bar < len - 0.3; d += c.bar + c.gap) {
+    const w = width(a0 + dir * d);
     if (w < 1.2) continue;
     const back = w / 2, inset = (c.edge * 2) / w;
-    if (d - back < 0.5) continue;
-    for (const f of [inset, 1 - inset]) {
-      const tipA = at(a, 0.5), tipB = at(a - dir * c.bar, 0.5), endA = at(a - dir * back, f), endB = at(a - dir * (back + c.bar), f);
-      bars.push([endB, tipB, tipA, endA]);
-    }
+    for (const f of [inset, 1 - inset]) bars.push([arm(d, back, f), arm(d + c.bar, back, f), at(a0 + dir * (d + c.bar), 0.5), at(a0 + dir * d, 0.5)]);
   }
   return { bars, lines };
 }
@@ -562,7 +564,7 @@ function ghostIslands(n: XZ, legs: ShapeLeg[], R: number, from: (l: ShapeLeg) =>
     const nose: XZ[] = [];
     for (let k = 1; k < 12; k++) { const t = (Math.PI * k) / 12; nose.push({ x: c.x + r * (Math.cos(t) * e1.x + Math.sin(t) * d.x), z: c.z + r * (Math.cos(t) * e1.z + Math.sin(t) * d.z) }); }
     polys.push([...side, P(a1 + r), ...nose, Q(a1 + r), ...other.reverse()]);
-    // chevrons, their points towards the grass nose, from where the ring's own flares end
+    // chevrons, their points towards the ring (where the edges come together), from where the ring's own flares end
     // (inside the roads' own edge lines, which border it: a carriageway's is its hard strip in from the kerb)
     const lineIn = (d: RoadDef) => (d.oneway ? d.strip ?? 0 : 0) + 0.1;
     const ch = chevronsIn((a) => legAt(n, l, a, el - lineIn(l.def)), (a) => legAt(n, nx, a, -(en - lineIn(nx.def))), a0, a1 + r * 0.6, Math.max(l.def.mph, nx.def.mph));
