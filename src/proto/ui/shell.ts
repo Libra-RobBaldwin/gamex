@@ -150,10 +150,10 @@ export class Shell {
           <button id="perfbtn" aria-expanded="false" aria-controls="perf">${icon('activity')}<span>Performance</span></button>
           <div id="perf" role="status" hidden><span id="perf-t">measuring…</span></div>
         </div>
-        <button id="compass" aria-label="Face north" title="Face north"><span id="needle">${needleSvg()}</span></button>
+        <button id="compass" aria-label="Face north and reset the tilt" title="Face north"><span id="needle">${needleSvg()}</span></button>
+        <button id="viewbtn" class="round" hidden aria-label="View" title="View">${icon('map')}<span></span></button>
         <div id="firstrun" role="status" hidden></div>
       </div>
-      <div id="hint" role="status" aria-live="polite" hidden></div>
       <section id="sheet" class="sheet facet" role="dialog" hidden></section>
       <div id="layers" class="facet" role="dialog" aria-label="Map layers" hidden></div>
       <div id="tpanel" class="facet" hidden></div>
@@ -163,12 +163,21 @@ export class Shell {
         <button data-bar="transport" aria-expanded="false">${icon('transport')}<span>Transport</span></button>
         <button data-bar="layers" aria-expanded="false">${icon('layers')}<span>Layers</span></button>
         <button data-bar="menu" aria-expanded="false">${icon('menu')}<span>Menu</span></button>
-      </nav>`);
+      </nav>
+      <div id="hint" role="status" aria-live="polite" hidden></div>`);
     this.$('#compass').addEventListener('click', () => opts.onCompass());
     this.$('#sp-pause').addEventListener('click', () => opts.onPause());
     this.$('#sp-rate').addEventListener('click', () => opts.onRate());
     this.$('#perfbtn').addEventListener('click', () => opts.onPerf());
     this.$('#clockbtn').addEventListener('click', () => this.toggleDrawer());
+    // while a tool hides the bar (and with it Layers), this cycles 3D, Low and Plan
+    this.$('#viewbtn').addEventListener('click', () => {
+      if (!this.views) return;
+      const o = this.views.options, i = o.findIndex((x) => x.id === this.views!.current());
+      const next = o[(i + 1) % o.length];
+      this.views.pick(next.id);
+      this.labelViewBtn(next.id);
+    });
     this.root.querySelectorAll<HTMLButtonElement>('#bar button').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.bar as BarKey;
       if (b.getAttribute('aria-expanded') === 'true') return k === 'layers' ? this.closeLayers() : this.closeSheet();
@@ -392,6 +401,13 @@ export class Shell {
     this.root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === id)));
   }
 
+  private labelViewBtn(id = this.views?.current() ?? '') {
+    const o = this.views?.options.find((x) => x.id === id);
+    const b = this.$('#viewbtn');
+    b.querySelector('span')!.textContent = o?.label ?? '';
+    b.setAttribute('aria-label', `View: ${o?.label ?? ''}, tap for the next`);
+  }
+
   // ---------------- menu ----------------
   addMenuItem(m: MenuItem) {
     const at = this.menu.findIndex((x) => x.id === m.id);
@@ -424,7 +440,10 @@ export class Shell {
     const el = this.$('#tool');
     const t = this.tool;
     const draw = () => {
+      const was = (el.querySelector('.opts') as HTMLElement | null)?.scrollLeft ?? 0;
       el.className = `tone-${t.tone ?? 'look'}`;
+      el.setAttribute('role', 'toolbar');
+      el.setAttribute('aria-label', t.name);
       html(el, `<div class="what">${t.icon ? `<i class="badge">${icon(t.icon)}</i>` : ''}<div class="tw"><b>${esc(t.name)}</b>${t.spec ? `<span>${esc(t.spec)}</span>` : ''}</div></div>
         <div class="opts">${t.options ?? ''}</div>
         <div class="acts">
@@ -436,6 +455,7 @@ export class Shell {
       el.querySelector('#t-cancel')!.addEventListener('click', () => { this.stopTool(); t.onCancel?.(); });
       drawPrimary();
       const o = el.querySelector('.opts') as HTMLElement;
+      o.scrollLeft = was;
       t.bind?.(o);
       // fade the edge while there are options scrolled out of sight
       const more = () => { o.classList.toggle('more', o.scrollWidth > o.clientWidth + 1); o.classList.toggle('end', o.scrollLeft + o.clientWidth >= o.scrollWidth - 2); };
@@ -453,6 +473,8 @@ export class Shell {
     el.classList.add('enter');
     el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true });
     this.$('#bar').hidden = true;
+    this.$('#viewbtn').hidden = !this.views;
+    this.labelViewBtn();
     document.body.classList.add('tooling');
     this.layout();
     const handle: ToolHandle = {
@@ -485,6 +507,7 @@ export class Shell {
     p.hidden = true;
     html(p, '');
     this.$('#bar').hidden = false;
+    this.$('#viewbtn').hidden = true;
     document.body.classList.remove('tooling');
     this.hint(null);
     this.layout();
@@ -502,9 +525,12 @@ export class Shell {
       if (el.hidden) continue;
       const b = { top: el.offsetTop, left: el.offsetLeft, width: el.offsetWidth, height: el.offsetHeight };
       if (!b.width || !b.height) continue;
-      if (b.width >= W * 0.6) { if (b.top > H / 2) r.bottom = Math.min(r.bottom, b.top); }
+      // full width and sitting on the bottom (the bar, a sheet, the blueprint): the map ends above
+      // it, however tall; narrower and on the right (landscape): the map ends beside it
+      const low = b.top + b.height > H * 0.6;
+      if (b.width >= W * 0.6) { if (low) r.bottom = Math.min(r.bottom, b.top); }
       else if (b.left > W * 0.35) r.right = Math.min(r.right, b.left);
-      else if (b.top > H / 2) r.bottom = Math.min(r.bottom, b.top);
+      else if (low) r.bottom = Math.min(r.bottom, b.top);
     }
     return r;
   }
