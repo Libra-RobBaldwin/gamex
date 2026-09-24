@@ -197,26 +197,47 @@ Draw calls and triangles per frame (shadow pass included), at 412×915 @2×, bef
 
 | Type | Iso before | Iso after | Near before | Near after |
 |---|---|---|---|---|
-| Timber trestle | 39 · 18.6k | 16 · 17.9k | 21 · 18.5k | 18 · 36.5k |
-| Masonry arch viaduct | 59 · 27.1k | 26 · 24.2k | 20 · 26.7k | 17 · 60.1k |
-| Steel girder | 54 · 22.0k | 25 · 19.2k | 22 · 21.7k | 19 · 56.9k |
-| Steel truss (through) | 82 · 49.8k | 34 · 42.8k | 21 · 49.2k | 18 · 80.5k |
-| Steel truss (deck) | 41 · 29.0k | 31 · 33.5k | 25 · 28.5k | 15 · 33.1k |
-| Concrete beam | 52 · 21.0k | 25 · 25.3k | 21 · 20.7k | 16 · 25.0k |
-| Concrete box girder | 53 · 31.8k | 43 · 39.8k | 24 · 30.9k | 14 · 38.9k |
+| Timber trestle | 39 · 18.6k | 19 · 34.9k | 21 · 18.5k | 16 · 26.5k |
+| Masonry arch viaduct | 59 · 27.1k | 18 · 23.6k | 20 · 26.7k | 19 · 53.3k |
+| Steel girder | 54 · 22.0k | 20 · 19.0k | 22 · 21.7k | 19 · 34.5k |
+| Steel truss (through) | 82 · 49.8k | 20 · 41.2k | 21 · 49.2k | 20 · 70.8k |
+| Steel truss (deck) | 41 · 29.0k | 20 · 33.6k | 25 · 28.5k | 17 · 33.5k |
+| Concrete beam | 52 · 21.0k | 18 · 25.7k | 21 · 20.7k | 18 · 25.7k |
+| Concrete box girder | 53 · 31.8k | 19 · 39.9k | 24 · 30.9k | 16 · 39.9k |
 | Concrete arch | 55 · 23.1k | 14 · 30.1k | 21 · 23.0k | 14 · 30.1k |
-| Steel tied arch | 63 · 27.7k | 32 · 39.3k | 21 · 24.2k | 16 · 35.9k |
-| Cable-stayed | 199 · 48.5k | 72 · 64.9k | 22 · 46.6k | 17 · 63.2k |
-| Suspension | 368 · 107.2k | 123 · 124.1k | 23 · 103.3k | 16 · 120.7k |
-| Bascule | 54 · 16.5k | 36 · 22.5k | 24 · 15.3k | 20 · 21.2k |
+| Steel tied arch | 63 · 27.7k | 24 · 39.7k | 21 · 24.2k | 18 · 36.7k |
+| Cable-stayed | 199 · 48.5k | 22 · 65.5k | 22 · 46.6k | 19 · 65.5k |
+| Suspension | 368 · 107.2k | 21 · 125.1k | 23 · 103.3k | 18 · 125.1k |
+| Bascule | 54 · 16.5k | 33 · 23.1k | 24 · 15.3k | 22 · 21.9k |
 
-Draw calls fall everywhere: the old scene drew every dash of the roads underneath as its own
-mesh, and the route's grass, surface and ballast separately. After review the channel buoys are
-instanced too, which takes the suspension scene from 123 to about 20 draw calls and
-cable-stayed from 72 to about 20 (see below). The budget for the far view is
-at most about 130k triangles for the whole scene (the 3.5 km suspension bridge); the near view
-adds at most about 60k for track on screen, drawn in 120 m chunks so off-screen ones are culled.
-Nothing new runs per frame.
+Draw calls fall everywhere, to 14–33 for every type: the old scene drew every dash of the roads
+underneath and every channel buoy as its own mesh, and the route's grass, surface and ballast
+separately. The trestle's default view now opens just inside the near look (0.12 m a pixel),
+which is why its triangles rose. The budget: at most about 130k triangles for a whole scene
+(the 3.5 km suspension bridge), and the near look adds at most about 50k for the track on
+screen, drawn in 120 m chunks so off-screen ones are culled. Nothing new runs per frame. The
+far look's rails are painted at their true width, and the track textures are filtered
+anisotropically, so the switch between looks refines the track rather than popping.
+
+An adversarial review (a visual and a performance reviewer, each writing failing tests,
+`visual.review.test.ts` and `perf.review.test.ts`) found 23 problems. All of them are fixed:
+
+- buoys as separate meshes;
+- instance buffers never freed;
+- `buildBridge`'s default parts changed for callers;
+- chunks per path;
+- a repeated first point pinching the track;
+- rings crossing near corners;
+- ground folding on tight bends;
+- bench roads on curves;
+- floating footings;
+- trees over the map's edge and over roads;
+- a pop at the near/far switch;
+- fin-like wing walls;
+- coplanar faces in 121 of 364 railway variants off the gallery.
+
+Two review tests were corrected, with notes in them: a curve longer than a full turn, and a
+brightness baseline that counted sleeper-free ballast as rail.
 
 ![Rail types, before and after](bridges/track-rail.jpg)
 ![Other types, before and after](bridges/track-other.jpg)
