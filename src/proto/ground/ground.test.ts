@@ -7,6 +7,7 @@ import { Layout } from './layout';
 import { DETAIL_REPEAT, groundFragment, patchGround, groundUniforms, setOrigin } from './material';
 import { makeDetail, makeMacro, seamStats, MACRO_PERIOD } from './textures';
 import { rng } from './noise';
+import { budget, cpuMs } from '../test/speed';
 
 // A town about the size of the game's: a grid of streets, plots along them, some landscaped
 // cells, country roads out to the edge, a lake and a thousand trees.
@@ -215,8 +216,8 @@ describe('budgets', () => {
     // Timed in CPU time spent by this process, so other tests and other work on the machine
     // running at the same time don't count against the painter (it's single-threaded: on its
     // own, CPU time and wall-clock time agree).
-    const proc = (globalThis as unknown as { process: { cpuUsage(p?: { user: number; system: number }): { user: number; system: number } } }).process;
-    const cpu = (f: () => void) => { const a = proc.cpuUsage(); f(); const d = proc.cpuUsage(a); return (d.user + d.system) / 1000; };
+    // The budgets are for the reference machine and scale with this one's speed (test/speed.ts).
+    const cpu = cpuMs;
     const full: number[] = [];
     for (let i = 0; i < 8; i++) full.push(cpu(() => g.paint(A)));
     const inc: number[] = [];
@@ -226,8 +227,8 @@ describe('budgets', () => {
       cur = { ...cur, plots: [...cur.plots!, { poly, kind: 'garden' }] };
       inc.push(cpu(() => g.change(cur, [{ x0: x, z0: z, x1: x + 14, z1: z + 28 }])));
     }
-    expect(median(full.slice(3))).toBeLessThan(30);
-    expect(median(inc)).toBeLessThan(2);
+    expect(median(full.slice(3))).toBeLessThan(budget(30));
+    expect(median(inc)).toBeLessThan(budget(2));
   });
 });
 
