@@ -26,7 +26,7 @@ export interface EconomyOptions {
   autoBuild?: boolean;
   // take the towns as they stand at the start to be in balance (default true)
   calibrate?: boolean;
-  clock?: number; // minutes past midnight at time 0
+  clock?: number; // minutes past midnight at time 0 (a new game; a loaded one keeps the saved clock)
   nextId?: number; // first id for buildings placed by autoBuild
 }
 
@@ -1005,7 +1005,7 @@ export class Economy {
   save() {
     const arr = (a: Float64Array) => [...a];
     return {
-      v: 1, time: this.time, month: this.month, acc: this.acc, nextDay: this.nextDay, nextReview: this.nextReview, rand: this.rand.s,
+      v: 1, clock: this.clock, time: this.time, month: this.month, acc: this.acc, nextDay: this.nextDay, nextReview: this.nextReview, rand: this.rand.s,
       reqNo: this.reqNo, nextId: this.nextId, runningOwed: this.runningOwed, totals: structuredClone(this.totals),
       towns: [...this.townMap.values()].map((t) => ({
         id: t.id, base: { ...t.base }, cal: { ...t.cal }, at: { ...t.at }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, assessed: t.assessed, labour: t.labour, customers: t.customers,
@@ -1029,6 +1029,7 @@ export class Economy {
     try { e = new Economy({ ...world, buildings: [] }, oracles, opts); } finally { Economy.restoring = false; }
     Object.assign(e, { time: s.time, month: s.month, acc: s.acc, nextDay: s.nextDay, nextReview: s.nextReview, reqNo: s.reqNo, nextId: s.nextId, runningOwed: s.runningOwed ?? 0 });
     e.rand.s = s.rand;
+    if (s.clock !== undefined) e.clock = s.clock; // the game's time of day goes with it; opts.clock only starts a new one
     e.totals = structuredClone(s.totals);
     for (const z of s.zones) { const q = e.zoneMap.get(z.id); if (q) Object.assign(q, z); }
     for (const b of s.buildings) {
