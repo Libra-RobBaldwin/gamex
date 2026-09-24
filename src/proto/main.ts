@@ -26,7 +26,8 @@ import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
 import { starterStops } from './game/crowdsites';
-import { motorwayWithJunction, type Interchange, type IxForm, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
+import { IX_BLURB, IX_FORMS, IX_NAME, motorwayWithJunction, type Interchange, type IxForm, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
+import { planJunction, roadCrossed, type IxPlan } from './interchange/plan';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -452,10 +453,17 @@ const shell = new Shell($('#ui'), {
 });
 // the tool in use (a road or rail type, or bus stops), if any
 let tool: ToolHandle | null = null;
+// "Junction here": the road a motorway blueprint crosses, the junction picked for it, and its plan
+let ixRoad: RSeg | null = null, ixPick: { form: IxForm; style: SlipStyle } | null = null, ixPlan: IxPlan | null = null;
+let ixStyle: SlipStyle = 'taper';
 
 const ctrlOf = (d: Draft) => (roadKind === 'smooth' ? net.smoothCtrl(d.a, d.b) : d.c);
 function draftChanged() {
   draftCheck = draft ? net.check(draft.a, draft.b, ctrlOf(draft), opts) : null;
+  // a motorway drawn across a road can have a junction there (interchange/plan.ts)
+  ixRoad = draft && ROADS[opts.type].family === 'Motorway' && opts.type !== 'slip' && !opts.oneway ? roadCrossed(net, net.makePath(draft.a, draft.b, ctrlOf(draft))) : null;
+  if (!ixRoad) ixPick = null;
+  ixPlan = ixPick && ixRoad && draft ? planJunction(net, ixPick.form, ixPick.style, net.makePath(draft.a, draft.b, ctrlOf(draft)), opts.type, ixRoad) : null;
   drawGhost();
   renderBar();
   tool?.setUndo(!!draft || picks.length > 0);
@@ -983,11 +991,31 @@ function renderBar() {
   const pr = c.profile;
   const lift = pr && pr.maxY > 0.05
     ? `<div class="lift">${icon('mountain')}<span>${c.ok ? `up to <b>${pr.maxY.toFixed(1)} m</b> · steepest <b>${(pr.maxGrade * 100).toFixed(1)}%</b>${c.bridges ? ` · ${c.bridges} bridge${c.bridges > 1 ? 's' : ''}` : ''} · ${Math.round(c.raised)} m raised` : `would need <b>${pr.maxY.toFixed(1)} m</b> — red line shows the lowest it could go`}</span></div>${profileSvg(c)}` : '';
+  // across a road, a motorway can have a junction there: pick one, and the card is its blueprint
+  const ix = ixRoad ? `<div class="ix"><span class="ixh">${icon('arrowsCross')}Junction here with the ${esc(net.def(ixRoad).label.split(' · ')[0].toLowerCase())}?</span>
+      <div class="ixrow"><button data-ix="" class="${ixPick ? '' : 'on'}" aria-pressed="${!ixPick}">No junction</button>${IX_FORMS.map((f) => `<button data-ix="${f}" class="${ixPick?.form === f ? 'on' : ''}" aria-pressed="${ixPick?.form === f}" title="${IX_BLURB[f]}">${IX_NAME[f]}</button>`).join('')}</div>
+      ${ixPick ? `<div class="ixrow"><button data-ixs="taper" class="${ixStyle === 'taper' ? 'on' : ''}">Taper slip roads</button><button data-ixs="parallel" class="${ixStyle === 'parallel' ? 'on' : ''}">Long parallel lanes</button></div>
+      <small>${IX_BLURB[ixPick.form]} · slip roads to DMRB CD 122</small>` : ''}</div>` : '';
+  const bindIx = (el: HTMLElement) => {
+    el.querySelectorAll<HTMLButtonElement>('[data-ix]').forEach((b) => b.addEventListener('click', () => { ixPick = b.dataset.ix ? { form: b.dataset.ix as IxForm, style: ixStyle } : null; draftChanged(); }));
+    el.querySelectorAll<HTMLButtonElement>('[data-ixs]').forEach((b) => b.addEventListener('click', () => { ixStyle = b.dataset.ixs as SlipStyle; if (ixPick) ixPick = { ...ixPick, style: ixStyle }; draftChanged(); }));
+  };
+  if (ixPick && ixPlan) {
+    const p = ixPlan, nd = p.clears.length, dm = nd ? demolitionSummary(p.clears) : null;
+    tool.setPanel(`<div class="what">${icon('ruler')}<span>Motorway and ${IX_NAME[ixPick.form].toLowerCase()} · <b class="cost">${p.ok ? `about ${money(p.cost)}` : '—'}</b></span></div>
+      ${dm ? `<div class="demo">${icon('alert')}<div><b>It demolishes ${nd} building${nd > 1 ? 's' : ''}</b> (flashing red): ${dm.list}.<br>${dm.people}</div></div>` : ''}
+      ${ix}
+      ${p.ok ? '' : `<div class="bad">${icon('alert')}<span>${esc(p.reason ?? '')}</span></div>`}`, bindIx);
+    tool.avoid(handles().map((h) => toScreen(h.p)));
+    tool.setPrimary({ label: 'Build', title: 'Build the motorway and its junction', icon: nd ? 'bulldozer' : 'check', kind: nd ? 'danger' : 'primary', disabled: !(p.ok && !dragging), onClick: buildDraft });
+    return;
+  }
   tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(c.cost)}</b></span></div>
+    ${ix}
     ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(n * 6000)} compensation included</div></div>` : ''}
     ${lift}
     ${c.ok ? bridgeLines(c) : ''}
-    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`);
+    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`, bindIx);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
   tool.avoid(handles().map((h) => toScreen(h.p)));
   tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging), onClick: buildDraft });
@@ -1001,6 +1029,7 @@ function bridgeLines(c: Check) {
   }).join('');
 }
 function buildDraft() {
+  if (draft && ixPick && ixRoad && ixPlan?.ok) { buildJunctionDraft(draft, ixPick, ixRoad); return; }
   if (!draft || !draftCheck?.ok) return;
   const doomed = new Set(draftCheck.clears);
   const summary = doomed.size ? demolitionSummary([...doomed]) : null;
@@ -1008,6 +1037,22 @@ function buildDraft() {
   draft = null;
   draftChanged();
   hint(summary ? `Demolished ${doomed.size}: ${summary.list}` : 'Built. New plots will fill in along it.', summary ? 'bulldozer' : 'check');
+}
+
+// The motorway blueprint with its junction, built (interchange/build.ts): both carriageways, the
+// slip roads, the bridge or ring, the junction's roundabouts or give-ways; one junction to the player.
+function buildJunctionDraft(d: Draft, pick: { form: IxForm; style: SlipStyle }, road: RSeg) {
+  const had = new Set(net.segs.keys());
+  const r = motorwayWithJunction(net, pick.form, net.makePath(d.a, d.b, ctrlOf(d)), opts.type, road, interchanges.length + 1, pick.style);
+  if (!r.ok) { hint(r.reason, 'alert'); return; }
+  interchanges.push(r.ix);
+  for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
+  commitRoads([...net.segs.keys()].filter((id) => !had.has(id)));
+  refreshTrees();
+  infillDue = true;
+  draft = null; ixPick = null;
+  draftChanged();
+  hint(`Built: the motorway and a ${IX_NAME[pick.form].toLowerCase()}. Tap the junction to see how it's working.`, 'check');
 }
 
 function buildRoad(a: End, b: End, ctrl: P | undefined, o: RoadOpts) {
@@ -1071,7 +1116,19 @@ function drawGhost() {
   };
   if (!draft && picks.length === 2) guide(picks[0], picks[1]);
   if (draft && roadKind === 'curve' && draft.c) { guide(draft.a, draft.c); guide(draft.c, draft.b); }
-  if (draft && draftCheck) {
+  if (draft && ixPlan?.ok) {
+    // the junction blueprint: every piece it builds (both carriageways, slip roads, the bridge or ring)
+    const f = new Flat();
+    for (const g of ixPlan.ghost) f.ribbon(g.path, g.half, 0.6);
+    const m = f.mesh(ghostMat);
+    m.renderOrder = 5;
+    ghost.add(m);
+    for (const l of ixPlan.clears) {
+      const box = new THREE.Mesh(new THREE.BoxGeometry(l.w + 1, l.h + 1, l.d + 1), doomMat);
+      box.position.set(l.x, (l.h + 1) / 2, l.z); box.rotation.y = -l.rot; box.renderOrder = 6;
+      ghost.add(box);
+    }
+  } else if (draft && draftCheck) {
     const f = new Flat();
     const gh = halfOfType(opts.type);
     f.ribbon(draftCheck.path, gh, 0.6);
@@ -1150,6 +1207,29 @@ function showJunctionInfo(node: number) {
     facts: [['Busiest lane', `${pctFull(j.score.dos)} full`], ['Busiest approach', j.score.busiest || 'all approaches'], ['Takes', `about ${Math.round(Math.min(j.score.capacity, 9999)).toLocaleString('en-GB')} vehicles an hour`]],
     meter: j.score.dos,
     actions: [{ label: 'Edit junction', icon: formIcon(j.form), kind: 'primary', onClick: () => openJunction(node) }],
+  });
+}
+
+// ---- motorway junctions (interchange/build.ts): one junction to the player ----
+function interchangeAt(p: P) {
+  for (const ix of interchanges) {
+    for (const n of ix.nodes) { const c = net.nodes.get(n), j = junctions.get(n); if (c && Math.hypot(c.x - p.x, c.z - p.z) < Math.max(14, (j?.R ?? 0) + 4)) return ix; }
+    for (const id of ix.segs) { const sg = net.segs.get(id); if (sg && closestOnPath(p, net.path(sg)).d < net.half(sg)) return ix; }
+  }
+  return null;
+}
+function showInterchangeInfo(ix: Interchange) {
+  const js = ix.nodes.map((n) => junctions.get(n)).filter((j): j is Junction => !!j);
+  const own = js.filter((j) => j.form !== 'merge' && j.form !== 'diverge'), worst = Math.max(0, ...js.map((j) => j.score.dos));
+  const ofKind = (k: 'merge' | 'diverge') => ix.slips.find((x) => x.kind === k);
+  const dv = ofKind('diverge'), mg = ofKind('merge');
+  const lane = (x: typeof dv) => (x ? `${x.aux ? `${x.aux} m alongside, ` : ''}${x.taper} m taper, ${x.nose} m nose` : '—');
+  const busiest = js.reduce<Junction | null>((b, j) => (!b || j.score.dos > b.score.dos ? j : b), null);
+  shell.openInfo({
+    key: `interchange-info:${ix.id}`, title: IX_NAME[ix.form], sub: `${IX_BLURB[ix.form]} · ${ix.slips.length} slip roads${ix.style === 'parallel' ? ' with parallel lanes' : ''}`, icon: formIcon(ix.form === 'diamond' ? 'priority' : 'roundabout'), tone: 'road',
+    facts: [['Busiest lane', `${pctFull(worst)} full${busiest ? ` (${FORM_NAME[busiest.form].toLowerCase()})` : ''}`], ['Leaving the motorway', lane(dv)], ['Joining it', lane(mg)], ['Junctions in it', own.map((j) => FORM_NAME[j.form]).join(', ') || '—']],
+    meter: worst,
+    actions: own.slice(0, 2).map((j, i) => ({ label: own.length > 1 ? `Edit ${FORM_NAME[j.form].toLowerCase()} ${i + 1}` : `Edit ${FORM_NAME[j.form].toLowerCase()}`, icon: formIcon(j.form), kind: i ? undefined : 'primary', onClick: () => openJunction(j.node) })),
   });
 }
 
@@ -1309,6 +1389,8 @@ function tapMap(sx: number, sy: number): Mode {
   if (mode === 'line') { lineTap(sx, sy); return mode; }
   const bus = traffic.busNear(g);
   if (bus !== null) { showBusInfo(bus); return 'look'; }
+  const ixAt = interchangeAt(g); // (a motorway junction is one junction, whichever part of it is tapped)
+  if (ixAt) { showInterchangeInfo(ixAt); return 'look'; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
   const br = st || jn !== null ? null : bridgeAt(sx, sy); // (a bridge is tapped where it's drawn, up in the air)
@@ -1426,20 +1508,22 @@ nav.onChange(() => {
 });
 
 // A motorway junction on its own, to look at: /proto.html?junction=dumbbell (or gsr, diamond; &slips=parallel)
-function seedJunctionDemo(form: IxForm, style: SlipStyle) {
-  const R = form === 'gsr' || style === 'parallel' ? 780 : 510;
+function seedJunctionDemo(form: IxForm | null, style: SlipStyle) {
+  const R = form === 'gsr' || style === 'parallel' || !form ? 780 : 510;
   net.bound = Math.max(BOUND, R + 10); // (a grade-separated roundabout's slip roads reach past the town's edge)
   // (north of the lake)
   net.build({ x: -60, z: -510 }, { x: -60, z: 510 }, undefined, { ...DEFAULT_OPTS, type: 'dual' });
-  const r = motorwayWithJunction(net, form, [{ x: -R, z: 230 }, { x: R, z: 230 }], 'motorway', [...net.segs.values()][0], 1, style);
-  if (r.ok) interchanges.push(r.ix); else console.warn(r.reason);
+  // (blank: just the road, for drawing a motorway across)
+  const r = form ? motorwayWithJunction(net, form, [{ x: -R, z: 230 }, { x: R, z: 230 }], 'motorway', [...net.segs.values()][0], 1, style) : null;
+  if (r?.ok) interchanges.push(r.ix); else if (r) console.warn(r.reason);
   commitRoads([...net.segs.keys()]);
   for (const l of queue.splice(0, Math.floor(queue.length * 0.8))) if (net.lotFree(l)) spawnLot(l, false);
 }
 
 // ---------------- loop ----------------
-const demoJunction = new URLSearchParams(location.search).get('junction') as IxForm | null;
-if (demoJunction === 'dumbbell' || demoJunction === 'gsr' || demoJunction === 'diamond') seedJunctionDemo(demoJunction, new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper');
+const demoJunction = new URLSearchParams(location.search).get('junction');
+if (demoJunction === 'blank') seedJunctionDemo(null, 'taper');
+else if (demoJunction === 'dumbbell' || demoJunction === 'gsr' || demoJunction === 'diamond') seedJunctionDemo(demoJunction, new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper');
 else seedTown();
 starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
 rebuildRoads();
@@ -1649,6 +1733,8 @@ requestAnimationFrame(frame);
 
 (window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
+// (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
+Object.assign((window as unknown as { proto: object }).proto, { interchanges, blueprint: (a: P, b: P) => { draft = { a: net.snapStart(a, 4), b: net.snapEnd(net.snapStart(a, 4), b, 4, true) }; draftChanged(); } });
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
 
