@@ -28,7 +28,8 @@ import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/line
 import { TownEconomy, TOWN_NAME } from './game/econ';
 import { Purse, PRICE_SHARE } from './game/money';
 import { starterStops } from './game/crowdsites';
-import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf } from './region'; // maps as data (docs/region.md)
+import { Loading } from './loading';
+import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
@@ -43,6 +44,14 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 // The map is data (region/mapspec.ts): ?map= picks it (a region with its options), the invented town by default.
 const MAP = mapFromQuery(new URLSearchParams(location.search));
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
+// the loading screen, while the map is built (it goes once the first frame is drawn)
+const loading = new Loading(MAP.name, mapLine());
+function mapLine() {
+  const o = MAP.options, n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  if (!o) return '';
+  return [`seed ${o.seed}`, n(MAP.settlements.length, 'place', 'places'), n(MAP.water.rivers.length, 'river', 'rivers'), n(MAP.water.lakes.length, 'lake', 'lakes'), o.style].join(' · ');
+}
+await loading.stage(MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
 const BOUND = MAP.bound;
 // the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
 const gameWater = new GameWater(BOUND * (BOUND > 520 ? 1.5 : 1.3), MAP.water); // (the ground's half-width)
@@ -405,10 +414,19 @@ function queuePlots(segs: number[]) {
 }
 
 // ---------------- the map's roads and towns ----------------
-function seedTown() {
-  // the map's streets (region/: the town's hand-drawn roads, or a generated region's settlements)
-  buildStreets(net, MAP.streets, DEFAULT_OPTS, MAP.generated);
+async function seedTown() {
+  // the map's streets (region/: the town's hand-drawn roads, or each of a generated region's settlements in turn)
+  if (MAP.generated) {
+    for (const [i, st] of MAP.settlements.entries()) {
+      await loading.stage(i ? `Laying out ${st.name}` : `Laying out ${st.name}'s streets`, 0.06 / MAP.settlements.length);
+      buildStreets(net, MAP.streets.filter((x) => x.settlement === st.id), DEFAULT_OPTS, true);
+    }
+  } else {
+    await loading.stage('Laying out the streets', 0.06);
+    buildStreets(net, MAP.streets, DEFAULT_OPTS, false);
+  }
   // junctions are designed (and take their land) before any plot is laid out
+  await loading.stage('Designing the junctions', 0.05);
   commitRoads([...net.segs.keys()]);
   // industry: library sites on the estate and out of town claim their land before any plot is
   // built; the estate's plots are theirs, so its buildgen sheds are dropped (game/industry.ts)
@@ -419,15 +437,12 @@ function seedTown() {
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
   const start = queue.splice(0, now);
-  // (a generated map builds the settlement you start over now, and the others over the next frames,
-  // nearest first: they stay in the queue till then, so nothing else is built on their plots)
-  const here = MAP.generated ? settlementAt(MAP, MAP.view) : null;
-  const later = here ? start.filter((l) => settlementAt(MAP, l) !== here).sort((a, b) => Math.hypot(a.x - here.x, a.z - here.z) - Math.hypot(b.x - here.x, b.z - here.z)) : [];
-  seeding = new Set(later);
-  for (const l of start) if (!seeding.has(l) && net.lotFree(l)) spawnLot(l, false);
-  queue.unshift(...later);
+  await loading.stage(`Putting up ${start.length.toLocaleString('en-GB')} buildings`, 0.22);
+  for (const [i, l] of start.entries()) {
+    if (net.lotFree(l)) spawnLot(l, false);
+    if (i % 16 === 0) await loading.tick(i / start.length);
+  }
 }
-let seeding = new Set<Lot>();
 
 // ---------------- UI ----------------
 type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line';
@@ -1501,7 +1516,8 @@ nav.onChange(() => {
 });
 
 // ---------------- loop ----------------
-seedTown();
+await seedTown();
+await loading.stage('Adding bus stops and drawing the roads', 0.1);
 starterStops(net, MAP.stops); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
 rebuildRoads();
 refreshTrees();
@@ -1509,10 +1525,15 @@ setMode('look');
 setKind('straight');
 setType('street');
 resize();
+await loading.stage('Parks, playgrounds and car parks', 0.14);
 refreshInfill();
+await loading.stage(MAP.style === 'arctic' ? 'Laying the snow' : MAP.style === 'desert' ? 'Spreading the sand' : 'Painting the fields and woods', 0.07);
 gameGround.start(trees);
 refreshTrees();
-if (MAP.generated) for (const c of chunks.values()) if (c.dirty) rebuildChunk(c); // (the settlement you start over, whole from the first frame)
+// every building merged into its chunk before the first frame (not two a frame as it plays)
+await loading.stage('Finishing the buildings', 0.03);
+{ const dirty = [...chunks.values()].filter((c) => c.dirty); for (const [i, c] of dirty.entries()) { rebuildChunk(c); await loading.tick(i / dirty.length); } }
+await loading.stage('Starting the traffic and the town', 0.15);
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
@@ -1636,12 +1657,6 @@ function frame(now: number) {
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
   doomMat.opacity = 0.3 + 0.25 * Math.sin(now / 160);
   const gdt = dt * speed; // game seconds this frame
-  // a generated map's other settlements go up in the first frames, a few milliseconds' worth a frame
-  if (seeding.size) {
-    const t = performance.now();
-    while (queue.length && seeding.has(queue[0]) && performance.now() - t < 6) { const l = queue.shift()!; seeding.delete(l); if (net.lotFree(l)) spawnLot(l, false); }
-    if (!queue.length || !seeding.has(queue[0])) { seeding.clear(); refreshTrees(); gameGround.invalidate(); }
-  }
   // the town grows and shrinks with how well it's served: the economy decides (game/econ.ts)
   town.advance(gdt * GAME_MIN_PER_S);
   syncAt -= dt;
@@ -1708,6 +1723,7 @@ function frame(now: number) {
   const q = TIERS[tier];
   if (q.every && ++frameNo % q.every === 0) renderer.shadowMap.needsUpdate = true;
   renderer.render(scene, cam);
+  if (!loaded) { loaded = true; loading.done(); } // (the first frame is drawn: the loading screen goes)
   const t2 = performance.now();
   perf.simMs += t1 - t0; perf.drawMs += t2 - t1; perf.worstSim = Math.max(perf.worstSim, t1 - t0);
   if (now - perf.since > 2000) {
@@ -1722,13 +1738,18 @@ function frame(now: number) {
   }
   requestAnimationFrame(frame);
 }
+// the shaders compile before the first frame, not during it (where the screen would sit still)
+await loading.stage('Getting ready to draw', 0.1);
+await renderer.compileAsync(scene, cam).catch(() => {});
+loading.finish();
+let loaded = false;
 requestAnimationFrame(frame);
 
 (window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
-Object.assign((window as unknown as { proto: object }).proto, { map: MAP, seeding: () => seeding.size }); // (the map being played, and how many of its plots are still to go up at the start)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

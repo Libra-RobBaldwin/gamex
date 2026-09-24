@@ -108,13 +108,12 @@ and `main.ts` reads the map from there instead of calling `mapById`.
   for each. A river is a channel filled to the lake level (still water for now). Its bed is a strip drawn in a
   ground material of its own that marks the stencil first. The flat ground leaves out what it marked (as it does
   for cuttings), so they never z-fight at the strip's edges.
-- **Loading a big map:** all the streets are built and committed at the start. Then:
-  - the settlement you start over is built at once;
-  - the others' plots stay at the front of the queue (so nothing else takes them) and go up over the next frames,
-    6 ms a frame, nearest first;
-  - then the trees are cleared and the ground repainted once.
-
-  `proto.seeding()` says how many plots are left.
+- **Loading:** a loading screen (`src/proto/loading.ts`) shows the map, its options, a progress bar and what's
+  being done ("Laying out Harrowley's streets", "Putting up 3,120 buildings", "Parks, playgrounds and car parks",
+  "Painting the fields and woods" or "Laying the snow"…). Everything is built before play starts, as in TF2:
+  nothing goes up in the background afterwards. `main.ts` yields to the page between stages (top-level `await`),
+  and within the long ones every few milliseconds. It goes once the first frame is drawn, and `proto.loading.times`
+  has each stage's time. On the cloud box under SwiftShader, the region takes 24 s (3,120 buildings) and the town 6 s.
 - **What's off on the big map until R4 (streaming):**
   - 3D hedgerows: 1.34 M triangles over 6 km. The fields and their boundaries are still painted.
   - Cover texels are 4 m, not 2.5 m.
