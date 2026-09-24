@@ -208,7 +208,8 @@ smoothed, then set against capacity:
 - Buildings come in lumps, so it never builds what it couldn't fill, or abandons what it
   would want back: no oscillation. When what's left is too lumpy to give up any more, it has
   settled.
-- A request the game declines rests that zone or building for six months.
+- A request the game declines rests that zone or building for six months, even when the game
+  sends the zone again, unless that brings it more free plots or changes what may go up.
 - Occupancy moves in quickly and out slowly, and only once low demand has lasted.
 
 Every town reports a status (growing, stable, stalling, declining), a headline, ranked
@@ -239,7 +240,8 @@ settled isn't stalling.
 
 1. *World.* Towns from the town centres. Zones are blocks of lots (the lots along one street
    `row`, or ~150 m cells), with the free plots the queue still holds (not the lots the
-   economy cleared: it keeps those for their old use). Buildings are `Lot`s,
+   economy cleared: it keeps those for their old use). Re-sending a zone doesn't lift the rest
+   after a declined request unless its free plots go up. Buildings are `Lot`s,
    with capacity from `USE`. Stops come from `seg.stops`, lines from a line editor, industries
    from the map.
 2. *Oracles.* `travelTime(stop, stop, vehicle)` and `carTime(zone, zone)` come from the traffic

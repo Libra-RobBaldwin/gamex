@@ -186,7 +186,11 @@ export class Economy {
     const allow = z.allow ? new Set(z.allow) : null;
     if (cur) {
       if (cur.x !== z.x || cur.z !== z.z) { this.pairCache = { places: [], cars: [] }; this.dirty.service = true; }
-      Object.assign(cur, { x: z.x, z: z.z, r: z.r ?? cur.r, plots: z.plots, allow, blocked: 0 });
+      // A zone the game declined to build on rests (see decline) unless this brings it new
+      // ground or changes what may go up there: the game re-sends zones as its plots change.
+      const same = (a: Set<BuildingKind> | null, b: Set<BuildingKind> | null) => (!a || !b ? a === b : a.size === b.size && [...a].every((k) => b.has(k)));
+      const blocked = z.plots > cur.plots || !same(allow, cur.allow) ? 0 : cur.blocked;
+      Object.assign(cur, { x: z.x, z: z.z, r: z.r ?? cur.r, plots: z.plots, allow, blocked });
       if (cur.town !== town) { cur.town.zones = cur.town.zones.filter((q) => q !== cur); cur.town = town; town.zones.push(cur); }
       return;
     }
