@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { appendFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { DEFAULT_OPTS, Network, rng, type RSeg } from './roads';
 import { Traffic } from './traffic';
 import { DIMS, type Kind } from './footprint';
 import { laneSpan } from './xsection';
+import { design, landFits, type Form } from './junction';
+import { town } from './trafficsim';
 
+// Situations an adversarial reviewer set up by hand to catch the traffic out.
+// TRAFFIC_REPORT=1 prints what each vehicle was doing at the end.
+const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
+const log = (s: string) => { if (env.TRAFFIC_REPORT) console.log(s); };
 const as = (type: string) => ({ ...DEFAULT_OPTS, type });
-const OUT = '/tmp/claude-0/-home-user-gamex/77896564-364e-5bd3-afef-740e87f2acff/scratchpad/refute/explore.log';
-const log = (s: string) => appendFileSync(OUT, s + '\n');
 
 // ---- putting vehicles exactly where a scenario needs them ----
 type T = Traffic & Record<string, any>;
@@ -16,10 +19,12 @@ interface Place { seg: RSeg; from: number; s: number; lane: number; v?: number; 
 function place(tr: T, p: Place) {
   const kind: Kind = p.bus ? 'bus' : p.kind ?? 'car', dm = DIMS[kind];
   const c: any = {
+    // @ts-expect-error: a hand-placed vehicle takes the next id, as spawn() would give it
     id: tr.ids++, kind, front: dm.front, back: dm.back, seg: p.seg, from: p.from, s: p.s, v: p.v ?? 0, vmax: p.bus ? 11 : 30,
     route: p.route ?? [], goal: p.goal ?? Infinity, lorry: kind === 'lorry', bus: !!p.bus, col: new THREE.Color(), heading: 0, born: -1e6, wait: 0,
     lane: p.lane, off: 0, uref: [],
   };
+  // @ts-expect-error: put it square in its lane, as spawn() does (laneOff and laneIdx are private)
   c.off = tr.laneOff(p.seg, p.from, p.s, tr.laneIdx(c));
   tr.cars.push(c);
   return c;
@@ -62,9 +67,7 @@ describe('lane drop: a queue alongside the lane that ends', () => {
   });
 });
 
-import { simulate, type Scenario } from './trafficsim';
-import { town } from './trafficsim';
-describe('explore natural', () => {
+describe("don't block the box", () => {
   it('exit with room for one, two committing from different arms', () => {
     const { net, junctions } = town({ name: 'x', prefer: 'roundabout', cars: 0, minTrips: 0, build: (n) => { n.build({ x: -250, z: 0 }, { x: 250, z: 0 }, undefined, as('rural-40')); n.build({ x: 0, z: -250 }, { x: 0, z: 250 }, undefined, as('rural-40')); } });
     const tr = new Traffic(net, new THREE.Scene(), rng(5)) as T;
@@ -81,18 +84,30 @@ describe('explore natural', () => {
     const b = place(tr, { seg: S, from: far(S), s: LS - reachS - 45, lane: 0, v: 12, route: [E.id], goal: 200 });
     let inBox = 0, worst = 0;
     const W = segAt(net, -120, 0), LW = net.length(W), reachW = Math.max(j.R + 1.5, j.reach[W.id] ?? 0);
-    const ring: any[] = [];
+    const ring: any[] = [], at = LW - reachW - 60;
     const r = run(tr, 40, 1 / 30, 0, (now) => {
-      // circulating traffic that passes the blocked exit: every few seconds a car from the west going north (through the east side)
-      if (now > 8000 && now % 3000 < 34 && ring.length < 6) ring.push(place(tr, { seg: W, from: far(W), s: LW - reachW - 60, lane: 0, v: 10, route: [N.id], goal: 200 }));
+      // traffic going round meanwhile: every few seconds a car from the west heading north (put
+      // down only where the last one has moved off, so the test doesn't stack them itself)
+      const clear = !tr.cars.some((c: any) => c.seg === W && c.from === far(W) && Math.abs(c.s - at) < 12);
+      if (now > 8000 && now % 3000 < 34 && ring.length < 6 && clear) ring.push(place(tr, { seg: W, from: far(W), s: at, lane: 0, v: 10, route: [N.id], goal: 200 }));
       for (const p of pins) { p.s = p._s ??= p.s; p.v = 0; }
       for (const c of [a, b]) if (c.turn && c.turn.t > c.turn.path.ext0 + 2 && c.turn.t < c.turn.path.ext1 && c.v < 0.3) { inBox += 1 / 30; worst = Math.max(worst, inBox); }
     });
     log(`exit room: a ${tr.describe(a.id)} | b ${tr.describe(b.id)} standing in the junction ${worst.toFixed(1)} s; overlaps ${r.pairs}`);
     for (const c of ring) log(`   ring ${tr.describe(c.id)} wait=${c.wait.toFixed(1)} :: ${tr.explain(c.id)}`);
+    expect(r.pairs, 'overlapping').toEqual([]);
+    // one of them takes the space; the other waits at its give-way line, not in the junction
+    expect(worst, 'standing in the junction for want of room beyond').toBeLessThan(0.5);
+    const got = [a, b].filter((c) => c.seg.id === E.id && !c.turn);
+    expect(got.length, `${tr.describe(a.id)} | ${tr.describe(b.id)}`).toBe(1);
+    const other = got[0] === a ? b : a;
+    expect(other.turn, `the other one: ${tr.describe(other.id)}`).toBeUndefined();
+    expect(other.seg.id === N.id || other.seg.id === S.id, `the other one: ${tr.describe(other.id)}`).toBe(true);
+    // and the traffic going round isn't held up by either of them
+    expect(ring.length).toBeGreaterThanOrEqual(4);
+    for (const c of ring) expect(c.gone !== undefined || c.seg.id === N.id, `ring car: ${tr.describe(c.id)} :: ${tr.explain(c.id)}`).toBe(true);
   });
 });
-import { design, landFits, type Form } from './junction';
 describe.skip('explore natural2', () => {
   const cases: { name: string; build: (n: Network) => void; from: Form; to: Form; at: number }[] = [
     { name: 'priority T -> roundabout', build: (n) => { n.build({ x: -250, z: 0 }, { x: 250, z: 0 }, undefined, as('rural-40')); n.build(n.snapStart({ x: 0, z: 0 }, 3), { x: 0, z: 250 }, undefined, as('rural-40')); }, from: 'priority', to: 'roundabout', at: 60 },
