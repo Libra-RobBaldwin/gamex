@@ -279,7 +279,8 @@ function truss(g: Geo, c: Crossing, sp: Span, hw: number, through: boolean) {
     if (i < i1) { const s2 = P(i + 1), f2 = frameAt(c, s2); g.bar(m, at(f, -n0, yb(s)), at(f2, n0, yb(s2)), 0.25); g.bar(m, at(f, n0, yb(s)), at(f2, -n0, yb(s2)), 0.25); }
   }
   // portal frames over the ends of a through truss
-  if (through) for (const i of [1, panels - 1]) { const s = P(i), f = frameAt(c, s); g.bar(m, at(f, -n0, hi(s) - 1.6), at(f, n0, hi(s) - 1.6), 0.6, 1.2); }
+  // (their underside kept at least 5.6 m above the deck: UK standard headroom is 5.03 m)
+  if (through) for (const i of [1, panels - 1]) { const s = P(i), f = frameAt(c, s), py = Math.max(hi(s) - 1.6, y(s) + 5.6 + 0.6); g.bar(m, at(f, -n0, py), at(f, n0, py), 0.6, 1.2); }
 }
 
 // A concrete deck arch: twin ribs springing from the valley sides, columns up to the deck.
@@ -364,8 +365,13 @@ function support(g: Geo, c: Crossing, lay: BridgeLayout, q: Support, hw: number,
     case 'abutment': return abutment(g, c, lay, q, hw);
     case 'anchorage': {
       const out = q.s < (main?.s0 ?? 0) ? -1 : 1, p = at(f, 0, 0, out * 6);
-      g.box('concrete', p[0], p[2], f.ux, f.uz, 9, hw + 4, Math.min(base, groundAt(c, q.s)) - 1, y + 3);
-      g.box('footing', p[0], p[2], f.ux, f.uz, 9.5, hw + 4.5, y + 3, y + 3.6);
+      // the road runs over the anchorage block; the cables go into housings on each side of it
+      g.box('concrete', p[0], p[2], f.ux, f.uz, 9, hw + 4, Math.min(base, groundAt(c, q.s)) - 1, y - 0.6);
+      for (const k of [-1, 1]) {
+        const h = at(f, k * (hw + 2.4), 0, out * 6);
+        g.box('concrete', h[0], h[2], f.ux, f.uz, 9, 1.6, y - 0.6, y + 3);
+        g.box('footing', h[0], h[2], f.ux, f.uz, 9.5, 1.9, y + 3, y + 3.6);
+      }
       return;
     }
     case 'tower': {
@@ -461,8 +467,13 @@ function masonryPier(g: Geo, c: Crossing, q: Support, hw: number) {
   const batter = Math.min(1.5, (q.top - q.base) / 30);
   g.box('stone', f.x, f.z, f.ux, f.uz, q.along + batter, across + batter, q.base, q.base + (q.top - q.base) * 0.3);
   g.box('stone', f.x, f.z, f.ux, f.uz, q.along, across, q.base, q.top + 0.3);
-  // pilasters carried up past the parapet: from above they punctuate the deck at every pier
-  g.box('stoneDark', f.x, f.z, f.ux, f.uz, Math.min(q.along, 1.4) * 0.8, across + 0.1, q.top + 0.3, y + 1.3);
+  // pilasters carried up past the parapet on each outside face: from above they punctuate the
+  // deck at every pier. (One block across the whole width would stand in the carriageway.)
+  const pa = Math.min(q.along, 1.4) * 0.8;
+  for (const k of [-1, 1]) {
+    const p = at(f, k * (hw + 0.45), 0);
+    g.box('stoneDark', p[0], p[2], f.ux, f.uz, pa, 0.4, q.top + 0.3, y + 1.3);
+  }
   if (water) cutwaters(g, f, q.along, across, q.base, q.level! + 2, 'stone');
 }
 

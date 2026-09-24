@@ -77,7 +77,8 @@ const B: BridgeDef[] = [
     id: 'truss-through', label: 'Steel truss (through)', icon: '🔺', material: 'steel', layout: 'multi',
     blurb: 'Trusses either side, traffic runs between them. Long spans with a shallow floor',
     span: { min: 30, max: 180 }, length: { min: 30, max: 3500 }, depth: { min: 1.5, ratio: 90 },
-    above: (len) => Math.min(16, Math.max(6, len / 7)),
+    // at least 8 m tall, so the end portals clear UK standard headroom (5.03 m) with room to spare
+    above: (len) => Math.min(16, Math.max(8, len / 7)),
     maxPier: 80, maxGrade: 0.06, roadTonnes: 150, railAxle: 25.5,
     era: { from: 1850 },
     cost: { deck: 5600, pier: 180000, pierPerM: 16000, abutment: 250000, maint: 30 },

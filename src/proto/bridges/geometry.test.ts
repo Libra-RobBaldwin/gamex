@@ -51,6 +51,31 @@ describe('bridge geometry', () => {
     expect(built('suspension').bg.parts.cable).toBeDefined();
   });
 
+  it('keeps the space vehicles need clear: nothing stands in the carriageway above the deck', () => {
+    // Samples points over every triangle (not just its corners: a slab can span the road with
+    // all four corners off to the sides) and checks none sit inside the traffic envelope.
+    for (const id of BRIDGE_IDS) {
+      const { c, lay, bg } = built(id);
+      const z0 = c.path[0].z, x0 = c.path[0].x, hw = lay.width / 2 - 0.8; // parapets stand at the edge
+      let bad = 0, example = '';
+      for (const [mat, g] of Object.entries(bg.parts)) {
+        const a = g!.getAttribute('position').array, idx = g!.getIndex()?.array;
+        const n = idx ? idx.length : a.length / 3, V = (i: number) => { const k = (idx ? idx[i] : i) * 3; return [a[k], a[k + 1], a[k + 2]]; };
+        for (let i = 0; i + 2 < n; i += 3) {
+          const A = V(i), B = V(i + 1), C = V(i + 2);
+          for (let u = 0; u <= 4; u++) for (let v = 0; u + v <= 4; v++) {
+            const w = 4 - u - v, p = [0, 1, 2].map((k) => (A[k] * u + B[k] * v + C[k] * w) / 4);
+            const s = p[0] - x0;
+            if (s < lay.s0 + 3 || s > lay.s1 - 3 || Math.abs(p[2] - z0) > hw) continue;
+            const d = deckAt(c, s);
+            if (p[1] > d + 0.45 && p[1] < d + 4.8) { bad++; if (!example) example = `${mat} at s=${s.toFixed(1)} n=${(p[2] - z0).toFixed(1)} +${(p[1] - d).toFixed(1)} m`; }
+          }
+        }
+      }
+      expect(bad, `${id}: ${example}`).toBe(0);
+    }
+  });
+
   it('puts piers and footings out beside the deck so they read from above', () => {
     const { lay, bg } = built('masonry');
     const b = box(bg.parts);
