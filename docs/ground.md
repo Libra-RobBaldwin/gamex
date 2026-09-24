@@ -62,17 +62,22 @@ the count. The game uses it at start-up, because its trees were scattered at ran
 
 ### Cover classes
 
-A cover map is two RGBA byte textures, 2.5 m per texel, over the region (see `covers.ts`):
+The cover map is one RGBA byte texture, 2.5 m per texel, over the region, so the ground makes
+one texture read for it (see `covers.ts`, `packCover`). Covers that never meet share a channel,
+one on each side of ½, so filtering blends them sensibly (½ is plain pasture):
 
-| texture | R | G | B | A |
-|---|---|---|---|---|
-| A | lawn | field | wood | bare |
-| B | crop | row direction | rough | wet |
+| channel | below ½ | above ½ |
+|---|---|---|
+| R | lawn | field |
+| B | bare earth | woodland floor |
+| A | wet grass | rough grass |
 
-Pasture is whatever isn't lawn, field, wood or bare. Rock/scree (from `1 − normal.y`) and
-heather/moor (from world height) aren't painted: the shader works them out per pixel. Tune them
-with `ground.uniforms.uSlope.value`: rock from/to, then heather from/to in metres, default
-`(0.2, 0.34, 70, 130)`.
+G holds the crop (top 3 bits) and the row direction (32 steps over half a turn). It is only
+read where there's a field or a lawn, which never reaches a boundary where two codes meet.
+Pasture is whatever is left over. Rock/scree (from `1 − normal.y`) and heather/moor (from world
+height) aren't painted: with `new Ground({ terrain: true })` the shader works them out per pixel.
+Tune them with `ground.uniforms.uSlope.value`: rock from/to, then heather from/to in metres,
+default `(0.2, 0.34, 70, 130)`. A flat map leaves `terrain` off and doesn't pay for them.
 
 Fields are world-anchored, so every map anywhere agrees about them. They come from a jittered
 grid, rotated and longer one way than the other:
@@ -114,7 +119,7 @@ repainted and its hedges replanned. Replaced hedge instances reuse their buffers
 - `gameGround.start(trees)` at start-up;
 - `invalidate()` when roads or the landscaping change (repainted on the next frame);
 - `built(lot)` after a building goes up;
-- `setGroundQuality()` from `setTier`: High and Good are `high`, Balanced is `medium`, Fast and Fastest are `low`.
+- `setGroundQuality()` from `setTier`: High is `high`, Good and Balanced are `medium`, Fast and Fastest are `low`.
 
 The next four plots in the queue show as cleared building sites.
 
@@ -126,11 +131,11 @@ patch put on afterwards should chain it too, as the water system's shore overlay
 
 | where | the swap |
 |---|---|
-| terrain tiles | `groundTile(tileMesh(src, ti, tj, o), ground.material, origin)`: world-space sampling needs no UVs, and slopes and heights come from the mesh |
-| water demo | `patchGroundMaterial(new Ground().material)`: the shore overlay goes on top |
-| bridges demo | the ground strips and earthworks use `ground.material`; cut faces steeper than about 35° turn to rock and scree by themselves |
+| terrain tiles | `groundTile(tileMesh(src, ti, tj, o), ground.material, origin)` with `new Ground({ terrain: true })`: world-space sampling needs no UVs, and slopes and heights come from the mesh |
+| water demo | `patchGroundMaterial(new Ground({ terrain: true }).material)`: the shore overlay goes on top |
+| bridges demo | the ground strips and earthworks use `new Ground({ base, terrain: true }).material`; cut faces steeper than about 35° turn to rock and scree by themselves |
 | industries, people and vehicles demos | their plane's material becomes `ground.material`; at night, tint `ground.material.color` rather than swapping materials |
-| bridge earthworks (bridges-track) | use `new Ground().material` or the game's `ground.material` for embankments and cuttings: grass on the gentle parts, scree on steep cut faces |
+| bridge earthworks (bridges-track) | use `new Ground({ terrain: true }).material` for embankments and cuttings: grass on the gentle parts, scree on steep cut faces |
 
 ### Far from the origin
 
@@ -146,22 +151,37 @@ shared 4-CPU machine, so treat them as relative.
 
 | budget | limit | measured |
 |---|---|---|
-| texture reads per ground pixel | ≤ 6 high, ≤ 3 low | 5 high, 4 medium, 3 low (from the shader source, tested) |
-| new texture memory | ≤ 4 MB | detail 512² with mips 1.40 MB + macro 256² 0.35 MB + game cover maps 480² × 2 = 1.84 MB, so **3.59 MB** |
+| texture reads per ground pixel | ≤ 6 high, ≤ 3 low | 4 high, 3 medium, 2 low (from the shader source, tested) |
+| new texture memory | ≤ 4 MB | detail 512² with mips 1.40 MB + macro 256² 0.35 MB + the game's cover map 480² 0.92 MB, so **2.67 MB** |
 | texture generation | ≤ 40 ms | about 30 ms warm, 55 ms cold at start-up (once) |
 | full paint of the game map (with hedges) | ≤ 30 ms | about 26–30 ms warm in Node; the first paint at start-up runs cold, at about 100 ms |
 | repaint after one building | ≤ 2 ms | about 1.3–1.6 ms median, 3 ms when a whole field becomes town |
-| draw calls | ground +0, extras ≤ +2 | +0 and +2 (hedges, hedgerow trees) |
-| triangles | ≤ +60k | 14 per 8 m hedge piece and 90 per hedgerow tree: about 25k on the game map |
+| draw calls | ground +0, extras ≤ +2 | +0 and +2 (hedges, hedgerow trees); +1 in the shadow pass (hedgerow trees only: hedges don't cast) |
+| triangles | ≤ +60k | about +52k in the main pass on the game map (14 per 8 m hedge piece, 90 per hedgerow tree) |
 | frame time vs old ground | within ~15% | see the table below |
-| shimmer | no worse than old | see the table below |
+| shimmer | no worse than old | see the review notes |
+
+The whole game frame in SwiftShader at 412×915, old ground against new. Each figure is the
+fastest of 8 renders per side, alternating old and new so background load hits both alike,
+with shadows redrawn every frame at High, Good and Balanced as the game does:
+
+| view | High | Good | Balanced | Fast | Fastest |
+|---|---|---|---|---|---|
+| countryside, 200 m | 1.22 | 1.07 | 0.98 | 1.06 | 1.00 |
+| town, 200 m | 0.72 | 0.95 | 1.11 | 1.01 | 1.00 |
+| far, 900 m | 0.94 | 1.20 | 1.20 | 1.05 | 1.01 |
+
+(The town and far rows were measured before hedges stopped casting shadows, so they flatter
+the old ground if anything.) Per full-screen pixel of ground alone the new ground costs 1.12×
+the old grass at High, 1.01× at Medium and 0.91× at Low. A software renderer runs every branch
+for every pixel, so the shader is written to be short rather than to skip work.
 
 Anti-shimmer measures:
 
-- mipmaps and anisotropy on the detail textures;
+- mipmaps on the detail textures, blending between levels so zooming never pops;
 - fine strokes fade out from 3 cm per pixel;
 - flowers only show close up;
-- rows, tramlines and stripes are box-filtered analytically and fade to their mean before they alias;
+- rows and stripes are soft triangle waves that fade to their mean before they alias; tramlines are anti-aliased lines that fade out below a pixel;
 - nothing has high contrast below the pixel.
 
 <!-- measured tables are appended below by the look-dev and review rounds -->
