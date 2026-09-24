@@ -1,59 +1,64 @@
-// The HUD's icons: Tabler Icons (MIT, tabler.io/icons), imported one at a time as raw SVG so only
-// these are bundled and the page works offline. They're vector, so crisp at any pixel density.
-import activity from '@tabler/icons/outline/activity.svg?raw';
-import adjustments from '@tabler/icons/outline/adjustments-horizontal.svg?raw';
-import alert from '@tabler/icons/outline/alert-triangle.svg?raw';
-import angle from '@tabler/icons/outline/angle.svg?raw';
-import arrowsCross from '@tabler/icons/outline/arrows-cross.svg?raw';
-import arrowsDownUp from '@tabler/icons/outline/arrows-down-up.svg?raw';
-import bike from '@tabler/icons/outline/bike.svg?raw';
-import bolt from '@tabler/icons/outline/bolt.svg?raw';
-import branch from '@tabler/icons/outline/git-branch.svg?raw';
-import bridge from '@tabler/icons/outline/building-bridge.svg?raw';
-import bulldozer from '@tabler/icons/outline/bulldozer.svg?raw';
-import bus from '@tabler/icons/outline/bus.svg?raw';
-import busStop from '@tabler/icons/outline/bus-stop.svg?raw';
-import car from '@tabler/icons/outline/car.svg?raw';
-import check from '@tabler/icons/outline/check.svg?raw';
-import clock from '@tabler/icons/outline/clock.svg?raw';
-import curve from '@tabler/icons/outline/vector-bezier-2.svg?raw';
-import finger from '@tabler/icons/outline/hand-finger.svg?raw';
-import handStop from '@tabler/icons/outline/hand-stop.svg?raw';
-import home from '@tabler/icons/outline/home.svg?raw';
-import line from '@tabler/icons/outline/line.svg?raw';
-import map from '@tabler/icons/outline/map-2.svg?raw';
-import minus from '@tabler/icons/outline/minus.svg?raw';
-import mountain from '@tabler/icons/outline/mountain.svg?raw';
-import giveWay from '@tabler/icons/outline/triangle-inverted.svg?raw';
-import parking from '@tabler/icons/outline/parking.svg?raw';
-import pause from '@tabler/icons/filled/player-pause.svg?raw';
-import play from '@tabler/icons/outline/player-play.svg?raw';
-import plus from '@tabler/icons/outline/plus.svg?raw';
-import ramp from '@tabler/icons/outline/arrow-ramp-left.svg?raw';
-import refresh from '@tabler/icons/outline/refresh.svg?raw';
-import road from '@tabler/icons/outline/road.svg?raw';
-import roadSign from '@tabler/icons/outline/road-sign.svg?raw';
-import rotL from '@tabler/icons/outline/rotate-2.svg?raw';
-import rotR from '@tabler/icons/outline/rotate-clockwise-2.svg?raw';
-import roundabout from '@tabler/icons/outline/arrow-roundabout-right.svg?raw';
-import route from '@tabler/icons/outline/route-2.svg?raw';
-import ruler from '@tabler/icons/outline/ruler-measure.svg?raw';
-import smooth from '@tabler/icons/outline/vector-spline.svg?raw';
-import sparkles from '@tabler/icons/outline/sparkles.svg?raw';
-import tree from '@tabler/icons/outline/tree.svg?raw';
-import trees from '@tabler/icons/outline/trees.svg?raw';
-import lights from '@tabler/icons/outline/traffic-lights.svg?raw';
-import train from '@tabler/icons/outline/train.svg?raw';
-import trendUp from '@tabler/icons/outline/trending-up.svg?raw';
-import tunnel from '@tabler/icons/outline/building-tunnel.svg?raw';
-import users from '@tabler/icons/outline/users.svg?raw';
-import wheat from '@tabler/icons/outline/wheat.svg?raw';
-import x from '@tabler/icons/outline/x.svg?raw';
+// The HUD's icons: Tabler Icons (MIT, tabler.io/icons, licence in ./icons/LICENSE), copied into
+// ./icons one file at a time so only these are bundled and the page works offline. Two are our
+// own in the same style: the UK motorway symbol (motorway-uk.svg) and the ground-hugging line for
+// Auto height (height-auto.svg). They're vector, so crisp at any pixel density.
+import activity from './icons/activity.svg?raw';
+import adjustments from './icons/adjustments-horizontal.svg?raw';
+import alert from './icons/alert-triangle.svg?raw';
+import angle from './icons/angle.svg?raw';
+import arrowsCross from './icons/arrows-cross.svg?raw';
+import arrowsDownUp from './icons/arrows-down-up.svg?raw';
+import bike from './icons/bike.svg?raw';
+import bolt from './icons/bolt.svg?raw';
+import branch from './icons/git-branch.svg?raw';
+import bridge from './icons/building-bridge.svg?raw';
+import bulldozer from './icons/bulldozer.svg?raw';
+import bus from './icons/bus.svg?raw';
+import busStop from './icons/bus-stop.svg?raw';
+import car from './icons/car.svg?raw';
+import check from './icons/check.svg?raw';
+import clock from './icons/clock.svg?raw';
+import cog from './icons/settings.svg?raw';
+import curve from './icons/vector-bezier-2.svg?raw';
+import finger from './icons/hand-finger.svg?raw';
+import handStop from './icons/hand-stop.svg?raw';
+import heightAuto from './icons/height-auto.svg?raw';
+import home from './icons/home.svg?raw';
+import line from './icons/line.svg?raw';
+import map from './icons/map-2.svg?raw';
+import minus from './icons/minus.svg?raw';
+import motorway from './icons/motorway-uk.svg?raw';
+import mountain from './icons/mountain.svg?raw';
+import giveWay from './icons/triangle-inverted.svg?raw';
+import parking from './icons/parking.svg?raw';
+import pause from './icons/player-pause-filled.svg?raw';
+import play from './icons/player-play.svg?raw';
+import plus from './icons/plus.svg?raw';
+import ramp from './icons/arrow-ramp-left.svg?raw';
+import refresh from './icons/refresh.svg?raw';
+import restore from './icons/restore.svg?raw';
+import road from './icons/road.svg?raw';
+import rotL from './icons/rotate-2.svg?raw';
+import rotR from './icons/rotate-clockwise-2.svg?raw';
+import roundabout from './icons/arrow-roundabout-right.svg?raw';
+import route from './icons/route-2.svg?raw';
+import ruler from './icons/ruler-measure.svg?raw';
+import smooth from './icons/vector-spline.svg?raw';
+import sparkles from './icons/sparkles.svg?raw';
+import tree from './icons/tree.svg?raw';
+import trees from './icons/trees.svg?raw';
+import lights from './icons/traffic-lights.svg?raw';
+import train from './icons/train.svg?raw';
+import trendUp from './icons/trending-up.svg?raw';
+import tunnel from './icons/building-tunnel.svg?raw';
+import users from './icons/users.svg?raw';
+import wheat from './icons/wheat.svg?raw';
+import x from './icons/x.svg?raw';
 
 const RAW = {
-  activity, adjustments, alert, angle, arrowsCross, arrowsDownUp, bike, bolt, branch, bridge, bulldozer, bus, busStop, car, check, clock, curve,
-  finger, giveWay, handStop, home, line, map, minus, mountain, parking, pause, play, plus, ramp, refresh, road, roadSign, rotL, rotR, roundabout, route,
-  ruler, smooth, sparkles, tree, trees, lights, train, trendUp, tunnel, users, wheat, x,
+  activity, adjustments, alert, angle, arrowsCross, arrowsDownUp, bike, bolt, branch, bridge, bulldozer, bus, busStop, car, check, clock, cog, curve,
+  finger, giveWay, handStop, heightAuto, home, line, map, minus, motorway, mountain, parking, pause, play, plus, ramp, refresh, restore, road, rotL, rotR,
+  roundabout, route, ruler, smooth, sparkles, tree, trees, lights, train, trendUp, tunnel, users, wheat, x,
 };
 export type Icon = keyof typeof RAW;
 
@@ -68,10 +73,12 @@ const SVG = Object.fromEntries(Object.entries(RAW).map(([k, s]) => [k, s
 
 export const icon = (name: Icon, cls = '') => (cls ? SVG[name].replace('class="ic"', `class="ic ${cls}"`) : SVG[name]);
 
-// What stands for each kind of road and railway in chips, lists and filters.
-const FAMILY: Record<string, Icon> = { Street: 'home', Avenue: 'trees', Boulevard: 'tree', Arterial: 'bus', Rural: 'wheat', Dual: 'arrowsDownUp', Motorway: 'roadSign', Rail: 'train' };
-const RAIL: Record<string, Icon> = { 'rail-branch': 'branch', 'rail-main': 'train', 'rail-hs': 'bolt', 'rail-light': 'route', 'rail-rack': 'mountain' };
-const TRAIN: Record<string, Icon> = { dmu: 'train', intercity: 'train', hs: 'bolt', tram: 'route', rack: 'mountain' };
+// What stands for each kind of road and railway in chips, lists and filters. Each icon means one
+// thing: the mountain is height (the blueprint's climb readout), so rack railways get the cog
+// they climb with, and Auto height its own line.
+const FAMILY: Record<string, Icon> = { Street: 'home', Avenue: 'trees', Boulevard: 'tree', Arterial: 'bus', Rural: 'wheat', Dual: 'arrowsDownUp', Motorway: 'motorway', Rail: 'train' };
+const RAIL: Record<string, Icon> = { 'rail-branch': 'branch', 'rail-main': 'train', 'rail-hs': 'bolt', 'rail-light': 'route', 'rail-rack': 'cog' };
+const TRAIN: Record<string, Icon> = { dmu: 'train', intercity: 'train', hs: 'bolt', tram: 'route', rack: 'cog' };
 export const roadIcon = (d: { id: string; family: string }) => RAIL[d.id] ?? FAMILY[d.family] ?? 'road';
 export const trainIcon = (id: string) => TRAIN[id] ?? 'train';
 // junction forms: the give-way triangle, signals, and a roundabout arrow that goes round clockwise

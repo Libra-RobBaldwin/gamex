@@ -418,7 +418,7 @@ let draftCheck: Check | null = null;
 let trace: P[] = []; // curve tool: where the finger has been during a drag
 const opts: RoadOpts = { ...DEFAULT_OPTS };
 const lastType = { road: 'street', rail: 'rail-main' };
-const HEIGHTS = [['auto', 'Auto', 'mountain'], ['level', 'Level', 'minus'], ['up', 'Climb', 'trendUp']] as const;
+const HEIGHTS = [['auto', 'Auto', 'heightAuto'], ['level', 'Level', 'minus'], ['up', 'Climb', 'trendUp']] as const;
 const CROSS = [['junction', 'Join', 'arrowsCross'], ['bridge', 'Over', 'bridge'], ['tunnel', 'Under', 'tunnel']] as const;
 const cls = () => (mode === 'rail' ? 'rail' : 'road') as 'road' | 'rail';
 const short = (id: string) => ({ street: 'Street', avenue: 'Avenue', dual: 'Dual', motorway: 'Motorway', 'rail-branch': 'Branch', 'rail-main': 'Main line', 'rail-hs': 'High speed', 'rail-light': 'Light rail', 'rail-rack': 'Rack' } as Record<string, string>)[id] ?? ROADS[id].family;
@@ -435,9 +435,9 @@ $('#ui').innerHTML = `
         <div class="brand">${markSvg()}<span class="wm">${NAME}</span></div>
         <div id="speed" role="group" aria-label="Game speed">
           <button data-sp="0" aria-label="Pause" title="Pause">${icon('pause')}</button>
-          <button data-sp="1" aria-label="Normal speed" title="Normal speed">1×</button>
-          <button data-sp="2" aria-label="Double speed" title="Double speed">2×</button>
-          <button data-sp="4" aria-label="Four times speed" title="Four times speed">4×</button>
+          <button data-sp="1" aria-label="1× speed" title="Normal speed">1×</button>
+          <button data-sp="2" aria-label="2× speed" title="Double speed">2×</button>
+          <button data-sp="4" aria-label="4× speed" title="Four times speed">4×</button>
         </div>
       </div>
       <button id="stats" title="Show or hide the performance readout" aria-controls="perf">
@@ -477,12 +477,12 @@ $('#ui').innerHTML = `
       </div>
     </div>
     <nav id="tools" aria-label="Tools">
-      <button data-t="look">${icon('finger')}<span>Look</span></button>
-      <button data-t="road">${icon('road')}<span>Road</span></button>
-      <button data-t="rail">${icon('train')}<span>Rail</span></button>
-      <button data-t="stop">${icon('busStop')}<span>Stop</span></button>
+      <button data-t="look" aria-pressed="false">${icon('finger')}<span>Look</span></button>
+      <button data-t="road" aria-pressed="false">${icon('road')}<span>Road</span></button>
+      <button data-t="rail" aria-pressed="false">${icon('train')}<span>Rail</span></button>
+      <button data-t="stop" aria-pressed="false">${icon('busStop')}<span>Stop</span></button>
       <button data-t="veh">${icon('bus')}<span>Vehicles</span></button>
-      <button data-t="reset">${icon('refresh')}<span>Reset</span></button>
+      <button data-t="reset">${icon('restore')}<span>Reset</span></button>
     </nav>
   </div>`;
 
@@ -498,7 +498,11 @@ function setMode(m: Mode) {
   const building = m === 'road' || m === 'rail';
   if (building && (mode === 'road' || mode === 'rail') && m !== mode) lastType[mode] = opts.type;
   mode = m;
-  document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => { b.classList.toggle('on', b.dataset.t === m); b.toggleAttribute('aria-current', b.dataset.t === m); });
+  // the four modes are toggles, pressed like the chips; Vehicles and Reset only open a panel
+  document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.t === m);
+    if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', String(b.dataset.t === m));
+  });
   // each mode has its colourway (green roads, blue rail, orange stops); the HUD reads it from here
   document.body.dataset.mode = m;
   $('#build').classList.toggle('hidden', !building);
@@ -512,7 +516,7 @@ function setMode(m: Mode) {
 }
 function setKind(k: RoadKind) {
   roadKind = k;
-  document.querySelectorAll<HTMLButtonElement>('#kinds button').forEach((b) => b.classList.toggle('on', b.dataset.k === k));
+  document.querySelectorAll<HTMLButtonElement>('#kinds button').forEach((b) => { b.classList.toggle('on', b.dataset.k === k); b.setAttribute('aria-pressed', String(b.dataset.k === k)); });
   clearDraft();
 }
 // The hint line under the map. It leads with the current tool's icon unless given its own.
@@ -533,7 +537,7 @@ document.querySelectorAll<HTMLButtonElement>('#tools button').forEach((b) => b.a
   const t = b.dataset.t!;
   if (t === 'look' || t === 'road' || t === 'rail' || t === 'stop') return setMode(t);
   if (t === 'veh') return openVehicles();
-  if (t === 'reset') location.reload();
+  if (t === 'reset') return openReset();
 }));
 
 // ---- the options row: height, gradient, and what happens where the route crosses something ----
@@ -573,7 +577,7 @@ $('#g-g').addEventListener('click', () => {
   renderGrade(); draftChanged();
   const d = ROADS[opts.type];
   hint(d.cls === 'rail'
-    ? `Steepest ${pctTxt(opts.grade)} (this line allows ${pctTxt(d.maxGrade)}) · intercity trains manage 3%, local trains 3.5%, light rail 7%, rack railcars 20%`
+    ? `Steepest ${pctTxt(opts.grade)} (this line allows ${pctTxt(d.maxGrade)}) · trains climb: intercity 3%, local 3.5%, light rail 7%, rack 20%`
     : `Steepest ${pctTxt(opts.grade)} (a ${d.mph} mph road allows ${pctTxt(d.maxGrade)}) · gentler means longer ramps`);
 });
 function setType(t: RoadType) {
@@ -608,17 +612,28 @@ $('#top').addEventListener('click', () => {
 // ---------------- the side panel ----------------
 // Detail opens in a column down the right; the camera turns so the thing you picked sits in the
 // clear space beside it (a road runs straight up the screen), so you can see what each choice does.
-let panelKind: 'junction' | 'stop' | 'roads' | 'vehicles' | null = null;
-const panelWidth = () => Math.min(canvas.clientWidth * 0.56, 320);
+let panelKind: 'junction' | 'stop' | 'roads' | 'vehicles' | 'reset' | null = null;
+// Where the clear map beside the panel runs from and to, in CSS pixels: from the left inset to the
+// panel's left edge. Read from the stylesheet (it answers even while the panel is hidden), so a
+// notch inset on either side moves the target with the panel.
+function clearSpan() {
+  const px = (el: Element, k: string) => parseFloat(getComputedStyle(el).getPropertyValue(k)) || 0;
+  const panel = $('#panel'), edge = px(document.documentElement, '--edge');
+  return { left: px($('#dock'), 'left') - edge, right: canvas.clientWidth - px(panel, 'right') - px(panel, 'width') };
+}
 // the colourway a panel wears: stops are orange, road work green, the rest the house green
-const TONE = { junction: 'road', roads: 'road', stop: 'stop', vehicles: 'look' } as const;
-function openPanel(kind: NonNullable<typeof panelKind>, title: string, ic: Icon, body: string) {
+const TONE = { junction: 'road', roads: 'road', stop: 'stop', vehicles: 'look', reset: 'look' } as const;
+// A different panel, or a new thing in the same one (another junction), starts at the top; a
+// re-render of the same one (a filter or a form tapped) keeps its place in the list.
+function openPanel(kind: NonNullable<typeof panelKind>, title: string, ic: Icon, body: string, fresh = false) {
+  if (kind !== panelKind) fresh = true;
   panelKind = kind;
   const el = $('#panel');
   el.className = `panel tone-${TONE[kind]}`;
   el.setAttribute('aria-label', title);
   el.innerHTML = `<div class="ph">${ridgeSvg()}<span class="pt"><i class="badge">${icon(ic)}</i><span>${title}</span></span><button id="px" aria-label="Close" title="Close">${icon('x')}</button></div>${body}`;
   el.classList.remove('hidden');
+  if (fresh) el.scrollTop = 0;
   document.body.classList.add('paneled');
   $('#px').addEventListener('click', closePanel);
   $('#card').classList.add('hidden');
@@ -634,7 +649,7 @@ function closePanel() {
 const closeSheet = closePanel;
 // Put p in the middle of the free space; if `dir` is given, turn so it runs up the screen.
 function focusOn(p: P, h: number, dir?: P, el?: number) {
-  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const H = canvas.clientHeight;
   let az = view.az;
   if (dir) {
     const a = Math.atan2(-dir.x, -dir.z);
@@ -643,7 +658,8 @@ function focusOn(p: P, h: number, dir?: P, el?: number) {
   const save = { ...view };
   Object.assign(view, { az, h, x: p.x, z: p.z, el: el ?? view.el });
   placeCamera();
-  const g = groundAt((W - panelWidth() - 8) / 2, H * 0.44);
+  const c = clearSpan();
+  const g = groundAt((c.left + c.right) / 2, H * 0.44);
   Object.assign(view, save);
   placeCamera();
   goal = { az, h, x: p.x - (g.x - p.x), z: p.z - (g.z - p.z), ...(el ? { el } : {}) };
@@ -682,7 +698,7 @@ function openRoadPicker() {
     ${chips('Speed (mph)', 'mph', [20, 30, 40, 50, 60, 70], (n) => `${n}`)}
     <div class="fl" role="group" aria-label="With"><span class="lbl">With</span>${tri('trees', 'trees', 'Trees')}${tri('bus', 'bus', 'Bus lanes')}${tri('cycle', 'bike', 'Cycle lanes')}${tri('parking', 'parking', 'Parking')}</div>
     <div class="cnt">${list.length} of ${Object.values(ROADS).filter((d) => d.cls === 'road').length} road types</div>
-    ${list.length ? '' : '<small>No road type has all of these. Set one of the filters back to Any.</small>'}
+    ${list.length ? '' : '<small>No road type has all of these. Set a filter back to Any, or tap a With chip until it’s plain.</small>'}
     <div class="rl">${list.map((d) => `<button data-pick="${d.id}" class="${d.id === opts.type ? 'on' : ''}"><b>${icon(roadIcon(d))}${d.label}</b>${roadSvg(d)}<small>${Math.round(halfOfType(d.id) * 2)} m wide · £${d.cost.toLocaleString('en-GB')}/m · ${d.blurb}</small></button>`).join('')}</div>`);
   const el = $('#panel');
   el.querySelectorAll<HTMLButtonElement>('[data-f]').forEach((b) => b.addEventListener('click', () => {
@@ -721,6 +737,18 @@ function openVehicles() {
   el.querySelectorAll<HTMLButtonElement>('[data-lvl]').forEach((b) => b.addEventListener('click', () => { level = +b.dataset.lvl!; openVehicles(); }));
 }
 
+// ---- reset: nothing is saved yet, so starting again throws the player's work away; ask first ----
+// (in a panel rather than confirm(), which a sandboxed artifact frame may block outright)
+function openReset() {
+  openPanel('reset', 'Start again?', 'restore', `
+    <div class="grp"><small>Every road, rail line, stop and vehicle you have added goes, and the town starts again as it was. This can’t be undone.</small>
+      <button data-reset="1" class="danger">${icon('restore')}Start again</button>
+      <button data-keep="1"><b>${icon('play')}Keep playing</b></button></div>`);
+  const el = $('#panel');
+  el.querySelector('[data-reset]')!.addEventListener('click', () => location.reload());
+  el.querySelector('[data-keep]')!.addEventListener('click', closePanel);
+}
+
 // ---- junctions: tap one in Road mode ----
 let editJ: number | null = null;
 function junctionNear(p: P) {
@@ -737,10 +765,10 @@ function openJunction(node: number) {
   const j = junctions.get(node)!, n = net.node(node);
   focusOn(n, Math.max(70, j.R * 5), undefined, 1.15);
   rebuildRoads();
-  renderJunction();
+  renderJunction(true);
 }
 const pctFull = (d: number) => `${Math.round(d * 100)}%`;
-function renderJunction() {
+function renderJunction(fresh = false) {
   if (editJ === null) return;
   const j = junctions.get(editJ)!;
   const legs = legsAt(net, editJ);
@@ -760,7 +788,7 @@ function renderJunction() {
     </div>
     ${j.form === 'priority' || j.form === 'signals' ? `<button data-slip="1" class="${j.slip ? 'on' : ''}" aria-pressed="${!!j.slip}"><b>${icon('ramp')}Left-turn slip lane${j.slip ? icon('check', 'tick') : ''}</b></button>` : ''}
     <div class="grp"><span class="tab">Lanes</span><small>Tap an arrow on the road to change what a lane is for. The design above is already the best balance for the traffic.</small>
-      <button data-opt="1"><b>${icon('refresh')}Re-optimise lanes</b></button></div>`);
+      <button data-opt="1"><b>${icon('refresh')}Re-optimise lanes</b></button></div>`, fresh);
   const el = $('#panel');
   el.querySelectorAll<HTMLButtonElement>('[data-form]').forEach((b) => b.addEventListener('click', () => {
     const f = b.dataset.form!;
@@ -1042,13 +1070,13 @@ function stopTap(p: P) {
   drawGhost();
   // turn the road to run up the screen beside the panel, so the lay-by can be seen as it's chosen
   focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
-  if (res.reason) openPanel('stop', 'Can’t put a stop here', 'busStop', `<div class="bad">${icon('alert')}<span>${res.reason}</span></div>`);
+  if (res.reason) openPanel('stop', 'Can’t put a stop here', 'busStop', `<div class="bad">${icon('alert')}<span>${res.reason}</span></div>`, true);
   else {
     const d = net.def(q.seg);
     openPanel('stop', `Stop on this ${d.family.toLowerCase()}`, 'busStop',
       res.plans.map((pl, i) => `<div class="plan${pl.ok ? '' : ' no'}"><div class="row"><span class="tab">${pl.title}</span><span class="cost">${money(pl.cost)}</span></div>
         ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${icon('alert')}<span>${pl.blocked}</span></div>` : ''}
-        <button class="primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</button></div>`).join(''));
+        <button class="primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</button></div>`).join(''), true);
   }
   const el = $('#panel');
   el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
@@ -1342,6 +1370,9 @@ function getPlaces(): Places {
   });
 }
 const hhmm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
+// a count short enough for the stats line however big the town gets: 9,999 then 23.4k, 123k, 1.2m
+// (rounded down, so it never claims more than there are)
+const count = (n: number) => (n < 1e4 ? n.toLocaleString('en-GB') : n < 1e5 ? `${Math.floor(n / 100) / 10}k` : n < 1e6 ? `${Math.floor(n / 1e3)}k` : `${Math.floor(n / 1e5) / 10}m`);
 
 let last = performance.now();
 let growAt = 0; // game minutes until the next building
@@ -1453,10 +1484,10 @@ function frame(now: number) {
     const rush = speed ? rushLabel(hour) : 'paused';
     $('#st-rush').textContent = ({ 'morning rush': 'AM peak', 'evening rush': 'PM peak' } as Record<string, string>)[rush] ?? rush;
     $('#st-rush').title = rush;
-    $('#st-cars').textContent = String(traffic.live);
+    $('#st-cars').textContent = count(traffic.live);
     $('#st-buses').textContent = String(traffic.buses);
     $('#st-trains').textContent = String(traffic.trains.length);
-    $('#st-pop').textContent = pop.toLocaleString('en-GB');
+    $('#st-pop').textContent = count(pop);
   }
   const t1 = performance.now();
   const q = TIERS[tier];
