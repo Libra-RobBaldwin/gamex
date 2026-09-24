@@ -72,12 +72,51 @@ function place() {
 
 const lit = (c: string, o: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color: c, side: THREE.DoubleSide, flatShading: true, ...o });
 const grass = lit('#79a653'), bank = lit('#8d8a62'), waterMat = lit('#3f86b8', { transparent: true, opacity: 0.88 });
+// the cut face at the edge of the map: turf, topsoil, subsoil, then rock
+const turf = lit('#5f8a3e'), topsoil = lit('#5b4632'), subsoil = lit('#9b7a4c'), rock = lit('#7c7872'), waterCut = lit('#2f6f9e', { transparent: true, opacity: 0.8 });
 const asph = lit('#4a4e54', { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), mark = lit('#eeeeea', { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
 const ballastMat = lit('#8f887c', { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), leafMat = lit('#3f7a3a'), trunkMat = lit('#5b4330');
 const red = lit('#d23b2e'), green = lit('#2f9a4a'), hullMat = lit('#2f3a48'), cabinMat = lit('#e9e4d8');
 
 function mesh(g: THREE.BufferGeometry, m: THREE.Material, shadow = true) { const x = new THREE.Mesh(g, m); x.receiveShadow = true; x.castShadow = shadow; return x; }
 function strip(pos: number[]) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); return g; }
+
+// The map ends in a cut face, like a slice through the ground: a lip of turf, dark topsoil, a
+// band of subsoil following the surface, then rock down to a level base. Where the cut meets the
+// river it shows the water as a column down to its bed. (A paper-thin edge gives the game away.)
+function earthEdges(c: Crossing, sc: Scenario, sOf: (x: number) => number, x0: number, x1: number, W: number, step: number) {
+  const g = new THREE.Group();
+  let lowest = Infinity;
+  for (let x = x0; x <= x1; x += step) lowest = Math.min(lowest, groundAt(c, sOf(x)));
+  const base = lowest - 18;
+  const bands: [THREE.Material, number, number][] = [[turf, 0, 0.35], [topsoil, 0.35, 1.4], [subsoil, 1.4, 5]]; // depths below the surface
+  const pos = new Map<THREE.Material, number[]>();
+  const push = (m: THREE.Material, ...v: number[]) => { let a = pos.get(m); if (!a) pos.set(m, (a = [])); a.push(...v); };
+  // a vertical quad on the face z = zf between x and xn, from height ya0..ya1 (at x) to yb0..yb1 (at xn)
+  const face = (m: THREE.Material, zf: number, x: number, xn: number, ya0: number, ya1: number, yb0: number, yb1: number) => {
+    if (ya1 - ya0 < 1e-3 && yb1 - yb0 < 1e-3) return;
+    push(m, x, ya0, zf, xn, yb0, zf, xn, yb1, zf, x, ya0, zf, xn, yb1, zf, x, ya1, zf);
+  };
+  const wet = (x: number, xn: number) => sc.water.find((w) => sOf(x) >= w.s0 - 1e-6 && sOf(xn) <= w.s1 + 1e-6);
+  for (const zf of [-W, W]) {
+    for (let x = x0; x < x1 - 1e-6; x += step) {
+      const xn = Math.min(x1, x + step), ga = groundAt(c, sOf(x)), gb = groundAt(c, sOf(xn));
+      for (const [m, d0, d1] of bands) face(m, zf, x, xn, Math.max(base, ga - d1), ga - d0, Math.max(base, gb - d1), gb - d0);
+      face(rock, zf, x, xn, base, Math.max(base, ga - 5), base, Math.max(base, gb - 5));
+      const w = wet(x, xn);
+      if (w) face(waterCut, zf, x, xn, ga, w.level, gb, w.level);
+    }
+  }
+  // the two ends of the map, across the route (the ground is level across it)
+  for (const xe of [x0, x1]) {
+    const ge = groundAt(c, sOf(xe));
+    const across = (m: THREE.Material, y0: number, y1: number) => { if (y1 - y0 > 1e-3) push(m, xe, y0, -W, xe, y0, W, xe, y1, W, xe, y0, -W, xe, y1, W, xe, y1, -W); };
+    for (const [m, d0, d1] of bands) across(m, Math.max(base, ge - d1), ge - d0);
+    across(rock, base, Math.max(base, ge - 5));
+  }
+  for (const [m, a] of pos) g.add(mesh(strip(a), m, false));
+  return g;
+}
 
 function world(sc: Scenario, c: Crossing, lay: BridgeLayout) {
   const out = new THREE.Group();
@@ -94,6 +133,7 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout) {
     (wet ? bp : gp).push(x, ya, -W, xb, yb, -W, xb, yb, W, x, ya, -W, xb, yb, W, x, ya, W);
   }
   out.add(mesh(strip(gp), grass, false), mesh(strip(bp), bank, false));
+  out.add(earthEdges(c, sc, sOf, x0, x1, W, step));
   for (const w of sc.water) {
     const xa = x0 + w.s0 / k, xb = x0 + w.s1 / k;
     out.add(mesh(strip([xa, w.level, -W, xb, w.level, -W, xb, w.level, W, xa, w.level, -W, xb, w.level, W, xa, w.level, W]), waterMat, false));
@@ -117,7 +157,13 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout) {
   // roads and railways underneath, running across the route
   for (const u of sc.under) {
     const xa = x0 + u.s0 / k, xb = x0 + u.s1 / k, y = groundAt(c, (u.s0 + u.s1) / 2) + 0.05, xm = (xa + xb) / 2;
-    out.add(mesh(strip([xa, y, -W, xb, y, -W, xb, y, W, xa, y, -W, xb, y, W, xa, y, W]), u.kind === 'rail' ? ballastMat : asph, false));
+    // laid on the ground metre by metre, so it never sinks into a slope
+    const rp: number[] = [];
+    for (let x = xa; x < xb - 1e-6; x += 1) {
+      const xn = Math.min(xb, x + 1), ya = groundAt(c, sOf(x)) + 0.06, yb = groundAt(c, sOf(xn)) + 0.06;
+      rp.push(x, ya, -W, xn, yb, -W, xn, yb, W, x, ya, -W, xn, yb, W, x, ya, W);
+    }
+    out.add(mesh(strip(rp), u.kind === 'rail' ? ballastMat : asph, false));
     if (u.kind === 'road') for (let z = -W; z < W; z += 9) out.add(mesh(strip([xm - 0.1, y + 0.02, z, xm + 0.1, y + 0.02, z, xm + 0.1, y + 0.02, z + 3, xm - 0.1, y + 0.02, z, xm + 0.1, y + 0.02, z + 3, xm - 0.1, y + 0.02, z + 3]), mark, false));
     else for (const r of [-2.72, -1.28, 1.28, 2.72]) out.add(mesh(strip([xm + r - 0.07, y + 0.15, -W, xm + r + 0.07, y + 0.15, -W, xm + r + 0.07, y + 0.15, W, xm + r - 0.07, y + 0.15, -W, xm + r + 0.07, y + 0.15, W, xm + r - 0.07, y + 0.15, W]), hullMat, false));
   }
