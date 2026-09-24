@@ -265,3 +265,26 @@ The models close up (panel hidden):
 - **The land check is the demo's.** The Neighbours toggle stands in for the land registry. The
   wider catchment ring is only drawn in the demo.
 - **Screenshots are SwiftShader**, so shadows and antialiasing are softer than on a phone's GPU.
+
+## On the anchors: tiers bought, then demolished
+
+These were re-taken after the review fixes, with `?anchors=1`: the site's gate, lorry bays,
+sidings and quay are marked in magenta. Starter tiers sit on those marks. Bigger tiers sit on
+land beside the plot: on the frontage by the bays, behind the works in line with the sidings (or
+off the far side when the back is water), or out into the water from the bank.
+
+| Colliery | Colliery, rail demolished | Steelworks | Steelworks, quay and road demolished |
+|---|---|---|---|
+| ![](terminals/anchors-coal-bought.png) | ![](terminals/anchors-coal-removed.png) | ![](terminals/anchors-steel-bought.png) | ![](terminals/anchors-steel-removed.png) |
+
+| Docks | Docks, back to their own quay | Refinery | Refinery, depot and jetty demolished |
+|---|---|---|---|
+| ![](terminals/anchors-docks-bought.png) | ![](terminals/anchors-docks-removed.png) | ![](terminals/anchors-refinery-bought.png) | ![](terminals/anchors-refinery-removed.png) |
+
+| Quarry | Quarry, sidings demolished | Power station | Power station, rail demolished |
+|---|---|---|---|
+| ![](terminals/anchors-quarry-bought.png) | ![](terminals/anchors-quarry-removed.png) | ![](terminals/anchors-power-bought.png) | ![](terminals/anchors-power-removed.png) |
+
+| Sawmill | Sawmill, road terminal demolished | The panel |
+|---|---|---|
+| ![](terminals/anchors-sawmill-bought.png) | ![](terminals/anchors-sawmill-removed.png) | ![](terminals/panel.png) |
