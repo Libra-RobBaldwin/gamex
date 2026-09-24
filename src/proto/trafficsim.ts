@@ -155,8 +155,8 @@ export const SCENARIOS: Scenario[] = [
   },
   // motorway junctions (interchange/build.ts): a pair of one-way carriageways, slip roads leaving and
   // joining them, and the local road they meet; trips run on and off the motorway at both ends
-  ...([['dumbbell', 'taper', 'open'], ['gsr', 'taper', 'open'], ['diamond', 'taper', 'open'], ['dumbbell', 'parallel', 'open'], ['dumbbell', 'taper', 'tight'], ['gsr', 'taper', 'tight']] as [IxForm, SlipStyle, IxSize][]).map(([form, style, size]): Scenario => ({
-    name: `motorway junction: ${form}${style === 'parallel' ? ', parallel slip lanes' : ''}${size === 'tight' ? ', tight' : ''}`, cars: 170, minTrips: 60, forms: undefined, through: true,
+  ...([['dumbbell', 'taper', 'open'], ['gsr', 'taper', 'open'], ['diamond', 'taper', 'open'], ['dumbbell', 'parallel', 'open'], ['dumbbell', 'taper', 'tight'], ['gsr', 'taper', 'tight'], ['trumpet', 'taper', 'tight'], ['trumpet', 'taper', 'open']] as [IxForm, SlipStyle, IxSize][]).map(([form, style, size]): Scenario => ({
+    name: `motorway junction: ${form}${style === 'parallel' ? ', parallel slip lanes' : ''}${size === 'tight' ? ', tight' : form === 'trumpet' ? ', open' : ''}`, cars: 170, minTrips: 60, forms: undefined, through: true,
     build: (n) => {
       n.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
       const r = motorwayWithJunction(n, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...n.segs.values()][0], 0, style, size);

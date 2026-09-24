@@ -1775,7 +1775,7 @@ function seedJunctionDemo(form: IxForm | null, style: SlipStyle, size: IxSize = 
 const sandbox = new URLSearchParams(location.search).get('map') === 'sandbox';
 // (or a motorway junction on its own, to look at: /proto.html?junction=dumbbell, see seedJunctionDemo)
 const demoJunction = new URLSearchParams(location.search).get('junction');
-const demo = demoJunction === 'blank' || demoJunction === 'dumbbell' || demoJunction === 'gsr' || demoJunction === 'diamond';
+const demo = demoJunction === 'blank' || (IX_FORMS as string[]).includes(demoJunction ?? '');
 if (demo) seedJunctionDemo(demoJunction === 'blank' ? null : (demoJunction as IxForm), new URLSearchParams(location.search).get('slips') === 'parallel' ? 'parallel' : 'taper', new URLSearchParams(location.search).get('size') === 'tight' ? 'tight' : 'open');
 else if (!sandbox) await seedTown();
 await loading.stage('Adding bus stops and drawing the roads', 0.1);

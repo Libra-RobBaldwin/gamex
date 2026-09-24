@@ -30,8 +30,10 @@ describe('motorway junctions', () => {
   for (const [form, style, size] of [...IX_FORMS.map((f) => [f, 'taper', 'open'] as const), ...IX_FORMS.map((f) => [f, 'taper', 'tight'] as const), ['dumbbell', 'parallel', 'open'] as const]) it(`${form} (${style}, ${size}): every slip road meets the carriageway as a merge or diverge, with DMRB tapers and noses`, () => {
     const { net, ix, js } = junctionTown(form, style, size);
     const slips = [...js.values()].filter((j) => j.form === 'merge' || j.form === 'diverge');
-    expect(slips.length).toBe(4);
-    expect(slips.filter((j) => j.form === 'merge').length).toBe(2);
+    // (four on the motorway; a trumpet's links have a merge and a diverge of their own as well)
+    const extra = form === 'trumpet' ? 2 : 0;
+    expect(slips.length).toBe(4 + extra);
+    expect(slips.filter((j) => j.form === 'merge').length).toBe(2 + extra / 2);
     expect(ix.slips.length).toBe(4);
     for (const j of slips) {
       // measured from the course the traffic drives: along the carriageway, where the slip lane runs
