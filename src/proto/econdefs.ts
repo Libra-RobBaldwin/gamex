@@ -156,6 +156,7 @@ export const TUNE = {
   // what towns need fed to them
   goodsPerShopJobHour: 0.08,
   materialsPerWorksJobHour: 0.06,
+  townStoreHours: 48, // a town takes goods and materials until it holds this many hours' use
   visitsPerOfficeJobDay: 0.25, // passengers arriving at the town's workplaces
   // share of what the town started with that it finds for itself: homes for people who don't
   // need to get to work (the retired, those working from home), and supplies for its businesses

@@ -56,6 +56,11 @@ export interface TState {
   labour: number; customers: number; // town-wide: workers per job, customers per shop place
   supply: { goods: number; materials: number; visitors: number }; // smoothed, per hour
   month: { goods: number; materials: number; visitors: number }; // delivered so far this month
+  // Goods and materials the town takes, per hour: as much as its businesses can make use of,
+  // however well supplied (set at each review). What's delivered goes into a store of a couple of
+  // days' worth that empties at that rate; beyond it the town takes no more, and isn't paid for.
+  accept: { goods: number; materials: number };
+  held: { goods: number; materials: number };
   use: Record<Use, UState>;
   health: PerUse; // how much of each use's capacity businesses want to keep going
   history: number[];
@@ -70,6 +75,7 @@ export function newTown(id: number, name: string, x: number, z: number, carShare
   return {
     id, name, x, z, carShare, zones: [], base: perUse(), bias: perUse(1), calibrated: false, primed: false, labour: 1, customers: 1,
     supply: { goods: 0, materials: 0, visitors: 0 }, month: { goods: 0, materials: 0, visitors: 0 },
+    accept: { goods: 0, materials: 0 }, held: { goods: 0, materials: 0 },
     use: { home: u(), shop: u(), office: u(), works: u(), civic: u() }, health: perUse(1), history: [], recent: { built: [], lost: [] },
     done: { built: 0, lost: 0 }, facts: null, report: null,
   };
@@ -155,6 +161,12 @@ export function reviewTown(t: TState, c: TownCtx) {
       const staffed = t.bias[u] * struct[u], ahead = staffed * (1 + T.labourSlack);
       const spare = ahead > 0 ? clamp(supplyB[u] / ahead - 1, 0, 1) : 0;
       us.raw = Math.min(ahead + staffed * T.supplySlack * spare, supplyB[u]);
+      // Supply beyond twice `ahead` changes nothing above, so that (less what the town finds for
+      // itself) is all it takes delivered: never less than what the businesses standing use, nor
+      // than one new building's worth.
+      const most = (local: number, per: number) => per * Math.max(0, Math.max(2 * ahead, C[u], BUILDINGS[ENTRY[u]].cap) - local * t.base[u]);
+      if (u === 'shop') t.accept.goods = most(T.local.goods, T.goodsPerShopJobHour);
+      else if (u === 'works') t.accept.materials = most(T.local.materials, T.materialsPerWorksJobHour);
     }
     D[u] = us.raw;
     us.demand = c.assess && us.demand === 0 ? C[u] : us.demand + T.demandAlpha * (D[u] - us.demand);

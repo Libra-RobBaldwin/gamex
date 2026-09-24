@@ -153,6 +153,7 @@ export class Economy {
         for (const x of st.visit) x.town.month.visitors += v * x.w;
       },
       pool: (L, slot) => site(L, slot)?.pool ?? none,
+      room: (L, slot, c) => this.freightRoom(site(L, slot), c),
       freight: (L, slot, c, amount) => this.freightArrives(site(L, slot), c, amount),
     };
     for (const t of world.towns) this.setTown(t);
@@ -354,6 +355,10 @@ export class Economy {
     if (this.dirty.service) { this.refreshService(); const t = performance.now(); this.timing.service += t - t0; t0 = t; }
     const hour = hourShape(((this.clock + this.time) / 60) % 24);
     for (const ind of this.indMap.values()) this.industryStep(ind, dt);
+    for (const t of this.townMap.values()) {
+      t.held.goods = Math.max(0, t.held.goods - (t.accept.goods * dt) / 60);
+      t.held.materials = Math.max(0, t.held.materials - (t.accept.materials * dt) / 60);
+    }
     for (const L of this.lineList) if (L.pax && L.running) L.generate(dt, hour);
     for (const L of this.lineList) {
       L.step(dt, this.ctx);
@@ -459,25 +464,46 @@ export class Economy {
     }
   }
 
-  private freightArrives(st: SState | undefined, c: number, amount: number) {
-    if (!st) return;
+  // What a freight stop could still take of a cargo: room in the store of whoever consumes it
+  // there, or room in the pool it waits in for a line on.
+  private freightRoom(st: SState | undefined, c: number) {
+    if (!st) return 0;
     const who = st.consumes[c], cargo = FREIGHT[c];
     if (who) {
-      if ('def' in who) {
-        const cap = (who.def.converts?.perHour ?? 60) * 4 * this.tune.industry.stockHours;
-        who.input[c] = Math.min(cap, who.input[c] + amount);
-        who.received += amount;
-      } else if (cargo === 'goods') who.month.goods += amount;
-      else if (cargo === 'materials') who.month.materials += amount;
-      this.totals.delivered[cargo] = (this.totals.delivered[cargo] ?? 0) + amount;
-      return;
+      if ('def' in who) return Math.max(0, this.inputCap(who) - who.input[c]);
+      if (cargo === 'goods' || cargo === 'materials') return Math.max(0, who.accept[cargo] * this.tune.townStoreHours - who.held[cargo]);
+      return 0;
     }
-    // nobody takes it here: it waits for the best line on (a transfer), here or at a freight stop
-    // next door (lorries bringing coal to a railhead, say), if there's room
     const to = st.drop[c] ?? st;
     let held = 0;
     for (let k = 0; k < NC; k++) held += to.pool[k];
-    to.pool[c] += Math.max(0, Math.min(amount, to.def.cap - held));
+    return Math.max(0, to.def.cap - held);
+  }
+
+  private inputCap(ind: IState) { return (ind.def.converts?.perHour ?? 60) * 4 * this.tune.industry.stockHours; }
+
+  // Freight unloaded at a stop: taken as far as there's room (see freightRoom), and only that is
+  // counted as delivered. Returns how much was taken; the line keeps the rest on board.
+  private freightArrives(st: SState | undefined, c: number, amount: number) {
+    const take = Math.min(amount, this.freightRoom(st, c));
+    if (!st || take <= 0) return 0;
+    const who = st.consumes[c], cargo = FREIGHT[c];
+    if (who) {
+      if ('def' in who) {
+        who.input[c] += take;
+        who.received += take;
+      } else if (cargo === 'goods' || cargo === 'materials') {
+        who.month[cargo] += take;
+        who.held[cargo] += take;
+      }
+      this.totals.delivered[cargo] = (this.totals.delivered[cargo] ?? 0) + take;
+      return take;
+    }
+    // nobody takes it here: it waits for the best line on (a transfer), here or at a freight stop
+    // next door (lorries bringing coal to a railhead, say)
+    const to = st.drop[c] ?? st;
+    to.pool[c] += take;
+    return take;
   }
 
   private reviewIndustries() {
@@ -964,7 +990,7 @@ export class Economy {
       reqNo: this.reqNo, nextId: this.nextId, runningOwed: this.runningOwed, totals: structuredClone(this.totals),
       towns: [...this.townMap.values()].map((t) => ({
         id: t.id, base: { ...t.base }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, labour: t.labour, customers: t.customers,
-        supply: { ...t.supply }, month: { ...t.month }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
+        supply: { ...t.supply }, month: { ...t.month }, accept: { ...t.accept }, held: { ...t.held }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
         recent: structuredClone(t.recent), done: { ...t.done }, report: t.report ? structuredClone(t.report) : null,
       })),
       zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared } })),

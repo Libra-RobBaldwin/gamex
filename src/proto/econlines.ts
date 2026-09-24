@@ -15,12 +15,16 @@ export interface StopPos { id: number; x: number; z: number; kind: StopKind; nam
 export interface Onward { line: LineState; board: number; alight: number; share: number }
 
 // What a line reports back as it runs: fares taken, people finishing their journey, freight
-// arriving (the economy decides whether it's consumed there or waits for another line).
+// arriving (the economy decides whether it's consumed there or waits for another line, and how
+// much of it there's room for: what isn't taken stays on board, unpaid, and goes round again).
 export interface LineCtx {
   fare(line: LineState, slot: number, amount: number): void;
   arrive(line: LineState, slot: number, people: number): void;
   pool(line: LineState, slot: number): Float64Array; // freight waiting at a slot's stop, by FREIGHT index
-  freight(line: LineState, slot: number, cargo: number, amount: number): void;
+  // how much of a cargo the stop at a slot could still take (for its consumer or to wait there)
+  room(line: LineState, slot: number, cargo: number): number;
+  // returns how much of it was taken
+  freight(line: LineState, slot: number, cargo: number, amount: number): number;
 }
 
 export class LineState {
@@ -65,6 +69,7 @@ export class LineState {
   readonly fonb: Float64Array;
   readonly fowed: Float64Array;
   readonly dest: Int16Array;
+  private readonly avail = new Float64Array(NC);
   // this step, per slot
   readonly legFlow: Float64Array;
   readonly boarded: Float64Array;
@@ -269,25 +274,34 @@ export class LineState {
       for (let c = 0; c < NC; c++) {
         const n = c * k + i, a = this.fonb[n];
         if (a <= 1e-9) continue;
-        this.fonb[n] = 0;
-        this.load -= a;
-        ctx.fare(this, i, this.fowed[n]);
-        this.month.revenue += this.fowed[n];
-        this.fowed[n] = 0;
-        ctx.freight(this, i, c, a);
-        this.alighted[i] += a;
+        // paid only for what the stop takes; the rest stays on board and comes round again
+        const took = Math.min(a, Math.max(0, ctx.freight(this, i, c, a)));
+        if (took <= 1e-9) continue;
+        const paid = this.fowed[n] * (took / a);
+        this.fonb[n] = a - took;
+        this.fowed[n] -= paid;
+        if (this.fonb[n] <= 1e-9) this.fonb[n] = this.fowed[n] = 0;
+        this.load -= took;
+        ctx.fare(this, i, paid);
+        this.month.revenue += paid;
+        this.alighted[i] += took;
       }
       const room = cap - this.load;
       if (room > 1e-9) {
         const pool = ctx.pool(this, i);
+        // load only what the stop it's taken to has room for, less what's on board for it already
+        const avail = this.avail;
         let total = 0;
-        for (let c = 0; c < NC; c++) if (this.dest[c * k + i] >= 0) total += pool[c];
+        for (let c = 0; c < NC; c++) {
+          const j = this.dest[c * k + i];
+          avail[c] = j >= 0 && pool[c] > 0 ? Math.min(pool[c], Math.max(0, ctx.room(this, j, c) - this.fonb[c * k + j])) : 0;
+          total += avail[c];
+        }
         if (total > 1e-9) {
           const take = Math.min(room, total), f = take / total;
           for (let c = 0; c < NC; c++) {
-            const j = this.dest[c * k + i];
-            if (j < 0 || pool[c] <= 0) continue;
-            const m = pool[c] * f;
+            if (avail[c] <= 0) continue;
+            const j = this.dest[c * k + i], m = avail[c] * f;
             pool[c] -= m;
             this.fonb[c * k + j] += m;
             this.fowed[c * k + j] += m * this.unitFare(c, i, j);

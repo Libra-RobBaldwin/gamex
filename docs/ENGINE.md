@@ -141,8 +141,8 @@ in WebTAG, walking all the way counts as it is, and taking a bus or train at all
 few minutes, so nobody rides 300 m. A journey on your lines counts towards reach only for the
 share of people who found room on board last month, so a full line can't feed a town like one
 with seats to spare. Fares have a fixed part that builds up over the first 2–3 km, so short
-hops earn next to nothing. Money events are in whole pounds, with what's left over carried to the next, so
-they add up to the lines' books.
+hops earn next to nothing. Money events are in whole pounds, with
+what's left over carried to the next, so they add up to the lines' books.
 
 **Pairs, not all pairs.** A zone pairs one to one with the zones within about a kilometre,
 then with blocks of zones, three times coarser at each step out to 25 km. A block is reached
@@ -165,6 +165,16 @@ closer, with any number of changes (lorry to railhead, train, lorry to the works
 shuttled for fares, and an industry doesn't hand its output to a depot whose only route runs to
 another depot beside it. Production rises when most of it is collected and falls back to where
 it started when it isn't, as in 2D.
+
+Freight is only taken, and only paid for, where there's room for it, as in Transport Fever. An
+industry takes its input up to its store (a power station burns only so much coal); a town
+takes goods and materials only as fast as its shops and works can make use of them (up to
+twice what they would staff, less what the town finds for itself, and never less than the
+businesses standing use), with a store of two days' worth; a transfer stop takes only what fits
+in its yard. A line loads only what the stop it's heading for has room for, and anything that
+still isn't taken stays on board, unpaid, and goes round again. So feeding more than a place
+can use earns nothing more, the surplus waits at the pickup, and the industry making it no
+longer counts as collected and doesn't grow on it.
 
 **How towns change.** Each month, each use of building in each town gets a demand:
 
