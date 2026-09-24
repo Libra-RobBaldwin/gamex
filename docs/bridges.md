@@ -150,9 +150,23 @@ span steeper than its type allows.
 
 Steps 1–7 of the plan below are in. The glue is `src/proto/game/bridges.ts`:
 
-- `crossingOf(net, path, road)` makes the `Crossing`. It uses the water sampled along the path,
-  the roads and railways underneath from `net.crossings()`, and keep-outs for other junctions'
-  land under a raised deck.
+- `crossingOf(net, path, road)` makes the `Crossing`. It uses:
+  - the water sampled along the path;
+  - roads and railways underneath, found by walking the deck: wherever a pier (a line across the
+    deck's width) would touch a road's full width below, that stretch is kept clear, so skewed
+    crossings, junction arms and roads running along under a viaduct are all covered;
+  - keep-outs for other junctions' land under a raised deck.
+- `extents()` reaches 6 m past each obstacle (it used to be 2 m), so there's room for the
+  abutment's footing and setback.
+- `check()` refuses a blueprint when:
+  - no type fits one of its bridges;
+  - a bridge already built overhead would have no room for its piers.
+
+  When a new road only takes a built bridge's headroom below standard, the bridge is re-laid as
+  a low bridge, with a note, instead of being refused. Over a railway, the height solver uses
+  the railway's clearance, for the overhead wires.
+- The game refuses types shorter than their `length.min`, such as a suspension bridge over a
+  pond. The earthworks outside the bridges are priced on the path that's actually built.
 - `check()` in `roads.ts` calls `priceBridges()`. Inside each extent, the chooser's cost
   replaces `RAISE_COST`. It passes a `resolve` that re-runs `solveProfile` with the over-limits
   raised or the gradient eased. If the chosen type needs it, the raised path is the one that
@@ -173,9 +187,10 @@ Steps 1–7 of the plan below are in. The glue is `src/proto/game/bridges.ts`:
   listing this year's types: the cost and upkeep of each, the recommended one marked, and
   refused ones greyed out with their reason. Picking one sets the override and re-commits
   through `commitRoads()`. The editor offers only types that fit the deck as it's built.
-- `Traffic.speedCap` caps cars at the type's `roadMph` on a bridge.
+- `Traffic.speedCap` caps cars at the type's `roadMph`, slowing them from 40 m before the bridge.
+  Trains are capped at `railMph`, and brake for it in time.
 
-Not done yet: bascule closures in traffic, abnormal loads, water classes and channels (for
+Not done yet: bascule closures in traffic, abnormal loads, charging for a change of type, water classes and channels (for
 water's `navLimits` and `pierBans`), and land claims for piers (steps 8–11). Money is shown but
 not charged, because the economy isn't wired in yet.
 
