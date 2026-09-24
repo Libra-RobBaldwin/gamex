@@ -282,3 +282,39 @@ describe('overlays', () => {
     expect(chain.some((e) => e.from === 'goods_factory' && e.to === 'town' && e.cargo === 'goods')).toBe(true);
   });
 });
+
+describe('sidings on their sites', () => {
+  // The top faces of what stands up on a site (roofs, walls' tops, pit benches), as half-metre
+  // cells in site-local metres: a triangle counts when all its corners are at least 0.9 m up.
+  const CELL = 0.5;
+  function tallCells(g: THREE.BufferGeometry) {
+    const pos = g.getAttribute('position'), idx = g.getIndex(), cells = new Set<string>();
+    const n = idx ? idx.count : pos.count, v = (i: number) => { const j = idx ? idx.getX(i) : i; return [pos.getX(j), pos.getY(j), pos.getZ(j)]; };
+    for (let t = 0; t < n; t += 3) {
+      const a = v(t), b = v(t + 1), c = v(t + 2);
+      if (Math.min(a[1], b[1], c[1]) < 0.9) continue;
+      const x0 = Math.floor(Math.min(a[0], b[0], c[0]) / CELL), x1 = Math.ceil(Math.max(a[0], b[0], c[0]) / CELL);
+      const z0 = Math.floor(Math.min(a[2], b[2], c[2]) / CELL), z1 = Math.ceil(Math.max(a[2], b[2], c[2]) / CELL);
+      for (let i = x0; i <= x1; i++) for (let k = z0; k <= z1; k++) {
+        const px = (i + 0.5) * CELL, pz = (k + 0.5) * CELL;
+        const s = (p: number[], q: number[]) => (q[0] - p[0]) * (pz - p[2]) - (q[2] - p[2]) * (px - p[0]);
+        const d1 = s(a, b), d2 = s(b, c), d3 = s(c, a);
+        if ((d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0)) cells.add(`${i},${k}`);
+      }
+    }
+    return cells;
+  }
+
+  it("keeps the opencast ironstone pit clear of the mine's own siding", () => {
+    // the pit's back face once started at the back fence, and the siding 5 m in ran through it
+    for (const seed of [1, 2, 3]) {
+      const m = buildIndustry('iron_ore_mine', defaultPlot('iron_ore_mine', 'opencast'), { seed, variant: 'opencast', bare: true });
+      const tall = tallCells((m.group.children[0] as THREE.Mesh).geometry);
+      for (const r of m.anchors.rail) {
+        let hit = 0;
+        for (let x = r.x0 + 2; x <= r.x1 - 1; x += CELL) for (const dz of [-1.7, 0, 1.7]) if (tall.has(`${Math.floor(x / CELL)},${Math.floor((r.z + dz) / CELL)}`)) hit++;
+        expect(hit * CELL / 3, `metres of pit across the siding at z ${r.z} (seed ${seed})`).toBe(0);
+      }
+    }
+  });
+});
