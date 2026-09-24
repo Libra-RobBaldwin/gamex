@@ -1,7 +1,7 @@
 // 3D prototype: free-form roads, plots along any street, buses and cars, rotating camera.
 import * as THREE from 'three';
 import './proto.css';
-import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
+import { DEFAULT_OPTS, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
 import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
 import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, type RoadFilter } from './catalog';
 import { GRADES } from './grade';
@@ -16,21 +16,21 @@ import { patchGround, setGroundQuality } from './ground';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
 import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
+import { TOWNS, chooseTown, chosenTown, settleStanding, startWorld, type Tree } from './town';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // ---------------- world ----------------
-const LAKE = { x: 250, z: -190, r: 90 };
-const isWater = (p: P) => Math.hypot(p.x - LAKE.x, p.z - LAKE.z) < LAKE.r + 4;
-const BOUND = 520;
-const net = new Network(isWater, BOUND, 11);
-// an industrial estate south of the centre
-const INDUSTRIAL = (p: P) => p.z < -215 && Math.abs(p.x) < 280;
-net.zoneAt = (p) => (INDUSTRIAL(p) ? 'industrial' : 'town');
-const CENTRE = { x: 0, z: 0 };
+// The town the game starts from (src/proto/town, docs/world-start.md): a real one imported from
+// OpenStreetMap, or the invented seed town. Everything below reads the world, never which it is.
+const bootAt = performance.now(); // (start-up time: the world, its junctions and buildings, the ground)
 const rand = rng(99);
+const world = startWorld(chosenTown(), rand);
+const BOUND = world.bound;
+const net = world.net;
+const CENTRE = world.centre;
 
 // ---------------- three setup ----------------
 const canvas = $<HTMLCanvasElement>('#c');
@@ -50,7 +50,7 @@ sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
-const view = { x: 0, z: 20, az: Math.PI / 4, el: 0.6, h: 300 };
+const view = { x: world.view.x, z: world.view.z, az: Math.PI / 4, el: 0.6, h: world.view.h };
 const HOME = { az: Math.PI / 4, el: 0.6 };
 const EL_MIN = 0.35, EL_MAX = 1.52, H_MIN = 35, H_MAX = 900;
 // animated camera moves (buttons, double-tap); any touch cancels them
@@ -92,7 +92,7 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND);
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, water: world.water.shores.length ? world.water.shores : world.water.polys, industrial: world.industrial, lawns: world.zones.filter((z) => z.kind === 'park').flatMap((z) => z.outer), parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND);
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND * 2.6, BOUND * 2.6), gameGround.ground.material);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
@@ -103,26 +103,23 @@ for (const m of [...GRASS_MATS, ...grassMats()]) { m.color.set('#ffffff'); patch
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
 scene.add(gameGround.ground.hedges);
 scene.add(ground);
-const beach = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 7, 72), new THREE.MeshLambertMaterial({ color: '#d9c894' }));
-beach.rotation.x = -Math.PI / 2;
-beach.position.set(LAKE.x, 0.05, LAKE.z);
-const lake = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r, 72), new THREE.MeshPhongMaterial({ color: '#3f86bf', shininess: 90, specular: '#cfe6ff' }));
-lake.rotation.x = -Math.PI / 2;
-lake.position.set(LAKE.x, 0.1, LAKE.z);
+// the world's water (lakes, rivers, canals) as flat polygons, over any beaches it has
+function flatPolys(polys: P[][], mat: THREE.Material, y: number) {
+  const geos = polys.filter((p) => p.length >= 3).map((p) => new THREE.ShapeGeometry(new THREE.Shape(p.map((q) => new THREE.Vector2(q.x, -q.z)))));
+  const mesh = new THREE.Mesh(geos.length ? mergeGeometries(geos, false) : new THREE.BufferGeometry(), mat);
+  for (const g of geos) g.dispose();
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = y;
+  return mesh;
+}
+const beach = flatPolys(world.water.shores, new THREE.MeshLambertMaterial({ color: '#d9c894' }), 0.05);
+const lake = flatPolys(world.water.polys, new THREE.MeshPhongMaterial({ color: '#3f86bf', shininess: 90, specular: '#cfe6ff' }), 0.1);
 lake.receiveShadow = true;
 scene.add(beach, lake);
 
 // ---------------- trees (instanced) ----------------
-interface Tree { x: number; z: number; s: number; kind: number }
-let trees: Tree[] = [];
-for (let i = 0; i < 1400; i++) {
-  const p = { x: (rand() * 2 - 1) * BOUND, z: (rand() * 2 - 1) * BOUND };
-  // woods on the outskirts, a few in town
-  const dc = Math.hypot(p.x, p.z);
-  if (dc < 140 && rand() < 0.85) continue;
-  if (isWater(p) || Math.hypot(p.x - LAKE.x, p.z - LAKE.z) < LAKE.r + 10) continue;
-  trees.push({ ...p, s: 0.8 + rand() * 0.7, kind: rand() < 0.3 ? 1 : 0 });
-}
+// (the world's woods and scattered trees; the ones on roads and plots are cleared below)
+let trees: Tree[] = world.trees;
 const crownGeo = new THREE.IcosahedronGeometry(3.4, 1);
 const pineGeo = new THREE.ConeGeometry(3, 9, 7);
 const trunkGeo = new THREE.CylinderGeometry(0.35, 0.5, 3.5, 6);
@@ -189,7 +186,8 @@ function redesignJunctions() {
     const old = junctions.get(n.id);
     const same = old && old.legs.length === legs.length && legs.every((l) => old.legs.includes(l.seg.id));
     if (same && !old!.auto) continue;
-    const j = design(net, n.id, geoFor(n.id), seenAt(n.id));
+    // (a form the map states outright, a real roundabout, holds until the player picks another)
+    const j = design(net, n.id, geoFor(n.id), seenAt(n.id), world.hints.get(n.id));
     if (j) junctions.set(n.id, j);
   }
 }
@@ -325,7 +323,7 @@ function refreshInfill() {
   for (const b of infill) { fromChunk(b); for (const p of b.parts) p.g.dispose(); }
   infill = [];
   infillCells.clear();
-  const { regions, civics } = findRegions(net, queue);
+  const { regions, civics } = findRegions(net, queue, { civics: world.civics });
   for (const l of civics) spawnLot(l, false);
   for (const r of regions) {
     const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges });
@@ -343,7 +341,7 @@ function queuePlots(segs: number[]) {
   for (const id of segs) {
     const plots = net.plotsFor(id, CENTRE);
     // denser, taller near the centre; a few gaps elsewhere
-    for (const p of plots) if (Math.hypot(p.x, p.z) < 200 || rand() < 0.75) queue.push(p);
+    for (const p of plots) if (world.canGrow(p) && (Math.hypot(p.x, p.z) < 200 || rand() < 0.75)) queue.push(p);
   }
   // and around any roundabout these roads meet at
   const nodes = new Set(segs.flatMap((id) => { const s = net.segs.get(id); return s ? [s.a, s.b] : []; }));
@@ -357,44 +355,14 @@ function queuePlots(segs: number[]) {
 }
 
 // ---------------- starter town ----------------
+// The world has laid its roads (src/proto/town). Junctions are designed and take their land before
+// any plot is laid out; then buildings already standing (a real town's) go up where that leaves
+// room; then the invented town builds most of its growth queue at once.
 function seedTown() {
-  const road = (a: P, b: P, c?: P, o = DEFAULT_OPTS) => net.build(net.snapStart(a, 3), net.snapStart(b, 3), c, o);
-  const as = (type: RoadType, o = DEFAULT_OPTS) => ({ ...o, type });
-  // the high street is a tree-lined avenue, from under the flyover to a roundabout on the bypass
-  // (it ends exactly where the bypass's curve will cross it, so the two meet there)
-  const bypass = net.makePath({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 });
-  const cross = bypass.findIndex((p) => p.z < 0), [p0, p1] = [bypass[cross - 1], bypass[cross]];
-  road({ x: -230, z: 0 }, { x: p0.x + ((p1.x - p0.x) * p0.z) / (p0.z - p1.z), z: 0 }, undefined, as('avenue'));
-  road({ x: 0, z: -200 }, { x: 0, z: 200 });
-  road({ x: 0, z: 0 }, { x: 170, z: -98 }); // a 30° diagonal
-  road({ x: -185, z: -96 }, { x: 0, z: -96 }); // (a cul-de-sac, its turning head clear of the flyover's ramp)
-  road({ x: -110, z: -96 }, { x: -170, z: 0 }); // a slanting link
-  road({ x: 0, z: 70 }, { x: -80, z: 150 }, { x: -80, z: 70 }); // a crescent
-  road({ x: 60, z: 0 }, { x: 60, z: 110 });
-  road({ x: 0, z: 110 }, { x: 110, z: 110 });
-  road({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 }, as('dual')); // a sweeping dual-carriageway bypass
-  const over = { ...DEFAULT_OPTS, cross: 'bridge' as const };
-  road({ x: -215, z: -150 }, { x: -215, z: 150 }, undefined, over); // a flyover across the main road
-  road({ x: 0, z: -150 }, { x: 510, z: -200 }, undefined, over); // a bridge over the lake, and on out of town to the east
-  // the industrial estate
-  road({ x: 0, z: -200 }, { x: 0, z: -380 });
-  road({ x: -190, z: -290 }, { x: 150, z: -290 });
-  road({ x: 0, z: -380 }, { x: -170, z: -370 }, { x: -110, z: -420 });
-  // a motorway along the south edge, reached from the estate by a dual carriageway
-  // the motorway ends at a roundabout, where it carries on east as a fast dual carriageway
-  road({ x: -510, z: -470 }, { x: 0, z: -470 }, undefined, as('motorway'));
-  road({ x: 0, z: -470 }, { x: 510, z: -470 }, undefined, as('dual-2-70-0'));
-  road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
-  // a main line railway along the north, lifted over the high road, and a road tunnel under the lake
-  net.build({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
-  road({ x: 250, z: -470 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 }); // from the dual carriageway
-  // roads out of town: west from the end of the high street, north under the railway (both run off the map)
-  road({ x: -230, z: 0 }, { x: -510, z: 0 }, undefined, as('rural-60'));
-  road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
-  // junctions are designed (and take their land) before any plot is laid out
-  commitRoads([...net.segs.keys()]);
-  // most of the town exists at the start, the rest grows in front of you
-  const now = Math.floor(queue.length * 0.8);
+  commitRoads(world.growAlong());
+  for (const l of settleStanding(net, world.standing).placed) spawnLot(l, false);
+  if (world.standing.length) queue = queue.filter((l) => net.lotFree(l));
+  const now = Math.floor(queue.length * world.growNow);
   for (const l of queue.splice(0, now)) if (net.lotFree(l)) spawnLot(l, false);
 }
 
@@ -586,9 +554,9 @@ shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it')
 // ---------------- sheets ----------------
 // Detail opens in a bottom sheet (a panel down the right in landscape); the camera turns so the
 // thing you picked sits in the clear map left above or beside it, so you can see what each choice does.
-type PanelKind = 'junction' | 'stop' | 'roads' | 'reset' | 'quality';
+type PanelKind = 'junction' | 'stop' | 'roads' | 'reset' | 'quality' | 'credits';
 // the colourway a sheet wears: stops are orange, road work green, the rest the house green
-const TONE = { junction: 'road', roads: 'road', stop: 'stop', reset: 'look', quality: 'look' } as const;
+const TONE = { junction: 'road', roads: 'road', stop: 'stop', reset: 'look', quality: 'look', credits: 'look' } as const;
 // what closing each kind of sheet undoes: a junction being edited, a stop being planned
 const leaveJunction = () => { if (editJ !== null) { editJ = null; rebuildRoads(); } };
 const ON_CLOSE: Partial<Record<PanelKind, () => void>> = { junction: leaveJunction, stop: () => { stopPreview = null; drawGhost(); } };
@@ -711,9 +679,19 @@ shell.addTransportTab({
 // ---- Menu: quality, the performance readout, a new town ----
 shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
 shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); shell.openMenu(); } });
-shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
+shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: `Now in ${world.real ? `${world.name} (real)` : world.name}`, onClick: () => openReset() });
 shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
 shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
+// a real town's map data is credited whenever it's on screen: faintly on the map, and here
+if (world.attribution) {
+  shell.setCredit(world.attribution, world.attributionUrl);
+  shell.addMenuItem({ id: 'credits', label: 'Map data', icon: 'info', sub: world.attribution, onClick: () => openCredits() });
+}
+function openCredits() {
+  openPanel('credits', 'Map data', 'map', `<div class="grp"><small>${esc(world.name)} is built from OpenStreetMap: ${esc(world.attribution ?? '')}, available under the Open Database Licence.</small>
+    <a class="act" href="${world.attributionUrl}" target="_blank" rel="noopener">${icon('info')}<span>openstreetmap.org/copyright</span></a>
+    ${world.notes.length ? `<small>Not in the game yet, so simplified: ${esc(world.notes.join(' · '))}.</small>` : ''}</div>`, true, { from: 'menu', back: () => shell.openMenu() });
+}
 // The game picks its own quality from how fast frames come (see judgeFrames); a tier chosen here holds.
 function openQuality() {
   const el = openPanel('quality', 'Quality', 'sparkles', `<div class="grp"><small>Auto steps down if frames run slow and back up when there’s headroom. Pick a level to hold it.</small>
@@ -731,10 +709,16 @@ function openQuality() {
 // (in a sheet rather than confirm(), which a sandboxed artifact frame may block outright)
 function openReset() {
   const el = openPanel('reset', 'Start a new town?', 'restore', `
-    <div class="grp"><small>Every road, rail line, stop and vehicle you have added goes, and the town starts again as it was. This can’t be undone.</small>
-      <button data-reset="1" class="act danger">${icon('restore')}<span>Start again</span></button>
+    <div class="grp"><small>Every road, rail line, stop and vehicle you have added goes, and the town you pick starts as it was. This can’t be undone.</small>
+      ${TOWNS.map((t) => `<button data-town="${t.id}" class="${t.id === world.id ? 'on' : ''}"><b>${icon(t.id === 'real' ? 'map' : 'building')}${esc(t.label)}</b><small>${esc(t.sub)}</small></button>`).join('')}
       <button data-keep="1" class="act">${icon('play')}<span>Keep playing</span></button></div>`, true, { from: 'menu', back: () => shell.openMenu() });
-  el.querySelector('[data-reset]')!.addEventListener('click', () => location.reload());
+  el.querySelectorAll<HTMLButtonElement>('[data-town]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.town as (typeof TOWNS)[number]['id'];
+    chooseTown(id);
+    const u = new URL(location.href);
+    u.searchParams.set('town', id);
+    location.replace(u.toString());
+  }));
   el.querySelector('[data-keep]')!.addEventListener('click', closePanel);
 }
 
@@ -780,6 +764,7 @@ function renderJunction(fresh = false) {
       <button data-opt="1"><b>${icon('refresh')}Re-optimise lanes</b></button></div>`, fresh, { back: () => showJunctionInfo(editJ!) });
   el.querySelectorAll<HTMLButtonElement>('[data-form]').forEach((b) => b.addEventListener('click', () => {
     const f = b.dataset.form!;
+    world.hints.delete(editJ!);
     junctions.set(editJ!, f === 'auto' ? auto : rescore(net, j, geo, { form: f as Form }));
     rebuildRoads(); renderJunction();
   }));
@@ -1365,6 +1350,7 @@ resize();
 refreshInfill();
 gameGround.start(trees);
 refreshTrees();
+const startMs = performance.now() - bootAt;
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
@@ -1535,4 +1521,4 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { world, startMs, renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };

@@ -121,6 +121,9 @@ body.paused #st-rush { color: var(--gold); }
 #hint span { min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* ---------------- bottom bar ---------------- */
+/* the map-data credit: faint, small, bottom right of the map, above whatever chrome is at the bottom */
+#credit { position: absolute; right: calc(4px + var(--safe-r)); bottom: calc(var(--chrome-b) + 3px); padding: 1px 5px; font-size: 10px; line-height: 1.4; color: rgba(20, 30, 25, 0.78); background: rgba(255, 255, 255, 0.5); text-decoration: none; pointer-events: auto; }
+body.tooling #credit { opacity: 0.6; }
 #bar { position: absolute; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px calc(8px + var(--safe-r)) calc(4px + var(--safe-b)) calc(8px + var(--safe-l)); background: var(--panel); border-top: 2px solid var(--gold); }
 #bar button { height: 52px; flex-direction: column; gap: 4px; padding: 0; font: 700 10.5px/1 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 #bar button .ic { width: 24px; height: 24px; }
@@ -276,4 +279,6 @@ body.paused #st-rush { color: var(--gold); }
   #layers { right: calc(var(--edge) + var(--safe-r) + var(--rail) + 8px); bottom: calc(var(--edge) + var(--safe-b)); max-height: calc(100dvh - var(--safe-t) - var(--safe-b) - 70px); }
   #tool { grid-template-columns: minmax(150px, 0.8fr) minmax(0, 2fr) auto; grid-template-areas: 'what opts acts'; }
   #tpanel { left: auto; width: min(440px, 50vw); max-height: calc(100dvh - var(--chrome-b) - var(--safe-t) - 70px); }
+  #credit { right: calc(var(--edge) + var(--safe-r) + var(--rail) + 6px); bottom: calc(var(--edge) + var(--safe-b)); }
+  body.tooling #credit { bottom: calc(var(--chrome-b) + 3px); }
 }

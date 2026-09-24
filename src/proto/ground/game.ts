@@ -1,7 +1,6 @@
-// The game's side of the ground: turns the road network, plots, trees and lake into a GroundInput,
+// The game's side of the ground: turns the road network, plots, trees and water into a GroundInput,
 // and keeps the ground up to date as the town changes. main.ts only calls these few functions.
 import { ROADS } from '../catalog';
-import { circlePoly } from '../land';
 import type { Lot, Network } from '../roads';
 import { Ground, type GroundInput, type XZ } from './index';
 
@@ -9,9 +8,10 @@ export interface GameWorld {
   net: Network;
   queue: () => Lot[]; // plots waiting to be built
   trees: () => XZ[];
-  lake: { x: number; z: number; r: number };
+  water: XZ[][]; // the world's water and its beaches (see src/proto/town)
   industrial: (p: XZ) => boolean;
   parks?: () => { cells: XZ[]; size: number }[]; // leftover land the game landscaped (parks, verges): cell centres
+  lawns?: XZ[][]; // the world's own parks and greens (a real town's, from its map)
 }
 
 // how many plots at the front of the queue show as building sites (bare earth, cleared)
@@ -21,7 +21,7 @@ export class GameGround {
   readonly ground: Ground;
   private sites = new Set<Lot>();
   private full = true;
-  constructor(private w: GameWorld, bound: number) {
+  constructor(private w: GameWorld, private bound: number) {
     const size = Math.ceil((bound * 2 + 160) / 10) * 10;
     this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed: 11 });
   }
@@ -50,10 +50,11 @@ export class GameGround {
     }
     const parks: GroundInput['parks'] = [];
     for (const r of this.w.parks?.() ?? []) for (const c of r.cells) { const h = r.size / 2; parks.push({ poly: [{ x: c.x - h, z: c.z - h }, { x: c.x + h, z: c.z - h }, { x: c.x + h, z: c.z + h }, { x: c.x - h, z: c.z + h }] }); }
+    for (const poly of this.w.lawns ?? []) parks.push({ poly });
     const industrial: XZ[] = [];
-    for (let x = -600; x <= 600; x += 40) for (let z = -600; z <= 600; z += 40) if (this.w.industrial({ x, z })) industrial.push({ x, z });
-    const L = this.w.lake;
-    return { blocked, lanes, parks, industrial, water: [circlePoly(L, L.r + 6, 48)] };
+    const e = Math.ceil((this.bound + 80) / 40) * 40;
+    for (let x = -e; x <= e; x += 40) for (let z = -e; z <= e; z += 40) if (this.w.industrial({ x, z })) industrial.push({ x, z });
+    return { blocked, lanes, parks, industrial, water: this.w.water };
   }
   // The roads or the landscaping changed: repaint everything (next time `sync` runs).
   invalidate() { this.full = true; this.fixed = null; }
