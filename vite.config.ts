@@ -11,6 +11,8 @@ export default defineConfig({
       },
     },
   },
+  // Agents' git worktrees live under .claude/: changes there mustn't reload the pages being served.
+  server: { watch: { ignored: ['**/.claude/**'] } },
   // Agents' git worktrees live under .claude/ and parked tests under docs/; neither is this checkout's suite.
   test: {
     exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', 'docs/**'],

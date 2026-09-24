@@ -41,7 +41,7 @@ export const PALETTE = {
   pastureDry: '#7e9150', // yellower patches (drier, thinner soil)
   pastureCool: '#5c7f4a', // bluer patches (damper, shaded)
   rough: '#83845a', // tussocks with straw in them
-  lawn: '#72994b', // a touch brighter and finer than pasture
+  lawn: '#6a8b4a', // a touch fresher and finer than pasture (not lime: it covers every garden and verge in town)
   wood: '#44502f', // moss, ivy and bramble under the canopy
   litter: '#5d4f35', // last year's leaves
   bare: '#86705a',

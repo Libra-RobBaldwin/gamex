@@ -11,12 +11,18 @@ import { Traffic, rushLabel, type Places } from './traffic';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CIVIC, grassMats, makeBuilding as generate, makeRegion, USE } from './buildgen';
 import { CELL, findRegions, type Region } from './infill';
+import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
 import { patchGround, setGroundQuality } from './ground';
 import { GameWater, LAKE } from './game/water';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
 import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
+import { Industries, townWishes, type IndustrySite } from './game/industry'; // industrial sites (docs/industries.md)
+import { PLAIN_MAT } from './buildgen';
+import { BridgeLayer, type BuiltBridge } from './game/bridges';
+import { TownCrowds } from './game/crowds';
+import { starterStops } from './game/crowdsites';
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const money = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -53,43 +59,23 @@ sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
-const view = { x: 0, z: 20, az: Math.PI / 4, el: 0.6, h: 300 };
 const HOME = { az: Math.PI / 4, el: 0.6 };
-const EL_MIN = 0.35, EL_MAX = 1.52, H_MIN = 35, H_MAX = 900;
-// animated camera moves (buttons, double-tap); any touch cancels them
-let goal: Partial<typeof view> | null = null;
+const EL_MIN = 0.35, EL_MAX = 1.52;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
-
-// light-space axes, for snapping the shadow map to its texel grid
-const SUN_DIR = new THREE.Vector3(-160, 260, 110).normalize();
-const SUN_X = new THREE.Vector3(0, 1, 0).cross(SUN_DIR).normalize();
-const SUN_Y = SUN_DIR.clone().cross(SUN_X).normalize();
-function placeCamera() {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  const aspect = w / h;
-  cam.left = (-view.h * aspect) / 2; cam.right = (view.h * aspect) / 2;
-  cam.top = view.h / 2; cam.bottom = -view.h / 2;
-  cam.updateProjectionMatrix();
-  const d = 1200;
-  cam.position.set(view.x + Math.sin(view.az) * Math.cos(view.el) * d, Math.sin(view.el) * d, view.z + Math.cos(view.az) * Math.cos(view.el) * d);
-  cam.lookAt(view.x, 0, view.z);
-  cam.updateMatrixWorld();
-  // The sun follows the view so shadows stay sharp where you're looking. Its shadow area only
-  // changes size in big steps and slides in whole shadow-map texels, so edges don't shimmer.
-  const r = 120 * Math.pow(1.6, Math.max(0, Math.ceil(Math.log((view.h * 0.9) / 120) / Math.log(1.6))));
-  const texel = (2 * r) / sun.shadow.mapSize.x;
-  const c = new THREE.Vector3(view.x, 0, view.z);
-  const u = c.dot(SUN_X), v = c.dot(SUN_Y);
-  c.addScaledVector(SUN_X, Math.round(u / texel) * texel - u).addScaledVector(SUN_Y, Math.round(v / texel) * texel - v);
-  sun.target.position.copy(c);
-  sun.position.copy(c).addScaledVector(SUN_DIR, 320);
-  const sc = sun.shadow.camera;
-  if (sc.right !== r) { sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 10; sc.far = 900; sc.updateProjectionMatrix(); }
-}
+// The shared camera (kit/camera.ts), the one every page uses: gestures, wheel, keys and animated moves
+// (any touch cancels those). The sun follows the view so shadows stay sharp where you're looking;
+// its shadow area only changes size in big steps and slides in whole shadow-map texels, so edges
+// don't shimmer. The game's own input hooks are set with the rest of the input code below.
+const nav = new NavRig(cam, canvas, {
+  view: { x: 0, z: 20, h: 300, ...HOME },
+  limits: { hMin: 35, hMax: 900, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -BOUND, maxX: BOUND, minZ: -BOUND, maxZ: BOUND } },
+  shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
+});
+const view = nav.view;
 
 function resize() {
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-  placeCamera();
+  nav.apply();
 }
 window.addEventListener('resize', resize);
 
@@ -176,6 +162,9 @@ function refreshTrees(only?: Lot) {
 // ---------------- roads ----------------
 const roadGroup = new THREE.Group();
 scene.add(roadGroup);
+// every bridge in the town: one mesh per material (game/bridges.ts)
+const bridgeLayer = new BridgeLayer();
+scene.add(bridgeLayer.group);
 // ---------------- junctions ----------------
 // Every junction designs itself (see junction.ts) whenever the roads meeting there change; a
 // junction the player has customised keeps their choices as long as its roads stay the same.
@@ -206,6 +195,7 @@ function commitRoads(made: number[] = []) {
   redesignJunctions();
   claimJunctions();
   evictFromWorks();
+  bridgeLayer.sync(net); // lays out the bridges and stores their types on the segments, which drawRoads reads
   lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
@@ -272,6 +262,27 @@ function rebuildChunk(c: { members: Set<Built>; group: THREE.Group; dirty: boole
   c.dirty = false;
 }
 
+// ---------------- industries (game/industry.ts) ----------------
+// Library sites, baked into the chunks with buildgen's shared vertex-coloured material, so they add
+// no draw calls; their moving parts are one IndustryFx in the scene. They aren't in `buildings`:
+// the stand-in lot only keys the chunk (and gives traffic's lorries a gate to go to).
+const industries = new Industries(net, scene, PLAIN_MAT);
+const siteBuilt = new Map<IndustrySite, Built>();
+industries.onAdd = (s) => { const b: Built = { lot: s.lot, born: 0, height: s.model.height, name: s.model.name, detail: s.model.detail, parts: s.parts, solo: null, chunk: null }; siteBuilt.set(s, b); toChunk(b); placesDirty = true; };
+industries.onRemove = (s) => { const b = siteBuilt.get(s); if (b) fromChunk(b); siteBuilt.delete(s); if (selectedSite === s) closeSheet(); placesDirty = true; };
+let selectedSite: IndustrySite | null = null, siteRings = false, siteT = 0;
+function showSite(s: IndustrySite) {
+  industries.openInfo(s, shell, [{ label: 'Add a stop nearby', icon: 'busStop', onClick: () => startStopTool() }], () => { if (selectedSite === s) selectedSite = null; });
+  selectedSite = s;
+  focusOn({ x: s.model.frame.cx, z: s.model.frame.cz }, industries.frameHeight(s)); // with its catchment, in the clear map above the sheet
+}
+// the site under a tap: where the ray meets what's drawn (a tall building hides the ground behind it)
+function siteUnder(sx: number, sy: number, g: P) {
+  ray.setFromCamera(ndc(sx, sy), cam);
+  const hit = ray.intersectObjects(cityGroup.children, true)[0];
+  return industries.at(hit ? { x: hit.point.x, z: hit.point.z } : g);
+}
+
 let queue: Lot[] = [];
 let placesDirty = true;
 let onRoadsChanged = () => {};
@@ -305,6 +316,7 @@ const shortName = (b: Built) => b.name.split(' · ')[0];
 // its land are compulsorily purchased, gardens running into it are cut back, queued plots dropped.
 function evictFromWorks() {
   const works = (c: { owner: string }) => c.owner === 'road';
+  industries.evict(); // a road through an industrial site takes it
   for (const b of buildings) {
     if (b.dying || b.lot.id < 0) continue;
     const l = b.lot;
@@ -394,6 +406,10 @@ function seedTown() {
   road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
   // junctions are designed (and take their land) before any plot is laid out
   commitRoads([...net.segs.keys()]);
+  // industry: library sites on the estate and out of town claim their land before any plot is
+  // built; the estate's plots are theirs, so its buildgen sheds are dropped (game/industry.ts)
+  industries.placeAll(townWishes(INDUSTRIAL, (p) => !INDUSTRIAL(p) && Math.hypot(p.x, p.z) > 300));
+  queue = queue.filter((l) => !INDUSTRIAL(l) && net.lotFree(l));
   // most of the town exists at the start, the rest grows in front of you
   const now = Math.floor(queue.length * 0.8);
   for (const l of queue.splice(0, now)) if (net.lotFree(l)) spawnLot(l, false);
@@ -421,7 +437,7 @@ const cls = () => (mode === 'rail' ? 'rail' : 'road') as 'road' | 'rail';
 // buttons (Build · Transport · Layers · Menu) at rest; sheets, a tool strip and a layers pop-over
 // when asked for. Everything below registers with it rather than adding markup of its own.
 const shell = new Shell($('#ui'), {
-  onCompass: () => { goal = { az: view.az + wrap(HOME.az - view.az), el: HOME.el }; },
+  onCompass: () => nav.resetNorth(),
   onPause: () => togglePause(),
   onRate: () => cycleRate(),
   onPerf: () => togglePerf(),
@@ -512,10 +528,10 @@ const pctTxt = (g: number) => { const v = g * 100; return `${Math.abs(v - Math.r
 function roadOptions() {
   const [, hl, hi] = HEIGHTS.find((h) => h[0] === opts.height)!;
   const on = (b: boolean) => `class="${b ? 'on' : ''}" aria-pressed="${b}"`;
-  return `${KINDS.map(([k, label, ic]) => `<button data-k="${k}" ${on(roadKind === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}<span class="sep"></span>
+  return `<span class="og" role="group" aria-label="Shape">${KINDS.map(([k, label, ic]) => `<button data-k="${k}" ${on(roadKind === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span><span class="sep"></span>
     <button id="g-h" aria-label="Height: ${hl}">${icon(hi)}<span>${hl}</span></button>
     <button id="g-g" aria-label="Steepest gradient ${pctTxt(opts.grade)}">${icon('angle')}<span>${pctTxt(opts.grade)}</span></button><span class="sep"></span>
-    ${CROSS.map(([k, label, ic]) => `<button data-x="${k}" ${on(opts.cross === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}`;
+    <span class="og" role="group" aria-label="Where it crosses something">${CROSS.map(([k, label, ic]) => `<button data-x="${k}" ${on(opts.cross === k)}>${icon(ic)}<span>${label}</span></button>`).join('')}</span>`;
 }
 function refreshOptions() { if (mode === 'road' || mode === 'rail') tool?.set({ options: roadOptions() }); }
 function bindRoadOptions(el: HTMLElement) {
@@ -555,7 +571,7 @@ function setType(t: RoadType) {
 
 // ---- the Build sheet: a tab per category, a card per thing ----
 shell.addBuildCategory({ id: 'roads', label: 'Roads', icon: 'road' });
-for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: typeSpec(id), icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
+for (const id of PRESETS) shell.addBuildItem('roads', { id, label: ROADS[id].label, spec: `${ROADS[id].blurb} · ${typeSpec(id)}`, icon: roadIcon(ROADS[id]), tone: 'road', on: () => lastType.road === id, onPick: () => startRoadTool(id) });
 shell.addBuildItem('roads', { id: 'more', label: 'More road types', spec: 'Filter by lanes, speed, trees, bus and cycle lanes', icon: 'adjustments', tone: 'road', on: () => !PRESETS.includes(lastType.road), onPick: () => { openRoadPicker(true); return false; } });
 shell.addBuildCategory({ id: 'rail', label: 'Rail', icon: 'train' });
 for (const id of RAIL_PRESETS) shell.addBuildItem('rail', { id, label: ROADS[id].label, spec: ROADS[id].blurb, icon: roadIcon(ROADS[id]), tone: 'rail', on: () => lastType.rail === id, onPick: () => startRoadTool(id) });
@@ -576,13 +592,14 @@ shell.addLayer({ id: 'flow', label: 'Traffic flow', icon: 'lights', disabled: 'N
 shell.addLayer({ id: 'catchment', label: 'Stop catchments', icon: 'busStop', disabled: 'Not in the game yet' });
 shell.addLayer({ id: 'demand', label: 'Where people want to go', icon: 'users', disabled: 'Not in the game yet' });
 shell.addLayer({ id: 'landuse', label: 'Land use', icon: 'building', disabled: 'Not in the game yet' });
-const viewNow = () => { const el = goal?.el ?? view.el; return el > 1.2 ? 'plan' : el < 0.45 ? 'low' : '3d'; };
+shell.addLayer({ id: 'industry', label: 'Industry catchments', icon: 'warehouse', on: false, onToggle: (on) => { siteRings = on; } });
+const viewNow = () => { const el = nav.goal.el; return el > 1.2 ? 'plan' : el < 0.45 ? 'low' : '3d'; };
 shell.setViews({
   options: [{ id: '3d', label: '3D' }, { id: 'low', label: 'Low' }, { id: 'plan', label: 'Plan' }],
   current: viewNow,
-  pick: (id) => { goal = { el: id === 'plan' ? EL_MAX : id === 'low' ? EL_MIN : HOME.el }; },
+  pick: (id) => { nav.tiltTo(id === 'plan' ? EL_MAX : id === 'low' ? EL_MIN : HOME.el); },
 });
-shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it');
+shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it · pinch to zoom, twist to turn, two fingers up or down to tilt');
 
 // ---------------- sheets ----------------
 // Detail opens in a bottom sheet (a panel down the right in landscape); the camera turns so the
@@ -607,14 +624,8 @@ function focusOn(p: P, h: number, dir?: P, el?: number) {
     const a = Math.atan2(-dir.x, -dir.z);
     az = [a, a + Math.PI].map((v) => view.az + wrap(v - view.az)).sort((x, y) => Math.abs(x - view.az) - Math.abs(y - view.az))[0];
   }
-  const save = { ...view };
-  Object.assign(view, { az, h, x: p.x, z: p.z, el: el ?? view.el });
-  placeCamera();
   const c = shell.clearRect();
-  const g = groundAt((c.left + c.right) / 2, (c.top + c.bottom) / 2);
-  Object.assign(view, save);
-  placeCamera();
-  goal = { az, h, x: p.x - (g.x - p.x), z: p.z - (g.z - p.z), ...(el ? { el } : {}) };
+  nav.animateTo(nav.framing(p, (c.left + c.right) / 2, (c.top + c.bottom) / 2, { az, h, ...(el ? { el } : {}) }));
 }
 
 // ---- road picker: a few filters over the whole catalogue ----
@@ -711,7 +722,7 @@ shell.addTransportTab({
 
 // ---- Menu: quality, the performance readout, a new town ----
 shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
-shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); shell.openMenu(); } });
+shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
 shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
 shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
 shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'floppy', disabled: 'Not in the game yet', onClick: () => {} });
@@ -841,6 +852,8 @@ function demolitionSummary(lots: Lot[]) {
 function renderBar() {
   if (!tool || (mode !== 'road' && mode !== 'rail')) return;
   if (!draft || !draftCheck) { tool.setPanel(null); tool.setPrimary(null); return; }
+  // (a sheet opened from the tool, such as the junction editor, makes way for the blueprint)
+  if (shell.sheetKey) closeSheet();
   const c = draftCheck;
   const n = c.clears.length;
   const kind = ctrlOf(draft) ? 'Curved road' : 'New road';
@@ -851,9 +864,19 @@ function renderBar() {
   tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(c.cost)}</b></span></div>
     ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(n * 6000)} compensation included</div></div>` : ''}
     ${lift}
+    ${c.ok ? bridgeLines(c) : ''}
     ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}`);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
+  tool.avoid(handles().map((h) => toScreen(h.p)));
   tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging), onClick: buildDraft });
+}
+// the bridges in a blueprint: the type the chooser picked, its price and what's worth knowing
+function bridgeLines(c: Check) {
+  return c.choices.map((ch) => {
+    const o = ch.options.find((x) => x.def.id === ch.chosen);
+    if (!o) return '';
+    return `<div class="lift">${icon('bridge')}<span><b>${o.def.label}</b> · ${Math.round(ch.s1 - ch.s0)} m · <b class="cost">${money(o.cost)}</b>${o.reasons.length ? ` · ${o.reasons.slice(0, 2).join(' · ')}` : ''}</span></div>`;
+  }).join('');
 }
 function buildDraft() {
   if (!draft || !draftCheck?.ok) return;
@@ -968,10 +991,9 @@ function drawGhost() {
 
 // ---------------- building card ----------------
 const ray = new THREE.Raycaster();
-const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+// (sx, sy relative to the canvas, as the shared camera gives them)
 function ndc(sx: number, sy: number) {
-  const r = canvas.getBoundingClientRect();
-  return new THREE.Vector2(((sx - r.left) / r.width) * 2 - 1, -((sy - r.top) / r.height) * 2 + 1);
+  return new THREE.Vector2((sx / canvas.clientWidth) * 2 - 1, -(sy / canvas.clientHeight) * 2 + 1);
 }
 function pickBuilding(sx: number, sy: number) {
   ray.setFromCamera(ndc(sx, sy), cam);
@@ -1009,6 +1031,59 @@ function showJunctionInfo(node: number) {
   });
 }
 
+// ---------------- bridges (game/bridges.ts) ----------------
+// the bridge drawn under a screen point: its deck, sampled along its length
+function bridgeAt(sx: number, sy: number) {
+  let best: BuiltBridge | null = null, bd = Infinity;
+  for (const b of bridgeLayer.list()) {
+    const hw = b.layout.width / 2;
+    for (let s = b.s0; s <= b.s1; s += 2) {
+      // within the deck's width as drawn on screen (and a finger's slack)
+      const p = pointAt(b.crossing.path, s), q = toScreen(p), e = toScreen({ x: p.x - p.uz * hw, z: p.z + p.ux * hw, y: p.y });
+      const d = Math.hypot(q.x - sx, q.y - sy);
+      if (d < Math.hypot(e.x - q.x, e.y - q.y) + 10 && d < bd) { bd = d; best = b; }
+    }
+  }
+  return best;
+}
+const bridgeKey = (b: BuiltBridge) => `${b.seg}:${b.idx}`;
+function showBridgeInfo(b: BuiltBridge) {
+  const L = b.layout, d = L.def, piers = L.supports.filter((q) => q.kind !== 'abutment').length;
+  const mph = net.segs.get(b.seg)?.type.startsWith('rail') ? d.railMph : d.roadMph;
+  const facts: [string, string][] = [['Length', `${Math.round(b.s1 - b.s0)} m`], ['Spans', `${L.spans.length}${piers ? ` on ${piers} support${piers > 1 ? 's' : ''}` : ''}`], ['Cost to build', money(L.cost)], ['Upkeep', `${money(L.maint)} a year`]];
+  if (mph) facts.push(['Speed limit', `${mph} mph`]);
+  const over = net.segs.get(b.seg)?.bridges?.[b.idx]?.override;
+  shell.openInfo({
+    key: `bridge-info:${bridgeKey(b)}`, title: d.label, sub: over ? 'Your choice of type' : 'Chosen for the lowest cost over its life', icon: 'bridge', tone: 'road',
+    facts, note: L.notes.join(' · ') || undefined,
+    actions: [{ label: 'Change bridge type', icon: 'bridge', kind: 'primary', onClick: () => openBridgeEditor(b) }],
+  });
+  const m = pointAt(b.crossing.path, (b.s0 + b.s1) / 2);
+  focusOn(m, Math.max(140, (b.s1 - b.s0) * 1.8), undefined, 0.9);
+}
+// every type that could stand here this year: price, a mark on the recommended one, and the
+// refused ones greyed with their reason. Picking one re-commits the town with it.
+function openBridgeEditor(b: BuiltBridge, fresh = true) {
+  const ch = bridgeLayer.options(b);
+  const el = shell.openSheet({
+    key: `bridge-edit:${bridgeKey(b)}`, title: 'Bridge type', sub: `${Math.round(b.s1 - b.s0)} m · now a ${b.layout.def.label.toLowerCase()}`, icon: 'bridge', tone: 'road', fresh,
+    back: () => showBridgeInfo(b),
+    body: `<div class="grp"><span class="tab">Types</span>${ch.options.map((o) => {
+      const on = o.def.id === b.layout.def.id, rec = o.def.id === ch.recommended;
+      const sub = o.ok ? `${money(o.cost)} · ${money(o.maint)} a year${o.reasons.length ? ` · ${o.reasons[0]}` : ''}` : o.reasons[0] ?? 'Can’t be built here';
+      return `<button data-type="${o.def.id}" class="${on ? 'on' : ''}" aria-pressed="${on}" ${o.ok ? '' : 'disabled'}><b>${rec ? icon('sparkles') : ''}${o.def.label}${rec ? ' · recommended' : ''}${on ? icon('check', 'tick') : ''}</b><small>${sub}</small></button>`;
+    }).join('')}</div>`,
+  });
+  el.querySelectorAll<HTMLButtonElement>('[data-type]').forEach((btn) => btn.addEventListener('click', () => {
+    const mid = (b.s0 + b.s1) / 2;
+    if (!bridgeLayer.setType(net, b, btn.dataset.type as BuiltBridge['layout']['def']['id'])) return;
+    rebuildRoads();
+    const nb = bridgeLayer.at(b.seg, mid);
+    if (nb) openBridgeEditor(nb, false);
+    hint(`Rebuilt as a ${nb?.layout.def.label.toLowerCase() ?? 'bridge'}`, 'check');
+  }));
+}
+
 // ---------------- bus stops ----------------
 let stopPreview: { seg: RSeg; t: number; side: 1 | -1 } | null = null;
 function stopAt(p: P) {
@@ -1028,7 +1103,7 @@ function showStopInfo(seg: RSeg, st: Stop) {
   ].filter(Boolean);
   shell.openInfo({
     key: `stop:${seg.id}:${st.id}`, title: st.kind === 'kerb' ? 'Kerbside stop' : 'Bus lay-by', sub: d.label, icon: 'busStop', tone: 'stop',
-    facts: [['Buses call for', 'about 7 seconds']], note: bits.join(' · '),
+    facts: [['Buses call for', 'about 7 seconds, longer while people board'], ...people.stopFacts(seg, st)], note: bits.join(' · '),
   });
 }
 
@@ -1070,6 +1145,7 @@ function stopTap(p: P) {
   const res = net.planStop(q.seg.id, q.s, side);
   stopPreview = { seg: q.seg, t: q.s, side };
   drawGhost();
+  const feeds = industries.servedFrom(industries.kerbPoint(q.seg, q.s, side)).map((x) => x.model.variant.name); // (game/industry.ts)
   let el: HTMLElement;
   if (res.reason) el = openPanel('stop', 'Can’t put a stop here', 'busStop', `<div class="bad">${icon('alert')}<span>${res.reason}</span></div>`, true);
   else {
@@ -1079,6 +1155,7 @@ function stopTap(p: P) {
         ${crossSvg(d, pl)}<ul>${pl.notes.map((n) => `<li>${n}</li>`).join('')}</ul>${pl.blocked ? `<div class="bad">${icon('alert')}<span>${pl.blocked}</span></div>` : ''}
         <button class="act primary" data-plan="${i}" ${pl.ok ? '' : 'disabled'}>${icon('check')}<span>Build ${pl.kind === 'kerb' ? 'this stop' : 'lay-by'}</span></button></div>`).join(''), true);
   }
+  if (feeds.length) el.insertAdjacentHTML('afterbegin', `<p class="note">${icon('warehouse')} This stop would serve the ${esc(feeds.join(' and the '))} too, raising ${feeds.length > 1 ? 'their' : 'its'} production.</p>`);
   // turn the road to run up the screen in the clear map above the sheet, so the lay-by can be seen as it's chosen
   focusOn({ x: q.x, z: q.z }, 75, { x: q.ux, z: q.uz }, 1.2);
   el.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((b) => b.addEventListener('click', () => {
@@ -1095,6 +1172,7 @@ function stopTap(p: P) {
 // lands on (a stop, a junction, a building) and opens an info sheet, or closes the sheet if it
 // lands on nothing. Returns the mode it was handled in (double-tap zoom only applies to 'look').
 function tapMap(sx: number, sy: number): Mode {
+  shell.guardTap();
   shell.dismissFirstRun();
   shell.closeLayers();
   const g = groundAt(sx, sy);
@@ -1107,6 +1185,10 @@ function tapMap(sx: number, sy: number): Mode {
   if (mode === 'stop') { stopTap(g); return mode; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
+  const br = st || jn !== null ? null : bridgeAt(sx, sy); // (a bridge is tapped where it's drawn, up in the air)
+  if (br) { showBridgeInfo(br); return 'look'; }
+  const site = st || jn !== null ? null : siteUnder(sx, sy, g); // an industrial site (game/industry.ts)
+  if (site) { showSite(site); return 'look'; }
   const b = st || jn !== null ? null : pickBuilding(sx, sy) ?? infillCells.get(cellKey(g.x, g.z)) ?? null;
   if (st) showStopInfo(st.seg, st.stop);
   else if (jn !== null) showJunctionInfo(jn);
@@ -1115,56 +1197,22 @@ function tapMap(sx: number, sy: number): Mode {
   return 'look';
 }
 
-// ---------------- input (Google Maps style) ----------------
+// ---------------- input ----------------
+// The shared camera (kit/camera.ts) pans, pinches, turns and tilts the map (Google Maps style);
+// the game takes the finger when a tool needs it, and hears about taps.
 function groundAt(sx: number, sy: number): P {
-  ray.setFromCamera(ndc(sx, sy), cam);
-  const hit = new THREE.Vector3();
-  ray.ray.intersectPlane(plane, hit);
-  return { x: hit.x, z: hit.z };
+  const g = nav.groundUnder(sx, sy);
+  return { x: g.x, z: g.z };
 }
-function toScreen(p: P) {
-  const v = new THREE.Vector3(p.x, p.y ?? 0, p.z).project(cam);
-  return { x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight };
-}
-// move the camera so world point w sits under screen point (sx, sy)
-function keepUnder(w: P, sx: number, sy: number) {
-  placeCamera();
-  const g = groundAt(sx, sy);
-  view.x += w.x - g.x;
-  view.z += w.z - g.z;
-  placeCamera();
-}
+const toScreen = (p: P) => nav.groundToScreen(p);
 
-const pts = new Map<number, { x: number; y: number; t: number }>();
-type G = 'none' | 'maybe' | 'pan' | 'draw' | 'handle' | 'two';
-let gesture: G = 'none';
-let downAt = { x: 0, y: 0, t: 0 };
-let lastTap = { x: 0, y: 0, t: 0 };
-let fling = { vx: 0, vz: 0 };
-let panAnchor: P = { x: 0, z: 0 };
-let vel: { x: number; z: number; t: number }[] = [];
 let grabbed: 'a' | 'b' | 'c' = 'b';
-// two-finger state, measured from the moment the second finger landed
-let two = {
-  d0: 0, a0: 0, m0: { x: 0, y: 0 }, anchor: { x: 0, z: 0 }, h0: 0, az0: 0, el0: 0,
-  rotating: false, rotOff: 0, tilting: false, moved: false, t: 0,
-};
+// what a finger the game has taken is doing: dragging a blueprint handle, or drawing a road
+let claim: 'handle' | 'draw' | null = null;
+// the mode the last tap was handled in: a double tap zooms in only while looking round
+let tapMode: Mode = 'look';
 const tol = () => view.h * 0.035;
-const ROT_START = (12 * Math.PI) / 180;
 
-function startTwo() {
-  const [a, b] = [...pts.values()];
-  const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  two = {
-    d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, a0: Math.atan2(b.y - a.y, b.x - a.x), m0: m,
-    anchor: groundAt(m.x, m.y), h0: view.h, az0: view.az, el0: view.el,
-    rotating: false, rotOff: 0, tilting: false, moved: false, t: performance.now(),
-  };
-}
-function startPan(x: number, y: number) {
-  panAnchor = groundAt(x, y);
-  vel = [];
-}
 function handleUnder(x: number, y: number) {
   if (mode !== 'road' && mode !== 'rail') return null;
   let best: 'a' | 'b' | 'c' | null = null, bd = 34;
@@ -1205,158 +1253,55 @@ function curveTap(raw: P) {
   hint();
 }
 
-canvas.addEventListener('pointerdown', (e) => {
-  try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
-  goal = null;
-  fling = { vx: 0, vz: 0 };
-  if (pts.size === 1) {
-    downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
-    const h = handleUnder(e.clientX, e.clientY);
-    if (h) { gesture = 'handle'; grabbed = h; dragging = true; return; }
-    gesture = 'maybe';
-    startPan(e.clientX, e.clientY);
-  } else if (pts.size === 2) {
-    if (gesture === 'draw') { draft = null; draftChanged(); }
-    if (gesture === 'handle') { dragging = false; renderBar(); }
+nav.hooks = {
+  // a blueprint handle under the finger is dragged, not the map
+  onPointerDown: (p) => {
+    const h = handleUnder(p.sx, p.sy);
+    if (!h) return false;
+    claim = 'handle'; grabbed = h; dragging = true;
+    return true;
+  },
+  // straight and smooth roads are drawn by dragging; the curve tool uses taps, so dragging pans
+  // (the curve tool draws on a drag too, unless you've started placing it by taps)
+  onDragStart: (p) => {
+    if (!((mode === 'road' || mode === 'rail') && !draft && !(roadKind === 'curve' && picks.length))) return false;
+    const a = net.snapStart(p.start.ground, tol(), cls());
+    draft = { a, b: { ...a } };
+    trace = [a];
+    claim = 'draw'; dragging = true;
+    return true;
+  },
+  onClaimMove: (p) => {
+    const raw = groundAt(p.sx, p.sy);
+    if (claim === 'handle') moveHandle(grabbed, raw);
+    else if (claim === 'draw' && draft) {
+      draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight', cls());
+      if (roadKind === 'curve') { trace.push(raw); draft.c = fitCurve(draft.a, draft.b, trace); }
+      draftChanged();
+    }
+  },
+  onClaimEnd: (_p, why) => {
+    const was = claim;
+    claim = null;
     dragging = false;
-    gesture = 'two';
-    startTwo();
-  }
-});
-
-canvas.addEventListener('pointermove', (e) => {
-  if (!pts.has(e.pointerId)) return;
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
-  if (gesture === 'two' && pts.size >= 2) {
-    const [a, b] = [...pts.values()];
-    const d = Math.hypot(a.x - b.x, a.y - b.y);
-    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const rot = wrap(Math.atan2(b.y - a.y, b.x - a.x) - two.a0);
-    const scale = d / two.d0;
-    const dy = m.y - two.m0.y;
-    if (Math.abs(scale - 1) > 0.04 || Math.abs(rot) > 0.05 || Math.hypot(m.x - two.m0.x, dy) > 8) two.moved = true;
-    // two fingers sliding up/down together (not pinching or turning) tilts, like Google Maps
-    if (!two.rotating && !two.tilting && Math.abs(dy) > 14 && Math.abs(scale - 1) < 0.08 && Math.abs(rot) < 0.1 && Math.abs(m.x - two.m0.x) < Math.abs(dy) * 0.6) two.tilting = true;
-    if (two.tilting) {
-      view.el = Math.max(EL_MIN, Math.min(EL_MAX, two.el0 - dy * 0.006));
-      placeCamera();
-      return;
-    }
-    // rotation only kicks in after a deliberate twist, so pinching doesn't wobble
-    if (!two.rotating && Math.abs(rot) > ROT_START) { two.rotating = true; two.rotOff = Math.sign(rot) * ROT_START; }
-    view.h = Math.max(H_MIN, Math.min(H_MAX, two.h0 / scale));
-    view.az = two.az0 + (two.rotating ? rot - two.rotOff : 0);
-    keepUnder(two.anchor, m.x, m.y);
-    return;
-  }
-  if (gesture === 'handle') { moveHandle(grabbed, groundAt(e.clientX, e.clientY)); return; }
-  if (gesture === 'maybe' && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 8) {
-    // straight and smooth roads are drawn by dragging; the curve tool uses taps, so dragging pans
-    // (the curve tool draws on a drag too, unless you've started placing it by taps)
-    gesture = (mode === 'road' || mode === 'rail') && !draft && !(roadKind === 'curve' && picks.length) ? 'draw' : 'pan';
-    if (gesture === 'draw') {
-      const a = net.snapStart(groundAt(downAt.x, downAt.y), tol(), cls());
-      draft = { a, b: { ...a } };
-      trace = [a];
-      dragging = true;
-    }
-  }
-  if (gesture === 'pan') {
-    keepUnder(panAnchor, e.clientX, e.clientY);
-    vel.push({ x: view.x, z: view.z, t: performance.now() });
-    if (vel.length > 6) vel.shift();
-  } else if (gesture === 'draw' && draft) {
-    const raw = groundAt(e.clientX, e.clientY);
-    draft.b = net.snapEnd(draft.a, raw, tol(), roadKind !== 'straight', cls());
-    if (roadKind === 'curve') { trace.push(raw); draft.c = fitCurve(draft.a, draft.b, trace); }
-    draftChanged();
-  }
-});
-
-const end = (e: PointerEvent) => {
-  if (!pts.has(e.pointerId)) return;
-  const now = performance.now();
-  pts.delete(e.pointerId);
-  if (gesture === 'two') {
-    if (pts.size === 1) {
-      // a quick two-finger tap zooms out
-      if (!two.moved && now - two.t < 300) animateZoom(2, two.m0.x, two.m0.y);
-      // carry on panning with the finger that's left, without a jump
-      const [p] = [...pts.values()];
-      startPan(p.x, p.y);
-      gesture = 'pan';
-      two.moved = true; // only the first finger lift counts for the tap
-    }
-    return;
-  }
-  if (pts.size) return;
-  if (gesture === 'draw' || gesture === 'handle') { dragging = false; renderBar(); hint(); }
-  if (gesture === 'pan' && vel.length >= 2) {
-    const a = vel[0], b = vel[vel.length - 1];
-    const dt = (b.t - a.t) / 1000;
-    if (dt > 0 && now - b.t < 80) fling = { vx: (b.x - a.x) / dt, vz: (b.z - a.z) / dt };
-  }
-  if (gesture === 'maybe' && now - downAt.t < 400) {
-    if (tapMap(e.clientX, e.clientY) === 'look') {
-      // double-tap zooms in on the spot
-      if (now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
-        animateZoom(0.5, e.clientX, e.clientY);
-        lastTap.t = 0;
-      } else lastTap = { x: e.clientX, y: e.clientY, t: now };
-    }
-  }
-  gesture = 'none';
+    // a second finger turns it into a pinch, and a road half drawn is dropped
+    if (why === 'second-finger') { if (was === 'draw') { draft = null; draftChanged(); } else renderBar(); return; }
+    renderBar(); hint();
+  },
+  onTap: (p) => { tapMode = tapMap(p.sx, p.sy); },
+  // a double tap zooms in on the spot while looking round; with a tool, taps place things
+  onDoubleTap: () => tapMode !== 'look',
 };
-canvas.addEventListener('pointerup', end);
-canvas.addEventListener('pointercancel', end);
-canvas.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const w = groundAt(e.clientX, e.clientY);
-  view.h = Math.max(H_MIN, Math.min(H_MAX, view.h * (e.deltaY > 0 ? 1.12 : 1 / 1.12)));
-  keepUnder(w, e.clientX, e.clientY);
-}, { passive: false });
-
-// Zoom by a factor, keeping the tapped spot in place.
-function animateZoom(f: number, sx: number, sy: number) {
-  const w = groundAt(sx, sy);
-  const h = Math.max(H_MIN, Math.min(H_MAX, view.h * f));
-  // where the camera centre should end up so w stays under the finger
-  const c = groundAt(canvas.clientWidth / 2, canvas.clientHeight / 2);
-  const k = h / view.h;
-  goal = { h, x: view.x + (w.x - c.x) * (1 - k), z: view.z + (w.z - c.z) * (1 - k) };
-}
-
-function stepCamera(dt: number) {
-  if (goal) {
-    const t = Math.min(1, dt * 7);
-    let done = true;
-    for (const k of Object.keys(goal) as (keyof typeof view)[]) {
-      const g = goal[k]!;
-      view[k] += (g - view[k]) * t;
-      if (Math.abs(g - view[k]) > (k === 'h' || k === 'x' || k === 'z' ? 0.05 : 0.002)) done = false;
-    }
-    if (done) { Object.assign(view, goal); goal = null; }
-  }
-  if (gesture !== 'pan' && gesture !== 'two' && (fling.vx || fling.vz)) {
-    view.x += fling.vx * dt;
-    view.z += fling.vz * dt;
-    const decay = Math.exp(-dt * 4);
-    fling.vx *= decay; fling.vz *= decay;
-    if (Math.hypot(fling.vx, fling.vz) < 2) fling = { vx: 0, vz: 0 };
-  }
-  view.x = Math.max(-BOUND, Math.min(BOUND, view.x));
-  view.z = Math.max(-BOUND, Math.min(BOUND, view.z));
-  // point the compass needle at north (-z) as it appears on screen
-  const a = new THREE.Vector3(view.x, 0, view.z).project(cam), b = new THREE.Vector3(view.x, 0, view.z - 50).project(cam);
-  const ang = Math.atan2(-(b.y - a.y) * canvas.clientHeight, (b.x - a.x) * canvas.clientWidth);
-  // (the needle icon points up, so a quarter turn more than an arrow pointing right would need)
-  $('#needle').style.transform = `rotate(${(ang * 180) / Math.PI + 90}deg)`;
+// point the compass needle at north (-z) as it appears on screen
+// (the needle icon points up, so a quarter turn more than an arrow pointing right would need)
+nav.onChange(() => {
+  $('#needle').style.transform = `rotate(${(nav.northAngle() * 180) / Math.PI + 90}deg)`;
   shell.syncView();
-}
+});
 
 // ---------------- loop ----------------
 seedTown();
+starterStops(net); // a few bus stops to start with, so buses call and people queue (game/crowdsites.ts)
 rebuildRoads();
 refreshTrees();
 setMode('look');
@@ -1369,6 +1314,7 @@ refreshTrees();
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
+traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
 onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; };
@@ -1383,9 +1329,9 @@ function getPlaces(): Places {
   const home = (l: Lot) => l.kind === 'house' || l.kind === 'terrace' || l.kind === 'flats' || l.kind === 'tower';
   return (places = {
     homes: live.filter(home),
-    jobs: live.filter((l) => l.kind === 'office' || l.kind === 'shop' || l.kind === 'industry' || l.kind === 'tower'),
+    jobs: live.filter((l) => l.kind === 'office' || l.kind === 'shop' || l.kind === 'industry' || l.kind === 'tower').concat(industries.works()),
     shops: live.filter((l) => l.kind === 'shop'),
-    works: live.filter((l) => l.kind === 'industry'),
+    works: live.filter((l) => l.kind === 'industry').concat(industries.works()),
     weight: (l) => USE[l.kind].pop,
   });
 }
@@ -1418,6 +1364,9 @@ function cycleRate() {
 }
 setSpeed(1);
 let lastH = view.h;
+// the town's people: on the footways, at the stops, in the parks (see game/crowds.ts)
+const people = new TownCrowds({ scene, net, junctions, traffic, regions: () => infill }, GAME_MIN_PER_S);
+(window as unknown as { people: TownCrowds }).people = people;
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
 // Phones differ enormously, so rather than guess, the game watches its own frame times: if
 // frames run slow it steps down (fewer pixels, then cheaper shadows, then none), and when
@@ -1442,6 +1391,7 @@ function setTier(t: number) {
   if (q.shadow && sun.shadow.mapSize.x !== q.shadow) { sun.shadow.mapSize.set(q.shadow, q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
   renderer.shadowMap.needsUpdate = true;
   setGroundQuality(tier >= 3 ? 'low' : tier === 2 ? 'medium' : 'high');
+  people.setTier(tier); // fewer, simpler figures on the lower tiers, and no shadows from them
 }
 function judgeFrames(now: number) {
   if (!tierAuto) return;
@@ -1457,8 +1407,7 @@ function frame(now: number) {
   last = now;
   const t0 = performance.now();
   perf.frames++; perf.frameMs += rawMs; perf.worst = Math.max(perf.worst, rawMs);
-  stepCamera(dt);
-  placeCamera();
+  nav.update(dt, now);
   if (gameGround.sync()) renderer.shadowMap.needsUpdate = true;
   // keep blueprint handles a finger's width wide at any zoom
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
@@ -1491,6 +1440,12 @@ function frame(now: number) {
   clock += gdt * GAME_MIN_PER_S;
   const hour = (clock / 60) % 24;
   gameWater.update(now / 1000, hour); // ripples and reeds, and the water's light from the clock
+  // industrial sites: state once a game minute, moving parts at their own low rate, lamps at night;
+  // catchment rings for the selected site, or for every site while a stop is placed
+  siteT += gdt;
+  industries.tick(clock);
+  industries.frame(siteT, hour, cam);
+  industries.showOverlay(selectedSite, mode === 'stop' ? (stopPreview ? industries.kerbPoint(stopPreview.seg, stopPreview.t, stopPreview.side) : null) : undefined, mode === 'stop' || siteRings);
   // At 1× traffic steps once a frame as it always has; faster, it's cut into steps of at most
   // 1/30 s so cars don't jump through each other or past their stop lines. Paused, it holds still.
   if (speed > 0) {
@@ -1504,6 +1459,7 @@ function frame(now: number) {
     }
   }
   for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, simNow) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
+  people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
   if (now - statsAt > 250) {
     statsAt = now;
@@ -1529,6 +1485,7 @@ function frame(now: number) {
     if (perfOn) {
       const n = Math.max(1, perf.frames), r = renderer.info.render;
       $('#perf-t').textContent = `${Math.round(1000 / (perf.frameMs / n))} fps · frame ${(perf.frameMs / n).toFixed(1)} ms (worst ${perf.worst.toFixed(0)}) · sim ${(perf.simMs / n).toFixed(1)} (worst ${perf.worstSim.toFixed(0)}) · draw ${(perf.drawMs / n).toFixed(1)} ms · ${r.calls} calls · ${Math.round(r.triangles / 1000)}k tris · ${TIERS[tier].name}`;
+      $('#perf-t').textContent += ` · ${people.readout()}`;
     }
     window.__perf = { ...perf, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, tier: TIERS[tier].name };
     Object.assign(perf, { frames: 0, frameMs: 0, simMs: 0, drawMs: 0, since: now, worst: 0, worstSim: 0 });
@@ -1537,5 +1494,7 @@ function frame(now: number) {
 }
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, tapMap, endTool, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
+Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
