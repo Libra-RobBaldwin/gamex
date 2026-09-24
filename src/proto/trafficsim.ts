@@ -6,7 +6,7 @@ import { DEFAULT_OPTS, Network, rng, type P } from './roads';
 import { design, landFits, legsAt, type Form, type Junction } from './junction';
 import { Traffic, type Places } from './traffic';
 import { laneSpan } from './xsection';
-import { motorwayWithJunction, pairUpMotorways, type IxForm, type SlipStyle } from './interchange/build';
+import { motorwayWithJunction, pairUpMotorways, type IxForm, type IxSize, type SlipStyle } from './interchange/build';
 
 const as = (type: string) => ({ ...DEFAULT_OPTS, type });
 const geo = (n: Network, node: number) => ({ fits: (polys: Parameters<typeof landFits>[2]) => landFits(n, node, polys) });
@@ -21,8 +21,9 @@ export function town(sc: Scenario) {
   const junctions = new Map<number, Junction>();
   for (const nd of net.nodes.values()) {
     if (legsAt(net, nd.id).length < 3) continue;
-    const pf = built.prefer?.[nd.id] ?? sc.prefer;
-    const j = design(net, nd.id, geo(net, nd.id), undefined, pf ? { form: pf } : undefined);
+    // (an interchange's junctions take the form it built them for, without slip lanes of their own)
+    const ixf = built.prefer?.[nd.id], pf = ixf ? { form: ixf, slip: false } : sc.prefer ? { form: sc.prefer } : undefined;
+    const j = design(net, nd.id, geo(net, nd.id), undefined, pf);
     if (j) { junctions.set(nd.id, j); net.land.claim(`junction:${nd.id}`, 'junction', j.shape?.claims ?? []); }
   }
   for (const id of net.segs.keys()) for (const l of net.plotsFor(id, { x: 999, z: 999 })) if (net.lotFree(l)) { net.fitParcel(l); net.lots.push(l); }
@@ -154,11 +155,11 @@ export const SCENARIOS: Scenario[] = [
   },
   // motorway junctions (interchange/build.ts): a pair of one-way carriageways, slip roads leaving and
   // joining them, and the local road they meet; trips run on and off the motorway at both ends
-  ...([['dumbbell', 'taper'], ['gsr', 'taper'], ['diamond', 'taper'], ['dumbbell', 'parallel']] as [IxForm, SlipStyle][]).map(([form, style]): Scenario => ({
-    name: `motorway junction: ${form}${style === 'parallel' ? ', parallel slip lanes' : ''}`, cars: 170, minTrips: 60, forms: undefined, through: true,
+  ...([['dumbbell', 'taper', 'open'], ['gsr', 'taper', 'open'], ['diamond', 'taper', 'open'], ['dumbbell', 'parallel', 'open'], ['dumbbell', 'taper', 'tight'], ['gsr', 'taper', 'tight']] as [IxForm, SlipStyle, IxSize][]).map(([form, style, size]): Scenario => ({
+    name: `motorway junction: ${form}${style === 'parallel' ? ', parallel slip lanes' : ''}${size === 'tight' ? ', tight' : ''}`, cars: 170, minTrips: 60, forms: undefined, through: true,
     build: (n) => {
       n.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
-      const r = motorwayWithJunction(n, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...n.segs.values()][0], 0, style);
+      const r = motorwayWithJunction(n, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...n.segs.values()][0], 0, style, size);
       if (!r.ok) throw new Error(r.reason);
       return { prefer: r.ix.prefer };
     },

@@ -1,8 +1,8 @@
 // Free-form road network in metres: nodes + segments (straight, or curved as a sampled polyline),
 // snapping, junction splitting, and building plots laid out along both sides of every road.
 
-import { ROADS, defOf, halfOf, kerbOf, type Cls } from './catalog';
-export { ROADS, defOf, halfOf, kerbOf, laneBase, type RoadDef } from './catalog';
+import { ROADS, defOf, halfOf, isSlip, kerbOf, type Cls } from './catalog';
+export { ROADS, defOf, halfOf, kerbOf, isSlip, laneBase, type RoadDef } from './catalog';
 import { Land, type Claim } from './land';
 import { courseOf, normals, sectionAt, taperOf } from './xsection';
 export type RoadType = string;
@@ -475,7 +475,7 @@ export class Network {
     // pieces, or a one-way carriageway arriving and one leaving straight on; slip roads don't count,
     // and a pair of carriageways ending at a roundabout is the motorway's end)
     const midway = (n: number) => {
-      const m = this.segsAt(n).filter((x) => isMotorway(x) && x.type !== 'slip');
+      const m = this.segsAt(n).filter((x) => isMotorway(x) && !isSlip(x.type));
       if (m.filter((x) => !x.oneway).length > 1) return true;
       const dir = (x: RSeg) => { const p = this.pathFrom(x, n), L = dist(p[0], p[1]) || 1; return { x: (p[1].x - p[0].x) / L, z: (p[1].z - p[0].z) / L }; };
       const ins = m.filter((x) => x.oneway && x.b === n), outs = m.filter((x) => x.oneway && x.a === n);

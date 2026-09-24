@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BAY, ROADS, bayWeight, closestOnPath, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
-import { legsAt, type Junction } from './junction';
+import { legsAt, moveOf, type Junction } from './junction';
 import { STD } from './standards';
 import { PEDX, pedCrossingsOn, type PedX } from './pedx';
 import { GHOST_PAIR, crossingAt, legAt, legDir, legFrameOf, ringA, type ShapeLeg } from './jshape';
@@ -827,7 +827,12 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       const approaches = !(j.form === 'priority' && j.major.includes(leg.seg.id));
       // give-way mk (double broken) or a solid stop line across the incoming half
       if (j.form === 'signals') rect(mk, lineAt, lineAt + 0.3, lb + 0.2, kIn - 0.1, 0.36);
-      else if (approaches) for (const off of [0, 0.6]) for (let b = Math.max(lb, sh.splitter[leg.seg.id] ? STD.splitter.width / 2 : -Infinity) + 0.3; b < kIn - 0.2; b += 0.9) { const la = lineAtB(b + 0.3); rect(mk, la + off, la + off + 0.3, b, Math.min(kIn - 0.2, b + 0.6), 0.36); }
+      else if (approaches) {
+        // (a side road's line, on the major road's kerb line, runs right across the flared mouth to the
+        // corner's kerb: anything past it is left off with the rest that isn't on the carriageway)
+        const bEnd = gw ? kIn + STD.cornerRadius(Math.max(...legs.map((l) => net.def(l.seg).mph))) : kIn - 0.2;
+        for (const off of [0, 0.6]) for (let b = Math.max(lb, sh.splitter[leg.seg.id] ? STD.splitter.width / 2 : -Infinity) + 0.3; b < bEnd; b += 0.9) { const la = lineAtB(b + 0.3); rect(mk, la + off, la + off + 0.3, b, Math.min(bEnd, b + 0.6), 0.36); }
+      }
       // the give-way triangle (TSRGD diagram 1023): an outline, its point towards the driver coming up
       // to the line and its base across the lane just behind the line
       if (approaches && j.form !== 'signals') for (let i = 0; i < d.lanes; i++) {
@@ -854,8 +859,12 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       // lane arrows, a pair per approach lane
       const lanes = j.lanes[leg.seg.id] ?? [];
       // arrows only where lanes actually divide the traffic (not on a plain single-lane approach)
-      const arrows = lanes.length > 1 || j.form === 'signals' || n.id === editing;
-      if (arrows) lanes.forEach((mv, i) => {
+      // (not at a roundabout: every entry there is a left turn onto the ring, whichever exit it's for;
+      // elsewhere only the movements there are, never towards a road that only leads in)
+      const can = new Set(legs.filter((o) => o !== leg && o.out).map((o) => moveOf(leg, o)));
+      const arrows = !ring && (lanes.length > 1 || j.form === 'signals' || n.id === editing);
+      if (arrows) lanes.map((mv) => mv.filter((m) => can.has(m))).forEach((mv, i) => {
+        if (!mv.length) return;
         const c = laneCentre(net, leg.seg, i), la = Math.max(lineAtB(c), sh.mouth[leg.seg.id] ?? 0);
         for (const at of [la + 9, la + 26]) {
           if (at > leg.len - 8) continue;

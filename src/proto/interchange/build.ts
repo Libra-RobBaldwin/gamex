@@ -9,13 +9,29 @@
 //   gsr       a grade-separated roundabout: a big one-way ring over the motorway on two bridges,
 //             the local road and the slip roads meeting it at give-way junctions
 import { DEFAULT_OPTS, ROADS, closestOnPath, kerbOf, halfOf, minRadius, pathLength, pointAt, type End, type Network, type P, type RSeg, type RoadOpts } from '../roads';
-import { oneWay } from '../catalog';
+import { laneBase, oneWay } from '../catalog';
+import type { Limit } from '../grade';
 import { STD } from '../standards';
 import { GRADES } from '../grade';
 import type { Form } from '../junction';
 import { Land, bandPolys } from '../land';
 
 export type IxForm = 'dumbbell' | 'gsr' | 'diamond';
+// how much room it takes: tight, for a town (the motorway dips into a cutting under it, the local
+// road climbs steeply over it, slip roads at 40 mph), or open, out in the country (everything at
+// ground level, gentle gradients, 50 mph slip roads)
+export type IxSize = 'tight' | 'open';
+export const IX_SIZES: IxSize[] = ['tight', 'open'];
+export const IX_SIZE_NAME: Record<IxSize, string> = { tight: 'Tight', open: 'Open' };
+export const IX_SIZE_BLURB: Record<IxSize, string> = { tight: 'Compact, for a town: the motorway in a cutting, tighter slip roads', open: 'Spread out, for the country: at ground level, gentle curves' };
+// depth: room for a deeper deck than the height solver allows for (a beam's, over a 30 m span); cut: how deep the motorway goes under it; grade: the local road's (or ring's) steepest; flat: how
+// far the local road is level either side of a roundabout, past its ring; ringFlat: a ring's level
+// stretch either side of each road meeting it; slip: the slip roads' type
+const SIZE: Record<IxSize, { cut: number; grade: number; flat: number; ringFlat: number; slip: string; depth: number }> = {
+  tight: { cut: 4, grade: 0.08, flat: 6, ringFlat: 12, slip: 'slip-40', depth: 1 },
+  open: { cut: 0, grade: 0.06, flat: 16, ringFlat: 22, slip: 'slip', depth: 2 },
+};
+const MW_GRADE = 0.045; // how steeply the motorway dips into its cutting (DMRB: 3–4%, a little over at the limit)
 export const IX_FORMS: IxForm[] = ['dumbbell', 'gsr', 'diamond'];
 export const IX_NAME: Record<IxForm, string> = { dumbbell: 'Dumbbell', gsr: 'Grade-separated roundabout', diamond: 'Diamond' };
 export const IX_BLURB: Record<IxForm, string> = {
@@ -32,6 +48,7 @@ export interface Interchange {
   prefer: Record<number, Form>; // the form each of its junctions has to take
   slips: { seg: number; kind: 'merge' | 'diverge'; taper: number; nose: number; aux: number }[];
   style: SlipStyle;
+  size: IxSize;
 }
 
 type V = { x: number; z: number };
@@ -79,12 +96,17 @@ const at = (net: Network, p: P, tol = 1): End => { const n = net.nearestNode(p, 
 
 // A motorway (or dual carriageway) as a pair of one-way carriageways either side of the line mw, run
 // from its first point to its last: the one on its left runs that way, the other back.
-export function buildPair(net: Network, mw: P[], type: string, opts: Partial<RoadOpts> = {}) {
+// `heights`: height windows by distance along mw (a cutting at a junction), laid onto each carriageway.
+export function buildPair(net: Network, mw: P[], type: string, opts: Partial<RoadOpts> = {}, heights: Limit[] = []) {
   const g = pairGap(type) / 2, o = { ...DEFAULT_OPTS, ...opts, type, oneway: true };
   const ab = offsetPath(mw, g), ba = offsetPath(mw, -g).reverse();
-  const A = road(net, at(net, ab[0]), at(net, ab[ab.length - 1]), { ...o, path: ab }, 'One carriageway');
+  const along = (path: P[], s: number) => closestOnPath(pointAt(mw, s), path).s;
+  const lim = (path: P[]) => heights.map((h) => { const [s0, s1] = [along(path, h.s0), along(path, h.s1)].sort((x, y) => x - y); return { ...h, s0, s1 }; });
+  // (a motorway in a cutting is built in 'tunnel' mode, which lets it go below the ground)
+  const oc = heights.length ? { ...o, cross: 'tunnel' as const } : o;
+  const A = road(net, at(net, ab[0]), at(net, ab[ab.length - 1]), { ...oc, path: ab, limits: [...(o.limits ?? []), ...lim(ab)] }, 'One carriageway');
   if (!A.ok) return A;
-  const B = road(net, at(net, ba[0]), at(net, ba[ba.length - 1]), { ...o, path: ba }, 'The other carriageway');
+  const B = road(net, at(net, ba[0]), at(net, ba[ba.length - 1]), { ...oc, path: ba, limits: [...(o.limits ?? []), ...lim(ba)] }, 'The other carriageway');
   if (!B.ok) return B;
   // (the reservation between them is the motorway's land too: no trees or plots in it)
   net.land.claim(`reservation:${A.segs[0]}`, 'road', bandPolys(mw, RESERVATION / 2 + 0.5, RESERVATION / 2 + 0.5));
@@ -155,31 +177,33 @@ function carriagewayAt(net: Network, p: P, w: V, type: string): RSeg | null {
 // there, or `road` null: a road of `roadType` to come, the junction's own link runs square across).
 // style: taper merges and diverges, or (parallel) slip roads with an auxiliary lane alongside (STD.parallel)
 export type SlipStyle = 'taper' | 'parallel';
-export interface Site { mw: P[]; type: string; s: number; road: RSeg | null; roadType?: string; style?: SlipStyle }
+// cut: how deep the motorway is under the junction (0: at ground level)
+export interface Site { mw: P[]; type: string; s: number; road: RSeg | null; roadType?: string; style?: SlipStyle; size?: IxSize; cut?: number }
 type Fail = { ok: false; reason: string };
 
 // The junction's layout: its centre and the motorway's direction there, the local road's
 // direction (pointing to the carriageway running the way the line was drawn), and where the local
 // road meets the junction either side (the two roundabouts or give-ways, or the ring).
-function layout(net: Network, form: IxForm, site: Site) {
+function layout(net: Network | null, form: IxForm, site: Site) {
   const q = pointAt(site.mw, site.s), u = { x: q.ux, z: q.uz }, X: P = { x: q.x, z: q.z }, nl = left(u);
   const g = pairGap(site.type) / 2, Dc = oneWay(ROADS[site.type]);
   let v: V = nl, type = site.roadType ?? 'dual';
-  if (site.road) { const c = closestOnPath(X, net.path(site.road)); v = { x: c.ux, z: c.uz }; type = site.road.type; }
+  if (site.road && net) { const c = closestOnPath(X, net.path(site.road)); v = { x: c.ux, z: c.uz }; type = site.road.type; }
   if (dot(v, nl) < 0) v = { x: -v.x, z: -v.z };
   const sin = Math.abs(u.x * v.z - u.z * v.x), half = (g + halfOf(Dc) + 1.5) / Math.max(0.3, sin);
+  const SZ = SIZE[site.size ?? 'open'], rise = Math.max(3, GRADES.road.clear - (site.cut ?? 0) + SZ.depth); // (how far it climbs over the motorway)
   if (form === 'gsr') {
-    const G = Math.min(DEFAULT_OPTS.grade, ROADS['gsr-ring'].maxGrade);
+    const G = Math.min(SZ.grade, ROADS['gsr-ring'].maxGrade);
     // big enough that between the slip roads' nodes and the motorway the ring can climb over it
-    const Rg = Math.ceil(((GRADES.road.clear + DEPTH) / G + RING_FLAT + half * 1.2) / (Math.PI / 2 - SPREAD) + 2);
-    return { X, u, v, sin, type, g, Dc, radius: Rg, R1: add(X, v, Rg), R2: add(X, v, -Rg) };
+    const Rg = Math.ceil((rise / G + SZ.ringFlat + half * 1.2) / (Math.PI / 2 - SPREAD) + 2);
+    return { X, u, v, sin, type, g, Dc, radius: Rg, R1: add(X, v, Rg), R2: add(X, v, -Rg), half };
   }
-  const L = ROADS[type], G = Math.min(DEFAULT_OPTS.grade, L.maxGrade), radius = form === 'dumbbell' ? STD.roundabout(2, true).R : 0;
+  const L = ROADS[type], G = Math.min(SZ.grade, L.maxGrade), radius = form === 'dumbbell' ? STD.roundabout(2, true).R : 0;
   // far enough out that the bridge can climb over both carriageways and be level again at the nodes
-  const dR = half + (GRADES.road.clear + DEPTH) / G + radius + 24;
-  return { X, u, v, sin, type, g, Dc, radius, R1: add(X, v, dR), R2: add(X, v, -dR) };
+  const dR = half + rise / G + radius + SZ.flat + 8;
+  return { X, u, v, sin, type, g, Dc, radius, R1: add(X, v, dR), R2: add(X, v, -dR), half };
 }
-const RING_FLAT = 22, SPREAD = 0.42, DEPTH = 2, ENTRY = 0.7; // DEPTH: room for a deeper deck than the height solver allows for (a beam's, over a 30 m span) // a ring's level stretch either side of each node; how far round from the local road the slip roads meet it (radians)
+const SPREAD = 0.42, ENTRY = 0.7; // how far round from the local road the slip roads meet it (radians); the angle slip roads meet a ring at
 
 // The local road's two nodes at the junction: an existing road is cut there and the stretch
 // between taken away (the bridge or the ring replaces it); otherwise two new nodes.
@@ -222,8 +246,8 @@ function buildTwo(net: Network, form: IxForm, site: Site, lay: Lay, [n1, n2]: [n
   const R1 = net.node(n1), R2 = net.node(n2);
   const nodes: number[] = [n1, n2], segs: number[] = [], prefer: Record<number, Form> = {}, slips: Interchange['slips'] = [];
   // the bridge, level where it meets the roundabouts
-  const flat = radius + 16, Lb = dist(R1, R2);
-  const br = road(net, { x: R1.x, z: R1.z, node: n1 }, { x: R2.x, z: R2.z, node: n2 }, { ...DEFAULT_OPTS, type, cross: 'bridge', limits: [{ s0: 0, s1: flat, lo: 0, hi: 0, why: 'the roundabout' }, { s0: Lb - flat, s1: Lb, lo: 0, hi: 0, why: 'the roundabout' }] }, 'The bridge');
+  const SZ = SIZE[site.size ?? 'open'], flat = radius + SZ.flat, Lb = dist(R1, R2);
+  const br = road(net, { x: R1.x, z: R1.z, node: n1 }, { x: R2.x, z: R2.z, node: n2 }, { ...DEFAULT_OPTS, type, grade: SZ.grade, cross: 'bridge', limits: [{ s0: 0, s1: flat, lo: 0, hi: 0, why: 'the roundabout' }, { s0: Lb - flat, s1: Lb, lo: 0, hi: 0, why: 'the roundabout' }] }, 'The bridge');
   if (!br.ok) return br;
   segs.push(...br.segs);
   // each carriageway's slip roads, on its nearside, to the node on that side
@@ -237,7 +261,7 @@ function buildTwo(net: Network, form: IxForm, site: Site, lay: Lay, [n1, n2]: [n
   }
   // (a roundabout's ring has its land clear: anything standing on it is bought and cleared)
   if (ring) for (const n of [n1, n2]) { const c = net.node(n); net.lots = net.lots.filter((l) => Math.hypot(l.x - c.x, l.z - c.z) > radius + 3 + Math.hypot(l.w, l.d) / 2); }
-  return { ok: true, ix: { id, form, at: X, type: site.type, nodes, segs, prefer, slips, style: site.style ?? 'taper' } };
+  return { ok: true, ix: { id, form, at: X, type: site.type, nodes, segs, prefer, slips, style: site.style ?? 'taper', size: site.size ?? 'open' } };
 }
 
 // A side's slip roads: the off-slip from its diverge to `offTo`, the on-slip from `onFrom` to its merge.
@@ -246,11 +270,11 @@ function slipRoads(net: Network, site: Site, sp: NonNullable<ReturnType<typeof s
   if (Math.min(site.s + side * r0, site.s + side * r1) < 0 || Math.max(site.s + side * r0, site.s + side * r1) > mwL) return { ok: false as const, reason: 'The motorway needs to run further either side of the junction for its slip roads' };
   const dc = carriagewayAt(net, sp.off[0], sp.w, site.type);
   if (!dc) return { ok: false as const, reason: 'No carriageway where the slip road should leave it' };
-  const off = road(net, { ...sp.off[0], seg: dc.id }, offTo, { ...DEFAULT_OPTS, type: 'slip', oneway: true, path: sp.off }, 'The off-slip');
+  const off = road(net, { ...sp.off[0], seg: dc.id }, offTo, { ...DEFAULT_OPTS, type: SIZE[site.size ?? 'open'].slip, oneway: true, path: sp.off }, 'The off-slip');
   if (!off.ok) return off;
   const mc = carriagewayAt(net, sp.on[sp.on.length - 1], sp.w, site.type);
   if (!mc) return { ok: false as const, reason: 'No carriageway where the slip road should join it' };
-  const on = road(net, onFrom, { ...sp.on[sp.on.length - 1], seg: mc.id }, { ...DEFAULT_OPTS, type: 'slip', oneway: true, path: sp.on }, 'The on-slip');
+  const on = road(net, onFrom, { ...sp.on[sp.on.length - 1], seg: mc.id }, { ...DEFAULT_OPTS, type: SIZE[site.size ?? 'open'].slip, oneway: true, path: sp.on }, 'The on-slip');
   if (!on.ok) return on;
   // (a slip road with an auxiliary lane says so: the merge or diverge lays it out from that)
   if (sp.aux) for (const id of [off.segs[0], on.segs[on.segs.length - 1]]) { const sg = net.segs.get(id); if (sg) sg.aux = sp.aux; }
@@ -267,9 +291,12 @@ function slipRoads(net: Network, site: Site, sp: NonNullable<ReturnType<typeof s
 // the local road at, arriving and leaving it at 45° to the local road. (`offTo`, `onFrom`: where on
 // a ring they meet it instead, square to it.)
 function slipPaths(site: Site, side: 1 | -1, R: P, radius: number, X: P, ring?: { offTo: P; onFrom: P; hOff: V; hOn: V; clear: number }) {
-  const g = pairGap(site.type) / 2, Dc = oneWay(ROADS[site.type]), S = ROADS.slip, K = kerbOf(Dc), Ks = kerbOf(S);
+  const g = pairGap(site.type) / 2, Dc = oneWay(ROADS[site.type]), S = ROADS[SIZE[site.size ?? 'open'].slip], K = kerbOf(Dc), Ks = kerbOf(S);
   const q = pointAt(site.mw, site.s), u = { x: q.ux, z: q.uz }, w = side === 1 ? u : { x: -u.x, z: -u.z }, m = left(w);
-  const eN = K + STD.noseTip + Ks, run = 20; // (the nose starts exactly where it runs alongside: see slips.ts)
+  const eN = K + STD.noseTip + Ks; // (the nose starts exactly where the kerbs have parted by its tip: see slips.ts)
+  // where the slip lane is when it's the next lane over, and so where it runs from across the nose,
+  // in a straight line out to eN (slips.ts lays its lane across the nose along that same line)
+  const ec = laneBase(Dc) + (Dc.lanes + 0.5) * Dc.lane, half = (e: number) => ec + (eN - ec) * e;
   // a point t metres along the carriageway from level with X (in its direction), e out from its centreline
   const F = (t: number, e: number) => { const s = site.s + side * t, c = pointAt(site.mw, s), n = left({ x: c.ux, z: c.uz }); return add(c, n, side * (g + e)); };
   const vs = unit(sub(R, X));
@@ -278,7 +305,8 @@ function slipPaths(site: Site, side: 1 | -1, R: P, radius: number, X: P, ring?: 
   // (round a ring, a slip road keeps outside it, bar where it meets it)
   const outside = (pts: P[], end: P) => !ring || pts.every((p) => dist(p, end) < 40 || dist(p, X) > ring.clear);
   const offTo = ring?.offTo ?? R, onFrom = ring?.onFrom ?? R;
-  const Qoff = add(offTo, hOff, -(radius + 22)), Qon = add(onFrom, hOn, radius + 22);
+  // (straight for the last stretch into the node: at a ring the junction's corner, at 40° to it, runs a long way back)
+  const straight = ring ? 60 : radius + 22, Qoff = add(offTo, hOff, -straight), Qon = add(onFrom, hOn, straight);
   const along = (p: P) => dot(sub(p, X), w), lateral = (p: P) => dot(sub(p, X), m) - g;
   const dv0 = STD.diverge(Dc.mph), mg0 = STD.merge(Dc.mph);
   // (the nose starts where the kerbs have parted by its tip, a little short of the point the slip road
@@ -287,12 +315,15 @@ function slipPaths(site: Site, side: 1 | -1, R: P, radius: number, X: P, ring?: 
   const par = site.style === 'parallel' ? STD.parallel(Dc.mph) : null, aux = par?.length ?? 0;
   if (par) { dv.taper = par.taper + aux; mg.taper = par.taper + aux; } // (how far along the carriageway each reaches)
   for (const k of [1.1, 1.4, 1.8, 2.3]) {
-    // the diverge: its node where the lanes part (td), the nose beyond, alongside, then round to the road
-    const spanOff = Math.max(40, k * (lateral(Qoff) - eN)), td = along(Qoff) - spanOff - dv.nose - run;
-    const off = [F(td, 0), F(td + dv.nose, eN), ...curve(F(td + dv.nose + run, eN), w, Qoff, hOff), { x: offTo.x, z: offTo.z }];
-    // the merge: from the road round to alongside, past the nose, closing in at tm
-    const spanOn = Math.max(40, k * (lateral(Qon) - eN)), tm = along(Qon) + spanOn + mg.nose + run;
-    const on = [{ x: onFrom.x, z: onFrom.z }, ...curve(Qon, hOn, F(tm - mg.nose - run, eN), w), F(tm - mg.nose, eN), F(tm, 0)];
+    // the diverge: its node where the lanes part (td), out along the taper's line to the nose, and on
+    // at that angle (it leaves the motorway as it leaves the lane) as it curves round to the road
+    const spanOff = Math.max(40, k * (lateral(Qoff) - eN)), td = along(Qoff) - spanOff - dv.nose;
+    const nOff = F(td + dv.nose, eN), hNoff = unit(sub(nOff, F(td + dv.nose / 2, half(0.5))));
+    const off = [F(td, 0), F(td + dv.nose / 2, half(0.5)), ...curve(nOff, hNoff, Qoff, hOff), { x: offTo.x, z: offTo.z }];
+    // the merge: from the road round to the nose, arriving at the taper's angle, closing in at tm
+    const spanOn = Math.max(40, k * (lateral(Qon) - eN)), tm = along(Qon) + spanOn + mg.nose;
+    const nOn = F(tm - mg.nose, eN), hNon = unit(sub(F(tm - mg.nose / 2, half(0.5)), nOn));
+    const on = [{ x: onFrom.x, z: onFrom.z }, ...curve(Qon, hOn, nOn, hNon), F(tm - mg.nose / 2, half(0.5)), F(tm, 0)];
     if (minRadius(off.slice(1, -1)) >= S.minR && minRadius(on.slice(1, -1)) >= S.minR && outside(off, offTo) && outside(on, onFrom))
       return { off, on, w, side, reach: [td - dv.taper - 20, tm + mg.taper + 20] as [number, number], dv, mg, aux };
   }
@@ -301,6 +332,15 @@ function slipPaths(site: Site, side: 1 | -1, R: P, radius: number, X: P, ring?: 
 
 // A grade-separated roundabout: a one-way ring about the junction's centre (going round with the
 // island on the right), over the motorway on two bridges, level where each road meets it.
+// where on the ring each side's slip roads meet it, and the headings they meet it at (40° to it:
+// turning in onto it, turning out off it)
+function gsrSlips(lay: Lay, side: 1 | -1) {
+  const { X, v, radius: Rg } = lay, av = Math.atan2(v.z, v.x), base = side === 1 ? av : av + Math.PI;
+  const onRing = (a: number): P => ({ x: X.x + Math.cos(a) * Rg, z: X.z + Math.sin(a) * Rg });
+  const tan = (p: P) => unit({ x: -(p.z - X.z), z: p.x - X.x }), rot = (h: V, a: number) => ({ x: h.x * Math.cos(a) - h.z * Math.sin(a), z: h.x * Math.sin(a) + h.z * Math.cos(a) });
+  const off = onRing(base - SPREAD), on = onRing(base + SPREAD);
+  return { off, on, ring: { offTo: off, onFrom: on, hOff: rot(tan(off), ENTRY), hOn: rot(tan(on), -ENTRY), clear: Rg + 14 } };
+}
 function buildGSR(net: Network, site: Site, lay: Lay, [rn1, rn2]: [number, number], id: number): { ok: true; ix: Interchange } | Fail {
   const { X, v, radius: Rg } = lay, av = Math.atan2(v.z, v.x);
   const onRing = (a: number): P => ({ x: X.x + Math.cos(a) * Rg, z: X.z + Math.sin(a) * Rg });
@@ -321,8 +361,8 @@ function buildGSR(net: Network, site: Site, lay: Lay, [rn1, rn2]: [number, numbe
     while (a1 <= A.a) a1 += Math.PI * 2;
     const n = Math.max(6, Math.ceil(((a1 - A.a) * Rg) / 4)), pts: P[] = [];
     for (let k = 0; k <= n; k++) pts.push(onRing(A.a + ((a1 - A.a) * k) / n));
-    const Lr = pathLength(pts), fl = Math.min(RING_FLAT, Lr / 2);
-    const r = road(net, { ...pts[0], node: A.node }, { ...pts[n], node: B.node }, { ...DEFAULT_OPTS, type: 'gsr-ring', oneway: true, cross: 'bridge', path: pts, limits: [{ s0: 0, s1: fl, lo: 0, hi: 0, why: 'the junction' }, { s0: Lr - fl, s1: Lr, lo: 0, hi: 0, why: 'the junction' }] }, 'The roundabout');
+    const Lr = pathLength(pts), fl = Math.min(SIZE[site.size ?? 'open'].ringFlat, Lr / 2);
+    const r = road(net, { ...pts[0], node: A.node }, { ...pts[n], node: B.node }, { ...DEFAULT_OPTS, type: 'gsr-ring', grade: SIZE[site.size ?? 'open'].grade, oneway: true, cross: 'bridge', path: pts, limits: [{ s0: 0, s1: fl, lo: 0, hi: 0, why: 'the junction' }, { s0: Lr - fl, s1: Lr, lo: 0, hi: 0, why: 'the junction' }] }, 'The roundabout');
     if (!r.ok) return r;
     segs.push(...r.segs);
   }
@@ -330,37 +370,67 @@ function buildGSR(net: Network, site: Site, lay: Lay, [rn1, rn2]: [number, numbe
   for (const side of [1, -1] as const) {
     const offN = net.node(slipNode.get(`${side}:off`)!), onN = net.node(slipNode.get(`${side}:on`)!);
     const R = side === 1 ? net.node(rn1) : net.node(rn2);
-    // they meet the ring at 40° to it: turning in onto it, turning out off it
-    const tan = (p: P) => unit({ x: -(p.z - X.z), z: p.x - X.x }), rot = (h: V, a: number) => ({ x: h.x * Math.cos(a) - h.z * Math.sin(a), z: h.x * Math.sin(a) + h.z * Math.cos(a) });
-    const sp = slipPaths(site, side, R, 8, X, { offTo: offN, onFrom: onN, hOff: rot(tan(offN), ENTRY), hOn: rot(tan(onN), -ENTRY), clear: Rg + 14 });
+    const sp = slipPaths(site, side, R, 8, X, { ...gsrSlips(lay, side).ring, offTo: offN, onFrom: onN });
     if (!sp) return { ok: false, reason: 'There isn’t room for the slip roads to curve round to the roundabout' };
     const r = slipRoads(net, site, sp, { x: offN.x, z: offN.z, node: offN.id }, { x: onN.x, z: onN.z, node: onN.id });
     if (!r.ok) return r;
     segs.push(...r.segs); nodes.push(...r.nodes); slips.push(...r.slips);
   }
   for (const r of around) { nodes.push(r.node); prefer[r.node] = 'priority'; }
-  return { ok: true, ix: { id, form: 'gsr', at: X, type: site.type, nodes, segs, prefer, slips, style: site.style ?? 'taper' } };
+  return { ok: true, ix: { id, form: 'gsr', at: X, type: site.type, nodes, segs, prefer, slips, style: site.style ?? 'taper', size: site.size ?? 'open' } };
 }
 
 // A new motorway drawn across a road, with a junction where it crosses: the local road is cut at
 // the junction's nodes, the pair of carriageways built through the gap, then the junction's pieces.
 // (Try it on scratch(net) first, for a blueprint that says what it costs and why it can't be built.)
-export function motorwayWithJunction(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id = 0, style: SlipStyle = 'taper') {
-  return allOrNothing(net, (n) => motorwayWithJunctionOn(n, form, mw, type, n.segs.get(road.id)!, id, style));
+export function motorwayWithJunction(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id = 0, style: SlipStyle = 'taper', size: IxSize = 'open') {
+  return allOrNothing(net, (n) => motorwayWithJunctionOn(n, form, mw, type, n.segs.get(road.id)!, id, style, size));
 }
-function motorwayWithJunctionOn(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id: number, style: SlipStyle) {
+function motorwayWithJunctionOn(net: Network, form: IxForm, mw: P[], type: string, road: RSeg, id: number, style: SlipStyle, size: IxSize) {
   const X = crossingOf(mw, net.path(road));
   if (!X) return { ok: false as const, reason: 'The motorway doesn’t cross that road' };
-  const site: Site = { mw, type, s: X.s, road, style };
+  let site: Site = { mw, type, s: X.s, road, style, size };
+  // (a tight one has the motorway in a cutting under it, as deep as there's room for)
+  const cut = size === 'tight' ? cutting(form, { ...site, road: null, roadType: road.type }) : null;
+  if (cut) site = { ...site, cut: cut.cut };
   const lay = layout(net, form, site);
   if (lay.sin < 0.6) return { ok: false as const, reason: 'The road crosses the motorway at too shallow an angle for a junction' };
   const ln = localNodes(net, site, lay.R1, lay.R2);
   if (!ln.ok) return ln;
-  const pair = buildPair(net, mw, type);
+  const pair = buildPair(net, mw, type, {}, cut?.heights ?? []);
   if (!pair.ok) return pair;
   const r = buildJunctionOn(net, form, { ...site, road: null, roadType: road.type }, id, ln.n);
   if (!r.ok) return r;
   return { ok: true as const, ix: r.ix, carriageways: [...pair.ab, ...pair.ba] };
+}
+
+// How deep the motorway can dip under a junction, and its heights to get there: down under the
+// bridge (or the ring), up again at MW_GRADE either side, and at ground level beyond. The slip roads
+// stay at ground level, so at every point along them the cutting (its grass slopes) has to be shallow
+// enough there to leave them clear of its top. The deepest that fits of 4, 3 or 2 m, or none.
+function cutting(form: IxForm, site: Site): { cut: number; heights: Limit[] } | null {
+  const L = pathLength(site.mw), g = pairGap(site.type) / 2, Dc = oneWay(ROADS[site.type]), S = ROADS[SIZE[site.size ?? 'open'].slip];
+  for (const cut of [4, 3, 2]) {
+    const st = { ...site, cut }, lay = layout(null, form, st);
+    // along the motorway, how far either side of the middle the bridge (or the ring) is over it
+    const W = form === 'gsr' ? lay.radius + halfOf(ROADS['gsr-ring']) + 10 : halfOf(ROADS[lay.type]) / Math.max(0.3, lay.sin) + 10;
+    const T0 = W + cut / MW_GRADE, depth = (t: number) => (t <= W ? cut : Math.max(0, cut - MW_GRADE * (t - W)));
+    let fits = true;
+    for (const side of [1, -1] as const) {
+      const R = side === 1 ? lay.R1 : lay.R2;
+      const sp = form === 'gsr' ? slipPaths(st, side, R, 8, lay.X, gsrSlips(lay, side).ring) : slipPaths(st, side, R, Math.max(lay.radius, 12), lay.X);
+      if (!sp) { fits = false; break; }
+      for (const p of [...sp.off, ...sp.on]) {
+        const d = depth(Math.abs(dot(sub(p, lay.X), lay.u)));
+        if (d > 0 && closestOnPath(p, site.mw).d - g < halfOf(Dc) + 0.7 * d + kerbOf(S) + S.verge + 0.5) { fits = false; break; }
+      }
+    }
+    if ((globalThis as { CUT_DEBUG?: boolean }).CUT_DEBUG) console.log('cut', form, cut, fits, 'W', W.toFixed(0), 'T0', T0.toFixed(0), 'dR', dist(lay.R1, lay.X).toFixed(0));
+    if (!fits || site.s - T0 < 20 || site.s + T0 > L - 20) continue;
+    const sX = site.s, win = (s0: number, s1: number, lo: number, hi: number, why: string): Limit => ({ s0: Math.max(0, s0), s1: Math.min(L, s1), lo, hi, why });
+    return { cut, heights: [win(sX - W, sX + W, -cut - 0.2, -cut + 0.2, 'the junction over it'), win(0, sX - T0, -0.05, 0.05, 'the slip roads'), win(sX + T0, L, -0.05, 0.05, 'the slip roads')] };
+  }
+  return null;
 }
 
 // where a polyline first crosses another: the distance along the first

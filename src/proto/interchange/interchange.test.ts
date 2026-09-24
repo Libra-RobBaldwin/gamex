@@ -4,7 +4,7 @@ import { design, landFits, legsAt, type Junction } from '../junction';
 import { laneBase } from '../catalog';
 import { STD } from '../standards';
 import { simulate, type Scenario } from '../trafficsim';
-import { IX_FORMS, motorwayWithJunction, type SlipStyle } from './build';
+import { IX_FORMS, motorwayWithJunction, type IxSize, type SlipStyle } from './build';
 import * as THREE from 'three';
 import { SURFACES, drawRoads } from '../roaddraw';
 import { TriIndex, checkWindow, trisOf, type Defect, type Mat } from '../drawcheck';
@@ -15,19 +15,19 @@ g0.document ??= { createElement: () => ({ getContext: () => new Proxy({}, { get:
 const geo = (net: Network, node: number) => ({ fits: (p: P[][]) => landFits(net, node, p) });
 const as = (type: string, oneway = false) => ({ ...DEFAULT_OPTS, type, oneway });
 
-function junctionTown(form: (typeof IX_FORMS)[number], style: SlipStyle = 'taper') {
+function junctionTown(form: (typeof IX_FORMS)[number], style: SlipStyle = 'taper', size: IxSize = 'open') {
   const net = new Network(() => false, 900);
   net.build({ x: 0, z: -880 }, { x: 0, z: 880 }, undefined, as('dual'));
-  const r = motorwayWithJunction(net, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...net.segs.values()][0], 0, style);
+  const r = motorwayWithJunction(net, form, [{ x: -880, z: 0 }, { x: 880, z: 0 }], 'motorway', [...net.segs.values()][0], 0, style, size);
   if (!r.ok) throw new Error(r.reason);
   const js = new Map<number, Junction>();
-  for (const n of net.nodes.values()) if (legsAt(net, n.id).length >= 3) { const j = design(net, n.id, geo(net, n.id), undefined, r.ix.prefer[n.id] ? { form: r.ix.prefer[n.id] } : undefined); if (j) js.set(n.id, j); }
+  for (const n of net.nodes.values()) if (legsAt(net, n.id).length >= 3) { const j = design(net, n.id, geo(net, n.id), undefined, r.ix.prefer[n.id] ? { form: r.ix.prefer[n.id], slip: false } : undefined); if (j) js.set(n.id, j); }
   return { net, ix: r.ix, js };
 }
 
 describe('motorway junctions', () => {
-  for (const [form, style] of [...IX_FORMS.map((f) => [f, 'taper'] as const), ['dumbbell', 'parallel'] as const]) it(`${form} (${style}): every slip road meets the carriageway as a merge or diverge, with DMRB tapers and noses`, () => {
-    const { net, ix, js } = junctionTown(form, style);
+  for (const [form, style, size] of [...IX_FORMS.map((f) => [f, 'taper', 'open'] as const), ...IX_FORMS.map((f) => [f, 'taper', 'tight'] as const), ['dumbbell', 'parallel', 'open'] as const]) it(`${form} (${style}, ${size}): every slip road meets the carriageway as a merge or diverge, with DMRB tapers and noses`, () => {
+    const { net, ix, js } = junctionTown(form, style, size);
     const slips = [...js.values()].filter((j) => j.form === 'merge' || j.form === 'diverge');
     expect(slips.length).toBe(4);
     expect(slips.filter((j) => j.form === 'merge').length).toBe(2);
@@ -67,8 +67,8 @@ describe('motorway junctions', () => {
     }
   });
 
-  for (const form of IX_FORMS) it(`${form}: drawn with no holes, stray markings or surfaces fighting`, () => {
-    const { net, ix, js } = junctionTown(form);
+  for (const [form, size] of [...IX_FORMS.map((f) => [f, 'open'] as const), ...IX_FORMS.map((f) => [f, 'tight'] as const)]) it(`${form} (${size}): drawn with no holes, stray markings or surfaces fighting`, () => {
+    const { net, ix, js } = junctionTown(form, 'taper', size);
     const g = new THREE.Group(), m = new THREE.MeshLambertMaterial();
     drawRoads(net, g, js, m, m);
     const mats = new Map<THREE.Material, Mat>();

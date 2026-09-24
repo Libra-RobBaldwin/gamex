@@ -3,7 +3,7 @@
 // what it knocks down and why it can't be built, and the ghost can show every piece, before
 // anything changes. Building it for real is then the same call on the real network.
 import { CLEAR_COST, RAISE_COST, closestOnPath, pathLength, type Lot, type Network, type P, type RSeg } from '../roads';
-import { crossingOf, motorwayWithJunction, scratch, type IxForm, type SlipStyle } from './build';
+import { crossingOf, motorwayWithJunction, scratch, type IxForm, type IxSize, type SlipStyle } from './build';
 
 export interface IxPlan { ok: boolean; reason?: string; cost: number; clears: Lot[]; ghost: { path: P[]; half: number }[] }
 
@@ -20,9 +20,9 @@ export function roadCrossed(net: Network, mw: P[]): RSeg | null {
   return best?.seg ?? null;
 }
 
-export function planJunction(net: Network, form: IxForm, style: SlipStyle, mw: P[], type: string, road: RSeg): IxPlan {
+export function planJunction(net: Network, form: IxForm, style: SlipStyle, mw: P[], type: string, road: RSeg, size: IxSize = 'open'): IxPlan {
   const s = scratch(net), had = new Set(net.segs.keys());
-  const r = motorwayWithJunction(s, form, mw, type, s.segs.get(road.id)!, 0, style);
+  const r = motorwayWithJunction(s, form, mw, type, s.segs.get(road.id)!, 0, style, size);
   if (!r.ok) return { ok: false, reason: r.reason, cost: 0, clears: [], ghost: [] };
   // every new road's price by the metre, and its embankments and bridges as check() prices a raised road
   let cost = 0;

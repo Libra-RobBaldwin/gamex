@@ -15,7 +15,6 @@ import type { XZ } from '../land';
 export interface SlipRoles { kind: 'merge' | 'diverge'; main: [Leg, Leg]; slip: Leg }
 
 const dot = (a: XZ, b: XZ) => a.x * b.x + a.z * b.z;
-const smooth = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 
 // Three one-way roads at a node, two in and one out (a merge) or one in and two out (a diverge),
 // where one in and one out run straight on and the third is on their nearside.
@@ -69,9 +68,10 @@ export function slipShape(net: Network, node: number, r: SlipRoles): Shape | nul
   // where the slip lane's centre is, along the carriageway (the taper is straight, as CD 122 draws it;
   // the lane eases across the nose)
   const lin = (x: number) => Math.max(0, Math.min(1, x));
+  // (across the nose in a straight line, as the slip road itself runs up to its nose: build.slipPaths)
   const e = (rho: number) => merge
-    ? (rho < 0 ? eN + (ec - eN) * smooth((rho - rhoN) / -rhoN) : ec + (lane0 - ec) * lin((rho - P) / T))
-    : (rho < 0 ? lane0 + (ec - lane0) * lin((rho + TP) / T) : ec + (eN - ec) * smooth(rho / rhoN));
+    ? (rho < 0 ? eN + (ec - eN) * lin((rho - rhoN) / -rhoN) : ec + (lane0 - ec) * lin((rho - P) / T))
+    : (rho < 0 ? lane0 + (ec - lane0) * lin((rho + TP) / T) : ec + (eN - ec) * lin(rho / rhoN));
   const [r0, r1] = merge ? [rhoN, TP] : [-TP, rhoN];
   const at: number[] = [];
   for (let rho = r0; rho < r1 - 0.5; rho += 2) at.push(rho);
@@ -87,6 +87,27 @@ export function slipShape(net: Network, node: number, r: SlipRoles): Shape | nul
     const A = Math.max(K, oa), B = Math.max(K, ob);
     aprons.push([frame(a, K), frame(b, K), frame(b, B), frame(a, A)]);
     paves.push([frame(a, A), frame(b, B), frame(b, B + S.verge), frame(a, A + S.verge)]);
+  }
+  // (the slip road's own drawing ends square to it, at the taper's slight angle to the carriageway:
+  // the junction's pieces are capped to meet that end exactly)
+  {
+    const q = pointAt(sp, mouth), c = (o: number): XZ => ({ x: q.x + q.uz * o, z: q.z - q.ux * o });
+    const out = proj(c(Ks)).lat > proj(c(-Ks)).lat ? 1 : -1; // (which way across it is away from the carriageway)
+    const back = (p: XZ) => frame(rhoN, proj(p).lat);
+    const [vi, ki, ko, vo] = [c(-out * (Ks + S.verge)), c(-out * Ks), c(out * Ks), c(out * (Ks + S.verge))];
+    // (the two ends cross at its middle: a triangle either side)
+    aprons.push([q, ki, back(ki)], [q, ko, back(ko)]);
+    paves.push([ko, vo, back(vo), back(ko)], [vi, ki, back(ki), back(vi)]);
+    // and past the nose, the thin wedge of ground between the slip road's verge and the carriageway's,
+    // where they part at the taper's shallow angle, is verge too (grassed, as the verges round it)
+    const Mv = Math.max(Min.verge, Mout.verge), edge = K + Mv;
+    const inner = (t: number) => { const p = pointAt(sp, t); return { x: p.x - p.uz * out * (Ks + S.verge), z: p.z + p.ux * out * (Ks + S.verge) }; };
+    for (let t = mouth; t < Math.min(Ls - 10, mouth + 120); t += 2) {
+      const a = inner(t), b = inner(t + 2), pa = proj(a), pb = proj(b);
+      if (pa.lat - edge > 4) break;
+      if (pb.lat <= edge && pa.lat <= edge) continue;
+      paves.push([a, b, frame(pb.rho, edge - 0.3), frame(pa.rho, edge - 0.3)]);
+    }
   }
   // the markings
   const line = (r0: number, r1: number, off: (rho: number) => number) => { const pts: XZ[] = []; for (let rho = r0; rho < r1; rho += 2) pts.push(frame(rho, off(rho))); pts.push(frame(r1, off(r1))); return pts; };

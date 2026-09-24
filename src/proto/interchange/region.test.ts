@@ -60,7 +60,7 @@ describe('the region’s roads', () => {
     for (const a of r.interchanges) { const seen = reach(a.nodes[0]); for (const b of r.interchanges) expect(seen.has(b.nodes[1])).toBe(true); }
     // every junction there designs as it should
     const forms = new Set<string>();
-    for (const ix of r.interchanges) for (const n of ix.nodes) if (legsAt(net, n).length >= 3) forms.add(design(net, n, { fits: (p) => landFits(net, n, p) }, undefined, ix.prefer[n] ? { form: ix.prefer[n] } : undefined)!.form);
+    for (const ix of r.interchanges) for (const n of ix.nodes) if (legsAt(net, n).length >= 3) forms.add(design(net, n, { fits: (p) => landFits(net, n, p) }, undefined, ix.prefer[n] ? { form: ix.prefer[n], slip: false } : undefined)!.form);
     expect([...forms].sort()).toEqual(['diverge', 'merge', 'roundabout']);
   }, 120_000);
 
