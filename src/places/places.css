@@ -128,7 +128,7 @@ body.dragging-square .area-handle { cursor: grabbing; transform-origin: center; 
 [role='tab'] { min-height: var(--tap); border: 0; background: var(--panel); color: var(--muted); font: 700 14px var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; border-bottom: 3px solid transparent; touch-action: manipulation; }
 [role='tab'][aria-selected='true'] { color: var(--paper); border-bottom-color: var(--lime); background: var(--forest); }
 .view-wrap { position: relative; }
-.viewer { position: relative; height: min(62dvh, 560px); min-height: 280px; overflow: hidden; background: #f4f2ec; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.viewer { position: relative; aspect-ratio: 1; max-height: 68dvh; width: 100%; min-height: 260px; overflow: hidden; background: #f4f2ec; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
 .viewer img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; will-change: transform; image-rendering: auto; pointer-events: none; }
 .zoom { position: absolute; right: 8px; top: 8px; z-index: 2; display: flex; flex-direction: column; gap: 6px; }
 .zoom .act { background: rgba(15, 51, 34, 0.9); }
@@ -160,5 +160,5 @@ body.dragging-square .area-handle { cursor: grabbing; transform-origin: center; 
   #area .sheet { left: auto; top: 0; width: min(360px, 55vw); overflow-y: auto; border-top: 0; border-left: 3px solid var(--lime); }
   body[data-step='area'] .leaflet-bottom { bottom: 0; }
   body[data-step='area'] .leaflet-right { right: min(360px, 55vw); }
-  .viewer { height: calc(100dvh - var(--top) - 120px); }
+  .viewer { aspect-ratio: auto; height: calc(100dvh - var(--top) - 120px); max-height: none; }
 }

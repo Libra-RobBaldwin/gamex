@@ -33,7 +33,7 @@ export class AreaMap {
     L.control.zoom({ position: 'topright', zoomInTitle: 'Zoom in', zoomOutTitle: 'Zoom out' }).addTo(this.map);
 
     this.square = L.rectangle(this.bounds(), { color: '#5cb83a', weight: 3, fillColor: '#5cb83a', fillOpacity: 0.12, interactive: false, className: 'area-square' }).addTo(this.map);
-    this.handle = L.marker([centre.lat, centre.lon], {
+    this.handle = L.marker(this.handleAt(), {
       icon: L.divIcon({ className: 'area-handle', html: icon('move'), iconSize: [44, 44], iconAnchor: [22, 22] }),
       keyboard: true, title: 'Drag to move the square', zIndexOffset: 1000, interactive: true, bubblingMouseEvents: false,
     }).addTo(this.map);
@@ -56,6 +56,8 @@ export class AreaMap {
   }
 
   bbox(): Bbox { return squareBbox(this.centre, this.sizeKm); }
+  // the handle sits on the square's top edge, so it never hides the postcode's pin
+  private handleAt(): L.LatLngTuple { return [this.bbox()[2], this.centre.lon]; }
   private bounds(): L.LatLngBoundsExpression { const b = this.bbox(); return [[b[0], b[1]], [b[2], b[3]]]; }
 
   setSize(km: number) { this.sizeKm = km; this.redraw(); this.fit(); }
@@ -70,12 +72,12 @@ export class AreaMap {
     const ll = this.map.containerPointToLatLng([(sz.x - c.right) / 2, (sz.y - c.bottom) / 2]);
     this.moveTo({ lat: ll.lat, lon: ll.lng });
   }
-  fit() { const c = this.cover(); this.map.fitBounds(this.bounds(), { paddingTopLeft: [20, 20], paddingBottomRight: [20 + c.right, 20 + c.bottom], maxZoom: 16, animate: false }); }
+  fit() { const c = this.cover(); this.map.fitBounds(this.bounds(), { paddingTopLeft: [20, 40], paddingBottomRight: [20 + c.right, 20 + c.bottom], maxZoom: 16, animate: false }); }
   resize() { this.map.invalidateSize(); }
 
   private redraw() {
     this.square.setBounds(this.bounds() as L.LatLngBoundsLiteral);
-    this.handle.setLatLng([this.centre.lat, this.centre.lon]);
+    this.handle.setLatLng(this.handleAt());
     this.onChange();
   }
 

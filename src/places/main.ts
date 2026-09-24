@@ -87,6 +87,7 @@ document.body.innerHTML = `
     <div class="card facet">
       <span class="tab">Step 3</span>
       <h1 id="f-title">Fetching the map</h1>
+      <p id="f-what" class="lede"></p>
       <div class="bar" role="progressbar" aria-labelledby="f-title" aria-valuemin="0" id="f-bar"><i></i></div>
       <p id="f-count" class="big"></p>
       <p id="f-server" class="msg" role="status" aria-live="polite"></p>
@@ -279,6 +280,7 @@ async function startBuild(bbox: ReturnType<AreaMap['bbox']>, size: number, name:
   if (await getArea(id).catch(() => undefined)) { openSaved(id); return; }
   go('fetch');
   $('#f-title').textContent = 'Fetching the map';
+  $('#f-what').textContent = `${name}: a ${km(size)} square.`;
   $('#f-error').textContent = '';
   $('#f-retry').hidden = true;
   $('#f-cancel').hidden = false;
