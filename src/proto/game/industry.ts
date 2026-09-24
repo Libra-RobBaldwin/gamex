@@ -218,6 +218,7 @@ export class Industries {
   }
   // A road was built across a site: it's compulsorily purchased, like a house would be.
   evict() {
+    this.lastMinute = -1; // the roads changed (a stop may have been added): refresh on the next tick, paused or not
     for (const s of [...this.sites]) if (!this.net.land.free(s.poly, (c) => c.key === s.key || c.owner === 'industry')) this.remove(s);
   }
 
