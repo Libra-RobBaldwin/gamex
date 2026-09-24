@@ -139,7 +139,7 @@ export class Crowds {
   year = 2025;
   // game seconds per second of simulated (shader) time: 240 in the game, where a day takes six minutes
   timeScale = 60;
-  private flows = new Map<string, { key: string; parts: Part[] }>();
+  private flows = new Map<string, { key: string; flow: Flow; parts: Part[] }>();
   private queues = new Map<string, QueueState>();
   constructor(public store: PeopleStore) {
     store.onRebase = (T) => { for (const q of this.queues.values()) if (q.shuffle) q.shuffle.at -= T; };
@@ -150,25 +150,27 @@ export class Crowds {
   // are matched by id: new ones are built, changed shapes rebuilt, counts eased, missing ones removed.
   set(flows: Flow[], clock: number) {
     const seen = new Set<string>();
-    for (const f of flows) {
-      seen.add(f.id);
-      const key = shapeKey(f, this.year);
-      let e = this.flows.get(f.id);
-      if (!e || e.key !== key) {
-        if (e) for (const p of e.parts) this.store.remove(p.spec.id);
-        e = { key, parts: this.build(f) };
-        this.flows.set(f.id, e);
-        for (const p of e.parts) { p.spec.count = p.count(clock); this.store.add(p.spec); }
-      } else if (e.parts.some((p) => { const cap = (p.spec as GroupSpec & { cap?: number }).cap; return cap !== undefined && p.count(clock) > cap; })) {
-        // more people than were made for it: make more (the first ones come out the same)
-        for (const p of e.parts) this.store.remove(p.spec.id);
-        e = { key, parts: this.build(f) };
-        this.flows.set(f.id, e);
-        for (const p of e.parts) { p.spec.count = p.count(clock); this.store.add(p.spec); }
-      } else {
-        for (const p of e.parts) this.store.setCount(p.spec.id, p.count(clock));
+    for (const given of flows) {
+      seen.add(given.id);
+      const key = shapeKey(given, this.year);
+      let e = this.flows.get(given.id);
+      if (e && e.key === key) {
+        // same place, new numbers: the crowd's count closures read the stored copy, so refresh it
+        Object.assign(e.flow, given);
+        const grow = e.parts.some((p) => { const cap = (p.spec as GroupSpec & { cap?: number }).cap; return cap !== undefined && p.count(clock) > cap; });
+        if (grow) {
+          // more people than were made for it: make more in place (the first ones come out the
+          // same, so nobody already standing there changes)
+          e.parts = this.build(e.flow);
+          for (const p of e.parts) { p.spec.count = p.count(clock); this.store.add(p.spec); }
+        } else for (const p of e.parts) this.store.setCount(p.spec.id, p.count(clock));
+        continue;
       }
-      (e as { flow?: Flow }).flow = f;
+      if (e) for (const p of e.parts) this.store.remove(p.spec.id);
+      const flow = { ...given } as Flow;
+      e = { key, flow, parts: this.build(flow) };
+      this.flows.set(given.id, e);
+      for (const p of e.parts) { p.spec.count = p.count(clock); this.store.add(p.spec); }
     }
     for (const [id, e] of this.flows) if (!seen.has(id)) { for (const p of e.parts) this.store.remove(p.spec.id); this.flows.delete(id); if (this.queues.has(id)) this.queues.delete(id); }
   }
@@ -214,12 +216,7 @@ export class Crowds {
       build: (b) => {
         const sh = st.shuffle && this.time - st.shuffle.at < 20 ? st.shuffle : undefined;
         for (let j = 0; j < cap; j++) {
-          const who = st.base + j, r = personRand(f.id, who);
-          const look = dress(roleOf(r, f.mix ?? (s.kind === 'platform' ? MIXES.station : MIXES.street), this.year), this.year, r);
-          const sl = slots(j), sit = sl.sit && look.prop !== 2 && look.prop !== 1;
-          if (look.prop === 1) look.prop = 0; // bikes don't queue for buses
-          look.idle = sit || look.prop === 3 ? Idle.Sit : look.idle === Idle.Phone ? Idle.Phone : Idle.Wait;
-          const ph = r();
+          const sl = slots(j), { look, ph, r } = this.waiter(f, st.base + j, sl.sit);
           if (sh && s.kind === 'stop') {
             // shuffle up the queue after the front has boarded
             const from = slots(j + sh.n).p, route = straightRoute([from, sl.p]);
@@ -237,11 +234,20 @@ export class Crowds {
     return [{ spec, count: () => f.waiting }];
   }
 
+  // Someone waiting: the same person whether they're queueing, walking to the door or boarding.
+  private waiter(f: QueueFlow, who: number, seat: boolean) {
+    const r = personRand(f.id, who);
+    const look = dress(roleOf(r, f.mix ?? (f.site.kind === 'platform' ? MIXES.station : MIXES.street), this.year), this.year, r);
+    if (look.prop === 1) look.prop = 0; // bikes don't queue for buses
+    look.idle = (seat && look.prop !== 2) || look.prop === 3 ? Idle.Sit : look.idle === Idle.Phone ? Idle.Phone : Idle.Wait;
+    return { look, ph: r(), r };
+  }
+
   // A bus or train is at the site: the first `n` waiting walk to the doors and get on. Returns
   // how many board and when the last is aboard (so the vehicle can wait that long).
   board(siteId: string, doors: XZ[], n: number) {
     const e = this.flows.get(siteId), st = this.queues.get(siteId);
-    const f = (e as { flow?: Flow } | undefined)?.flow as QueueFlow | undefined;
+    const f = e?.flow as QueueFlow | undefined;
     if (!e || !st || !f) return { n: 0, until: this.time };
     const spec = this.store.spec(siteId)!;
     const k = Math.min(Math.floor(spec.count), Math.max(0, n));
@@ -265,10 +271,8 @@ export class Crowds {
       id: `${siteId}#board${st.seq}`, centre: f.site.at, radius: 20, y, count: k, expires: until + 1,
       build: (b) => {
         for (const w of walkers) {
-          const r = personRand(f.id, base + w.j);
-          const look = dress(roleOf(r, f.mix ?? (f.site.kind === 'platform' ? MIXES.station : MIXES.street), this.year), this.year, r);
-          if (look.prop === 1) look.prop = 0;
-          emitPerson(b, w.j, w.route, { mode: Mode.Once, v: 1.3, s0: 0, lat: 0, t0: w.t0, tShow: now - 1, tHide: w.tHide, y }, look, r(), NO_FADE_IN);
+          const { look, ph } = this.waiter(f, base + w.j, st.slots(w.j).sit);
+          emitPerson(b, w.j, w.route, { mode: Mode.Once, v: 1.3, s0: 0, lat: 0, t0: w.t0, tShow: now - 1, tHide: w.tHide, y }, look, ph, NO_FADE_IN);
         }
       },
     });
@@ -282,7 +286,7 @@ export class Crowds {
   // `n` people step off at the doors and walk away (along the site's `away` lines if given).
   alight(siteId: string, doors: XZ[], n: number) {
     const e = this.flows.get(siteId), st = this.queues.get(siteId);
-    const f = (e as { flow?: Flow } | undefined)?.flow as QueueFlow | undefined;
+    const f = e?.flow as QueueFlow | undefined;
     if (!f || !st || n <= 0) return { until: this.time };
     const now = this.time, y = f.site.y ?? 0, seq = ++st.seq, id = `${siteId}#alight${seq}`;
     let until = now;

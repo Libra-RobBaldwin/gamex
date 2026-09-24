@@ -329,6 +329,9 @@ window.__people = {
   store, crowds, renderer, cam, view, BUDGETS,
   setView, placeCamera,
   setClock: (m: number) => { clock = m; },
+  // run the town forward without drawing (for screenshots on slow software GL)
+  advance: (sec: number) => { for (let t = 0; t < sec; t += 0.05) { if (playing) clock = (clock + 0.05 * MINUTES_PER_S) % 1440; crowds.set(stressN ? [...townFlows(clock), ...stressFlows(stressN)] : townFlows(clock), clock); stepVehicles(0.05); store.update(cam, canvas.clientHeight, 0.05); } },
+  bus, train,
   setPlaying: (p: boolean) => { playing = p; },
   setWaiting: (n: number) => { waiting = n; ui.wait.value = String(n); },
   setStress: (n: number) => { stressN = n; },

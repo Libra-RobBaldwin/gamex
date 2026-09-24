@@ -31,6 +31,8 @@ export function fitRoute(pts: XZ[], tol = 0.25, closed = false): Route {
   if (p.length < 2) return { legs: [{ x: p[0]?.x ?? 0, z: p[0]?.z ?? 0, h: 0, k: 0, L: 0.01, S: 0 }], length: 0.01, closed };
   const legs: Leg[] = [];
   let i = 0, h = Math.atan2(p[1].z - p[0].z, p[1].x - p[0].x), S = 0;
+  // on a curve the first chord leans in by half its turn: the tangent is twice it less the next chord
+  if (p.length > 2) { const a2 = Math.atan2(p[2].z - p[0].z, p[2].x - p[0].x); h = h + wrapAngle(h - a2); }
   if (closed && p.length > 3) {
     // start on the heading that the closing corner averages to, so the loop joins smoothly
     const a = p[p.length - 2], b = p[0], c = p[1];
@@ -86,6 +88,8 @@ export function straightRoute(pts: XZ[]): Route {
   if (!legs.length) legs.push({ x: pts[0].x, z: pts[0].z, h: 0, k: 0, L: 0.01, S: 0 });
   return { legs, length: Math.max(S, 0.01), closed: false };
 }
+// `ccw` is anticlockwise in the x–z plane (curvature +1/R); seen from above with the game's
+// camera, where z points down the screen, that turns clockwise. Left of travel is outward.
 export function circleRoute(c: XZ, R: number, start = 0, ccw = true): Route {
   const h = start + (ccw ? Math.PI / 2 : -Math.PI / 2);
   const x = c.x + Math.cos(start) * R, z = c.z + Math.sin(start) * R;
