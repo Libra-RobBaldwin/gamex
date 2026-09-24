@@ -41,6 +41,9 @@ if (await page.$('[data-line="0"]')) fail('a line is listed before one was drawn
 await page.tap('[data-newline]');
 await page.evaluate(() => window.proto.focusOn({ x: 0, z: -60 }, 900));
 await page.waitForTimeout(2500);
+// (the camera glides there; under SwiftShader that can outlast the wait, and screen points read
+// mid-glide are stale by the time they're tapped)
+await page.waitForFunction(() => !window.proto.nav.busy, null, { timeout: 30000 });
 const targets = [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }];
 const picks = await page.evaluate((targets) => {
   const P = window.proto, places = P.markers.places();
