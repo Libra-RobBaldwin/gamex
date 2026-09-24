@@ -66,7 +66,9 @@ export type Role = 'primary' | 'processor' | 'sink' | 'hub' | 'gateway';
 export type ServeKind = 'lorry' | 'rail' | 'quay';
 export const SERVE_2D: Record<ServeKind, StationKind[]> = { lorry: ['loading_bay', 'lorry_depot', 'road'], rail: ['rail'], quay: [] };
 
-export interface Flow { cargo: CargoId; amount: number; optional?: boolean }
+// era: the years this flow runs at every site, old or new (a type's era only limits new building).
+// Only the docks use it, because what a port trades changes with the times.
+export interface Flow { cargo: CargoId; amount: number; optional?: boolean; era?: [number, number | null] }
 
 export interface Variant {
   id: string;
@@ -174,8 +176,9 @@ export const INDUSTRY_TYPES: Record<IndustryId, IndustryType> = {
   food_plant: {
     id: 'food_plant', name: 'Food plant', blurb: 'Mills grain and processes livestock into food for the shops. Either will do.',
     role: 'processor', mix: 'any', inputs: [{ cargo: 'grain', amount: 1 }, { cargo: 'livestock', amount: 1 }], outputs: [{ cargo: 'food', amount: 0.8 }], rate: 1.5,
-    size: { w: 80, d: 60 }, minSize: { w: 55, d: 42 }, era: [1850, null], serve: ['lorry', 'rail'], catchment: 80,
-    variants: [V('flour_mill', 'Flour mill', [1850, null]), V('biscuit_works', 'Biscuit works', [1900, null]), V('modern', 'Food processing plant', [1960, null])],
+    // from 1800 like the farm, or livestock would have no customer for the first fifty years
+    size: { w: 80, d: 60 }, minSize: { w: 55, d: 42 }, era: [1800, null], serve: ['lorry', 'rail'], catchment: 80,
+    variants: [V('flour_mill', 'Flour mill', [1800, null]), V('biscuit_works', 'Biscuit works', [1900, null]), V('modern', 'Food processing plant', [1960, null])],
   },
   goods_factory: {
     id: 'goods_factory', name: 'Factory', blurb: 'Makes finished goods from steel, sawn timber or chemicals, whichever arrives.',
@@ -184,10 +187,13 @@ export const INDUSTRY_TYPES: Record<IndustryId, IndustryType> = {
     variants: [V('mill', 'Mill', [1800, 1950]), V('works', 'Engineering works', [1880, null]), V('modern', 'Modern factory', [1960, null])],
   },
   port: {
-    id: 'port', name: 'Docks', blurb: 'Exports steel, goods and coal; imports iron ore and crude oil. Ships tie up at the quay.',
+    id: 'port', name: 'Docks', blurb: 'Exports steel and goods, and coal until the pits decline; imports iron ore, crude oil and later coal. Ships tie up at the quay.',
     role: 'gateway',
-    inputs: [{ cargo: 'steel', amount: 1 }, { cargo: 'goods', amount: 1 }, { cargo: 'coal', amount: 1 }],
-    outputs: [{ cargo: 'iron_ore', amount: 1 }, { cargo: 'oil', amount: 1 }], rate: 1,
+    // Imports start when someone can take them. Coal turns from export to import in 1985, after
+    // which collieries dwindle (none are built after 2015) and steelworks and power stations run
+    // on shipped-in coal. The two never overlap, or coal could be shuttled from docks to docks.
+    inputs: [{ cargo: 'steel', amount: 1 }, { cargo: 'goods', amount: 1 }, { cargo: 'coal', amount: 1, era: [1800, 1984] }],
+    outputs: [{ cargo: 'iron_ore', amount: 1, era: [1850, null] }, { cargo: 'oil', amount: 1, era: [1920, null] }, { cargo: 'coal', amount: 1, era: [1985, null] }], rate: 1,
     size: { w: 150, d: 90 }, minSize: { w: 100, d: 60 }, era: [1800, null], serve: ['lorry', 'rail', 'quay'], waterside: 'required', catchment: 150,
     variants: [V('victorian_dock', 'Victorian dock', [1800, 1970]), V('bulk', 'Bulk terminal', [1900, null]), V('container', 'Container terminal', [1968, null])],
   },
@@ -202,9 +208,14 @@ export const INDUSTRY_TYPES: Record<IndustryId, IndustryType> = {
 
 export const INDUSTRY_IDS = Object.keys(INDUSTRY_TYPES) as IndustryId[];
 
+// Whether a year falls in an era (both ends included), and whether a flow runs that year.
+// Without a year every flow counts, which is what the era-blind helpers below want.
+export const inEra = (era: [number, number | null], year: number) => era[0] <= year && (era[1] === null || year <= era[1]);
+export const flowLive = (f: Flow, year?: number) => year === undefined || !f.era || inEra(f.era, year);
+
 // Pick the variant a site built in `year` would most likely be, stably for a seed.
 export function variantFor(type: IndustryType, year: number, seed: number): Variant {
-  const ok = type.variants.filter((v) => v.era[0] <= year && (v.era[1] === null || year <= v.era[1]));
+  const ok = type.variants.filter((v) => inEra(v.era, year));
   const list = ok.length ? ok : type.variants;
   return list[Math.abs(Math.floor(seed * 7919)) % list.length];
 }
