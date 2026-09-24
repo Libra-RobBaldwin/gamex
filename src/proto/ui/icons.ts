@@ -54,11 +54,25 @@ import tunnel from './icons/building-tunnel.svg?raw';
 import users from './icons/users.svg?raw';
 import wheat from './icons/wheat.svg?raw';
 import x from './icons/x.svg?raw';
+import arrowLeft from './icons/arrow-left.svg?raw';
+import building from './icons/building.svg?raw';
+import chevronDown from './icons/chevron-down.svg?raw';
+import droplet from './icons/droplet.svg?raw';
+import floppy from './icons/device-floppy.svg?raw';
+import hammer from './icons/hammer.svg?raw';
+import info from './icons/info-circle.svg?raw';
+import layers from './icons/stack-2.svg?raw';
+import menu from './icons/menu-2.svg?raw';
+import pin from './icons/map-pin.svg?raw';
+import transport from './icons/route.svg?raw';
+import undo from './icons/arrow-back-up.svg?raw';
+import warehouse from './icons/building-warehouse.svg?raw';
 
 const RAW = {
   activity, adjustments, alert, angle, arrowsCross, arrowsDownUp, bike, bolt, branch, bridge, bulldozer, bus, busStop, car, check, clock, cog, curve,
   finger, giveWay, handStop, heightAuto, home, line, map, minus, motorway, mountain, parking, pause, play, plus, ramp, refresh, restore, road, rotL, rotR,
   roundabout, route, ruler, smooth, sparkles, tree, trees, lights, train, trendUp, tunnel, users, wheat, x,
+  arrowLeft, building, chevronDown, droplet, floppy, hammer, info, layers, menu, pin, transport, undo, warehouse,
 };
 export type Icon = keyof typeof RAW;
 
