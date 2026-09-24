@@ -240,7 +240,11 @@ function show(sc: Scenario, c: Crossing, lay: BridgeLayout) {
   const ctr = fit.box.getCenter(new THREE.Vector3());
   // zooming in heads for the most telling part: a tower, pylon, lifting pier or the tallest pier
   const key = lay.supports.find((q) => q.kind === 'tower' || q.kind === 'pylon' || q.kind === 'leaf-pier' || q.kind === 'springing') ?? [...lay.supports].sort((p, q) => q.top - q.base - (p.top - p.base))[0];
-  const fp = key ? frameAt(c, key.s) : null;
+  // ?at=start|end|<metres along the route> aims the zoom at an abutment or any point instead
+  // (start-30 is 30 m back from the first abutment)
+  const atM = /^(start|end)?([+-]?[\d.]+)?$/.exec(params.get('at') ?? '');
+  const atS = atM && (atM[1] || atM[2]) ? (atM[1] === 'start' ? lay.s0 : atM[1] === 'end' ? lay.s1 : 0) + +(atM[2] ?? 0) : NaN;
+  const fp = Number.isFinite(atS) ? frameAt(c, atS) : key ? frameAt(c, key.s) : null;
   fit = { ...fit, cx: ctr.x, cy: ctr.y * 0.5, cz: ctr.z, focus: fp ? new THREE.Vector3(fp.x, fp.y, fp.z) : null };
   liftNow = liftGoal = +(params.get('open') ?? 0);
   lifter?.(liftNow);
@@ -331,4 +335,6 @@ renderer.setAnimationLoop((now) => {
 if (params.get('zoom')) view.zoom = +params.get('zoom')!;
 render();
 resize();
+// for the screenshot scripts: draw calls and triangles per frame
+(window as unknown as { demo: object }).demo = { renderer, scene };
 (window as unknown as { demoReady: boolean }).demoReady = true;
