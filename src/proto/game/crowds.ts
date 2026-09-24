@@ -12,7 +12,7 @@
 // walks to its door and the bus waits until they're aboard; its passengers get off first.
 import type * as THREE from 'three';
 import { PeopleStore, BUDGETS } from '../people/store';
-import { Crowds, type Flow, type QueueFlow, type WalkFlow, type ParkFlow, type LoiterFlow, type AnimalFlow, type SchoolFlow, type CommuteFlow } from '../people/flows';
+import { Crowds, type Flow, type QueueFlow, type QueueSite, type WalkFlow, type ParkFlow, type LoiterFlow, type AnimalFlow, type SchoolFlow, type CommuteFlow } from '../people/flows';
 import { DAY } from '../people/schedule';
 import { MIXES } from '../people/wardrobe';
 import { demand, type Traffic } from '../traffic';
@@ -186,6 +186,7 @@ export class TownCrowds {
       const queues = new Map<string, QueueFlow>();
       for (const s of r.stops) queues.set(s.id, this.queues.get(s.id) && sameSite(this.queues.get(s.id)!, s) ? this.queues.get(s.id)! : { kind: 'queue', id: s.id, site: s.site, waiting: 0 });
       for (const c of r.crossings) for (const k of c.kerbs) queues.set(k.id, { kind: 'queue', id: k.id, site: k, waiting: 0 });
+      for (const [id, p] of this.plats) queues.set(id, p.flow);
       this.queues = queues;
       for (const id of [...this.waiting.keys()]) if (!queues.has(id)) this.waiting.delete(id);
     }
@@ -243,6 +244,7 @@ export class TownCrowds {
       this.queues.get(id)!.waiting = Math.min(cap, Math.floor(w));
     };
     for (const s of this.roads.stops) settle(s.id, N.arrivals(s, clock), STOP_PATIENCE, s.roomy ? 24 : 16);
+    for (const [id, p] of this.plats) if (this.queues.has(id)) settle(id, p.rate * Math.min(1, demand(hourOf(clock)) / PEAK + 0.1), STOP_PATIENCE * 1.5, 60);
     for (const c of this.roads.crossings) {
       const foot = c.footfall.reduce((t, id) => t + (ff.get(id) ?? 0), 0) / Math.max(1, c.footfall.length);
       for (const k of c.kerbs) settle(k.id, N.crossing(foot, clock), KERB_PATIENCE, 5);
@@ -385,6 +387,44 @@ export class TownCrowds {
     if (!u || u.day !== day) this.usage.set(id, (u = { day, boarded: 0, alighted: 0 }));
     return u;
   }
+
+  // ---------- trains (rail/, docs/rail.md) ----------
+  // The railway's platforms, each a queue along its edge; `rate` is how many come to wait a game
+  // minute at the busiest time. The same object for a platform keeps its people.
+  private plats = new Map<string, { flow: QueueFlow; rate: number }>();
+  setPlatforms(list: { id: string; site: QueueSite; rate: number }[]) {
+    const next = new Map<string, { flow: QueueFlow; rate: number }>();
+    for (const p of list) {
+      const had = this.plats.get(p.id), same = had && JSON.stringify(had.flow.site) === JSON.stringify(p.site);
+      next.set(p.id, { flow: same ? had!.flow : { kind: 'queue', id: p.id, site: p.site, waiting: 0 }, rate: p.rate });
+    }
+    for (const id of this.plats.keys()) if (!next.has(id)) { this.queues.delete(id); this.waiting.delete(id); }
+    this.plats = next;
+    for (const [id, p] of next) this.queues.set(id, p.flow);
+    this.list = [...this.list.filter((f) => !(f.kind === 'queue' && f.id.startsWith('plat:'))), ...[...next.values()].map((p) => p.flow)];
+    this.dirty = true;
+  }
+  // A train has pulled up at a platform with its doors here: its passengers for this station get off
+  // first, then those waiting board through the nearest doors. How long it should stand (seconds).
+  private trainLoads = new Map<number, number>();
+  trainAt(platform: string, doors: XZ[], train: number, capacity: number) {
+    const q = this.queues.get(platform);
+    if (!q || !doors.length) return 0;
+    const now = this.store.time;
+    let load = this.trainLoads.get(train) ?? 20 + (train % 17) * 3;
+    const off = Math.min(load, Math.round(load * 0.3));
+    const a = off > 0 ? this.crowds.alight(platform, doors, Math.min(off, 24)) : { until: now };
+    load -= off;
+    const b = this.crowds.board(platform, doors, Math.min(capacity - load, 30, q.waiting));
+    this.took(platform, b.n);
+    load += b.n;
+    this.trainLoads.set(train, load);
+    const u = this.usageOf(platform);
+    u.boarded += b.n; u.alighted += off;
+    return Math.max(0, Math.min(40, Math.max(a.until, b.until) - now + 2));
+  }
+  aboardTrain(train: number) { return this.trainLoads.get(train) ?? 0; }
+  platformUse(platform: string) { const u = this.usageOf(platform); return { waiting: this.queues.get(platform)?.waiting ?? 0, boarded: u.boarded, alighted: u.alighted }; }
 
   // ---------- for the HUD ----------
   // How a stop is doing, for its card: waiting now, and today's boardings and alightings.

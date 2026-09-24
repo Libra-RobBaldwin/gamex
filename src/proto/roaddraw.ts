@@ -355,6 +355,13 @@ export function endsOf(junctions: Map<number, Junction>, s: RSeg, C: Course): En
   return { strip: [A.strip, B.strip], line: [A.line, B.line], median: [A.median, B.median], L: [A.L, B.L], R: [A.R, B.R], centre: [A.centre, B.centre] };
 }
 
+// Stretches of a railway's course that rail/draw.ts lays itself (a station's passing loop, the
+// tracks spreading round an island platform), as the points they run between. None by default.
+export let trackSkip: (s: RSeg) => [XZ, XZ][] = () => [];
+export function setTrackSkip(f: (s: RSeg) => [XZ, XZ][]) { trackSkip = f; }
+// the railway's materials, for rail/draw.ts to lay its own track in
+export const RAIL_MATS = { ballast: ballastMat, sleeper: sleeperMat, rail: railMat, verge: vergeMat };
+
 // (pedx: a pelican crossing's, whose lights follow its people rather than a junction's)
 export interface Lamp { mesh: THREE.Mesh; node: number; seg: number; col: 'red' | 'amber' | 'green'; pedx?: string }
 
@@ -433,13 +440,22 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       const q = part(0, CL), K = kerbOf(d);
       band(verge, q, () => [K, half], 0.12);
       band(verge, q, () => [-half, -K], 0.12);
-      band(ballast, q, () => [-K, K], 0.2);
+      // (not where a station moves the tracks over: rail/draw.ts lays those, see trackSkip)
+      const skip = trackSkip(s).map(([a, b]) => [closestOnPath(a, cp).s, closestOnPath(b, cp).s].sort((x, y) => x - y)).sort((x, y) => x[0] - y[0]);
+      const runs: [number, number][] = [];
+      let r0 = 0;
+      for (const [a, b] of skip) { if (a > r0 + 0.5) runs.push([r0, a]); r0 = Math.max(r0, b); }
+      if (CL > r0 + 0.5) runs.push([r0, CL]);
       const tracks = d.tracks === 2 ? [-2, 2] : [0];
-      for (const c of tracks) {
-        sleepers.dashes(cp, () => c, 0.2, CL - 0.2, 0.26, 0.42, 1.3, 0.3);
-        for (const r of [-0.72, 0.72]) band(railsF, q, () => [c + r - 0.05, c + r + 0.05], 0.44);
-        if (d.rack) band(rack, q, () => [c - 0.07, c + 0.07], 0.46);
-        if (d.electric) band(wires, q, () => [c - 0.03, c + 0.03], 5.8);
+      for (const [a, b] of runs) {
+        const qr = skip.length ? part(a, b) : q;
+        band(ballast, qr, () => [-K, K], 0.2);
+        for (const c of tracks) {
+          sleepers.dashes(cp, () => c, a + 0.2, b - 0.2, 0.26, 0.42, 1.3, 0.3);
+          for (const r of [-0.72, 0.72]) band(railsF, qr, () => [c + r - 0.05, c + r + 0.05], 0.44);
+          if (d.rack) band(rack, qr, () => [c - 0.07, c + 0.07], 0.46);
+          if (d.electric) band(wires, qr, () => [c - 0.03, c + 0.03], 5.8);
+        }
       }
       if (d.electric) for (let t = 20; t < CL - 5; t += 55) {
         const q = pointAt(cp, t), o = K + 0.6;
