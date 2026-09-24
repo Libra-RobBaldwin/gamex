@@ -6,7 +6,7 @@ and `roaddraw.ts`.
 
 ## Try it
 
-- `/proto.html?map=town&junction=dumbbell`, `…=gsr`, `…=diamond`, `…=trumpet`: one junction on its own.
+- `/proto.html?map=town&junction=dumbbell`, `…=gsr`, `…=diamond`, `…=trumpet`, `…=cloverleaf`: one junction on its own.
   - Add `&size=tight` for the town-sized version (see **Size** below).
   - Add `&slips=parallel` for slip roads with a long parallel lane.
 - `/proto.html?map=town&junction=blank`: a north–south dual carriageway on an empty map. Build a motorway
@@ -178,6 +178,7 @@ People cross there when nothing is coming.
 | **Dumbbell** | A roundabout either side of the motorway, and the local road on a bridge over both carriageways between them. |
 | **Grade-separated roundabout** | A one-way ring (`gsr-ring`, 2 lanes, 40 mph) about the junction, over the motorway on two bridges. The local road and the slip roads meet it at give-way junctions, the slip roads at 40° to it from outside. |
 | **Diamond** | A dumbbell with give-way junctions instead of roundabouts. |
+| **Cloverleaf** | Two motorways (below). |
 | **Trumpet** | A T: the road meets the motorway from one side only (its other side stops short). It ends at a roundabout, from which a pair of one-lane links runs to the motorway and over it. The two right turns go by a 270° loop and by a semi-direct ramp wrapped round the outside of the loop; the two left turns go by direct ramps. Every join is a merge or a diverge. |
 
 - Each has four slip roads. The off-slips diverge before the junction and the on-slips merge after
@@ -197,6 +198,29 @@ People cross there when nothing is coming.
 - **Size:** at 70 mph a junction takes about 950 m of motorway (1,250 m with parallel lanes). The
   dumbbell takes about 430 m across, and the grade-separated roundabout's ring is about 140 m in
   radius.
+
+### The cloverleaf (`motorwayCloverleaf`)
+
+For one motorway drawn across another that's already there as a pair (`pairCrossed`).
+
+- **Collector–distributor roads.** Each of the four carriageways has a one-lane CD alongside it
+  through the junction. It leaves the carriageway (a diverge) before the junction and rejoins it
+  (a merge) after, so each motorway has only one diverge and one merge each way.
+- **The ramps join the CDs, not the motorways:**
+  - in each quarter, a **loop** turns 270° to the left for the right turn;
+  - an **outer ramp** round the outside of the loop takes the left turn.
+- **On each CD, the loop in and the loop out are either side of the crossing,** far enough apart
+  for both tapers at the CD's speed. Without the CDs the loops would weave on the motorways
+  themselves, about 150 m apart, where DMRB wants 300 m or more.
+- **Heights.** The motorway already there stays at ground level. The new one and its CDs bridge it.
+  Every merge and diverge is on a level stretch: the new motorway's CDs climb only between their
+  loops' tapers. A merge's wider taper can't sit on a climbing approach, or it would float over the
+  embankment.
+- **Size.** It's big: about 900 m across Tight, 1,100 m Open. Tight has 45 m loops and 50 m ramps
+  at up to 8%; Open has 85 m and 90 m at 6%.
+- **In the game:** drawing a motorway across a motorway offers **Cloverleaf** under "Junction here".
+  The card says why not if it can't be built there: the other motorway too short either side,
+  water in the way, or a ramp that would have to bridge a road.
 
 ### Size: Tight or Open
 
@@ -264,15 +288,14 @@ the region session, since this stream doesn't touch `src/proto/region/`.
 | File | What it checks |
 |---|---|
 | `interchange/interchange.test.ts` | Tapers and noses measured from the course traffic drives against `STD`, for each form and for parallel lanes. The drawn surfaces round every junction window (`drawcheck.ts`): no holes, stray markings or footway/verge fights. A junction that can't be built changes nothing. One-way streets: nobody ever goes the wrong way. |
-| `traffic.test.ts` (scenarios in `trafficsim.ts`) | Motorway junction scenarios for all three forms and for parallel lanes, with lorries running end to end along the motorway: zero overlaps at 30 and 10 frames a second. |
+| `traffic.test.ts` (scenarios in `trafficsim.ts`) | Motorway junction scenarios for every form and size (the cloverleaf's with a town at one motorway's end), and for parallel lanes: zero overlaps at 30 and 10 frames a second. |
 | `interchange/region.test.ts` | The region's roads. |
 | `game/pedx.test.ts` | Zebras and pelicans: the right kind for each road, clear of junctions and stops, people at both kerbs; a pelican's cycle (green, amber, red with the green man, flashing amber), with traffic held at the stop line. |
 
 ## Known limits
 
-- **No cloverleaf yet.** A cloverleaf's loops join and leave each carriageway about 150 m apart. DMRB
-  tapers need 300 m or more between a merge and the next diverge, so it needs collector–distributor
-  roads alongside (as UK ones have), or a weaving section. That's the next set piece.
+- **A cloverleaf's ramps don't bridge other roads.** They're level where they join the CDs, so one
+  that crosses a road is refused.
 - **The cutting is only for junctions built with a new motorway** ("Junction here"), not ones added
   to a motorway that's already there.
 
