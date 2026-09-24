@@ -82,6 +82,9 @@ export class ProceduralTerrain extends BaseHeight {
   private water: number | null = null; // water surface found by the last eval()
   private w = new Float64Array(8); // interpolation weights, reused
   private f = new Float64Array(F); // fields at the last point interpolated
+  // false while the water system asks for the ground without the river channel (see sampleBase)
+  private channel = true;
+  private scratch?: Float32Array;
   constructor(params: Partial<TerrainParams> = {}) {
     super();
     this.p = { ...DEFAULT_TERRAIN, ...params };
@@ -161,7 +164,7 @@ export class ProceduralTerrain extends BaseHeight {
         const t = smoothstep(half, vw, d);
         h = floor + (h - floor) * t * t;
         // ...and the channel is cut into it, a rounded trough
-        if (d < half) {
+        if (d < half && this.channel) {
           const q = d / half, bed = floor - p.riverDepth * (1 + mask);
           h = bed + (floor - bed) * q * q;
           this.water = floor - 0.3;
@@ -197,9 +200,11 @@ export class ProceduralTerrain extends BaseHeight {
       const rad = (90 + 260 * r()) * Math.sqrt(this.p.scale);
       // the surface sits a little below the land at its centre, so the bowl reads as a hollow
       // (worked out directly at the centre: no lattice block needed there)
-      const d = new Float32Array(F);
+      const d = new Float32Array(F), ch = this.channel;
       this.smooth(cx, cz, d, 0);
+      this.channel = true; // a lake's level never depends on who asked first
       const level = this.finish(cx, cz, d[0], d[1], d[2], d[3], undefined) - 1.5;
+      this.channel = ch;
       l = { cx, cz, r: rad, level, depth: 3 + 12 * r() };
     }
     this.lakes.set(k, l);
@@ -230,7 +235,8 @@ export class ProceduralTerrain extends BaseHeight {
 
   // A whole grid at once. The same numbers as heightAt, but the cubic is done separably (along x
   // for every lattice row, then along z), which is about four times less work per point.
-  sample(g: GridSpec, out = new Float32Array(g.nx * g.nz), water?: Float32Array) {
+  // (`river`, for the water system, receives the river field at each point: see riverField)
+  sample(g: GridSpec, out = new Float32Array(g.nx * g.nz), water?: Float32Array, river?: Float32Array) {
     const st = this.step, nx = g.nx, nz = g.nz;
     const lx0 = Math.floor(g.x0 / st) - 1, lx1 = Math.floor((g.x0 + (nx - 1) * g.step) / st) + 2;
     const lz0 = Math.floor(g.z0 / st) - 1, lz1 = Math.floor((g.z0 + (nz - 1) * g.step) / st) + 2;
@@ -245,6 +251,7 @@ export class ProceduralTerrain extends BaseHeight {
         this.smooth(x, z, d, 0);
         const y = (out[k] = this.finish(x, z, d[0], d[1], d[2], d[3], lakes));
         if (water) water[k] = this.water !== null && this.water > y ? this.water : NaN;
+        if (river) river[k] = d[3];
       }
       return out;
     }
@@ -287,6 +294,7 @@ export class ProceduralTerrain extends BaseHeight {
         const y = this.finish(g.x0 + i * g.step, z, h, fl, m, rv, lakes);
         out[k] = y;
         if (water) water[k] = this.water !== null && this.water > y ? this.water : NaN;
+        if (river) river[k] = rv;
       }
     }
     return out;
@@ -295,5 +303,30 @@ export class ProceduralTerrain extends BaseHeight {
   sampleWater(g: GridSpec, out = new Float32Array(g.nx * g.nz)) {
     this.sample(g, undefined, out);
     return out;
+  }
+
+  // ---------- for the water system (src/proto/water) ----------
+  // The water system rebuilds rivers as a drainage network whose channels widen downstream, so it
+  // needs the ground without this terrain's own uniform channel (the floodplain is left at the
+  // valley floor there), and the river field itself to keep its rivers on these valleys.
+  // Heights and water (lakes and sea only; NaN where dry) on a grid, without the river channel.
+  sampleBase(g: GridSpec, out = new Float32Array(g.nx * g.nz), water?: Float32Array, river?: Float32Array) {
+    this.channel = false;
+    try { return this.sample(g, out, water, river); } finally { this.channel = true; }
+  }
+  // The same at one point: the ground without the channel, and the lake or sea surface (or null).
+  baseAt(x: number, z: number): { h: number; water: number | null } {
+    this.channel = false;
+    try { const h = this.eval(x, z); return { h, water: this.water !== null && this.water > h ? this.water : null }; } finally { this.channel = true; }
+  }
+  // The river field at a point: v is the signed noise value whose zero line is the river's centre,
+  // lam the metres per unit of it (so |v|·lam/1.1 ≈ distance to the line), floor the valley floor
+  // and half the half-width of the channel this terrain would cut. Null when there are no rivers.
+  riverField(x: number, z: number): { v: number; lam: number; floor: number; half: number; mask: number } | null {
+    if (this.p.rivers <= 0) return null;
+    // worked out directly (as coarse grids are), so asking along a river builds no lattice blocks
+    const d = (this.scratch ??= new Float32Array(F));
+    this.smooth(x, z, d, 0);
+    return { v: d[3], lam: (3200 * this.p.scale) / this.p.rivers, floor: d[1], half: this.p.riverWidth / 2, mask: d[2] };
   }
 }
