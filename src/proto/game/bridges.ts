@@ -224,13 +224,16 @@ export class BridgeLayer {
   // whether anything changed. Call before drawRoads().
   // `reserve`: how far from each end of a segment (a, b) the junction there reaches: no bridge
   // runs into a junction (its deck and parapets would cut across the roads leaving it).
-  sync(net: Network, reserve: (s: RSeg) => [number, number] = () => [0, 0]) {
+  // `near`: when given, only roads it picks are looked at again (a big map's edit); the rest keep
+  // the bridges they have.
+  sync(net: Network, reserve: (s: RSeg) => [number, number] = () => [0, 0], near?: (s: RSeg) => boolean) {
     // nothing to do if no road changed and no type was picked (the common case: a junction edit)
     const topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}`).join();
     if (topo === this.topo && !this.dirty) return false;
     this.topo = topo;
     for (const id of [...this.segs.keys()]) if (!net.segs.has(id)) { this.drop(id); this.dirty = true; }
     for (const s of net.segs.values()) {
+      if (near && this.segs.has(s.id) && !near(s)) continue;
       const path = net.path(s);
       if (!path.some((p) => (p.y ?? 0) > 3)) { if (s.bridges || this.segs.has(s.id)) { s.bridges = undefined; this.drop(s.id); this.dirty = true; } continue; }
       const c = crossingOf(net, path, net.def(s), (id) => id === s.id), keep = reserve(s);

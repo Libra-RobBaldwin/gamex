@@ -14,12 +14,18 @@ const FREE = 0, LOT = 1, ROAD = 2, WATER = 3;
 // a cell is taken if any part of it (not just its centre) is on claimed land
 const landNear = (net: Network, p: P) => { const h = CELL * 0.45; return !net.land.free([{ x: p.x - h, z: p.z - h }, { x: p.x + h, z: p.z - h }, { x: p.x + h, z: p.z + h }, { x: p.x - h, z: p.z + h }]); };
 
-export function findRegions(net: Network, pending: Lot[]) {
+// `within`: look only at this box (a big map, after an edit there). Gaps that run off its edge are
+// left out (their boxes are in `cut`, so the caller can look again over a bigger box); every gap
+// found is exactly what looking at the whole map would find.
+export interface Box { x0: number; z0: number; x1: number; z1: number }
+export function findRegions(net: Network, pending: Lot[], within?: Box) {
   const all = [...net.lots, ...pending];
-  if (!all.length) return { regions: [] as Region[], civics: [] as Lot[] };
+  const cut: Box[] = [];
+  if (!all.length) return { regions: [] as Region[], civics: [] as Lot[], cut };
   // grid over the built-up area, aligned to world multiples of CELL
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-  for (const l of all) { const c = net.parcelCentre(l), r = net.parcelR(l); x0 = Math.min(x0, c.x - r); z0 = Math.min(z0, c.z - r); x1 = Math.max(x1, c.x + r); z1 = Math.max(z1, c.z + r); }
+  if (within) ({ x0, z0, x1, z1 } = { x0: within.x0 + 30, z0: within.z0 + 30, x1: within.x1 - 30, z1: within.z1 - 30 });
+  else for (const l of all) { const c = net.parcelCentre(l), r = net.parcelR(l); x0 = Math.min(x0, c.x - r); z0 = Math.min(z0, c.z - r); x1 = Math.max(x1, c.x + r); z1 = Math.max(z1, c.z + r); }
   x0 = Math.floor((x0 - 30) / CELL) * CELL; z0 = Math.floor((z0 - 30) / CELL) * CELL;
   const nx = Math.ceil((x1 + 30 - x0) / CELL), nz = Math.ceil((z1 + 30 - z0) / CELL);
   const occ = new Uint8Array(nx * nz), nearRoad = new Uint8Array(nx * nz), nearLot = new Uint8Array(nx * nz);
@@ -53,17 +59,25 @@ export function findRegions(net: Network, pending: Lot[]) {
       }
     }
   }
-  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
-    const p = { x: cx(i), z: cz(j) };
-    if (net.isWater(p)) occ[i + j * nx] = WATER;
-    // anything the land registry says is taken (junctions, slip roads, islands, road corridors)
-    else if (occ[i + j * nx] === FREE && landNear(net, p)) occ[i + j * nx] = ROAD;
-  }
+  // Water, and anything the land registry says is taken (junctions, slip roads, islands, road
+  // corridors). Only cells a gap could use, or that border one, are ever asked about, so each is
+  // worked out the first time it's needed: on a big map most of the grid is open country, and
+  // asking the registry about every cell of it cost seconds.
+  const known = new Uint8Array(nx * nz);
+  const at = (k: number) => {
+    if (!known[k]) {
+      known[k] = 1;
+      const p = { x: cx(k % nx), z: cz(Math.floor(k / nx)) };
+      if (net.isWater(p)) occ[k] = WATER;
+      else if (occ[k] === FREE && landNear(net, p)) occ[k] = ROAD;
+    }
+    return occ[k];
+  };
 
   // gaps: connected free cells that are near both a road and buildings
   const seen = new Uint8Array(nx * nz);
   const regions: Region[] = [], civics: Lot[] = [];
-  const ok = (i: number, j: number) => i >= 0 && j >= 0 && i < nx && j < nz && occ[i + j * nx] === FREE && nearRoad[i + j * nx] && nearLot[i + j * nx];
+  const ok = (i: number, j: number) => i >= 0 && j >= 0 && i < nx && j < nz && nearRoad[i + j * nx] && nearLot[i + j * nx] && at(i + j * nx) === FREE;
   for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
     if (seen[i + j * nx] || !ok(i, j)) continue;
     const comp: [number, number][] = [], stack: [number, number][] = [[i, j]];
@@ -75,6 +89,10 @@ export function findRegions(net: Network, pending: Lot[]) {
         const u = a + da, v = b + db;
         if (ok(u, v) && !seen[u + v * nx]) { seen[u + v * nx] = 1; stack.push([u, v]); }
       }
+    }
+    if (within && comp.some(([a, b]) => a === 0 || b === 0 || a === nx - 1 || b === nz - 1)) {
+      cut.push({ x0: x0 + Math.min(...comp.map((c) => c[0])) * CELL, z0: z0 + Math.min(...comp.map((c) => c[1])) * CELL, x1: x0 + (Math.max(...comp.map((c) => c[0])) + 1) * CELL, z1: z0 + (Math.max(...comp.map((c) => c[1])) + 1) * CELL });
+      continue;
     }
     let cells = comp;
     // railings along the back of the road's footway where it borders this gap, following the road
@@ -103,7 +121,7 @@ export function findRegions(net: Network, pending: Lot[]) {
       }
       return out;
     };
-    const touching = cells.filter(([a, b]) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([da, db]) => occ[a + da + (b + db) * nx] === ROAD));
+    const touching = cells.filter(([a, b]) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([da, db]) => occ[a + da + (b + db) * nx] !== undefined && at(a + da + (b + db) * nx) === ROAD));
     const mid = { x: cells.reduce((t, c) => t + cx(c[0]), 0) / cells.length, z: cells.reduce((t, c) => t + cz(c[1]), 0) / cells.length };
     const industrial = net.zoneAt(mid) === 'industrial';
     const fromCentre = Math.hypot(mid.x, mid.z);
@@ -162,5 +180,5 @@ export function findRegions(net: Network, pending: Lot[]) {
       cells: cells.map(([a, b]) => ({ x: cx(a), z: cz(b) })), kind, seed: rand(), roadEdges: roadEdges(cells), centre: mid,
     });
   }
-  return { regions, civics };
+  return { regions, civics, cut };
 }
