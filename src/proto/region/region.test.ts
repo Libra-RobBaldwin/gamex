@@ -211,7 +211,7 @@ describe('maps as data', () => {
     for (const p of [{ x: -280, z: -300 }, { x: 280, z: -300 }, { x: 0, z: -215 }, { x: 0, z: -215.01 }]) expect(zoneOf(TOWN_MAP, p) === 'industrial').toBe(INDUSTRIAL(p));
     expect(plotCentre(TOWN_MAP, { x: 100, z: 10 }, { x: 180, z: 10 })).toEqual({ x: 0, z: 0 });
     expect(centrality(TOWN_MAP, { x: 30, z: 40 })).toBe(50);
-    expect(TOWN_MAP.bound).toBe(820); // (the town's land was widened from 520: its roads out of town run on to the new edge)
+    expect(TOWN_MAP.bound).toBe(1030); // (the town's land was widened from 520: its roads out of town run on to the new edge)
     // the high street ends where the bypass's curve crosses z = 0, as seedTown() worked it out
     const bypass = bezier({ x: 110, z: 110 }, { x: 230, z: 40 }, { x: 170, z: -98 });
     const i = bypass.findIndex((p) => p.z < 0), [p0, p1] = [bypass[i - 1], bypass[i]];

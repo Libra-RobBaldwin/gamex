@@ -14,7 +14,7 @@ function bezier(a: XZ, c: XZ, b: XZ): XZ[] {
 
 // You can build out to BOUND either side of the centre; the roads out of town end OUT from the
 // centre, near enough the edge to run on off the map.
-const BOUND = 820, OUT = BOUND - 10;
+const BOUND = 1030, OUT = BOUND - 10;
 
 function townStreets(): MapStreet[] {
   const road = (a: XZ, b: XZ, c?: XZ, type = 'street', o: Partial<MapStreet> = {}): MapStreet => ({ a, b, c, type, ...o });

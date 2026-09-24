@@ -2,6 +2,7 @@
 // snapping, junction splitting, and building plots laid out along both sides of every road.
 
 import { ROADS, halfOf, kerbOf, type Cls } from './catalog';
+import { GROUND } from './standards';
 export { ROADS, halfOf, kerbOf, type RoadDef } from './catalog';
 import { Land, type Claim } from './land';
 import { courseOf, normals, sectionAt, taperOf } from './xsection';
@@ -222,6 +223,8 @@ export class Network {
   nextId = 1;
   isWater: (p: P) => boolean;
   bound: number;
+  // where the ground ends (half its width): roads running off the map are drawn out to here
+  edge: number;
   private rand: () => number;
   zoneAt: (p: P) => Zone = () => 'town';
   // lots whose plots the last build() cut into (their gardens get trimmed)
@@ -232,6 +235,7 @@ export class Network {
   constructor(isWater: (p: P) => boolean = () => false, bound = 560, seed = 7) {
     this.isWater = isWater;
     this.bound = bound;
+    this.edge = bound * GROUND;
     this.rand = rng(seed);
   }
 
