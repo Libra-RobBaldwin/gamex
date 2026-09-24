@@ -195,8 +195,10 @@ its homes are wanted whatever its people can reach (the retired, those working f
 an unserved town shrinks towards a floor rather than vanishing. It is taken to be in balance
 when the map is made, within limits: one with more jobs than homes is held back so it doesn't
 grow on its own, and one far short (an estate with no jobs in reach) is only partly lifted, so
-it still shrinks towards its floor and a trickle of service can't make it boom. Demand is
-smoothed, then set against capacity:
+it still shrinks towards its floor and a trickle of service can't make it boom. A town added
+to a running game (the map streaming in, or the player founding one) is taken as it stands at
+its first review, as those there from the start are. Demand is smoothed, then set against
+capacity:
 
 - After two months above capacity it builds. It restores abandoned buildings first, then
   uses a free plot in the zone where demand is keenest, or densifies (house → terrace →

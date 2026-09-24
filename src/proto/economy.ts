@@ -849,10 +849,14 @@ export class Economy {
       service: (t) => this.svc.get(t) ?? { stops: 0, lines: 0 },
       crowding: (t) => this.crowding(t),
     };
+    // A town's first review takes it as it stands, whenever it joins (the map streaming in a
+    // town, or the player founding one), as the constructor does for those there from the start.
+    const first: TownCtx = { ...ctx, assess: true, vacate: () => {} };
     for (const t of [...this.townMap.values()].sort((a, b) => a.id - b.id)) {
-      const before = t.report;
-      reviewTown(t, ctx);
-      if (!assess) this.townNews(t, before);
+      const before = t.report, fresh = !t.assessed;
+      reviewTown(t, fresh ? first : ctx);
+      t.assessed = true;
+      if (!assess && !fresh) this.townNews(t, before);
     }
     const t2 = performance.now();
     this.timing.parts.towns += t2 - t1;
@@ -996,7 +1000,7 @@ export class Economy {
       v: 1, time: this.time, month: this.month, acc: this.acc, nextDay: this.nextDay, nextReview: this.nextReview, rand: this.rand.s,
       reqNo: this.reqNo, nextId: this.nextId, runningOwed: this.runningOwed, totals: structuredClone(this.totals),
       towns: [...this.townMap.values()].map((t) => ({
-        id: t.id, base: { ...t.base }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, labour: t.labour, customers: t.customers,
+        id: t.id, base: { ...t.base }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, assessed: t.assessed, labour: t.labour, customers: t.customers,
         supply: { ...t.supply }, month: { ...t.month }, accept: { ...t.accept }, held: { ...t.held }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
         recent: structuredClone(t.recent), done: { ...t.done }, report: t.report ? structuredClone(t.report) : null,
       })),
@@ -1026,7 +1030,7 @@ export class Economy {
     }
     for (const t of s.towns) {
       const q = e.townMap.get(t.id);
-      if (q) Object.assign(q, structuredClone({ ...t, id: q.id }));
+      if (q) Object.assign(q, structuredClone({ ...t, id: q.id, assessed: t.assessed ?? t.primed }));
     }
     for (const i of s.industries) {
       const q = e.indMap.get(i.id);

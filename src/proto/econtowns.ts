@@ -53,6 +53,7 @@ export interface Facts {
 export interface TState {
   id: number; name: string; x: number; z: number; carShare: number; zones: ZState[];
   base: PerUse; bias: PerUse; calibrated: boolean; primed: boolean;
+  assessed: boolean; // its first review has taken it as it stands (see Economy.review)
   labour: number; customers: number; // town-wide: workers per job, customers per shop place
   supply: { goods: number; materials: number; visitors: number }; // smoothed, per hour
   month: { goods: number; materials: number; visitors: number }; // delivered so far this month
@@ -73,7 +74,7 @@ export interface TState {
 export function newTown(id: number, name: string, x: number, z: number, carShare: number): TState {
   const u = (): UState => ({ demand: 0, raw: 0, up: 0, down: 0, grew: -99, shrank: -99, stuck: false, settled: 0 });
   return {
-    id, name, x, z, carShare, zones: [], base: perUse(), bias: perUse(1), calibrated: false, primed: false, labour: 1, customers: 1,
+    id, name, x, z, carShare, zones: [], base: perUse(), bias: perUse(1), calibrated: false, primed: false, assessed: false, labour: 1, customers: 1,
     supply: { goods: 0, materials: 0, visitors: 0 }, month: { goods: 0, materials: 0, visitors: 0 },
     accept: { goods: 0, materials: 0 }, held: { goods: 0, materials: 0 },
     use: { home: u(), shop: u(), office: u(), works: u(), civic: u() }, health: perUse(1), history: [], recent: { built: [], lost: [] },
