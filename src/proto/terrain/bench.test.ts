@@ -1,6 +1,9 @@
 // Timings for the report (docs/reports/terrain.md). The assertions are loose so a slow CI box
-// doesn't fail the build; the printed numbers are what matter.
+// doesn't fail the build; the printed numbers are what matter. Budgets are for the reference
+// machine and scale with this one's speed (test/speed.ts); times are CPU time, so a busy machine's
+// other work doesn't count.
 import { expect, it } from 'vitest';
+import { budget, cpuMs } from '../test/speed';
 import { ROADS } from '../catalog';
 import { alignRoute, alignSpec } from './align';
 import { CachedHeight, tileGrid } from './height';
@@ -11,7 +14,7 @@ import { GridHeight } from './raster';
 // median of several runs (garbage collection makes single runs noisy)
 const time = (f: () => void, reps = 9) => {
   const t: number[] = [];
-  for (let r = 0; r < reps; r++) { const a = performance.now(); f(); t.push(performance.now() - a); }
+  for (let r = 0; r < reps; r++) t.push(cpuMs(f));
   t.sort((a, b) => a - b);
   return t[Math.floor(reps / 2)];
 };
@@ -34,7 +37,7 @@ it('performance', () => {
   out.push(`1 km tile, 513² vertices (1.95 m), new ground: ${ms(cold512)}; ground already cached: ${ms(warm512)} (height sampling alone ${ms(sampleOnly)})`);
   out.push(`1 km tile, 257² vertices (3.9 m), new ground: ${ms(cold256)}; cached: ${ms(warm256)}`);
   out.push(`coarser levels (129², 65², 33², 17²): ${lods.map(ms).join(', ')}`);
-  expect(cold512).toBeLessThan(250);
+  expect(cold512).toBeLessThan(budget(250));
 
   // point queries
   const c = new CachedHeight(t);

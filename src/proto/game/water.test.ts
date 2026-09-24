@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { GameWater, LAKE, WATER_LEVEL, lakeGround, lakeRadius } from './water';
 import { Land } from '../land';
+import { budget, cpuMs } from '../test/speed';
 
 describe('game water', () => {
-  const t0 = performance.now();
-  const gw = new GameWater(676);
-  const ms = performance.now() - t0;
+  let gw!: GameWater;
+  const ms = cpuMs(() => { gw = new GameWater(676); });
   it('builds quickly, with one tile of water', () => {
-    expect(ms).toBeLessThan(1500); // (about 100 ms on a quiet machine; generous for a busy one)
+    expect(ms).toBeLessThan(budget(1500)); // (about 100 ms on the reference machine; the budget scales with this one's speed, test/speed.ts)
     expect(gw.tiles.length).toBe(1);
     expect(gw.group.children.length).toBeLessThanOrEqual(3);
   });

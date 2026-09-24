@@ -62,8 +62,15 @@ a stream with review and fixes takes 45–90 minutes, and a merge about 5.
 ### 5. Ready for real players
 - [ ] **A green CI:**
   - fix the economy test (above);
-  - scale timing budgets by a measured machine factor (bridges, terrain and water benchmarks);
-  - run the Playwright phone tests (`e2e/*.e2e.mjs`) in CI.
+  - [x] scale timing budgets by a measured machine factor: every timed test's budget goes
+    through `budget()` (src/proto/test/speed.ts) and is timed in CPU time (bridges, terrain,
+    water, game water, ground, world and economy benchmarks). Four budgets are loose enough that
+    a 2× slowdown still passes on a reference-speed machine: water bench (42 ms of 200), terrain
+    (34 of 250), game water (390 of 1500) and the conurbation month (90 of 1000). Tightening them
+    is their streams' call;
+  - [x] run the Playwright phone tests in CI: the `phone` job in .github/workflows/ci.yml runs
+    lines, loop, rail, saving and loading, and the start menu (Playwright's own Chromium, via
+    `CHROME`).
 - [ ] **Performance on a real Pixel:** frame time, memory and heat on each quality tier. Every
   check so far ran under SwiftShader.
 - [ ] **Known bugs:**
