@@ -370,10 +370,14 @@ function queuePlots(segs: number[]) {
 function seedTown() {
   const road = (a: P, b: P, c?: P, o = DEFAULT_OPTS) => net.build(net.snapStart(a, 3), net.snapStart(b, 3), c, o);
   const as = (type: RoadType, o = DEFAULT_OPTS) => ({ ...o, type });
-  road({ x: -230, z: 0 }, { x: 230, z: 0 }, undefined, as('avenue')); // the high street is a tree-lined avenue
+  // the high street is a tree-lined avenue, from under the flyover to a roundabout on the bypass
+  // (it ends exactly where the bypass's curve will cross it, so the two meet there)
+  const bypass = net.makePath({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 });
+  const cross = bypass.findIndex((p) => p.z < 0), [p0, p1] = [bypass[cross - 1], bypass[cross]];
+  road({ x: -230, z: 0 }, { x: p0.x + ((p1.x - p0.x) * p0.z) / (p0.z - p1.z), z: 0 }, undefined, as('avenue'));
   road({ x: 0, z: -200 }, { x: 0, z: 200 });
   road({ x: 0, z: 0 }, { x: 170, z: -98 }); // a 30° diagonal
-  road({ x: -200, z: -96 }, { x: 0, z: -96 });
+  road({ x: -185, z: -96 }, { x: 0, z: -96 }); // (a cul-de-sac, its turning head clear of the flyover's ramp)
   road({ x: -110, z: -96 }, { x: -170, z: 0 }); // a slanting link
   road({ x: 0, z: 70 }, { x: -80, z: 150 }, { x: -80, z: 70 }); // a crescent
   road({ x: 60, z: 0 }, { x: 60, z: 110 });
@@ -381,7 +385,7 @@ function seedTown() {
   road({ x: 110, z: 110 }, { x: 170, z: -98 }, { x: 230, z: 40 }, as('dual')); // a sweeping dual-carriageway bypass
   const over = { ...DEFAULT_OPTS, cross: 'bridge' as const };
   road({ x: -215, z: -150 }, { x: -215, z: 150 }, undefined, over); // a flyover across the main road
-  road({ x: 40, z: -190 }, { x: 470, z: -190 }, undefined, over); // a bridge over the lake
+  road({ x: 0, z: -150 }, { x: 510, z: -200 }, undefined, over); // a bridge over the lake, and on out of town to the east
   // the industrial estate
   road({ x: 0, z: -200 }, { x: 0, z: -380 });
   road({ x: -190, z: -290 }, { x: 150, z: -290 });
@@ -393,7 +397,10 @@ function seedTown() {
   road({ x: 0, z: -380 }, { x: 0, z: -470 }, undefined, as('dual'));
   // a main line railway along the north, lifted over the high road, and a road tunnel under the lake
   net.build({ x: -500, z: 185 }, { x: 500, z: 185 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge', grade: 0.025 });
-  road({ x: 250, z: -450 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 });
+  road({ x: 250, z: -470 }, { x: 250, z: 90 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'tunnel', grade: 0.08 }); // from the dual carriageway
+  // roads out of town: west from the end of the high street, north under the railway (both run off the map)
+  road({ x: -230, z: 0 }, { x: -510, z: 0 }, undefined, as('rural-60'));
+  road({ x: 0, z: 200 }, { x: 0, z: 510 }, undefined, as('rural-60'));
   // junctions are designed (and take their land) before any plot is laid out
   commitRoads([...net.segs.keys()]);
   // most of the town exists at the start, the rest grows in front of you

@@ -5,6 +5,9 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { BAY, ROADS, bayWeight, kerbOf, pointAt, stopSpan, subPath, pathLength, type Network, type P, type RSeg, type RoadType } from './roads';
 import { legsAt, type Junction } from './junction';
 import { STD } from './standards';
+import { TAPER, courseOf, normals, type Course, type Section2 } from './xsection';
+import type { XZ } from './land';
+import type { RoadDef } from './catalog';
 
 export const paveMat = new THREE.MeshLambertMaterial({ color: '#bdb8ad', polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 export const asphaltMat = new THREE.MeshLambertMaterial({ color: '#484c52', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
@@ -30,13 +33,11 @@ export class Flat {
       this.tri3(a.x, yp, a.z, c.x, yq, c.z, d.x, yp, d.z);
     }
   }
-  // a strip between two sideways offsets (left of the path's direction is positive), which may vary
-  strip(path: P[], off: (i: number) => [number, number], y: number) {
+  // a strip between two sideways offsets (left of the path's direction is positive), which may vary;
+  // `ends` fixes the direction at either end (where it meets another road's strip round a join)
+  strip(path: P[], off: (i: number) => [number, number], y: number, ends: [XZ | null, XZ | null] = [null, null]) {
     const n = path.length;
-    const nl = path.map((_, i) => {
-      const a = path[Math.max(0, i - 1)], b = path[Math.min(n - 1, i + 1)], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-      return { x: (b.z - a.z) / L, z: -(b.x - a.x) / L };
-    });
+    const nl = normals(path, ends);
     for (let i = 1; i < n; i++) {
       const p = path[i - 1], q = path[i], [a0, a1] = off(i - 1), [b0, b1] = off(i);
       const yp = (p.y ?? 0) + y, yq = (q.y ?? 0) + y;
@@ -181,8 +182,10 @@ export const LAMP_OFF = new THREE.MeshBasicMaterial({ color: '#1b1d20' });
 export const LAMP_ON: Record<string, THREE.Material> = { red: new THREE.MeshBasicMaterial({ color: '#ff3b2f' }), amber: new THREE.MeshBasicMaterial({ color: '#ffb020' }), green: new THREE.MeshBasicMaterial({ color: '#35e06b' }) };
 const lampGeo = new THREE.BoxGeometry(0.22, 0.22, 0.06);
 
-// black boards with white chevrons, the kind on a roundabout's central island
-const chevronMat = (() => {
+// black boards with white chevrons, the kind on a roundabout's central island (made when first
+// needed, since it paints a canvas)
+let chevrons: THREE.Material | null = null;
+const chevronMat = () => (chevrons ??= (() => {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 32;
   const x = c.getContext('2d')!;
@@ -192,7 +195,7 @@ const chevronMat = (() => {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return lit('#ffffff', { map: t, side: THREE.DoubleSide });
-})();
+})());
 class Boards {
   pos: number[] = []; uv: number[] = [];
   quad(a: number[], b: number[], c: number[], d: number[]) {
@@ -208,24 +211,26 @@ class Boards {
   }
 }
 
-// The cross-section of a road at distance t along it, allowing for bus lay-bys: where one is cut
-// in, that side's kerb moves out (into parking, the pavement, and bought land) and its lanes narrow.
-export function section(net: Network, s: RSeg, t: number) {
-  const d = net.def(s), K = kerbOf(d), gen = d.median / 2 + d.lanes * d.lane;
-  const side = () => ({ kerb: K, lane: gen, back: K + d.pave + d.verge, bay: 0, park: d.parking });
+// The cross-section of a road at distance r along its course (see xsection.courseOf): through a
+// taper it follows sectionAt, round a join it blends into the next road, and where a bus lay-by is
+// cut in, that side's kerb moves out (into parking, the pavement, and bought land) and its lanes narrow.
+export interface Side { kerb: number; lane: number; back: number; bay: number; park: number }
+export function section(net: Network, s: RSeg, C: Course, r: number) {
+  const d = net.def(s), x = C.sec(r), t = C.tau(r), gen = x.median + x.lanes * x.lane;
+  const side = (): Side => ({ kerb: x.kerb, lane: gen, back: x.back, bay: 0, park: d.parking });
   const L = side(), R = side();
   for (const st of s.stops) {
     const w = bayWeight(st, t);
     if (!w) continue;
-    const x = st.side === 1 ? L : R;
-    x.park -= (st.take.park ?? 0) * w;
+    const q = st.side === 1 ? L : R;
+    q.park -= (st.take.park ?? 0) * w;
     if (st.kind !== 'layby') continue;
-    x.kerb += (st.take.pave + st.take.land) * w;
-    x.back += st.take.land * w;
-    x.lane -= st.take.lane * w;
-    x.bay = Math.max(x.bay, w);
+    q.kerb += (st.take.pave + st.take.land) * w;
+    q.back += st.take.land * w;
+    q.lane -= st.take.lane * w;
+    q.bay = Math.max(q.bay, w);
   }
-  return { d, L, R };
+  return { d, x, L, R };
 }
 
 // Extra points along a road near its stops, so kerb lines can bend smoothly.
@@ -244,6 +249,23 @@ function arcs(path: P[]) {
   const a = [0];
   for (let i = 1; i < path.length; i++) a.push(a[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z));
   return a;
+}
+
+// Dashes along a line at a (varying) sideways offset, between r0 and r1 along the path. Where the line
+// runs on into the next road round a join, the pattern is fitted to finish half a gap short of the
+// join (`a0`, `a1`), so the next road's dashes carry on at the same rhythm with no seam.
+export function dashRun(f: Flat, path: P[], off: (r: number) => number, r0: number, r1: number, len: number, gap: number, w: number, y: number, a0 = false, a1 = false) {
+  const run = r1 - r0;
+  if (run < 0.3) return;
+  const dash = (a: number, b: number) => {
+    const sp = subPath(path, Math.max(r0, a), Math.min(r1, b)), ar = arcs(sp);
+    if (ar[ar.length - 1] > 0.05) f.strip(sp, (i) => { const o = off(a + ar[i]); return [o - w, o + w]; }, y);
+  };
+  if (a0 && a1) {
+    const n = Math.max(1, Math.round(run / (len + gap))), g = Math.max(0.2, run / n - len), l = run / n - g;
+    for (let k = 0; k < n; k++) dash(r0 + g / 2 + k * (l + g), r0 + g / 2 + k * (l + g) + l);
+  } else if (a1) for (let e = r1 - gap / 2; e > r0 + 0.3; e -= len + gap) dash(e - len, e);
+  else for (let t = r0 + (a0 ? gap / 2 : 0); t < r1 - 0.3; t += len + gap) dash(t, Math.min(r1, t + len));
 }
 
 function shelter(solid: { glass: Solid; frame: Solid; red: Solid }, path: P[], t: number, off: number) {
@@ -266,27 +288,27 @@ export function laneCentre(net: Network, s: RSeg, i: number) {
   const d = net.def(s);
   return d.lanes > 1 ? d.median / 2 + (d.lanes - 1 - i + 0.5) * d.lane : d.median / 2 + d.lane / 2;
 }
-// Where a road's own drawing stops at each end, taken from the junction's shape: its carriageway
-// (`strip`), its markings (`line`), its reservation (`median`), and its footway on each side
-// (`L`/`R`, left and right of the road's direction from a to b).
+// Where a road's own drawing stops at each end of its course, taken from the junction's shape (or the
+// turning head at a cul-de-sac): its carriageway (`strip`), its markings (`line`), its reservation
+// (`median`), and its footway on each side (`L`/`R`, left and right of the road's direction from a
+// to b). Where roads meet with no junction, or a road runs off the map, it's drawn to the course's end.
 export interface Ends { strip: [number, number]; line: [number, number]; median: [number, number]; L: [number, number]; R: [number, number] }
-export function endsOf(junctions: Map<number, Junction>, s: RSeg): Ends {
-  const at = (node: number, atA: boolean) => {
-    const j = junctions.get(node), sh = j?.shape;
-    if (!j || !sh) return { strip: 0, line: 0, median: 0, L: 0, R: 0 };
-    const [plus, minus] = sh.paveTrim[s.id] ?? [0, 0];
-    const major = j.form === 'priority' && j.major.includes(s.id);
-    const ring = j.form === 'roundabout' || j.form === 'mini';
-    return {
-      strip: sh.mouth[s.id] ?? 0,
-      line: major ? 0 : ring ? sh.mouth[s.id] ?? 0 : sh.line[s.id] ?? 0,
-      median: sh.medianTrim[s.id] ?? 0,
-      // arriving traffic keeps left: at the a end it arrives on the road's right, at the b end on its left
-      L: atA ? minus : plus,
-      R: atA ? plus : minus,
-    };
+export function endsOf(junctions: Map<number, Junction>, s: RSeg, C: Course): Ends {
+  const at = (node: number, e: 0 | 1) => {
+    const atA = e === 0, j = junctions.get(node), sh = C.kinds[e] === 'junction' ? j?.shape : null, head = C.heads[e];
+    // arriving traffic keeps left: at the a end it arrives on the road's right, at the b end on its left
+    const sides = ([plus, minus]: [number, number]) => ({ L: atA ? minus : plus, R: atA ? plus : minus });
+    if (j && sh) {
+      const major = j.form === 'priority' && j.major.includes(s.id);
+      const ring = j.form === 'roundabout' || j.form === 'mini';
+      return { strip: sh.mouth[s.id] ?? 0, line: major ? 0 : ring ? sh.mouth[s.id] ?? 0 : sh.line[s.id] ?? 0, median: sh.medianTrim[s.id] ?? 0, ...sides(sh.paveTrim[s.id] ?? [0, 0]) };
+    }
+    // (the road's own surfaces run a little way under the head, which is laid square to its end, so
+    // a curving road meets it without a sliver)
+    if (head) return { strip: head.mouth - 0.6, line: head.mouth, median: head.mouth, ...sides([head.paveTrim[0] - 0.6, head.paveTrim[1] - 0.6]) };
+    return { strip: 0, line: 0, median: 0, L: 0, R: 0 };
   };
-  const A = at(s.a, true), B = at(s.b, false);
+  const A = at(s.a, 0), B = at(s.b, 1);
   return { strip: [A.strip, B.strip], line: [A.line, B.line], median: [A.median, B.median], L: [A.L, B.L], R: [A.R, B.R] };
 }
 
@@ -304,19 +326,13 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   const trees: THREE.BufferGeometry[] = [];
   const lamps: Lamp[] = [];
   const tree = (x: number, y: number, z: number, s = 1) => trees.push(new THREE.CylinderGeometry(0.18 * s, 0.25 * s, 3 * s, 5).translate(x, y + 1.5 * s, z), new THREE.IcosahedronGeometry(2.2 * s, 0).translate(x, y + 4.4 * s, z));
+  const courses = new Map<number, Course>();
 
   for (const s of net.segs.values()) {
     const d = net.def(s), path = finePath(net, s), A = arcs(path), L = A[A.length - 1];
 
     const half = net.half(s);
     structures(path, body, rails, half);
-    const ends = endsOf(junctions, s);
-    // markings stop at the junction's lines; the carriageway, reservation and footways where its shape takes over
-    const [trimA, trimB] = ends.line, [stripA, stripB] = ends.strip;
-    const part = (t0: number, t1: number) => {
-      const p = subPath(path, Math.max(0, t0), Math.min(L, t1)), ar = arcs(p);
-      return { p, sec: ar.map((t) => section(net, s, t + Math.max(0, t0))) };
-    };
     // ---- cuttings and tunnels: open to the sky while shallow, covered once deep ----
     const Y = (i: number) => path[i].y ?? 0;
     const DEEP = -9;
@@ -351,20 +367,35 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
         }
       } else hint.dashes(flat, () => 0, 0, A[i] - A[i - 1], 2, 2, 0.35, 0.05); // a covered tunnel: its line on the surface
     }
+    // ---- everything else follows the road's course: round the curve into the next road, off the map ----
+    const C = courseOf(net, s), cp = C.path, CL = C.len;
+    courses.set(s.id, C);
+    const S = (r: number) => section(net, s, C, r);
+    // round the inside of a join's curve, nothing reaches past the curve's centre
+    const lim = (r: number, o: number) => { const l = C.limit(r); return l && Math.sign(o) === l.side && Math.abs(o) > l.r ? l.side * l.r : o; };
+    const part = (r0: number, r1: number) => {
+      const a = Math.max(0, r0), b = Math.min(CL, r1), p = subPath(cp, a, b), ar = arcs(p).map((t) => t + a);
+      return { p, r: ar, sec: ar.map(S), ends: [a < 1e-6 ? C.dirs[0] : null, b > CL - 1e-6 ? C.dirs[1] : null] as [XZ | null, XZ | null] };
+    };
+    type Part = ReturnType<typeof part>;
+    const band = (f: Flat, q: Part, off: (i: number) => [number, number], y: number) => f.strip(q.p, (i) => { const [a, b] = off(i); return [lim(q.r[i], a), lim(q.r[i], b)]; }, y, q.ends);
+    // a solid line along the course
+    const solid = (f: Flat, r0: number, r1: number, off: (r: number) => number, w: number, y = 0.35) => { if (r1 - r0 > 0.2) { const q = part(r0, r1); f.strip(q.p, (i) => { const o = off(q.r[i]); return [o - w, o + w]; }, y, q.ends); } };
     if (d.cls === 'rail') {
       // ---- railway: ballast, sleepers, rails, a rack, overhead wires ----
-      verge.strip(path, () => [kerbOf(d), half], 0.12);
-      verge.strip(path, () => [-half, -kerbOf(d)], 0.12);
-      ballast.strip(path, () => [-kerbOf(d), kerbOf(d)], 0.2);
+      const q = part(0, CL), K = kerbOf(d);
+      band(verge, q, () => [K, half], 0.12);
+      band(verge, q, () => [-half, -K], 0.12);
+      band(ballast, q, () => [-K, K], 0.2);
       const tracks = d.tracks === 2 ? [-2, 2] : [0];
       for (const c of tracks) {
-        sleepers.dashes(path, () => c, 0.2, L - 0.2, 0.26, 0.42, 1.3, 0.3);
-        for (const r of [-0.72, 0.72]) railsF.strip(path, () => [c + r - 0.05, c + r + 0.05], 0.44);
-        if (d.rack) rack.strip(path, () => [c - 0.07, c + 0.07], 0.46);
-        if (d.electric) wires.strip(path, () => [c - 0.03, c + 0.03], 5.8);
+        sleepers.dashes(cp, () => c, 0.2, CL - 0.2, 0.26, 0.42, 1.3, 0.3);
+        for (const r of [-0.72, 0.72]) band(railsF, q, () => [c + r - 0.05, c + r + 0.05], 0.44);
+        if (d.rack) band(rack, q, () => [c - 0.07, c + 0.07], 0.46);
+        if (d.electric) band(wires, q, () => [c - 0.03, c + 0.03], 5.8);
       }
-      if (d.electric) for (let t = 20; t < L - 5; t += 55) {
-        const q = pointAt(path, t), o = kerbOf(d) + 0.6;
+      if (d.electric) for (let t = 20; t < CL - 5; t += 55) {
+        const q = pointAt(cp, t), o = K + 0.6;
         const px = q.x - q.uz * o, pz = q.z + q.ux * o;
         poles.box(px, pz, q.ux, q.uz, 0.15, 0.15, q.y, q.y + 6.6);
         const mx = q.x - q.uz * (o / 2 - 0.3), mz = q.z + q.ux * (o / 2 - 0.3);
@@ -373,109 +404,207 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       continue;
     }
     // ---- road: pavements or verges, then the carriageway ----
+    const ends = endsOf(junctions, s, C);
     const surface = d.pave > 0 ? pave : verge;
-    if (L - ends.L[0] - ends.L[1] > 0.2) { const q = part(ends.L[0], L - ends.L[1]); surface.strip(q.p, (i) => [q.sec[i].L.kerb, q.sec[i].L.back], 0.15); }
-    if (L - ends.R[0] - ends.R[1] > 0.2) { const q = part(ends.R[0], L - ends.R[1]); surface.strip(q.p, (i) => [-q.sec[i].R.back, -q.sec[i].R.kerb], 0.15); }
-    const cw = part(stripA, L - stripB);
-    if (d.median > 0) {
-      asph.strip(cw.p, (i) => [d.median / 2, cw.sec[i].L.kerb], 0.25);
-      asph.strip(cw.p, (i) => [-cw.sec[i].R.kerb, -d.median / 2], 0.25);
-      const mk = d.medianKind;
-      // the reservation stops at its nose, where the junction starts
-      const [mA, mB] = ends.median;
-      if (L - mA - mB > 2) {
-        const mp = subPath(path, mA, L - mB);
-        (mk === 'grass' || mk === 'trees' ? verge : mk === 'hatch' ? asph : median).strip(mp, () => [-d.median / 2, d.median / 2], 0.27);
-        // a rounded kerbed nose at each end
-        if (mk !== 'hatch') for (const [t, dir] of [[mA, 1], [L - mB, -1]] as const) {
-          const q = pointAt(path, t), r = d.median / 2;
-          for (let k = 0; k < 8; k++) {
-            const a0 = (k / 8) * Math.PI, a1 = ((k + 1) / 8) * Math.PI;
-            const pt = (a: number) => [q.x + q.uz * Math.cos(a) * r - q.ux * Math.sin(a) * r * dir, q.z - q.ux * Math.cos(a) * r - q.uz * Math.sin(a) * r * dir];
-            const [x0, z0] = pt(a0), [x1, z1] = pt(a1);
-            (mk === 'grass' || mk === 'trees' ? verge : median).tri(q.x, q.z, x0, z0, x1, z1, q.y + 0.27);
-          }
+    // where the road runs on into one with grass verges (out of town), the footway tapers out to the
+    // kerb over its last few metres rather than stopping square
+    const fade = (q: number) => C.onward.reduce((f, o, e) => (o && d.pave > 0 && o.def.pave === 0 ? Math.min(f, Math.max(0, Math.min(1, (e ? CL - q : q) / 6))) : f), 1);
+    const fades = C.onward.some((o) => o && d.pave > 0 && o.def.pave === 0);
+    for (const k of [1, -1] as const) {
+      const [e0, e1] = k === 1 ? ends.L : ends.R;
+      if (CL - e0 - e1 <= 0.2) continue;
+      const q = part(e0, CL - e1), S2 = (i: number) => (k === 1 ? q.sec[i].L : q.sec[i].R);
+      const mid = (i: number) => S2(i).kerb + (S2(i).back - S2(i).kerb) * fade(q.r[i]);
+      band(surface, q, (i) => (k === 1 ? [S2(i).kerb, mid(i)] : [-mid(i), -S2(i).kerb]), 0.15);
+      if (fades) band(verge, q, (i) => (k === 1 ? [mid(i), S2(i).back] : [-S2(i).back, -mid(i)]), 0.15);
+    }
+    // the inside corner of the footway at a bend
+    C.fills.forEach((f, e) => { if (f) surface.poly(f, net.node(e ? s.b : s.a).y + 0.15); });
+    // stretches of the course where a test holds (to a few centimetres)
+    const runs = (test: (r: number) => boolean, a: number, b: number) => {
+      const out: [number, number][] = [];
+      if (b - a < 0.1) return out;
+      const pts = [a, ...C.rho.filter((r) => r > a + 1e-6 && r < b - 1e-6), b];
+      const edge = (lo: number, hi: number) => { const t0 = test(lo); for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (test(m) === t0) lo = m; else hi = m; } return (lo + hi) / 2; };
+      let start: number | null = test(a) ? a : null, was = start !== null;
+      for (let i = 1; i < pts.length; i++) {
+        const ok = test(pts[i]);
+        if (ok && !was) start = edge(pts[i - 1], pts[i]);
+        if (!ok && was) { out.push([start!, edge(pts[i - 1], pts[i])]); start = null; }
+        was = ok;
+      }
+      if (start !== null) out.push([start, b]);
+      return out.filter(([x, y]) => y - x > 0.05);
+    };
+    const kerbed = (x: Section2, dd: RoadDef) => x.median > 0.02 && !x.hatched && dd.medianKind !== 'hatch';
+    const painted = (x: Section2) => x.median > 0.03 && (x.hatched || d.medianKind === 'hatch');
+    // the kerbed reservation: where it starts and stops, and whether it ends in a rounded nose there
+    // (at a junction, where a ghost island opens out, or where the road stops) or carries straight on
+    // (round a join into another divided road, or off the map)
+    const r = d.median / 2, nose = [true, true];
+    let mb: [number, number] | null = null;
+    const km = d.median > 0 && d.medianKind !== 'hatch' ? runs((q) => kerbed(C.sec(q), d), 0, CL) : [];
+    if (km.length) {
+      let m0 = km[0][0], m1 = km[km.length - 1][1];
+      for (const e of [0, 1] as const) {
+        const k = C.kinds[e], on = C.onward[e], reaches = e ? CL - m1 < 0.05 : m0 < 0.05;
+        // how far in from this end of the course the reservation's full width starts
+        let back: number;
+        if (!reaches) back = (e ? CL - m1 : m0) + r; // after a ghost island: the nose's tip is where the hatching stops
+        else if (k === 'edge' || (k === 'join' && on && kerbed(on.sec, on.def))) { nose[e] = false; continue; }
+        else if (k === 'join') back = (e ? CL - C.own[1] : C.own[0]) + 1 + r;
+        else if (k === 'end') back = 1.5 + r;
+        else back = ends.median[e];
+        if (e) m1 = CL - back; else m0 = back;
+      }
+      if (m1 - m0 > 1) mb = [m0, m1];
+    }
+    const [s0, s1] = [ends.strip[0], CL - ends.strip[1]];
+    const fullWidth = (a: number, b: number) => { if (b - a > 0.05) { const q = part(a, b); band(asph, q, (i) => [-q.sec[i].R.kerb, q.sec[i].L.kerb], 0.25); } };
+    if (mb) {
+      fullWidth(s0, mb[0]);
+      fullWidth(mb[1], s1);
+      const q = part(Math.max(s0, mb[0]), Math.min(s1, mb[1]));
+      band(asph, q, (i) => [q.sec[i].x.median, q.sec[i].L.kerb], 0.25);
+      band(asph, q, (i) => [-q.sec[i].R.kerb, -q.sec[i].x.median], 0.25);
+      const mk = d.medianKind, mf = mk === 'grass' || mk === 'trees' ? verge : median;
+      const mq = part(mb[0], mb[1]);
+      band(mf, mq, (i) => [-mq.sec[i].x.median, mq.sec[i].x.median], 0.27);
+      // a rounded kerbed nose where it ends
+      for (const [t, dir, e] of [[mb[0], 1, 0], [mb[1], -1, 1]] as const) {
+        if (!nose[e]) continue;
+        const q = pointAt(cp, t), rr = C.sec(t).median;
+        for (let k = 0; k < 8; k++) {
+          const a0 = (k / 8) * Math.PI, a1 = ((k + 1) / 8) * Math.PI;
+          const pt = (a: number) => [q.x + q.uz * Math.cos(a) * rr - q.ux * Math.sin(a) * rr * dir, q.z - q.ux * Math.cos(a) * rr - q.uz * Math.sin(a) * rr * dir];
+          const [x0, z0] = pt(a0), [x1, z1] = pt(a1);
+          mf.tri(q.x, q.z, x0, z0, x1, z1, q.y + 0.27);
         }
       }
-      if (mk === 'hatch') {
-        for (const k of [1, -1]) lines.strip(path, () => [k * d.median / 2 - 0.07, k * d.median / 2 + 0.07], 0.35);
-        lines.dashes(path, () => 0, trimA + 2, L - trimB - 2, 0.5, 2.5, d.median / 2 - 0.1, 0.35); // chevron-ish hatching
+      if (mk === 'trees') for (let t = mb[0] + 10; t < mb[1] - 6; t += 16) { const q = pointAt(cp, t); tree(q.x, q.y, q.z, 0.9); }
+      if (mk === 'barrier' || d.family === 'Motorway') {
+        const bq = part(mb[0] + 0.3, mb[1] - 0.3);
+        for (let i = 1; i < bq.p.length; i++) {
+          const p = bq.p[i - 1], q = bq.p[i];
+          barrier.quad([p.x, (p.y ?? 0) + 0.25, p.z], [q.x, (q.y ?? 0) + 0.25, q.z], [q.x, (q.y ?? 0) + 1.05, q.z], [p.x, (p.y ?? 0) + 1.05, p.z]);
+        }
       }
-      if (mk === 'trees') for (let t = ends.median[0] + 10; t < L - ends.median[1] - 6; t += 16) { const q = pointAt(path, t); tree(q.x, q.y, q.z, 0.9); }
-    } else asph.strip(cw.p, (i) => [-cw.sec[i].R.kerb, cw.sec[i].L.kerb], 0.25);
-    const secAt = (t: number) => section(net, s, t);
-    // kerbside lanes: bus lanes (red), cycle lanes (green), parking bays with parked cars
+    } else fullWidth(s0, s1);
+
+    // ---- markings, kept clear of junctions ----
+    const joinAt = (e: 0 | 1) => C.kinds[e] === 'join' || C.kinds[e] === 'edge';
+    const l0 = ends.line[0] + (joinAt(0) ? 0 : 1), l1 = CL - ends.line[1];
+    const anchor = (a: number, b: number) => [joinAt(0) && a < 1e-6, joinAt(1) && b > CL - 1e-6] as const;
+    // a hatched area (a ghost island): solid edges and diagonal stripes; its edges become the lines
+    // along the kerbed reservation where that begins, and close in to the centre line where it ends
+    const edgeOff = (x: Section2) => (painted(x) ? (d.medianKind === 'hatch' ? x.median : x.median * (1 + 0.25 / Math.max(0.5, r))) : x.median + 0.25);
+    for (const [a, b] of runs((q) => C.sec(q).median > 0.02, l0, l1)) for (const k of [1, -1]) solid(lines, a, b, (q) => k * edgeOff(C.sec(q)), 0.07);
+    const H = STD.hatch(d.mph);
+    for (const [a, b] of runs((q) => painted(C.sec(q)), l0, l1)) {
+      // (phased from the far end, where a ghost island meets the nose of the kerbed reservation)
+      for (let c = b - H.spacing / 2; c > a; c -= H.spacing) {
+        const e = edgeOff(C.sec(c));
+        if (e < 0.25) continue;
+        // a stripe at 45°, clipped to the hatched area
+        const u0 = Math.max(-1, (a - c) / e), u1 = Math.min(1, (b - c) / e);
+        const P2 = (u: number, dw: number) => {
+          const t = c + e * u + dw, q = pointAt(cp, t), o = Math.sign(u) * Math.min(Math.abs(e * u), edgeOff(C.sec(t)));
+          return [q.x + q.uz * o, q.y + 0.35, q.z - q.ux * o];
+        };
+        const [p0, p1, p2, p3] = [P2(u0, -H.stripe / 2), P2(u0, H.stripe / 2), P2(u1, H.stripe / 2), P2(u1, -H.stripe / 2)];
+        lines.tri3(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p2[0], p2[1], p2[2]);
+        lines.tri3(p0[0], p0[1], p0[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]);
+      }
+    }
+    // the centre line of a single carriageway sits midway between the lane edges (it moves over
+    // where lanes are narrowed), running on round a join into the next road
+    for (const [a, b] of runs((q) => C.sec(q).median < 0.05, l0, l1)) dashRun(lines, cp, (q) => { const x = S(q); return (x.L.lane - x.R.lane) / 2; }, a, b, 3, 3, 0.07, 0.35, ...anchor(a, b));
+    // lane lines: where a lane tapers away, its line closes in on the reservation's edge line
+    for (const k of [1, -1] as const) for (let j = 1; j < d.lanes; j++) {
+      const off = (q: number) => { const x = S(q), sd = k === 1 ? x.L : x.R, n = x.x.lanes; return k * (x.x.median + ((sd.lane - x.x.median) * (n - j)) / n); };
+      for (const [a, b] of runs((q) => C.sec(q).lanes - j > 0.12, l0, l1)) dashRun(lines, cp, off, a, b, 4, 5, 0.07, 0.35, ...anchor(a, b));
+    }
+    // kerbside lanes (bus lanes, cycle lanes, parking), only where the road has its own full width
+    const T = C.taper, k0 = C.rhoOf(T.A ? TAPER.median * T.A.len : 0), k1 = C.rhoOf(L - (T.B ? TAPER.median * T.B.len : 0));
+    const ks0 = Math.max(s0, k0), ks1 = Math.min(s1, k1), kl0 = Math.max(l0, k0), kl1 = Math.min(l1, k1);
     for (const k of [1, -1] as const) {
-      const gen = d.median / 2 + d.lanes * d.lane;
+      const S2 = (x: ReturnType<typeof S>) => (k === 1 ? x.L : x.R);
       const span = (a: number, b: number) => (k === 1 ? [a, b] : [-b, -a]) as [number, number];
-      const S2 = (i: number) => (k === 1 ? cw.sec[i].L : cw.sec[i].R);
-      if (d.bus) { bus.strip(cw.p, (i) => span(S2(i).lane, S2(i).lane + d.bus), 0.26); lines.dashes(path, (t) => k * (k === 1 ? secAt(t).L.lane : secAt(t).R.lane), trimA + 1, L - trimB, Math.max(1, L - trimA - trimB - 2), 1, 0.12, 0.35); }
+      if (d.shoulder) solid(lines, l0, l1, (q) => k * S2(S(q)).lane, 0.1);
+      if (ks1 - ks0 < 1) continue;
+      const q = part(ks0, ks1);
+      if (d.bus) { band(bus, q, (i) => span(S2(q.sec[i]).lane, S2(q.sec[i]).lane + d.bus), 0.26); solid(lines, kl0, kl1, (t) => k * S2(S(t)).lane, 0.12); }
       if (d.cycle) {
-        const c0 = gen + d.bus;
-        cyc.strip(cw.p, () => span(c0, c0 + d.cycle), 0.26);
-        lines.dashes(path, () => k * (c0 + 0.1), trimA + 1, L - trimB, Math.max(1, L - trimA - trimB - 2), 1, 0.08, 0.35);
+        band(cyc, q, (i) => span(S2(q.sec[i]).lane + d.bus, S2(q.sec[i]).lane + d.bus + d.cycle), 0.26);
+        solid(lines, kl0, kl1, (t) => k * (S2(S(t)).lane + d.bus + 0.1), 0.08);
       }
       if (d.parking) {
-        const p0 = gen + d.bus + d.cycle;
-        bays.strip(cw.p, (i) => span(p0 + d.parking - Math.max(0, S2(i).park), p0 + d.parking), 0.26);
+        band(bays, q, (i) => { const p0 = S2(q.sec[i]).lane + d.bus + d.cycle; return span(p0 + d.parking - Math.max(0, S2(q.sec[i]).park), p0 + d.parking); }, 0.26);
         let n = 0;
-        for (let t = stripA + 4; t < L - stripB - 5; t += 6) {
-          const x = secAt(t + 3), side = k === 1 ? x.L : x.R;
+        for (let t = ks0 + 4; t < ks1 - 5; t += 6) {
+          const x = S(t + 3), side = S2(x);
           if (side.park < d.parking - 0.1) continue; // painted out by a stop
-          lines.dashes(path, () => k * (p0 + d.parking / 2), t, t + 0.12, 0.12, 1, d.parking / 2, 0.35);
+          const pm = side.lane + d.bus + d.cycle + d.parking / 2;
+          lines.dashes(cp, () => k * pm, t, t + 0.12, 0.12, 1, d.parking / 2, 0.35);
           if ((Math.sin(s.id * 7 + t * 13.7) + 1) / 2 < 0.65) {
-            const q = pointAt(path, t + 3), o = k * (p0 + d.parking / 2);
-            parked[(n++ + s.id) % parked.length].box(q.x + q.uz * o, q.z - q.ux * o, q.ux, q.uz, 2.1, 0.88, q.y + 0.3, q.y + 1.35);
+            const q2 = pointAt(cp, t + 3), o = k * pm;
+            parked[(n++ + s.id) % parked.length].box(q2.x + q2.uz * o, q2.z - q2.ux * o, q2.ux, q2.uz, 2.1, 0.88, q2.y + 0.3, q2.y + 1.35);
           }
         }
       }
     }
-    // lines, kept clear of junctions
-    if (d.median === 0) {
-      // centre line sits midway between the lane edges (it moves over where lanes are narrowed)
-      lines.dashes(path, (t) => { const x = secAt(t); return (x.L.lane - x.R.lane) / 2; }, trimA + 1, L - trimB, 3, 3, 0.07, 0.35);
-    } else {
-      for (const k of [1, -1]) {
-        const edge = (t: number) => (k === 1 ? secAt(t).L.lane : secAt(t).R.lane);
-        for (let n = 1; n < d.lanes; n++) lines.dashes(path, (t) => k * (d.median / 2 + ((edge(t) - d.median / 2) * n) / d.lanes), trimA + 1, L - trimB, 4, 5, 0.07, 0.35);
-        const run = L - trimA - trimB - 2;
-        if (run > 1) {
-          lines.dashes(path, () => k * (d.median / 2 + 0.25), trimA + 1, L - trimB, run, 1, 0.07, 0.35);
-          if (d.shoulder) lines.dashes(path, (t) => k * edge(t), trimA + 1, L - trimB, run, 1, 0.1, 0.35);
-        }
-      }
-      if (d.medianKind === 'barrier' || d.family === 'Motorway') for (let i = 1; i < path.length; i++) {
-        if (A[i - 1] < trimA || A[i] > L - trimB) continue;
-        const p = path[i - 1], q = path[i];
-        barrier.quad([p.x, (p.y ?? 0) + 0.25, p.z], [q.x, (q.y ?? 0) + 0.25, q.z], [q.x, (q.y ?? 0) + 1.05, q.z], [p.x, (p.y ?? 0) + 1.05, p.z]);
+    // "lane ends" arrows (bent, TSRGD diagram 1014) in each lane that tapers away, before the taper,
+    // for traffic heading into the narrower road
+    for (const Tp of [T.A, T.B]) if (Tp) {
+      const { length: al, gap, count } = STD.deflectionArrow(d.mph);
+      const k = Tp.atA ? -1 : 1; // the side whose traffic is heading for the join (we drive on the left)
+      for (let j = Tp.to.lanes; j < d.lanes; j++) for (let n = 0; n < count; n++) {
+        const u = Tp.len * 0.9 + n * (al + gap), tHead = Tp.atA ? u : L - u, tTail = Tp.atA ? u + al : L - u - al;
+        if (tTail < 0 || tTail > L) break;
+        const rHead = C.rhoOf(tHead), rTail = C.rhoOf(tTail);
+        if (Math.min(rHead, rTail) < l0 + 2 || Math.max(rHead, rTail) > l1 - 2) continue;
+        if (C.sec(rHead).lanes - j < 0.85 || C.sec(rTail).lanes - j < 0.85) continue; // the lane must still be (nearly) full width
+        // `a` metres ahead from the tail, `b` over towards the nearside, from the middle of lane j
+        const W2 = (a: number, b: number) => {
+          const t = rTail + k * a, q = pointAt(cp, t), x = S(t), sd = k === 1 ? x.L : x.R, w = (sd.lane - x.x.median) / x.x.lanes;
+          const c = (Math.max(x.x.median, sd.lane - (j + 1) * w) + sd.lane - j * w) / 2, o = k * (c + b);
+          return [q.x + q.uz * o, q.y + 0.36, q.z - q.ux * o];
+        };
+        const quad = (p: number[][]) => { lines.tri3(p[0][0], p[0][1], p[0][2], p[1][0], p[1][1], p[1][2], p[2][0], p[2][1], p[2][2]); lines.tri3(p[0][0], p[0][1], p[0][2], p[2][0], p[2][1], p[2][2], p[3][0], p[3][1], p[3][2]); };
+        const hw = 0.08, bend = [0.5 * al, 0], elbow = [0.78 * al, 0.55];
+        quad([W2(0, -hw), W2(bend[0], -hw), W2(bend[0], hw), W2(0, hw)]);
+        const dx = elbow[0] - bend[0], dz = elbow[1] - bend[1], dl = Math.hypot(dx, dz), ux = dx / dl, uz = dz / dl;
+        quad([W2(bend[0] + uz * hw, bend[1] - ux * hw), W2(elbow[0] + uz * hw, elbow[1] - ux * hw), W2(elbow[0] - uz * hw, elbow[1] + ux * hw), W2(bend[0] - uz * hw, bend[1] + ux * hw)]);
+        const hl = 0.24 * al, tip = W2(elbow[0] + ux * hl, elbow[1] + uz * hl), b0 = W2(elbow[0] + uz * 0.45, elbow[1] - ux * 0.45), b1 = W2(elbow[0] - uz * 0.45, elbow[1] + ux * 0.45);
+        lines.tri3(b0[0], b0[1], b0[2], tip[0], tip[1], tip[2], b1[0], b1[1], b1[2]);
       }
     }
-    // bus stops: yellow bay markings, the lay-by's edge line, a shelter
+    // bus stops: yellow bay markings, the lay-by's edge line, a shelter (stops are placed along the road's own t)
     for (const st of s.stops) {
-      const [a, b] = stopSpan(st), k = st.side;
-      const kerb = (t: number) => k * (k === 1 ? secAt(t).L.kerb : secAt(t).R.kerb);
-      const laneE = (t: number) => k * (k === 1 ? secAt(t).L.lane : secAt(t).R.lane);
-      const s0 = st.s - BAY.stand / 2, s1 = st.s + BAY.stand / 2;
+      const [a, b] = stopSpan(st).map((t) => C.rhoOf(t)), k = st.side;
+      const kerb = (t: number) => k * (k === 1 ? S(t).L.kerb : S(t).R.kerb);
+      const laneE = (t: number) => k * (k === 1 ? S(t).L.lane : S(t).R.lane);
+      const s0b = C.rhoOf(st.s - BAY.stand / 2), s1b = C.rhoOf(st.s + BAY.stand / 2);
       const inner = st.kind === 'layby' ? laneE : (t: number) => kerb(t) - k * 3;
-      yellow.dashes(path, (t) => kerb(t) - k * 0.3, s0, s1, 1, 0.01, 0.1, 0.36);
-      yellow.dashes(path, inner, s0, s1, 1, 0.01, 0.1, 0.36);
-      for (const t of [s0, s1]) { const sp = subPath(path, t - 0.1, t + 0.1); yellow.strip(sp, () => { const x = [inner(t), kerb(t) - k * 0.3].sort((p, q) => p - q); return [x[0], x[1]]; }, 0.36); }
-      if (st.kind === 'layby') lines.dashes(path, laneE, a, b, 1, 1, 0.1, 0.35);
-      shelter(furn, path, st.s, kerb(st.s) + k * 0.2);
+      yellow.dashes(cp, (t) => kerb(t) - k * 0.3, s0b, s1b, 1, 0.01, 0.1, 0.36);
+      yellow.dashes(cp, inner, s0b, s1b, 1, 0.01, 0.1, 0.36);
+      for (const t of [s0b, s1b]) { const sp = subPath(cp, t - 0.1, t + 0.1); yellow.strip(sp, () => { const x = [inner(t), kerb(t) - k * 0.3].sort((p, q) => p - q); return [x[0], x[1]]; }, 0.36); }
+      if (st.kind === 'layby') lines.dashes(cp, laneE, a, b, 1, 1, 0.1, 0.35);
+      const rs = C.rhoOf(st.s);
+      shelter(furn, cp, rs, kerb(rs) + k * 0.2);
     }
     // street trees along wide pavements, clear of junctions and stops
-    if (d.pave >= 5) for (const k of [1, -1]) for (let t = (k === 1 ? ends.L : ends.R)[0] + 8; t < L - (k === 1 ? ends.L : ends.R)[1] - 4; t += 14) {
-      if (s.stops.some((st) => { const [a, b] = stopSpan(st); return st.side === k && t > a - 6 && t < b + 6; })) continue;
-      const x = secAt(t), side = k === 1 ? x.L : x.R;
+    if (d.pave >= 5) for (const k of [1, -1]) for (let t = (k === 1 ? ends.L : ends.R)[0] + 8; t < CL - (k === 1 ? ends.L : ends.R)[1] - 4; t += 14) {
+      if (s.stops.some((st) => { const [a, b] = stopSpan(st).map((q) => C.rhoOf(q)); return st.side === k && t > a - 6 && t < b + 6; })) continue;
+      const x = S(t), side = k === 1 ? x.L : x.R;
       if (side.back - side.kerb < 3) continue;
-      const q = pointAt(path, t), o = k * (side.kerb + 1.4);
+      const q = pointAt(cp, t), o = k * (side.kerb + 1.4);
       const at = { x: q.x + q.uz * o, z: q.z - q.ux * o };
-      // not on a junction's land (a slip road, an island)
-      if (net.land.at(at)?.owner === 'junction') continue;
+      // not on a junction's land (a slip road, an island), nor off the map
+      if (net.land.at(at)?.owner === 'junction' || Math.abs(at.x) > net.bound || Math.abs(at.z) > net.bound) continue;
       tree(at.x, q.y, at.z);
     }
   }
-
   // ---- junctions ----
   // Each junction is drawn from its shape (jshape.ts): the carriageway with its kerb radii or
   // roundabout, the footway round it, islands, then the markings a UK road would have.
@@ -486,15 +615,23 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   for (const n of net.nodes.values()) {
     const segs = net.segsAt(n.id);
     if (!segs.length) continue;
-    if (net.def(segs[0]).cls === 'rail') { ballast.disc(n, Math.max(...segs.map((s) => kerbOf(net.def(s)))), 0.2); continue; }
-    const j = junctions.get(n.id), sh = j?.shape;
+    // (track joins up round a curve like a road; only where lines branch is there a bed of ballast)
+    if (net.def(segs[0]).cls === 'rail') { if (segs.length > 2) ballast.disc(n, Math.max(...segs.map((s) => kerbOf(net.def(s)))), 0.2); continue; }
+    // two roads meeting end to end are drawn by their own courses, running on round the curve
+    const j = junctions.get(n.id), sh = segs.length > 2 ? j?.shape : undefined;
     const y = n.y;
     const noPave = segs.every((s) => net.def(s).pave === 0);
     if (!j || !sh) {
-      // a bend or where one road runs on as another: fill the joint
-      const kerb = Math.max(ROADS.street.lane, ...segs.map((s) => kerbOf(net.def(s))));
-      (noPave ? verge : pave).disc(n, net.nodeHalf(n.id), 0.15, 32);
-      asph.disc(n, kerb, 0.25, 32);
+      if (segs.length === 1) {
+        // a cul-de-sac's turning head (a road running off the map, or a big road that just stops, has none)
+        const s = segs[0], head = courses.get(s.id)?.heads[s.a === n.id ? 0 : 1];
+        if (head) { (noPave ? verge : pave).poly(head.pave, y + 0.15); asph.poly(head.apron, y + 0.25); }
+      } else if (segs.length > 2) {
+        // roads meeting with no junction designed yet: fill the middle
+        const kerb = Math.max(ROADS.street.lane, ...segs.map((s) => kerbOf(net.def(s))));
+        (noPave ? verge : pave).disc(n, net.nodeHalf(n.id), 0.15, 32);
+        asph.disc(n, kerb, 0.25, 32);
+      }
       continue;
     }
     (noPave ? verge : pave).poly(sh.pave, y + 0.15);
@@ -635,7 +772,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   add(furn.glass, shelterGlass); add(furn.frame, shelterFrame); add(furn.red, stopRed);
   const hm = add(holes, holeMat, -10);
   if (hm) { hm.receiveShadow = false; hm.castShadow = false; }
-  if (boards.pos.length) group.add(boards.mesh(chevronMat));
+  if (boards.pos.length) group.add(boards.mesh(chevronMat()));
   if (trees.length) {
     const trunk = mergeGeometries(trees.filter((_, i) => i % 2 === 0).map((g) => g.toNonIndexed())), crown = mergeGeometries(trees.filter((_, i) => i % 2 === 1).map((g) => g.toNonIndexed()));
     for (const [g, m] of [[trunk, trunkMat], [crown, crownMat]] as const) if (g) { const mesh = new THREE.Mesh(g, m); mesh.castShadow = true; group.add(mesh); }
