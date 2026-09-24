@@ -1694,7 +1694,7 @@ function frame(now: number) {
     }
   } else traffic.redraw();
   for (const l of lamps) l.mesh.material = traffic.lightFor(l.node, l.seg, simNow) === l.col ? LAMP_ON[l.col] : LAMP_OFF;
-  railGame.frame(dt);
+  railGame.frame(dt, cam, canvas.clientHeight);
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   markers.frame(cam, canvas.clientHeight);
   if (routeShown) routeShown.material.resolution.set(canvas.width, canvas.height);

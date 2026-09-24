@@ -209,8 +209,9 @@ export class RailGame {
     const stops = [...this.draft], loop = this.loop;
     const long = stops.every((s) => (railway.station(s)?.len ?? 0) >= 130);
     const trains: TrainDef[] = long ? [TRAINS.intercity, TRAINS.dmu] : [TRAINS.dmu, TRAINS.dmu];
-    const cost = trains.reduce((a, t) => a + this.trainPrice(t), 0);
-    if (!this.can(cost)) { this.c.hint(this.short(cost), 'alert'); return; }
+    // (as many of them as there's the money for: one at least)
+    while (trains.length > 1 && !this.can(trains.reduce((a, t) => a + this.trainPrice(t), 0))) trains.pop();
+    if (!this.can(this.trainPrice(trains[0]))) { this.c.hint(this.short(this.trainPrice(trains[0])), 'alert'); return; }
     const l = railway.addLine(stops, loop, trains);
     this.end();
     if (typeof l === 'string') { this.c.hint(l, 'alert'); return; }
@@ -225,11 +226,10 @@ export class RailGame {
     if (!order) return;
     for (const [id, sh] of this.c.railway.shapes) {
       const k = order.indexOf(id);
-      const m = new THREE.SpriteMaterial({ map: badge(k >= 0 ? String(k + 1) : '', k >= 0), depthTest: false, depthWrite: false, transparent: true, sizeAttenuation: false });
+      const m = new THREE.SpriteMaterial({ map: badge(k >= 0 ? String(k + 1) : '', k >= 0), depthTest: false, depthWrite: false, transparent: true });
       const s = new THREE.Sprite(m);
       s.position.set(sh.mid.x, sh.mid.y + 9, sh.mid.z);
-      const px = k >= 0 ? 0.055 : 0.045;
-      s.scale.set(px, px, 1);
+      s.userData.px = k >= 0 ? 40 : 32; // css pixels across (kept so in frame())
       s.renderOrder = 21;
       this.badges.add(s);
     }
@@ -331,9 +331,20 @@ export class RailGame {
   }
 
   // ---------- each frame ----------
-  frame(dt: number) {
+  // (cam and cssH: the camera and the canvas's css height, to keep the badges their size on screen)
+  frame(dt: number, cam?: THREE.Camera, cssH = 915) {
     const { railway, draw, people } = this.c;
     draw.frame(dt);
+    if (cam && this.badges.children.length) {
+      const o = cam as THREE.OrthographicCamera, pc = cam as THREE.PerspectiveCamera, v = new THREE.Vector3();
+      for (const b of this.badges.children) {
+        let perPx: number;
+        if (o.isOrthographicCamera) perPx = (o.top - o.bottom) / o.zoom / cssH;
+        else { v.copy(b.position).applyMatrix4(cam.matrixWorldInverse); perPx = (2 * -v.z * Math.tan((pc.fov * Math.PI) / 360)) / pc.zoom / cssH; }
+        const k = (b.userData.px as number) * perPx;
+        b.scale.set(k, k, 1);
+      }
+    }
     if (railway.cleared.length) { this.c.clear(railway.cleared.splice(0)); }
     if (this.seenVersion !== railway.version) {
       this.seenVersion = railway.version;

@@ -129,7 +129,7 @@ export class RailDraw {
       // the building, from the building kit, facing away from the track
       const b = sh.building, nx = Math.cos(b.rot + Math.PI / 2), nz = Math.sin(b.rot + Math.PI / 2);
       const side = (b.x - sh.mid.x) * nx + (b.z - sh.mid.z) * nz > 0 ? 1 : -1, fx = nx * side, fz = nz * side;
-      const lot: Lot = { id: -id, x: b.x, z: b.z, rot: Math.atan2(-fx, fz), w: b.w, d: b.d, h: 8, kind: 'civic', arch: 'station', seg: 0, seed: ((id * 0.6180339) % 1), row: -id, front: 6, back: 0.5, px: 0, pw: b.w + 4 };
+      const lot: Lot = { id: -id, x: b.x, z: b.z, rot: Math.atan2(-fx, fz), w: b.w, d: b.d, h: 8, kind: 'civic', arch: 'station', seg: 0, seed: ((id * 0.6180339) % 1), row: -id, front: 6, back: st.layout === 'island' ? 0.5 : 3.6, px: 0, pw: b.w + 4 };
       const shape = makeBuilding(lot);
       shape.group.position.y = b.y;
       shape.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; } });

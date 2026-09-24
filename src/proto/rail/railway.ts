@@ -11,7 +11,7 @@
 // Call `rebuild()` whenever the network changes.
 import { polysOverlap, rectCorners, type Lot, type Network, type P } from '../roads';
 import type { TrainDef } from '../catalog';
-import { TrackGraph, type StationWorks } from './track';
+import { TrackGraph, worksSpan, type StationWorks } from './track';
 import { RailSim, callOrder, type RailLine, type Train } from './sim';
 import { findCrossings, zoneFrom, type CrossingSite } from './crossing';
 import { DEPOT_LEN, planStation, stationShape, worksFor, type Station, type StationPlan, type StationShape } from './station';
@@ -146,14 +146,19 @@ export class Railway {
     this.rebuild();
     return undefined;
   }
-  // the siding's ground is free (bar the railway's own)
+  // the siding and its shed are on free ground (bar the railway's own), and cross no road
   private depotClear(id: number) {
-    const p = this.graph.pieces[this.graph.depots.get(id)!];
-    for (let i = 4; i < p.pts.length; i += 3) {
-      const c = this.net.land.at(p.pts[i]);
-      if (c && c.key !== `road:${p.seg}` && c.key !== `station:${id}`) return false;
-    }
-    return true;
+    const sh = this.shapes.get(id), dp = this.graph.depots.get(id);
+    if (!sh?.depot || dp === undefined) return false;
+    const seg = this.graph.pieces[dp].seg, n = sh.depot.pts.length;
+    const mine = (k: string) => k === `road:${seg}` || k === `station:${id}`;
+    // (its own polygons are the last ones in the station's land: a band per piece of the siding, then the shed)
+    const polys = sh.land.slice(-n);
+    if (polys.some((poly) => this.net.land.hits(poly, (c) => mine(c.key)).length)) return false;
+    const L = this.net.segs.get(seg) ? this.net.length(this.net.segs.get(seg)!) : 0, w = worksFor(this.net, this.station(id)!);
+    if (!w) return false;
+    const [a, b] = worksSpan(w, this.net.def(this.net.segs.get(seg)!).tracks);
+    return !this.crossings.some((c) => c.rail === seg && c.railS > a - 10 && c.railS < b + 10) && a >= 0 && b <= L;
   }
 
   // ---------- running ----------

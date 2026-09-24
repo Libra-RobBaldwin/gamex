@@ -109,6 +109,54 @@ describe('level crossings', () => {
     expect(onTrack).toBe(0);
     expect(rw.sim.stats.redPassed).toBe(0);
   }, 120_000);
+  it('work where the road curves over the line', () => {
+    const net = new Network(() => false, 2000);
+    rail(net, { x: 0, z: -1400 }, { x: 0, z: 1400 }, 'rail-branch');
+    // a road bending across the track (about square to it where they cross)
+    const ids = net.build({ x: -400, z: -150 }, { x: 400, z: -150 }, { x: 0, z: 150 }, { ...DEFAULT_OPTS, type: 'street', cross: 'junction' });
+    expect(ids.length).toBe(1);
+    for (const id of net.segs.keys()) for (const l of net.plotsFor(id, { x: 999, z: 999 })) if (net.lotFree(l)) { net.fitParcel(l); net.lots.push(l); }
+    const rw = new Railway(net);
+    rw.rebuild();
+    expect(rw.crossings.length).toBe(1);
+    const c = rw.crossings[0];
+    expect(c.sin).toBeGreaterThan(0.9);
+    expect(c.z1 - c.z0).toBeGreaterThan(5);
+    const seg = [...net.segs.values()].find((s) => net.def(s).cls === 'rail')!, L = net.length(seg);
+    const a = rw.build(rw.plan(seg.id, 300, 1, 60).plans[0]).station, b = rw.build(rw.plan(seg.id, L - 300, 1, 60).plans[0]).station;
+    const traffic = new Traffic(net, new THREE.Scene(), rng(9));
+    rw.useRoads(traffic);
+    rw.addLine([a.id, b.id], false, [TRAINS.dmu]);
+    const lots = net.lots, places: Places = { homes: lots.filter((_, i) => i % 2 === 0), jobs: lots.filter((_, i) => i % 2 === 1), shops: [], works: [], weight: () => 1 };
+    let onTrack = 0, closures = 0, was = false, open = 0;
+    for (let i = 0; i < 600 / 0.05; i++) {
+      traffic.generate(places, 8.2, 3, i * 50); traffic.update(0.05, i * 50); rw.update(0.05);
+      const held = rw.graph.blocks.some((bk) => bk.crossings.includes(0) && rw.sim.owner[bk.id] !== 0), on = traffic.onStretch(c.road, c.z0, c.z1);
+      if (held && on) onTrack++;
+      if (!held && on) open++;
+      if (held && !was) closures++;
+      was = held;
+    }
+    expect(closures).toBeGreaterThan(2);
+    expect(open).toBeGreaterThan(20);
+    expect(onTrack).toBe(0);
+  }, 120_000);
+  it('keep depot sidings off the road: a siding never runs over a crossing', () => {
+    const net = new Network(() => false, 2000);
+    rail(net, { x: 0, z: -1400 }, { x: 0, z: 1400 }, 'rail-branch');
+    net.build({ x: -600, z: 30 }, { x: 600, z: 30 }, undefined, { ...DEFAULT_OPTS, type: 'street', cross: 'junction' });
+    const rw = new Railway(net);
+    rw.rebuild();
+    const seg = [...net.segs.values()].find((s) => net.def(s).cls === 'rail')!;
+    // a station just past the crossing: its siding would run back over the road
+    const s = rw.build(rw.plan(seg.id, 1400 + 200, 1, 60).plans[0]).station, t = rw.build(rw.plan(seg.id, 2600, 1, 60).plans[0]).station;
+    const line = rw.addLine([s.id, t.id], false, [TRAINS.dmu]);
+    expect(typeof line).toBe('object');
+    const c = rw.crossings[0], dp = rw.graph.depots.get(s.id);
+    if (dp !== undefined) for (const q of rw.graph.pieces[dp].pts) expect(Math.hypot(q.x - c.x, q.z - c.z)).toBeGreaterThan(15);
+    const sh = rw.shapes.get(s.id)!;
+    if (sh.depot) expect(sh.land.slice(-sh.depot.pts.length).some((poly) => net.land.hits(poly, (k) => k.key === `road:${seg.id}` || k.key === `station:${s.id}`).length)).toBe(false);
+  });
 });
 
 describe('the region’s railway', () => {

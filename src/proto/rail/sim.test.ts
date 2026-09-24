@@ -91,6 +91,42 @@ describe('rail signalling', () => {
     for (const x of sim.trains) expect(x.calls - (before.get(x.id) ?? 0), `train ${x.id} in the last day`).toBeGreaterThan(2);
   }, 60_000);
 
+  it('a train behind another stops at the red signal short of it, braking with its own brakes', () => {
+    const net = new Network(() => false, 5000);
+    net.build({ x: -2000, z: 0 }, { x: 2000, z: 0 }, undefined, { ...DEFAULT_OPTS, type: 'rail-main', cross: 'bridge' });
+    const seg = [...net.segs.values()][0], L = net.length(seg);
+    const works: StationWorks[] = [
+      { id: 1, seg: seg.id, s0: 100, s1: 230, layout: 'side', loop: false, side: 1 },
+      { id: 2, seg: seg.id, s0: L - 400, s1: L - 270, layout: 'side', loop: false, side: 1 },
+    ];
+    const g = new TrackGraph(net, works), sim = new RailSim(g);
+    // the first train to reach the far station stays there a long while
+    let holder = 0;
+    sim.onCall = (t, st) => { if (st === 2 && !holder) holder = t.id; return t.id === holder ? 100000 : 0; };
+    const line: RailLine = { id: 1, num: 1, stops: [1, 2], loop: false };
+    const a = sim.addTrain(TRAINS.intercity, line);
+    run(sim, 30, 0.1);
+    const b = sim.addTrain(TRAINS.intercity, line);
+    expect(typeof a).toBe('object'); expect(typeof b).toBe('object');
+    const plat = g.pieces[g.platforms.get(2)!.find((i) => g.pieces[i].oneWay === 1)!];
+    let entered = 0, minGap = Infinity, maxDecel = 0, lastV = 0;
+    run(sim, 900, 0.1, () => {
+      const t2 = sim.trains.find((t) => t.id !== holder && holder);
+      if (!t2) return;
+      if (sim.occupied(t2).has(plat.block)) entered++;
+      maxDecel = Math.max(maxDecel, (lastV - t2.v) / 0.1); lastV = t2.v;
+      // how far short of the platform's block its front stands
+      const f = sim.front(t2), fp = g.pieces[f.piece];
+      if (fp.block !== plat.block && g.exits(f.piece, f.dir).some((e) => g.pieces[e.piece].block === plat.block)) minGap = Math.min(minGap, fp.len - t2.u);
+    });
+    expect(holder).toBeGreaterThan(0);
+    expect(entered).toBe(0);
+    expect(sim.stats.redPassed).toBe(0);
+    expect(minGap).toBeGreaterThanOrEqual(0);
+    expect(minGap).toBeLessThan(40); // (it drew up at the signal, not somewhere short of it)
+    expect(maxDecel).toBeLessThanOrEqual(TRAINS.intercity.brake! * 1.6 + 1e-6);
+  }, 60_000);
+
   it('trains call at every station of their line, in order', () => {
     const { net, works } = singleLine();
     const sim = new RailSim(new TrackGraph(net, works));

@@ -1292,10 +1292,13 @@ function civic(k: Kit, l: Lot, r: () => number) {
       k.block(0, 0, W, D, 0, 1, 4.4, 3.2, facade('shop', L.skin, L.wall[0], '#2d3338', '#1f5e3f'), fm(L), fm(L));
       k.gable(0, 0, W, D, 4.4, 3.2, 0.35, roofM(pick(r, SLATE)[0]), blank(L));
       chimney(k, -W / 2 + 1.2, 0, 8.4, blank(L));
-      const cz = -D / 2 - 1.9, green = plain('#1f5e3f'), cream = plain('#efe3c2');
-      k.box(0, 3.5, cz, W - 1, 0.25, 3.6, green);
-      k.box(0, 3.35, cz - 1.75, W - 1, 0.18, 0.12, cream); // (the valance)
-      for (let i = 0; i < 5; i++) k.box(-W / 2 + 1.5 + ((W - 3) * i) / 4, 0, cz - 1.2, 0.16, 3.5, 0.16, green);
+      // (the canopy only where there's a platform behind it: `back` is how far out it reaches)
+      const green = plain('#1f5e3f'), cream = plain('#efe3c2'), cd = Math.min(3.6, l.back), cz = -D / 2 - cd / 2 - 0.1;
+      if (cd >= 2) {
+        k.box(0, 3.5, cz, W - 1, 0.25, cd, green);
+        k.box(0, 3.35, cz - cd / 2 + 0.05, W - 1, 0.18, 0.12, cream); // (the valance)
+        for (let i = 0; i < 5; i++) k.box(-W / 2 + 1.5 + ((W - 3) * i) / 4, 0, cz - cd / 2 + 0.7, 0.16, 3.5, 0.16, green);
+      }
       // the name board over the door, in the company's colours
       k.box(0, 3.1, D / 2 + 0.06, Math.min(9, W * 0.5), 0.7, 0.08, green);
       k.box(0, 3.25, D / 2 + 0.11, Math.min(8.4, W * 0.46), 0.4, 0.04, cream);
