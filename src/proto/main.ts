@@ -35,10 +35,14 @@ import { Railway } from './rail/railway'; // stations, signalling and rail lines
 import { RailDraw } from './rail/draw';
 import { RailGame } from './rail/game';
 import { layRegionRail, planRegionRail } from './rail/region';
+import { layRegionRoads } from './interchange/region';
 import { edgeCrossings, edgeMesh } from './game/edge';
 import { STD } from './standards';
 import { Loading } from './loading';
-import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, zoneOf } from './region'; // maps as data (docs/region.md)
+import { Drape } from './drape';
+import { PlaceLabels, openPlaces } from './game/places';
+import { makeRelief } from './region/terrain';
+import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
 import { deleteSave, getSave, listSaves, putSave, saveSearch } from './game/savedb';
 
@@ -71,7 +75,7 @@ function mapLine() {
   if (!o) return '';
   return [`seed ${o.seed}`, n(MAP.settlements.length, 'place', 'places'), n(MAP.water.rivers.length, 'river', 'rivers'), n(MAP.water.lakes.length, 'lake', 'lakes'), o.style].join(' · ');
 }
-await loading.stage(MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
+await loading.stage(MAP.relief !== 'flat' ? 'Raising the hills and filling the rivers' : MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
 const BOUND = MAP.bound;
 // the water: one water system (src/proto/game/water.ts) gives isWater to roads, plots, bridges and traffic
 // A big map (the region) is drawn more coarsely until it streams (docs/region.md R4); the town, even
@@ -79,6 +83,8 @@ const BOUND = MAP.bound;
 // on further, for its rivers), and the camera goes right out to it.
 const BIG = BOUND > 2000;
 const gameWater = new GameWater(BIG ? BOUND * 1.5 : BOUND + STD.mapEdge + 10, MAP.water); // (the ground's half-width)
+// the hills, if the map has them (region/terrain.ts): everything drawn follows them (drape.ts)
+const RELIEF = makeRelief(MAP, gameWater.half);
 const isWater = (p: P) => gameWater.isWater(p);
 const EDGE = gameWater.half; // (where the ground ends, in a cut face: game/edge.ts)
 const net = new Network(isWater, BOUND, 11);
@@ -137,7 +143,10 @@ window.addEventListener('resize', resize);
 const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })) }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
-const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2), gameGround.ground.material);
+const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
+ground.userData.noDrape = true; // (the hills are in its heights already)
+const drape = RELIEF ? new Drape(RELIEF) : null;
+if (RELIEF) nav.setGround(RELIEF.heightAt, [-1, RELIEF.max + 1]); // (the camera and taps find the ground on the hills)
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 // Grass drawn on top of the ground (verges, roundabout islands, cutting slopes, gardens, parks)
@@ -473,6 +482,12 @@ async function seedTown() {
       await loading.stage(i ? `Laying out ${st.name}` : `Laying out ${st.name}'s streets`, 0.06 / MAP.settlements.length);
       buildStreets(net, MAP.streets.filter((x) => x.settlement === st.id), DEFAULT_OPTS, true);
     }
+    // then the roads between them: a motorway across the map with its junctions, A roads between
+    // the city and the towns, B roads out to the villages (interchange/region.ts)
+    await loading.stage('Building the motorway and the roads between places', 0.04);
+    const roads = layRegionRoads(net, { bound: BOUND, settlements: MAP.settlements, links: MAP.links });
+    interchanges.push(...roads.interchanges);
+    if (roads.failed.length) console.info('region roads:', roads.failed.join(' · '));
   } else {
     await loading.stage('Laying out the streets', 0.06);
     buildStreets(net, MAP.streets, DEFAULT_OPTS, false);
@@ -1119,8 +1134,13 @@ shell.addTransportTab({
 
 // ---- the town panel: how the town is doing, and why (game/econ.ts) ----
 const STATUS_WORD = { growing: 'Growing', stable: 'Steady', stalling: 'Stalling', declining: 'Declining' } as const;
-function showTown() {
-  const r = townRef?.report;
+// On a map with many places it's the one you're looking at (or the one asked for), with where its
+// people go: the other places busiest first, and how many of them ride your lines.
+let shownTown = 0;
+function showTown(id?: number) {
+  if (!townRef) return;
+  shownTown = id ?? (shell.sheetKey === 'town' && shownTown ? shownTown : townRef.townAt(view.x, view.z));
+  const r = townRef.reportFor(shownTown);
   if (!r) return;
   const n = (x: number) => Math.round(x).toLocaleString('en-GB');
   const hist = [...r.history, r.residents], lo = Math.min(...hist), hi = Math.max(...hist), span = Math.max(1, hi - lo);
@@ -1129,8 +1149,10 @@ function showTown() {
     <div class="spark-cap"><span>${hist.length - 1} days ago · ${n(hist[0])}</span><span>now · ${n(r.residents)}</span></div>` : '';
   const reasons = r.reasons.slice(0, 5).map((x) => `<li class="${x.good ? 'good' : 'bad'}">${icon(x.good ? 'check' : 'alert')}<span>${esc(x.text.charAt(0).toUpperCase() + x.text.slice(1))}</span></li>`).join('');
   const lineRows = lines.list.map((l) => { const s = townRef!.line(l.id); return s ? `<button class="lrow tone-stop" data-tl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${n(s.carriedLastMonth || s.carried)} carried a day · ${Math.round(s.loadFactor * 100)}% full · ${n(s.waiting)} waiting</span></button>` : ''; }).join('');
+  const trips = townRef.trips(shownTown).slice(0, 5);
+  const tripRows = trips.map((t) => `<button class="lrow tone-stop" data-tt="${t.town}"><span class="num">${icon('pin')}</span><b>${esc(t.name)}</b><span>${n(t.all)} trips a day${t.lines >= 0.5 ? ` · ${n(t.lines)} by your lines` : ''}</span></button>`).join('');
   const el = shell.openInfo({
-    key: 'town', title: TOWN_NAME, sub: `${n(r.residents)} people · ${n(r.jobs)} jobs`, icon: 'building',
+    key: 'town', title: townRef.townName(shownTown), sub: `${n(r.residents)} people · ${n(r.jobs)} jobs`, icon: 'building',
     html: `<div class="townhead"><span class="pill ${r.status}">${STATUS_WORD[r.status]}</span></div>
       <p class="note">${esc(r.headline.replace(/^\w+: /, ''))}</p>${spark}
       <dl class="facts" style="margin-top:10px">
@@ -1144,15 +1166,21 @@ function showTown() {
       </dl>
       <ul class="why">${reasons}</ul>
       <p class="note" style="margin-top:10px">A day here is a month in the town's life: it reviews how it's doing each day, and fares and running costs come and go at a month's pace.</p>
+      ${tripRows ? `<div class="grp" style="margin-top:12px"><span class="tab">Where people go</span>${tripRows}</div><p class="note">Link places with a coach or a railway and more people travel between them.</p>` : ''}
       ${lineRows ? `<div class="grp" style="margin-top:12px"><span class="tab">Your lines</span>${lineRows}</div>` : ''}`,
   });
+  el.querySelectorAll<HTMLButtonElement>('[data-tt]').forEach((b) => b.addEventListener('click', () => {
+    const t = +b.dataset.tt!, st = MAP.settlements.find((x) => x.id + 1 === t);
+    if (st) focusOn(st, Math.max(260, st.r * 2.6));
+    showTown(t);
+  }));
   el.querySelectorAll<HTMLButtonElement>('[data-tl]').forEach((b) => b.addEventListener('click', () => { const l = lines.list.find((x) => x.id === +b.dataset.tl!); if (l) showLineInfo(l); }));
 }
 
 // ---- Menu: quality, the performance readout, a new town ----
 shell.addMenuItem({ id: 'quality', label: 'Quality', icon: 'sparkles', sub: () => (tierAuto ? `Auto · ${TIERS[tier].name} now` : TIERS[tier].name), onClick: () => openQuality() });
 shell.addMenuItem({ id: 'perf', label: 'Performance', icon: 'activity', sub: () => (perfOn ? 'Readout showing' : 'Readout off'), onClick: () => { togglePerf(); closeSheet(); } });
-shell.addMenuItem({ id: 'town', label: TOWN_NAME, icon: 'building', sub: () => (townRef?.report ? `${STATUS_WORD[townRef.report.status]} · ${Math.round(townRef.report.residents).toLocaleString('en-GB')} people` : 'The town panel'), onClick: () => showTown() });
+shell.addMenuItem({ id: 'town', label: MAP.settlements.length > 1 ? 'Town panel' : TOWN_NAME, icon: 'building', sub: () => { const r = townRef?.reportFor(townRef.townAt(view.x, view.z)); return r ? `${MAP.settlements.length > 1 ? `${r.name} · ` : ''}${STATUS_WORD[r.status]} · ${Math.round(r.residents).toLocaleString('en-GB')} people` : 'The town panel'; }, onClick: () => showTown() });
 shell.addMenuItem({ id: 'new', label: 'New town', icon: 'restore', sub: 'Starts again from the seed town', onClick: () => openReset() });
 shell.addMenuItem({ id: 'save', label: 'Save town', icon: 'floppy', sub: () => (lastSaved ? `Saved ${when(lastSaved)} · it saves itself every few hours too` : 'It saves itself every few game hours too'), onClick: () => { void saveGame('manual'); } });
 shell.addMenuItem({ id: 'load', label: 'Load town', icon: 'clock', sub: 'Your saved towns, on this device', onClick: () => { void openLoad(); } });
@@ -1583,7 +1611,7 @@ function showBuildingInfo(b: Built) {
   if (u.pop) facts.push([u.unit.charAt(0).toUpperCase() + u.unit.slice(1), String(u.pop)]);
   shell.openInfo({
     key: `building:${b.lot.x},${b.lot.z}`, title: b.name, sub: b.detail, icon: b.region ? 'trees' : 'building', facts,
-    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }, { label: TOWN_NAME, icon: 'building', onClick: () => showTown() }],
+    actions: b.region ? [] : [{ label: 'Add a bus stop', icon: 'busStop', onClick: () => startStopTool() }, { label: townRef?.townName(townRef.townAt(b.lot.x, b.lot.z)) ?? TOWN_NAME, icon: 'building', onClick: () => showTown(townRef?.townAt(b.lot.x, b.lot.z)) }],
   });
 }
 // a junction: how busy it is, and the way into its editor
@@ -1802,7 +1830,26 @@ function groundAt(sx: number, sy: number): P {
   const g = nav.groundUnder(sx, sy);
   return { x: g.x, z: g.z };
 }
-const toScreen = (p: P) => nav.groundToScreen(p);
+const toScreen = (p: P) => (RELIEF ? nav.groundToScreen({ ...p, y: (p.y ?? 0) + RELIEF.heightAt(p.x, p.z) }) : nav.groundToScreen(p));
+
+// ---- finding your way (game/places.ts): place names over the map when zoomed out, and a Places list ----
+let peopleAt = 0, people0 = new Map<number, number>();
+// how many live in each settlement (homes, by the settlement they're nearest; worked out at most every few seconds)
+function peopleIn(st: SettlementInfo) {
+  if (performance.now() - peopleAt > 4000) {
+    peopleAt = performance.now();
+    people0 = new Map();
+    for (const b of buildings) {
+      if (b.dying || b.region || USE[b.lot.kind].unit === 'jobs') continue;
+      const id = settlementAt(MAP, b.lot).id;
+      people0.set(id, (people0.get(id) ?? 0) + USE[b.lot.kind].pop);
+    }
+  }
+  return people0.get(st.id) ?? 0;
+}
+const goTo = (st: SettlementInfo) => { closeSheet(); focusOn(st, Math.max(260, st.r * 2.6)); };
+const placeLabels = MAP.settlements.length > 1 ? new PlaceLabels($('#ui'), MAP.settlements, { toScreen, onPick: goTo, count: peopleIn }) : null;
+if (placeLabels) shell.addMenuItem({ id: 'places', label: 'Places', icon: 'pin', sub: `${MAP.settlements.length} towns and villages · go to one`, onClick: () => openPlaces(shell, MAP.settlements, view, goTo, peopleIn) });
 
 let grabbed: 'a' | 'b' | 'c' = 'b';
 // what a finger the game has taken is doing: dragging a blueprint handle, or drawing a road
@@ -2028,6 +2075,7 @@ shell.addTransportTab({ id: 'rail', label: 'Railway', icon: 'train', sub: 'Your 
 if (SAVED) purse.load(SAVED.purse);
 const town = new TownEconomy({
   net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, rail: railGame.econ(),
+  towns: MAP.settlements.length > 1 ? MAP.settlements : undefined, // (each place a town of its own: docs/region.md R5)
   standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
   free: () => queue,
   build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); },
@@ -2223,6 +2271,7 @@ function frame(now: number) {
   railGame.frame(dt, cam, canvas.clientHeight);
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   markers.frame(cam, canvas.clientHeight);
+  placeLabels?.update(view.h);
   if (routeShown) routeShown.material.resolution.set(canvas.width, canvas.height);
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
   if (now - statsAt > 250) {
@@ -2243,6 +2292,7 @@ function frame(now: number) {
   const t1 = performance.now();
   const q = TIERS[tier];
   if (q.every && ++frameNo % q.every === 0) renderer.shadowMap.needsUpdate = true;
+  drape?.apply(scene); // (whatever's new since the last frame follows the hills)
   renderer.render(scene, cam);
   if (!loaded) { loaded = true; loading.done(); } // (the first frame is drawn: the loading screen goes)
   const t2 = performance.now();
@@ -2261,6 +2311,7 @@ function frame(now: number) {
 }
 // the shaders compile before the first frame, not during it (where the screen would sit still)
 await loading.stage('Getting ready to draw', 0.1);
+drape?.apply(scene);
 await renderer.compileAsync(scene, cam).catch(() => {});
 loading.finish();
 let loaded = false;

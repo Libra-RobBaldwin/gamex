@@ -633,8 +633,13 @@ export class Network {
       const shared = [a.node, b.node].some((id) => id === s.a || id === s.b) || a.seg === s.id || b.seg === s.id;
       if (shared) continue;
       const sp = this.path(s), near = (half + this.half(s)) * 0.7;
+      // (its box, grown by `near`: a point outside it can't be that close)
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const q of sp) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
+      x0 -= near; z0 -= near; x1 += near; z1 += near;
       for (let i = 1; i < path.length; i++) {
         const m = { x: (path[i - 1].x + path[i].x) / 2, z: (path[i - 1].z + path[i].z) / 2 };
+        if (m.x < x0 || m.x > x1 || m.z < z0 || m.z > z1) continue;
         if (path.length > 2 && (dist(m, a) < near * 1.5 || dist(m, b) < near * 1.5)) continue;
         const c = closestOnPath(m, sp);
         if (c.d >= near || Math.abs(c.y - ((path[i - 1].y ?? 0) + (path[i].y ?? 0)) / 2) > 3) continue;

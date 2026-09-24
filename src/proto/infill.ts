@@ -4,7 +4,7 @@
 // park, a planted verge. This finds the gaps on a 5 m grid and decides what each becomes.
 import { CIVIC } from './buildgen';
 import type { RegionKind } from './buildgen';
-import { closestOnSeg, pathLength, pointAt, rng, type Lot, type Network, type P } from './roads';
+import { closestOnSeg, pathLength, rng, type Lot, type Network, type P } from './roads';
 
 export const CELL = 5;
 export interface Region { id: string; cells: P[]; kind: RegionKind; seed: number; roadEdges: [number, number, number, number][]; centre: P }
@@ -13,6 +13,21 @@ const FREE = 0, LOT = 1, ROAD = 2, WATER = 3;
 
 // a cell is taken if any part of it (not just its centre) is on claimed land
 const landNear = (net: Network, p: P) => { const h = CELL * 0.45; return !net.land.free([{ x: p.x - h, z: p.z - h }, { x: p.x + h, z: p.z - h }, { x: p.x + h, z: p.z + h }, { x: p.x - h, z: p.z + h }]); };
+
+// pointAt for arc lengths that only go up (carrying on from where it got to), and which piece it's on
+function walker(path: P[]) {
+  let i = 1, before = 0;
+  return (s: number) => {
+    for (;;) {
+      const a = path[i - 1], b = path[i], L = Math.hypot(b.x - a.x, b.z - a.z);
+      if (s - before <= L || i === path.length - 1) {
+        const t = L ? Math.max(0, Math.min(1, (s - before) / L)) : 0;
+        return { i, q: { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, y: (a.y ?? 0) + ((b.y ?? 0) - (a.y ?? 0)) * t, ux: (b.x - a.x) / (L || 1), uz: (b.z - a.z) / (L || 1) } };
+      }
+      before += L; i++;
+    }
+  };
+}
 
 export function findRegions(net: Network, pending: Lot[]) {
   const all = [...net.lots, ...pending];
@@ -53,7 +68,19 @@ export function findRegions(net: Network, pending: Lot[]) {
       }
     }
   }
+  // (only where a gap could be, next to roads and buildings, and the cells round those: the rest
+  // of a big map's grid is never looked at again)
+  const need = new Uint8Array(nx * nz);
   for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    if (!nearRoad[i + j * nx] || !nearLot[i + j * nx]) continue;
+    need[i + j * nx] = 1;
+    if (i > 0) need[i - 1 + j * nx] = 1;
+    if (i + 1 < nx) need[i + 1 + j * nx] = 1;
+    if (j > 0) need[i + (j - 1) * nx] = 1;
+    if (j + 1 < nz) need[i + (j + 1) * nx] = 1;
+  }
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    if (!need[i + j * nx]) continue;
     const p = { x: cx(i), z: cz(j) };
     if (net.isWater(p)) occ[i + j * nx] = WATER;
     // anything the land registry says is taken (junctions, slip roads, islands, road corridors)
@@ -90,10 +117,17 @@ export function findRegions(net: Network, pending: Lot[]) {
         if (p.every((q) => q.x < lo.x) || p.every((q) => q.x > hi.x) || p.every((q) => q.z < lo.z) || p.every((q) => q.z > hi.z)) continue;
         if (net.def(s).cls !== 'road') continue;
         const L = pathLength(p), back = net.half(s) + 0.3;
+        // (only the road's pieces near the gap can border it: a long road across the map is walked
+        // piece by piece, and the ones far off skipped)
+        const near = p.map((q, k) => k > 0 && Math.max(q.x, p[k - 1].x) >= lo.x && Math.min(q.x, p[k - 1].x) <= hi.x && Math.max(q.z, p[k - 1].z) >= lo.z && Math.min(q.z, p[k - 1].z) <= hi.z);
+        if (!near.some(Boolean)) continue;
         for (const side of [1, -1]) {
           let prev: P | null = null;
+          const walk = walker(p);
           for (let t = 0; t <= L; t += 1.5) {
-            const q = pointAt(p, t), nxv = q.uz * side, nzv = -q.ux * side;
+            const w = walk(t);
+            if (!near[w.i]) { prev = null; continue; }
+            const q = w.q, nxv = q.uz * side, nzv = -q.ux * side;
             const at = { x: q.x + nxv * back, z: q.z + nzv * back };
             const ok = Math.abs(q.y) < 1 && inside(q.x + nxv * (back + 2.5), q.z + nzv * (back + 2.5)) && !net.land.at({ x: q.x + nxv * (back + 0.3), z: q.z + nzv * (back + 0.3) });
             if (ok && prev) out.push([prev.x, prev.z, at.x, at.z]);
