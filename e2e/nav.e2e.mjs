@@ -47,7 +47,7 @@ for (const name of names) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(BASE + P.url);
-  await page.waitForFunction(`!!(${P.rig})`, null, { timeout: 60000 });
+  await page.waitForFunction(`(() => { try { return !!(${P.rig}); } catch { return false; } })()`, null, { timeout: 60000 }); // (the game loads after the page does, from the start menu)
   await page.waitForTimeout(WAIT);
   const cdp = await page.context().newCDPSession(page);
   // Each touch carries its own time (UTC seconds). A loaded machine can deliver events a few

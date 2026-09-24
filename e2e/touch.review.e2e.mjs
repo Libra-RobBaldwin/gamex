@@ -31,7 +31,7 @@ async function openPage(url, rigSrc) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(BASE + url);
-  await page.waitForFunction(`!!(${rigSrc})`, null, { timeout: 60000 });
+  await page.waitForFunction(`(() => { try { return !!(${rigSrc}); } catch { return false; } })()`, null, { timeout: 60000 }); // (the game loads after the page does, from the start menu)
   await page.waitForTimeout(WAIT);
   const cdp = await page.context().newCDPSession(page);
   const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y, id]) => ({ x, y, id })) });
