@@ -91,6 +91,10 @@ everything".
   pixel ratio, then shadow-map size, then shadow refresh rate, then no shadows. It steps
   back up when there's headroom. Tap the stats line to see fps, sim and draw time, draw
   calls and the current tier.
+- **Done.** The region streams in 1 km tiles at three levels of detail picked from the zoom
+  (near: everything; mid: road ribbons and flat-coloured merged buildings; far: boxes and
+  low-poly trees), and an edit there redraws only the 250 m cells whose roads or junctions
+  changed and re-derives only what's round them (`docs/streaming.md`).
 - **Next.**
   - Move building generation and mesh merging into a Web Worker. They're the remaining
     ~10 ms spikes.
