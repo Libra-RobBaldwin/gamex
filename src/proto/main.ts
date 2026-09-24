@@ -707,10 +707,10 @@ shell.addTransportTab({
         ${buses.map((o) => row(o, `data-bus="${o.id}"`, 'bus')).join('')}</div>
       <div class="grp"><span class="tab">Trains and trams</span><small>Each runs only on track it can manage: rack, electric wires, gradient</small>
         ${trains.map((o) => row(o, `data-set="${o.id}"`, trainIcon(trainKind(o)))).join('')}</div>
-      <div class="grp"><span class="tab">Lorries, vans, boats and planes</span><small>On sale in ${year}; not in the game yet</small>
-        ${later.map((o) => row(o, '', o.kind === 'boat' ? 'droplet' : o.kind === 'plane' ? 'route' : 'building', true)).join('')}</div>
       <div class="grp"><span class="tab">Background traffic</span><small>Cars come from homes, jobs, shops and works, and follow the clock</small>
-        <div class="row3" role="group" aria-label="How busy">${LEVELS.map(([n], i) => `<button data-lvl="${i}" class="${i === level ? 'on' : ''}" aria-pressed="${i === level}">${n === 'Traffic' ? 'Normal' : n}</button>`).join('')}</div></div>`;
+        <div class="row3" role="group" aria-label="How busy">${LEVELS.map(([n], i) => `<button data-lvl="${i}" class="${i === level ? 'on' : ''}" aria-pressed="${i === level}">${n === 'Traffic' ? 'Normal' : n}</button>`).join('')}</div></div>
+      <div class="grp"><span class="tab">Lorries, vans, boats and planes</span><small>On sale in ${year}; not in the game yet</small>
+        ${later.map((o) => row(o, '', o.kind === 'boat' ? 'droplet' : o.kind === 'plane' ? 'route' : 'building', true)).join('')}</div>`;
     el.querySelectorAll<HTMLButtonElement>('[data-bus]').forEach((b) => b.addEventListener('click', () => {
       const o = buses.find((x) => x.id === b.dataset.bus)!, c = traffic.addBus(o.id);
       hint(c ? `${o.name} added · fleet number ${c.dress?.fleetNo ?? ''}` : 'No room on the roads for a bus just now', c ? 'bus' : 'alert');
@@ -1389,6 +1389,7 @@ seenAt = (node) => traffic.seen.get(node);
 onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; };
 for (let i = 0; i < 4; i++) traffic.addBus();
 for (const t of ['intercity', 'dmu']) traffic.addTrain(t);
+const dbSize = new THREE.Vector2();
 let clock = 7 * 60; // minutes since midnight: a day passes in six minutes
 let places: Places | null = null;
 function getPlaces(): Places {
@@ -1507,8 +1508,8 @@ function frame(now: number) {
   const hour = (clock / 60) % 24;
   // At 1× traffic steps once a frame as it always has; faster, it's cut into steps of at most
   // 1/30 s so cars don't jump through each other or past their stop lines. Paused, it holds still.
-  // the vehicles' levels of detail, culling and lamps (game/fleet.ts): how big a metre is on screen, and the hour
-  traffic.fleet.frame(cam, renderer.domElement.clientHeight / view.h, hour);
+  // the vehicles' levels of detail, culling and lamps (game/fleet.ts): how many device pixels a metre is, and the hour
+  traffic.fleet.frame(cam, renderer.getDrawingBufferSize(dbSize).y / view.h, hour);
   if (speed > 0) {
     const n = speed > 1 ? Math.ceil(gdt * 30 - 1e-9) : 1, step = gdt / n;
     simNow = Math.max(simNow, now - gdt * 1000); // so it's caught up with real time by the last step
