@@ -33,7 +33,7 @@ export const STD = {
   hatch(mph: number) { return { spacing: mph <= 30 ? 1.5 : mph <= 40 ? 2 : 3, stripe: mph <= 40 ? 0.15 : 0.2 }; },
   // the turning head at the end of a cul-de-sac: a turning circle (kerb radius) big enough for a
   // refuse lorry to turn round in a three-point turn, flared in from the street
-  turningHead: { R: 8, entry: 6 },
+  turningHead: { R: 8, entry: 6, minRoad: 30 }, // (a shorter dead end has none: see xsection.endKind)
   // a road ending within this distance of the map's edge, heading out, runs on off the map
   mapEdge: 30,
 };
