@@ -471,10 +471,13 @@ export class Pairs {
 // by car if they can. The two groups are capped at `cap` separately, so a full line into a town
 // with jobs to spare still leaves most of its would-be riders without one.
 // `lost` is demand at each origin that reaches nowhere at all (so isn't shared out).
+// Within the limit, nearer places count more (`decay`: minutes further that count 1/e as much, as
+// trips are spread by gravity), both in who competes for a place and in what each origin reaches:
+// a job next door is more its neighbours' than commuters' from the next town down the line.
 export interface Reach { car: Float64Array; nc: Float64Array; pt: Float64Array; ratio: Float64Array; lost: Float64Array }
 
-export function reach(p: Pairs, demand: Float64Array, supply: Float64Array, carShare: Float64Array, T: number, share: boolean, cap = Infinity): Reach {
-  const Z = demand.length, g = (t: number) => (t <= T ? 1 : t >= 1.5 * T ? 0 : (1.5 * T - t) / (0.5 * T));
+export function reach(p: Pairs, demand: Float64Array, supply: Float64Array, carShare: Float64Array, T: number, share: boolean, cap = Infinity, decay = Infinity): Reach {
+  const Z = demand.length, g = (t: number) => (t <= T ? 1 : t >= 1.5 * T ? 0 : (1.5 * T - t) / (0.5 * T)) * Math.exp(-t / decay);
   const S = p.sum(supply), denom = new Float64Array(p.N), sc = new Float64Array(Z), sn = new Float64Array(Z);
   const out: Reach = { car: new Float64Array(Z), nc: new Float64Array(Z), pt: new Float64Array(Z), ratio: new Float64Array(Z), lost: new Float64Array(Z) };
   const lim = 1.5 * T, [GC, GN] = p.scratch;

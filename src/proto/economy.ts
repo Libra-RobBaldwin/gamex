@@ -860,9 +860,9 @@ export class Economy {
     this.refreshService(false);
     const t0 = performance.now();
     const za = this.zoneArrays(), p = this.pairs!;
-    const work = reach(p, za.workers, za.work, za.car, T.workMin, true, T.reachCap);
-    const shop = reach(p, za.residents, za.shop, za.car, T.shopMin, true, T.reachCap);
-    const leisure = reach(p, za.residents, za.leisure, za.car, T.leisureMin, false, T.reachCap);
+    const work = reach(p, za.workers, za.work, za.car, T.workMin, true, T.reachCap, T.gravityMin);
+    const shop = reach(p, za.residents, za.shop, za.car, T.shopMin, true, T.reachCap, T.gravityMin);
+    const leisure = reach(p, za.residents, za.leisure, za.car, T.leisureMin, false, T.reachCap, T.gravityMin);
     this.lastReach = { work, shop, leisure, zones: this.zoneList };
     const t1 = performance.now();
     this.timing.parts.reach += t1 - t0;
