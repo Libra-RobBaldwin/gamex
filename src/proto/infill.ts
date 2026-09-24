@@ -14,7 +14,8 @@ const FREE = 0, LOT = 1, ROAD = 2, WATER = 3;
 // a cell is taken if any part of it (not just its centre) is on claimed land
 const landNear = (net: Network, p: P) => { const h = CELL * 0.45; return !net.land.free([{ x: p.x - h, z: p.z - h }, { x: p.x + h, z: p.z - h }, { x: p.x + h, z: p.z + h }, { x: p.x - h, z: p.z + h }]); };
 
-export function findRegions(net: Network, pending: Lot[]) {
+// `civics: false` leaves out invented community buildings (a real town has its own).
+export function findRegions(net: Network, pending: Lot[], opts: { civics?: boolean } = {}) {
   const all = [...net.lots, ...pending];
   if (!all.length) return { regions: [] as Region[], civics: [] as Lot[] };
   // grid over the built-up area, aligned to world multiples of CELL
@@ -60,6 +61,17 @@ export function findRegions(net: Network, pending: Lot[]) {
     else if (occ[i + j * nx] === FREE && landNear(net, p)) occ[i + j * nx] = ROAD;
   }
 
+  // each road's path and box, worked out once (every gap looks for the roads along its edge)
+  const roads = [...net.segs.values()].filter((s) => net.def(s).cls === 'road').map((s) => {
+    const p = net.path(s);
+    let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity;
+    for (const q of p) { bx0 = Math.min(bx0, q.x); bz0 = Math.min(bz0, q.z); bx1 = Math.max(bx1, q.x); bz1 = Math.max(bz1, q.z); }
+    const L = pathLength(p), back = net.half(s) + 0.3;
+    // the road's centreline every 1.5 m (sampled on first use)
+    let at: ReturnType<typeof pointAt>[] | null = null;
+    const samples = () => { if (!at) { at = []; for (let t = 0; t <= L; t += 1.5) at.push(pointAt(p, t)); } return at; };
+    return { s, box: [bx0, bz0, bx1, bz1], back, samples };
+  });
   // gaps: connected free cells that are near both a road and buildings
   const seen = new Uint8Array(nx * nz);
   const regions: Region[] = [], civics: Lot[] = [];
@@ -85,15 +97,12 @@ export function findRegions(net: Network, pending: Lot[]) {
       const inside = (x: number, z: number) => { const a = Math.floor((x - x0) / CELL), b = Math.floor((z - z0) / CELL); return a >= 0 && b >= 0 && a < nx && b < nz && set.has(a + b * nx); };
       const bx = list.map(([a]) => cx(a)), bz = list.map(([, b]) => cz(b));
       const lo = { x: Math.min(...bx) - 30, z: Math.min(...bz) - 30 }, hi = { x: Math.max(...bx) + 30, z: Math.max(...bz) + 30 };
-      for (const s of net.segs.values()) {
-        const p = net.path(s);
-        if (p.every((q) => q.x < lo.x) || p.every((q) => q.x > hi.x) || p.every((q) => q.z < lo.z) || p.every((q) => q.z > hi.z)) continue;
-        if (net.def(s).cls !== 'road') continue;
-        const L = pathLength(p), back = net.half(s) + 0.3;
+      for (const { box, back, samples } of roads) {
+        if (box[2] < lo.x || box[0] > hi.x || box[3] < lo.z || box[1] > hi.z) continue;
         for (const side of [1, -1]) {
           let prev: P | null = null;
-          for (let t = 0; t <= L; t += 1.5) {
-            const q = pointAt(p, t), nxv = q.uz * side, nzv = -q.ux * side;
+          for (const q of samples()) {
+            const nxv = q.uz * side, nzv = -q.ux * side;
             const at = { x: q.x + nxv * back, z: q.z + nzv * back };
             const ok = Math.abs(q.y) < 1 && inside(q.x + nxv * (back + 2.5), q.z + nzv * (back + 2.5)) && !net.land.at({ x: q.x + nxv * (back + 0.3), z: q.z + nzv * (back + 0.3) });
             if (ok && prev) out.push([prev.x, prev.z, at.x, at.z]);
@@ -117,7 +126,7 @@ export function findRegions(net: Network, pending: Lot[]) {
 
     // try a community building that fits, facing the road
     let civic: Lot | null = null;
-    if (!industrial && touching.length && n >= 6) {
+    if (opts.civics !== false && !industrial && touching.length && n >= 6) {
       const options = n > 40 ? ['church', 'school', 'pub', 'petrol', 'surgery'] : n > 16 ? ['pub', 'surgery', 'hall', 'petrol', 'cornershop'] : (r < 0.15 ? ['substation'] : ['cornershop', 'hall']);
       const want = options.filter((o) => o !== 'petrol' || fromCentre > 110).sort(() => rand() - 0.5);
       const set = new Set(cells.map(([a, b]) => a + b * nx));

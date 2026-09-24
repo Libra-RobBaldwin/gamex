@@ -655,7 +655,9 @@ export class Network {
     return this.tryParcel(l, extra);
   }
   private tryParcel(l: Lot, extra: Lot[]) {
-    const others = [...this.lots, ...extra].filter((o) => o !== l);
+    // (only plots that could touch this one at its deepest garden are worth checking below)
+    const reach = Math.hypot(l.pw, l.d + l.front + BACK[l.kind]) + 1;
+    const others = [...this.lots, ...extra].filter((o) => o !== l && dist(this.parcelCentre(o), l) < reach + this.parcelR(o));
     for (let back = BACK[l.kind]; back >= 0; back -= 1.5) {
       l.back = Math.max(0.5, back);
       const poly = this.parcelRect(l, -0.3), c = this.parcelCentre(l), r = this.parcelR(l);

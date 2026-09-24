@@ -90,10 +90,11 @@ export function waterOf(d: OsmData, zones: ZoneArea[], local: (lat: number, lon:
     if (path.length >= 2) lines.push({ id: w.id, kind: k, path, width });
   }
   const polys = zones.filter((z) => z.kind === 'water');
-  const grid = new Grid<{ poly?: ZoneArea; line?: WaterLine }>(40);
+  // (lines go in piece by piece, so a point only measures to the pieces near it)
+  const grid = new Grid<{ poly?: ZoneArea; piece?: P[]; width?: number }>(40);
   for (const z of polys) grid.add(boxOf(z.outer.flat()), { poly: z });
-  for (const l of lines) grid.add(boxOf(l.path, l.width), { line: l });
-  const isWater = (p: P) => grid.at(p).some((c) => (c.poly ? inArea(p, c.poly) : closestOnPath(p, c.line!.path).d <= c.line!.width / 2));
+  for (const l of lines) for (let i = 1; i < l.path.length; i++) { const piece = [l.path[i - 1], l.path[i]]; grid.add(boxOf(piece, l.width), { piece, width: l.width }); }
+  const isWater = (p: P) => grid.at(p).some((c) => (c.poly ? inArea(p, c.poly) : closestOnPath(p, c.piece!).d <= c.width! / 2));
   return { lines, polys, isWater };
 }
 
