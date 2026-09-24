@@ -177,7 +177,10 @@ export function reedSpots(t: WaterTile, o: { density?: number; seed?: number } =
     const p = (kind === KIND_CODE.lake ? 0.5 : kind === KIND_CODE.estuary ? 0.35 : 0.6) * dens * (clump < 0.45 ? 0.15 : 1);
     if ((h & 0xffff) / 65536 >= p) continue;
     const jx = (((h >>> 16) & 0xff) / 255 - 0.5) * g.step, jz = (((h >>> 24) & 0xff) / 255 - 0.5) * g.step;
-    out.push(g.x0 + (mg + a) * g.step + jx, t.ground[k], g.z0 + (mg + b) * g.step + jz, ((h >>> 5) & 0x3ff) / 1024 * Math.PI * 2, 0.9 + (((h >>> 11) & 0xff) / 255) * 0.7);
+    // (the jitter mustn't carry a tuft more than 2 m up the bank, where a road may run beside the water)
+    const px = g.x0 + (mg + a) * g.step + jx, pz = g.z0 + (mg + b) * g.step + jz;
+    if (rasterAt(t, t.shore, px, pz) < -2) continue;
+    out.push(px, t.ground[k], pz, ((h >>> 5) & 0x3ff) / 1024 * Math.PI * 2, 0.9 + (((h >>> 11) & 0xff) / 255) * 0.7);
   }
   return Float32Array.from(out);
 }

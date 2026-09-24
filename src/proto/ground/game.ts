@@ -10,6 +10,7 @@ export interface GameWorld {
   queue: () => Lot[]; // plots waiting to be built
   trees: () => XZ[];
   lake: { x: number; z: number; r: number };
+  water?: () => XZ[][]; // the water's outlines, if the game has them (else the lake's circle)
   industrial: (p: XZ) => boolean;
   parks?: () => { cells: XZ[]; size: number }[]; // leftover land the game landscaped (parks, verges): cell centres
 }
@@ -39,7 +40,7 @@ export class GameGround {
   private fixedInput() {
     const { net } = this.w;
     const blocked: XZ[][] = [];
-    for (const c of net.land.all()) blocked.push(...c.polys);
+    for (const c of net.land.all()) if (c.owner !== 'water') blocked.push(...c.polys); // (water isn't a road: no verge round it)
     const lanes: GroundInput['lanes'] = [];
     for (const s of net.segs.values()) {
       const d = ROADS[s.type];
@@ -53,7 +54,7 @@ export class GameGround {
     const industrial: XZ[] = [];
     for (let x = -600; x <= 600; x += 40) for (let z = -600; z <= 600; z += 40) if (this.w.industrial({ x, z })) industrial.push({ x, z });
     const L = this.w.lake;
-    return { blocked, lanes, parks, industrial, water: [circlePoly(L, L.r + 6, 48)] };
+    return { blocked, lanes, parks, industrial, water: this.w.water?.() ?? [circlePoly(L, L.r + 6, 48)] };
   }
   // The roads or the landscaping changed: repaint everything (next time `sync` runs).
   invalidate() { this.full = true; this.fixed = null; }
