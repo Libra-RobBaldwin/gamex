@@ -234,10 +234,11 @@ describe('towns grow and shrink with how well they are fed', () => {
     expect(words.some((w) => /^shops only \d+% supplied with goods/.test(w))).toBe(true);
   });
 
-  // The town starts in balance (it used to start with room to grow from the jobs round it, and
-  // grew on that alone), so this is what the service brings: jobs from the industries it feeds and
-  // offices drawn by rail passengers, then homes for their workers, until its one plot a zone is
-  // used up and it can only get denser.
+  // The town starts in balance. Calibration used to lift a town but never hold one back, so this
+  // one started with room to grow from the industry jobs round it, and the 25% this test once
+  // asked for counted that. Now the growth is what the service brings: jobs from the industries
+  // it feeds and offices drawn by rail passengers, then homes for their workers, until its one
+  // plot a zone is used up and it can only get denser (about 23% in 18 months).
   it('a well-served town grows and gets denser', () => {
     const e = served();
     const start = e.town(1)!.residents;

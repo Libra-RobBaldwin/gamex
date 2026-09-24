@@ -229,8 +229,10 @@ settled isn't stalling.
    boundaries.
 4. *Actions* (`takeActions()`):
    - `add`: queue a plot in that zone, then `addBuilding(lot, req)`, or `decline(req)` if
-     none fits. The game's own growth from its plot queue must be switched off, since the
-     economy asks for what the town needs.
+     none fits. It asks for the first kind of each use (house, shop, office, industry); the
+     game may put up a bigger building of the same use and pass its capacity. The game's own
+     growth from its plot queue must be switched off, since the economy asks for what the town
+     needs.
    - `densify`: rebuild the lot as the next kind, then `updateBuilding`, or `decline(req)`
      when the lot can't take it (roads.ts lots are sized by kind).
    - `vacate`, `abandon`, `restore`: change how the building looks.
