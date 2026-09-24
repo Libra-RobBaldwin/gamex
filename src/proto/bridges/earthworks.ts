@@ -164,18 +164,22 @@ export function earthMaterial() {
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.06, 1.04, 0.84) * (0.86 + 0.28 * f.b), rough * 0.7);
         float t = vEarthPos.y / 0.55 + (f.b - 0.5) * 0.6, d = min(fract(t), 1.0 - fract(t));
         float fade = 1.0 - smoothstep(0.18, 0.45, fwidth(t));
-        diffuseColor.rgb *= 1.0 - 0.2 * (1.0 - smoothstep(0.05, 0.17, d)) * rough * fade;
+        diffuseColor.rgb *= 1.0 - 0.1 * (1.0 - smoothstep(0.05, 0.17, d)) * rough * fade;
       }`);
   };
-  m.customProgramCacheKey = () => 'earth-1';
+  m.customProgramCacheKey = () => 'earth-2';
   return (mat = m);
 }
 
 // Triangles for the earth material, with a colour and a grass factor per vertex.
 export class EarthGeo {
   pos: number[] = []; col: number[] = []; grass: number[] = [];
-  private c = new THREE.Color();
-  vert(p: number[], colour: string, grassy: number) { this.pos.push(p[0], p[1], p[2]); this.c.set(colour); this.col.push(this.c.r, this.c.g, this.c.b); this.grass.push(grassy); }
+  private cols = new Map<string, THREE.Color>(); // parsed once each: a scene has a handful of colours
+  vert(p: number[], colour: string, grassy: number) {
+    let c = this.cols.get(colour);
+    if (!c) this.cols.set(colour, (c = new THREE.Color(colour)));
+    this.pos.push(p[0], p[1], p[2]); this.col.push(c.r, c.g, c.b); this.grass.push(grassy);
+  }
   // a quad a→b→c→d with a colour and grass factor at each corner
   quad(p: number[][], colour: string[], grassy: number[]) {
     for (const i of [0, 1, 2, 0, 2, 3]) this.vert(p[i], colour[i], grassy[i]);

@@ -7,13 +7,12 @@ import { deckAt, deckWidth, groundAt, pointOn, type Crossing } from './crossing'
 import { buildBridge, bridgeObject, frameAt, routeMat, Geo } from './geometry';
 import { BATTER, dashCuts, EARTH_COLOURS, EarthGeo, earthMaterial, earthPaint, halfSection, isEarth, mirrored, sectionReach, type SectionKind } from './earthworks';
 import { BALLAST_DEPTH, formationDrop, TrackBuilder, type Track } from './track';
-import type { BridgeLayout } from './layout';
+import { layoutBridge, underside, type BridgeLayout } from './layout';
 import { bridgeMaterials, type Mat } from './materials';
 import { scenario, type Scenario } from './scenario';
 import { chooseBridge } from './choose';
 import { BRIDGES, type BridgeId } from './catalogue';
 import { extents } from './crossing';
-import { layoutBridge } from './layout';
 import { GALLERY } from './gallery';
 
 export interface BridgeScene {
@@ -22,6 +21,15 @@ export interface BridgeScene {
   track: Track; // every run of track in the scene
   setOpen: ((t: number) => void) | null; // lifts a bascule's leaves
   setDetail(metresPerPixel: number): void; // near or far track
+  dispose(): void; // frees its geometries and instance buffers (materials and textures are shared)
+}
+
+function disposeAll(root: THREE.Object3D) {
+  const seen = new Set<THREE.BufferGeometry>();
+  root.traverse((o) => {
+    if (o instanceof THREE.InstancedMesh) o.dispose();
+    if (o instanceof THREE.Mesh && !seen.has(o.geometry)) { seen.add(o.geometry); o.geometry.dispose(); }
+  });
 }
 
 // A gallery type on its own showcase crossing, raised or eased as the chooser would.
@@ -39,7 +47,7 @@ export function bridgeScene(sc: Scenario, c: Crossing, lay: BridgeLayout): Bridg
   const group = new THREE.Group(), tb = new TrackBuilder();
   let bridge: THREE.Object3D | null = null, setOpen: BridgeScene['setOpen'] = null;
   if (lay.ok) {
-    const bo = bridgeObject(buildBridge(c, lay), undefined, { track: tb });
+    const bo = bridgeObject(buildBridge(c, lay, { track: true }), undefined, { track: tb });
     bridge = bo.object;
     group.add(bo.object);
     if (lay.def.opening) setOpen = (t) => { bo.setOpen(t); };
@@ -47,12 +55,12 @@ export function bridgeScene(sc: Scenario, c: Crossing, lay: BridgeLayout): Bridg
     group.add(world(sc, c, lay, tb));
     const track = tb.build();
     group.add(track.group);
-    return { group, bridge, track, setOpen, setDetail: (m) => { track.setDetail(m); leafDetail(m); } };
+    return { group, bridge, track, setOpen, setDetail: (m) => { track.setDetail(m); leafDetail(m); }, dispose: () => disposeAll(group) };
   }
   group.add(world(sc, c, lay, tb));
   const track = tb.build();
   group.add(track.group);
-  return { group, bridge, track, setOpen, setDetail: (m) => { track.setDetail(m); } };
+  return { group, bridge, track, setOpen, setDetail: (m) => { track.setDetail(m); }, dispose: () => disposeAll(group) };
 }
 
 
@@ -144,7 +152,10 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
   const half = (s: number) => {
     const sp = spillAt(s);
     if (!sp) return halfSection(c.road, hw, y(s), gr(s));
-    const level = Math.max(gr(s) + formationDrop('ballast'), y(sp.e) - Math.abs(s - sp.e) / sp.batter);
+    // (and never up into the bridge: under a deep girder or truss it falls away at once)
+    const span = lay.spans.find((q) => s >= q.s0 - 1e-6 && s <= q.s1 + 1e-6);
+    const soffit = span ? underside(c, span, s) - 0.3 : Infinity;
+    const level = Math.max(gr(s) + formationDrop('ballast'), Math.min(soffit, y(sp.e) - Math.abs(s - sp.e) / sp.batter));
     return halfSection(c.road, hw, level, gr(s)).map((q) => (q.kind === 'ditch' ? q : { ...q, kind: 'slope' as const }));
   };
   const cuts = new Set<number>([0, L, lay.s0, lay.s1]);
@@ -155,24 +166,41 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
   for (let s = lay.s0; s < lay.s1; s += stepB) cuts.add(s);
   for (const q of spills) { for (let d = 0; d < Math.abs(q.to - q.e); d += 1.5) cuts.add(q.e + q.dir * d); cuts.add(q.to); }
   for (const w of sc.water) cuts.add(w.s0 - 1).add(w.s1 + 1);
-  for (const u of sc.under) for (const s of [u.bench0, u.bench1, u.toe0, u.toe1]) if (s !== undefined) cuts.add(s);
+  for (const u of sc.under) {
+    for (const s of [u.bench0, u.bench1, u.toe0, u.toe1, (u.s0 + u.s1) / 2]) if (s !== undefined) cuts.add(s);
+    if (u.kind === 'road') for (const [n] of roadUnder((u.s1 - u.s0) / 2)) cuts.add((u.s0 + u.s1) / 2 + n);
+  }
   const stations = [...cuts].filter((s) => s >= 0 && s <= L).sort((a, b) => a - b).filter((s, i, a) => i === 0 || s - a[i - 1] > 0.05);
 
   // the approaches' reach at the bridge ends: the ground under the bridge lines up with it
   const reachAt = (s: number) => sectionReach(half(s));
   const endA = spills.find((q) => q.dir === 1)?.to ?? lay.s0, endB = spills.find((q) => q.dir === -1)?.to ?? lay.s1;
   const rA = reachAt(Math.max(0, endA)), rB = reachAt(Math.min(L, endB));
-  const BAND = 30;
+  // The band narrows where the route curves hard, so lines square to it can't converge and cross
+  // on the inside of the curve within it (at most half-way to the centre of the curve).
+  const bandAt = (s: number, r: number) => {
+    const a = frameAt(c, Math.max(0, s - 5)), b = frameAt(c, Math.min(L, s + 5));
+    const k = Math.abs(Math.atan2(a.ux * b.uz - a.uz * b.ux, a.ux * b.ux + a.uz * b.uz)) / 10; // curvature, 1/m
+    return Math.max(4, Math.min(30, 0.4 / Math.max(k, 1e-6) - r));
+  };
+  // The direction across the route at s, smoothed over 3 m: the route is a polyline, and its
+  // segments' own directions jump at every corner, which 30 m out would fold the ground.
+  const across = (s: number) => {
+    const f = frameAt(c, s), a = pointOn(c.path, Math.max(0, s - 1.5)), b = pointOn(c.path, Math.min(L, s + 1.5)), d = Math.hypot(b.x - a.x, b.z - a.z);
+    if (d > 1e-6) { f.ux = (b.x - a.x) / d; f.uz = (b.z - a.z) / d; f.nx = -f.uz; f.nz = f.ux; }
+    return f;
+  };
   const lineAt = (s: number, side: 'approach' | 'under'): Line => {
-    const f = frameAt(c, s), p = (n: number, h: number): V3 => [f.x + f.nx * n, h, f.z + f.nz * n];
+    const f = across(s), p = (n: number, h: number): V3 => [f.x + f.nx * n, h, f.z + f.nz * n];
     const g = gr(s), gp = groundPaint(s), edge = (z: number): V3 => [f.x, g, z];
     if (side === 'under') {
       // the earthworks' reach, eased from one end of the bridge to the other
       const t = Math.max(0, Math.min(1, (s - endA) / Math.max(1, endB - endA))), r = rA + (rB - rA) * t;
-      return { s, pts: [edge(-W), p(-r - BAND, g), p(-r, g), p(r, g), p(r + BAND, g), edge(W)], paint: [0, 1, 2, 3, 4].map(() => [gp, gp]) };
+      const band = bandAt(s, r);
+      return { s, pts: [edge(-W), p(-r - band, g), p(-r, g), p(r, g), p(r + band, g), edge(W)], paint: [0, 1, 2, 3, 4].map(() => [gp, gp]) };
     }
     const { pts, kinds } = mirrored(half(s)), r0 = -pts[0].n, r1 = pts[pts.length - 1].n;
-    const all: V3[] = [edge(-W), p(-r0 - BAND, g), ...pts.map((q) => p(q.n, q.y)), p(r1 + BAND, g), edge(W)];
+    const all: V3[] = [edge(-W), p(-r0 - bandAt(s, r0), g), ...pts.map((q) => p(q.n, q.y)), p(r1 + bandAt(s, r1), g), edge(W)];
     const paint: [string, number][][] = [[gp, gp], [gp, gp]];
     kinds.forEach((kd, e) => {
       const a = pts[e], b = pts[e + 1];
@@ -207,12 +235,14 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
   };
   // group consecutive stations into runs of the same kind, sharing the end station
   let run: Line[] = [], runSide: 'approach' | 'under' | null = null;
-  const flush = () => { if (run.length > 1) sweepLines(run, runSide === 'approach'); };
+  const runs: [Line[], boolean][] = [], ordered: Line[] = [];
+  const flush = () => { if (run.length > 1) runs.push([run, runSide === 'approach']); };
   for (let i = 0; i < stations.length; i++) {
     const s = stations[i], last = i + 1 === stations.length;
     const side: 'approach' | 'under' = last && runSide ? runSide : onApproach((s + stations[i + 1]) / 2) ? 'approach' : 'under';
     const here = lineAt(s, runSide ?? side);
     lines.push(here);
+    ordered.push(here);
     run.push(here);
     if (runSide && side !== runSide) {
       flush();
@@ -227,10 +257,25 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
         earth.quad([p, q, [q[0], g, q[2]], [p[0], g, p[2]]], [col, col, col, col], [0, 0, 0, 0]);
       }
       run = [other];
+      ordered.push(other);
     }
     runSide = side;
   }
   flush();
+  // Where the route curves hard and the earthworks' reach changes fast (a spill slope), the band's
+  // outer points could step backwards and fold the ground over itself: keep them moving on along
+  // the route.
+  for (let i = 1; i < ordered.length; i++) {
+    const a = ordered[i - 1], b = ordered[i];
+    for (const [ka, kb] of [[1, 1], [a.pts.length - 2, b.pts.length - 2]]) {
+      const p = a.pts[ka], q = b.pts[kb];
+      if (Math.abs(b.s - a.s) < 1e-6) { q[0] = p[0]; q[2] = p[2]; continue; }
+      // progress measured along the route (the lines may run at any angle to x)
+      const f = frameAt(c, b.s), ahead = (q[0] - p[0]) * f.ux + (q[2] - p[2]) * f.uz, want = 0.02 * (b.s - a.s);
+      if (ahead < want) { q[0] += (want - ahead) * f.ux; q[2] += (want - ahead) * f.uz; }
+    }
+  }
+  for (const [ls, approach] of runs) sweepLines(ls, approach);
 
   // the map's cut edges, along both sides and across both ends
   let lowest = Infinity;
@@ -257,11 +302,16 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
   // channel buoys and a boat, to show where the piers can't go
   for (const o of c.obstacles) {
     if (o.kind !== 'water' || !o.channel) continue;
+    // (the buoys are instanced: a long river has a hundred of them)
     const ch = o.channel, xa = xAt(ch.s0), xb = xAt(ch.s1), buoy = new THREE.CylinderGeometry(1.2, 1.2, 2.4, 8);
-    for (let z = -W + 20; z < W; z += 45) {
-      if (Math.abs(z) < 30) continue;
-      const a = mesh(buoy, red); a.position.set(xa, o.level + 1, z); out.add(a);
-      const b = mesh(buoy, green); b.position.set(xb, o.level + 1, z); out.add(b);
+    const zs: number[] = [];
+    for (let z = -W + 20; z < W; z += 45) if (Math.abs(z) >= 30) zs.push(z);
+    for (const [x, m] of [[xa, red], [xb, green]] as const) {
+      const im = new THREE.InstancedMesh(buoy, m, zs.length), m4 = new THREE.Matrix4();
+      zs.forEach((z, i) => im.setMatrixAt(i, m4.makeTranslation(x, o.level + 1, z)));
+      im.computeBoundingSphere();
+      im.castShadow = true; im.receiveShadow = true; im.name = 'buoys';
+      out.add(im);
     }
     const bw = Math.min(10, (xb - xa) * 0.3), bl = bw * 3.2, boat = new THREE.Group();
     const hull = mesh(new THREE.BoxGeometry(bw, 2.2, bl), hullMat); hull.position.y = 1.1; boat.add(hull);
@@ -272,47 +322,48 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
   }
   // roads and railways underneath, across the route on their benches, along the line of ground
   // through their middle: a road on its own pavement with sloping edges, a railway on its ballast
+  const underLines: { path: { x: number; z: number }[]; clear: number }[] = [];
   for (const u of sc.under) {
     const mid = (u.s0 + u.s1) / 2, hwU = (u.s1 - u.s0) / 2, g = u.level ?? gr(mid);
-    const line = lineAt(mid, onApproach(mid) ? 'approach' : 'under').pts;
+    const line = (ordered.find((l) => Math.abs(l.s - mid) < 1e-6) ?? lineAt(mid, onApproach(mid) ? 'approach' : 'under')).pts;
     const path = [line[0], line[1], line[line.length - 2], line[line.length - 1]].map((q) => ({ x: q[0], z: q[2], y: 0 }));
+    // (trees keep clear of it, its bench and the bench's slopes, measured on the ground)
+    underLines.push({ path, clear: Math.max(hwU, mid - (u.toe0 ?? u.s0), (u.toe1 ?? u.s1) - mid) + 1 });
     const len = path.reduce((a, q, i) => (i ? a + Math.hypot(q.x - path[i - 1].x, q.z - path[i - 1].z) : 0), 0);
     if (u.kind === 'rail') {
       tb.add({ path, s0: 0, s1: len, level: () => g + BALLAST_DEPTH, tracks: 2, form: 'ballast', year: c.year, step: 12 });
       continue;
     }
-    // across: edge slope, carriageway with edge lines and a dashed centre line, edge slope
-    const P = 0.15, e = hwU - 0.6;
-    const sec: [number, number][] = [[-hwU - 0.35, 0], [-hwU, P], [-e - 0.08, P], [-e + 0.08, P], [-0.08, P], [0.08, P], [e - 0.08, P], [e + 0.08, P], [hwU, P], [hwU + 0.35, 0]];
-    const kinds: SectionKind[] = ['surface', 'surface', 'line', 'surface', 'centre', 'surface', 'line', 'surface', 'surface'];
-    // along: the corners (mitred) and every dash
-    const cum = path.map(() => 0);
-    for (let i = 1; i < path.length; i++) cum[i] = cum[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
-    // (no dash ends right beside a corner: the mitred ring there would cross its neighbour)
-    const ds = [...new Set([...cum, ...dashCuts(0, len).filter((d) => cum.every((q) => Math.abs(q - d) > 1.5))])].sort((a, b) => a - b);
-    const ring = (d: number) => {
-      const i = Math.max(1, cum.findIndex((q) => q >= d - 1e-6)), a = path[i - 1], b = path[i], l = cum[i] - cum[i - 1], t = l ? (d - cum[i - 1]) / l : 0;
-      let ux = (b.x - a.x) / l, uz = (b.z - a.z) / l, k = 1;
-      const j = cum.findIndex((q) => Math.abs(q - d) < 1e-6);
-      if (j > 0 && j < path.length - 1) { // a corner: mitre
-        const c2 = path[j + 1], vx = (c2.x - b.x) / (cum[j + 1] - cum[j]), vz = (c2.z - b.z) / (cum[j + 1] - cum[j]);
-        const bx = ux + vx, bz = uz + vz, bl = Math.hypot(bx, bz);
-        k = 1 / Math.max(0.5, (bx * ux + bz * uz) / bl); ux = bx / bl; uz = bz / bl;
+    // Across: edge slope, carriageway with edge lines and a dashed centre line, edge slope. Each
+    // edge of each stretch is a line of the ground itself (a station at mid + n), so the road
+    // lies exactly over its bench however the lines run.
+    const sec = roadUnder(hwU), kinds: SectionKind[] = ['surface', 'surface', 'line', 'surface', 'centre', 'surface', 'line', 'surface', 'surface'];
+    const polys = sec.map(([n]) => (ordered.find((q) => Math.abs(q.s - (mid + n)) < 1e-6) ?? lineAt(mid + n, 'under')).pts);
+    // along: every corner of the middle line and every dash, as fractions of each line's length
+    const lens = polys.map((q) => q.reduce((a, v, i) => (i ? a + Math.hypot(v[0] - q[i - 1][0], v[2] - q[i - 1][2]) : 0), 0));
+    const midPoly = polys[4], midLen = lens[4], cumM = [0];
+    for (let i = 1; i < midPoly.length; i++) cumM.push(cumM[i - 1] + Math.hypot(midPoly[i][0] - midPoly[i - 1][0], midPoly[i][2] - midPoly[i - 1][2]));
+    const ts = [...new Set([...cumM.map((d) => d / midLen), ...dashCuts(0, midLen).map((d) => d / midLen)])].sort((a, b) => a - b);
+    const at = (q: V3[], len: number, t: number, h: number): V3 => {
+      let d = t * len;
+      for (let i = 1; i < q.length; i++) {
+        const l = Math.hypot(q[i][0] - q[i - 1][0], q[i][2] - q[i - 1][2]);
+        if (d <= l + 1e-9 || i === q.length - 1) { const f = l ? Math.min(1, d / l) : 0; return [q[i - 1][0] + (q[i][0] - q[i - 1][0]) * f, g + h, q[i - 1][2] + (q[i][2] - q[i - 1][2]) * f]; }
+        d -= l;
       }
-      const x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
-      return sec.map(([n, h]): V3 => [x - uz * n * k, g + h, z + ux * n * k]);
+      return [q[0][0], g + h, q[0][2]];
     };
-    const rings = ds.map(ring);
-    for (let i = 1; i < ds.length; i++) for (let e2 = 0; e2 + 1 < sec.length; e2++) {
-      const m = routeMat(kinds[e2], ds[i - 1], ds[i])!;
-      route.quad(m, rings[i - 1][e2], rings[i - 1][e2 + 1], rings[i][e2 + 1], rings[i][e2]);
+    for (let i = 1; i < ts.length; i++) for (let e2 = 0; e2 + 1 < sec.length; e2++) {
+      const m = routeMat(kinds[e2], ts[i - 1] * midLen, ts[i] * midLen)!;
+      const [, ha] = sec[e2], [, hb] = sec[e2 + 1];
+      route.quad(m, at(polys[e2], lens[e2], ts[i - 1], ha), at(polys[e2 + 1], lens[e2 + 1], ts[i - 1], hb), at(polys[e2 + 1], lens[e2 + 1], ts[i], hb), at(polys[e2], lens[e2], ts[i], ha));
     }
   }
   // the route itself on the approaches: ballast and track, or the road's surface
   if (rail) for (const [a, b] of approaches) tb.add({ path: c.path, s0: a, s1: b, level: y, tracks: c.road.tracks, form: 'ballast', year: c.year });
   const mats = bridgeMaterials();
   for (const [m, g] of Object.entries(route.geometries()) as [Mat, THREE.BufferGeometry][]) out.add(mesh(g, mats[m], false, `route-${m}`));
-  trees(out, c, sc, sOf, x0, x1, W, (s) => (onApproach(s) ? reachAt(s) : hw + 14 + Math.max(0, y(s) - gr(s)) * 2), heightOn(earth));
+  trees(out, c, sc, sOf, x0, x1, W, (s) => (onApproach(s) ? reachAt(s) : hw + 14 + Math.max(0, y(s) - gr(s)) * 2), heightOn(earth), underLines);
   return out;
 }
 
@@ -320,19 +371,19 @@ function world(sc: Scenario, c: Crossing, lay: BridgeLayout, tb: TrackBuilder) {
 // The height of the ground mesh at (x, z), from its up-facing triangles: trees stand on the
 // ground as built, wherever the lines of it run.
 function heightOn(e: EarthGeo) {
-  const C = 8, grid = new Map<string, number[]>(), P = e.pos;
+  // bucketed by x only: the ground's triangles are narrow along the route and long across it
+  const C = 4, cells = new Map<number, number[]>(), P = e.pos;
   for (let i = 0; i < P.length; i += 9) {
     const ny = (P[i + 5] - P[i + 2]) * (P[i + 6] - P[i]) - (P[i + 3] - P[i]) * (P[i + 8] - P[i + 2]);
     if (Math.abs(ny) < 1e-6) continue; // vertical (the map's cut edges)
-    const xs = [P[i], P[i + 3], P[i + 6]], zs = [P[i + 2], P[i + 5], P[i + 8]];
-    for (let x = Math.floor(Math.min(...xs) / C); x <= Math.floor(Math.max(...xs) / C); x++) for (let z = Math.floor(Math.min(...zs) / C); z <= Math.floor(Math.max(...zs) / C); z++) {
-      const k = `${x},${z}`; let a = grid.get(k); if (!a) grid.set(k, (a = [])); a.push(i);
-    }
+    const x0 = Math.floor(Math.min(P[i], P[i + 3], P[i + 6]) / C), x1 = Math.floor(Math.max(P[i], P[i + 3], P[i + 6]) / C);
+    for (let x = x0; x <= x1; x++) { let a = cells.get(x); if (!a) cells.set(x, (a = [])); a.push(i); }
   }
   return (x: number, z: number) => {
     let best = -Infinity;
-    for (const i of grid.get(`${Math.floor(x / C)},${Math.floor(z / C)}`) ?? []) {
+    for (const i of cells.get(Math.floor(x / C)) ?? []) {
       const ax = P[i], az = P[i + 2], bx = P[i + 3], bz = P[i + 5], cx = P[i + 6], cz = P[i + 8];
+      if (z < Math.min(az, bz, cz) || z > Math.max(az, bz, cz)) continue;
       const d = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
       const l1 = ((bx - x) * (cz - z) - (cx - x) * (bz - z)) / d, l2 = ((cx - x) * (az - z) - (ax - x) * (cz - z)) / d, l3 = 1 - l1 - l2;
       if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
@@ -342,16 +393,37 @@ function heightOn(e: EarthGeo) {
   };
 }
 
-function trees(out: THREE.Group, c: Crossing, sc: Scenario, sOf: (x: number) => number, x0: number, x1: number, W: number, reach: (s: number) => number, heightAt: (x: number, z: number) => number) {
+// A road underneath, across it: [offset from its middle, height above its bench] for its edge
+// slopes, carriageway, edge lines and centre line.
+function roadUnder(hw: number): [number, number][] {
+  const P = 0.15, e = hw - 0.6;
+  // (the pavement edges are steep: out where the lines of ground spread apart they flatten)
+  return [[-hw - 0.12, 0], [-hw, P], [-e - 0.08, P], [-e + 0.08, P], [-0.08, P], [0.08, P], [e - 0.08, P], [e + 0.08, P], [hw, P], [hw + 0.12, 0]];
+}
+
+// distance in plan from a point to a polyline
+function distTo(path: { x: number; z: number }[], x: number, z: number) {
+  let best = Infinity;
+  for (let j = 1; j < path.length; j++) {
+    const a = path[j - 1], b = path[j], dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / L2));
+    best = Math.min(best, Math.hypot(x - a.x - dx * t, z - a.z - dz * t));
+  }
+  return best;
+}
+
+function trees(out: THREE.Group, c: Crossing, sc: Scenario, sOf: (x: number) => number, x0: number, x1: number, W: number, reach: (s: number) => number, heightAt: (x: number, z: number) => number, under: { path: { x: number; z: number }[]; clear: number }[]) {
   let seed = 7;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   const spots: THREE.Vector3[] = [], sizes: number[] = [];
   for (let i = 0; i < 900 && spots.length < 260; i++) {
-    const x = x0 + (x1 - x0) * rnd(), z = (rnd() * 2 - 1) * W, s = sOf(x);
+    // (the widest crown is 4.2 m across its radius: all of it stays inside the map's edges)
+    const x = x0 + 5 + (x1 - x0 - 10) * rnd(), z = (rnd() * 2 - 1) * (W - 5), s = sOf(x);
     if (sc.water.some((w) => s > w.s0 - 8 && s < w.s1 + 8)) continue;
     // clear of the roads underneath and their benches, and of the route's earthworks (a crown is
     // about 4 m across)
     if (sc.under.some((u) => s > Math.min(u.s0, u.toe0 ?? u.s0) - 6 && s < Math.max(u.s1, u.toe1 ?? u.s1) + 6)) continue;
+    if (under.some((u) => distTo(u.path, x, z) < u.clear + 5)) continue;
     const p = frameAt(c, s);
     if (Math.abs(z - p.z) < reach(s) + 5) continue;
     // crowns never overlap: two cones of the same slope meeting would flicker where they cross

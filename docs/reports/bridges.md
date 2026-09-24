@@ -211,7 +211,9 @@ Draw calls and triangles per frame (shadow pass included), at 412×915 @2×, bef
 | Bascule | 54 · 16.5k | 36 · 22.5k | 24 · 15.3k | 20 · 21.2k |
 
 Draw calls fall everywhere: the old scene drew every dash of the roads underneath as its own
-mesh, and the route's grass, surface and ballast separately. The budget for the far view is
+mesh, and the route's grass, surface and ballast separately. After review the channel buoys are
+instanced too, which takes the suspension scene from 123 to about 20 draw calls and
+cable-stayed from 72 to about 20 (see below). The budget for the far view is
 at most about 130k triangles for the whole scene (the 3.5 km suspension bridge); the near view
 adds at most about 60k for track on screen, drawn in 120 m chunks so off-screen ones are culled.
 Nothing new runs per frame.

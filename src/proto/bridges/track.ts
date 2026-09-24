@@ -84,23 +84,26 @@ const GUARD_SECTION: [number, number][] = [[0.03, 0], [0.03, 0.11], [-0.03, 0.11
 
 // Pixel painter with 3×3 supersampling. `px` is the size of a texel in metres (across, along) so
 // thin things (rails) can be kept at least a texel wide in the smaller mipmaps.
-type Paint = (n: number, s: number, px: number) => [number, number, number];
+type Paint = (n: number, s: number, px: number) => [number, number, number]; // (px: texel size, m)
 const U_M = TRACK_CENTRES, V_M = SLEEPER_PITCH; // one texture repeat, in metres across and along
 function paintTexture(w: number, h: number, paint: Paint) {
   const levels: { data: Uint8Array; width: number; height: number }[] = [];
   for (let lw = w, lh = h; ; lw = Math.max(1, lw >> 1), lh = Math.max(1, lh >> 1)) {
     const data = new Uint8Array(lw * lh * 4), px = Math.max(U_M / lw, V_M / lh);
+    // enough samples across that a rail 7 cm wide is weighed at its true width in every level
+    const na = Math.max(3, Math.ceil(U_M / lw / 0.01)), nc = Math.max(3, Math.ceil(V_M / lh / 0.02));
     for (let j = 0; j < lh; j++) for (let i = 0; i < lw; i++) {
       let r = 0, g = 0, b = 0;
-      for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) {
-        const u = (i + (a + 0.5) / 3) / lw, v = (j + (c + 0.5) / 3) / lh;
+      for (let a = 0; a < na; a++) for (let c = 0; c < nc; c++) {
+        const u = (i + (a + 0.5) / na) / lw, v = (j + (c + 0.5) / nc) / lh;
         // across: distance from the nearest track centre (centres sit at u = 0 and u = 1)
         const n = (u <= 0.5 ? u : u - 1) * U_M, s = (v - 0.5) * V_M;
         const [pr, pg, pb] = paint(n, s, px);
         r += pr; g += pg; b += pb;
       }
       const k = (j * lw + i) * 4;
-      data[k] = r / 9; data[k + 1] = g / 9; data[k + 2] = b / 9; data[k + 3] = 255;
+      const w = na * nc;
+      data[k] = r / w; data[k + 1] = g / w; data[k + 2] = b / w; data[k + 3] = 255;
     }
     levels.push({ data, width: lw, height: lh });
     if (lw === 1 && lh === 1) break;
@@ -124,13 +127,13 @@ function stone(n: number, s: number) {
   return h - Math.floor(h);
 }
 // rails, chairs and sleepers seen from above, shared by both painted beds
-function trackTop(n: number, s: number, px: number, kind: SleeperKind, under: [number, number, number], guard: boolean): [number, number, number] {
+function trackTop(n: number, s: number, _px: number, kind: SleeperKind, under: [number, number, number], guard: boolean): [number, number, number] {
   const d = SLEEPERS[kind], an = Math.abs(n), dr = Math.abs(an - RAIL_CENTRE);
-  // a rail head is 7 cm across: in the small mipmaps keep it a texel wide, a little fainter
-  const head = Math.max(0.035, px * 0.6), fade = Math.sqrt(0.035 / head);
-  if (dr < head) return shade(hex('#c3c7cb'), 0.75 + 0.25 * fade);
-  if (dr < Math.max(0.07, head * 1.6)) return hex('#3b3c40'); // the foot, and its shadow
-  if (guard && Math.abs(an - (RAIL_CENTRE - GUARD_INSET)) < Math.max(0.03, px * 0.5)) return hex('#56595e');
+  // everything at its true width and in the colours the real rails light up to, so the far look
+  // averages to what the near look shows and the switch between them doesn't pop
+  if (dr < 0.035) return hex('#959a9e'); // the head
+  if (dr < 0.07) return hex('#3b3c40'); // the foot, and its shadow
+  if (guard && Math.abs(an - (RAIL_CENTRE - GUARD_INSET)) < 0.03) return hex('#6a6d72');
   const onSleeper = an < d.len / 2 && Math.abs(s) < d.width / 2;
   if (onSleeper && dr < d.seat.across / 2 && Math.abs(s) < d.seat.along / 2) return hex(d.seat.colour);
   if (onSleeper) return shade(hex(d.colour), 0.92 + 0.12 * stone(n * 0.3, s * 4));
@@ -221,6 +224,8 @@ function corners(path: P[]) {
 // instead of overlapping on the inside of the bend.
 const frame = (path: P[], s: number, mitre = false) => {
   const p = pointOn(path, s);
+  // a zero-length segment (a repeated point) has no direction: take the next one's
+  for (let d = 1e-3; Math.hypot(p.ux, p.uz) < 1e-9 && d < 1e4; d *= 4) { const q = pointOn(path, s + d); if (Math.hypot(q.ux, q.uz) > 1e-9) { p.ux = q.ux; p.uz = q.uz; } }
   const f = { x: p.x, z: p.z, ux: p.ux, uz: p.uz, nx: -p.uz, nz: p.ux, k: 1 };
   if (!mitre) return f;
   const q = pointOn(path, s + 1e-4);
@@ -251,18 +256,22 @@ export class TrackBuilder {
 
   build(): Track {
     const bed = { timber: new Tris(), concrete: new Tris() }, open = new Tris();
-    const rails = new Map<number, Tris>(), inst = new Map<string, THREE.Matrix4[]>();
-    const railsOf = (k: number) => { let t = rails.get(k); if (!t) rails.set(k, (t = new Tris())); return t; };
-    const instOf = (kind: SleeperKind, k: number) => { const key = `${kind}:${k}`; let a = inst.get(key); if (!a) inst.set(key, (a = [])); return a; };
+    const rails = new Map<string, Tris>(), inst = new Map<string, THREE.Matrix4[]>();
+    const railsOf = (k: string) => { let t = rails.get(k); if (!t) rails.set(k, (t = new Tris())); return t; };
+    const instOf = (kind: SleeperKind, k: string) => { const key = `${kind}:${k}`; let a = inst.get(key); if (!a) inst.set(key, (a = [])); return a; };
     const m4 = new THREE.Matrix4(), X = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3();
     const ballastRuns = this.runs.filter((r) => r.form === 'ballast');
     const joined = (r: TrackRun, s: number) => ballastRuns.some((o) => o !== r && o.path === r.path && (Math.abs(o.s0 - s) < 1e-3 || Math.abs(o.s1 - s) < 1e-3));
-    // chunks are counted along each path, so a run's pieces and its neighbours share them
-    const chunkOf = (r: TrackRun, s: number) => this.runs.indexOf(this.runs.find((o) => o.path === r.path)!) * 100000 + Math.floor(s / CHUNK);
+    // chunks are squares of ground CHUNK across, so short runs (and neighbouring lines) share them
+    const chunkOf = (r: TrackRun, s: number) => { const p = pointOn(r.path, s); return `${Math.floor(p.x / CHUNK)},${Math.floor(p.z / CHUNK)}`; };
     for (const r of this.runs) {
       // samples along the run, and at every corner of its path (mitred there)
+      // (regular samples too near a corner are dropped: a square ring just short of a mitred one
+      // would cross it on the inside of the bend)
       const cs0 = corners(r.path).filter((d) => d > r.s0 + 1e-3 && d < r.s1 - 1e-3);
-      const ss = [...new Set([...samples(r.s0, r.s1, r.step ?? 3), ...cs0])].sort((a, b) => a - b).filter((s, i, a) => i === 0 || s - a[i - 1] > 1e-3);
+      const clear = bedWidth(r.tracks).toe * 0.25 + 0.5;
+      const regular = samples(r.s0, r.s1, r.step ?? 3).filter((s, i, a) => i === 0 || i === a.length - 1 || cs0.every((d) => Math.abs(d - s) > clear));
+      const ss = [...new Set([...regular, ...cs0])].sort((a, b) => a - b).filter((s, i, a) => i === 0 || s - a[i - 1] > 1e-3);
       const fr = ss.map((s) => frame(r.path, s, cs0.some((d) => Math.abs(d - s) < 1e-3))), lv = ss.map((s) => r.level(s));
       const cs = trackCentres(r.tracks), c0 = cs[0], w = bedWidth(r.tracks);
       const kind: SleeperKind = r.form === 'open' ? 'timber' : sleeperKind(r.year);
@@ -345,14 +354,19 @@ export class TrackBuilder {
     group.add(near, far);
     const track: Track = {
       group, near, far, sleepers: count, detailed: false,
+      // (with a little hysteresis, so a camera resting at the threshold doesn't flip back and forth)
       setDetail(mpp: number) {
-        const on = mpp < DETAIL_MPP;
+        const on = track.detailed ? mpp < DETAIL_MPP * 1.04 : mpp < DETAIL_MPP * 0.96;
         near.visible = on; far.visible = !on; track.detailed = on;
         return on;
       },
+      // frees the geometries and the sleepers' instance buffers; textures and materials are shared
       dispose() {
         const seen = new Set<THREE.BufferGeometry>();
-        group.traverse((o) => { if (o instanceof THREE.Mesh && !seen.has(o.geometry)) { seen.add(o.geometry); o.geometry.dispose(); } });
+        group.traverse((o) => {
+          if (o instanceof THREE.InstancedMesh) o.dispose();
+          if (o instanceof THREE.Mesh && !seen.has(o.geometry)) { seen.add(o.geometry); o.geometry.dispose(); }
+        });
       },
     };
     track.setDetail(Infinity);

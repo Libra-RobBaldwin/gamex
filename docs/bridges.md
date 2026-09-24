@@ -113,8 +113,8 @@ const geo = buildBridge(opt.crossing!, opt.layout!, { surface: false }); // the 
 const { object, setOpen, setDetail } = bridgeObject(geo); // one mesh per material; setOpen(0..1) lifts leaves
 ```
 
-On a railway the deck's track is laid by `track.ts` unless `buildBridge(..., { track: false })`
-asks for the old plain ballast and bar rails. The deck's slab then stops at the track's
+On a railway, `buildBridge(..., { track: true })` asks for detailed track from `track.ts` instead
+of the plain ballast and bar rails (the default, so `parts` stay as they were). The deck's slab then stops at the track's
 formation, and its runs come back in `geo.track`. `bridgeObject()` builds them, or adds them to
 your own `TrackBuilder` if you pass one (`bridgeObject(geo, mats, { track: builder })`), so all
 the track in a scene is built together. Call `setDetail(metresPerPixel)` when the camera changes.
@@ -188,12 +188,16 @@ open deck, the bed the timbers sit on. Rail heads stand 0.25 m above it.
 - **Near look** (a sleeper pitch covers five or more pixels, `DETAIL_MPP` = 0.13 m a pixel):
   the same bed with a plain-stones texture, real rails (a ten-sided head, web and foot section)
   and instanced sleepers, each exactly over its painted twin so the switch doesn't shift
-  anything. Sleepers and rails are built in chunks of about 120 m, one instanced mesh and one
-  rail mesh per chunk, so zoomed in only the chunks on screen are drawn.
+  anything. Sleepers and rails are built in chunks, 120 m squares of ground, one instanced mesh
+  and one rail mesh per chunk (short runs share them), so zoomed in only the chunks on screen are
+  drawn. The painted rails are their true width and colour, so the two looks match at the switch,
+  and the switch has 4% hysteresis so a camera resting on it doesn't flicker between them.
 - **Corners:** the bed and rails are mitred at every corner of the path, and sleepers turn with
   the track over three metres, so polylines with sharp corners still look right.
 - **Cost:** a sleeper with its two chairs is 30 triangles; rails are 22 triangles per rail per
   3 m. Nothing runs per frame: `setDetail()` only flips two groups' visibility.
+- **Disposal:** `track.dispose()` frees its geometries and the sleepers' instance buffers;
+  `bridgeScene(...).dispose()` does the same for a whole scene. Textures and materials are shared.
 
 ### Earthworks (`earthworks.ts`)
 
@@ -245,8 +249,9 @@ the fixes it forced follow:
    the whole cross-section if the game wants its embankments to match.
 4. Call `track.setDetail(metresPerPixel(camera, bufferHeight))` from the camera's change handler
    (not every frame), once for all tiles.
-5. On a bridge, pass the network's builder to `bridgeObject(geo, mats, { track: builder })`, so
-   the deck's track joins the approach's without a seam.
+5. On a bridge, build with `buildBridge(crossing, layout, { track: true })` and pass the
+   network's builder to `bridgeObject(geo, mats, { track: builder })`, so the deck's track joins
+   the approach's without a seam.
 6. Dispose with `track.dispose()` when a tile is rebuilt. The textures and materials are shared
    and stay.
 

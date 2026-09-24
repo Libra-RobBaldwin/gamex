@@ -79,6 +79,7 @@ function place() {
 let root: THREE.Group | null = null;
 let track: Track | null = null;
 let detail: ((mpp: number) => void) | null = null;
+let disposeScene: (() => void) | null = null;
 const bufferSize = new THREE.Vector2();
 let worldR = 1000; // radius of the scene, for the camera's depth range
 let lifter: ((t: number) => void) | null = null;
@@ -92,10 +93,11 @@ const money = (v: number) => (v >= 1e6 ? `£${(v / 1e6).toFixed(2)}m` : v >= 1e4
 const realMoney = (v: number) => (v >= 1e6 ? `£${(v / 1e6).toFixed(1)}m` : `£${Math.round(v / 1000)}k`);
 
 function show(sc: Scenario, c: Crossing, lay: BridgeLayout) {
-  if (root) { scene.remove(root); root.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); }); }
+  if (root) { scene.remove(root); disposeScene?.(); }
   root = null;
   lifter = null;
   const bs = bridgeScene(sc, c, lay);
+  disposeScene = bs.dispose;
   root = bs.group;
   lifter = bs.setOpen;
   detail = bs.setDetail;
