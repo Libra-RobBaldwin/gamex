@@ -22,6 +22,8 @@ for (const map of maps) {
   const start = await page.evaluate(() => ({ ms: Math.round(performance.now()), stages: window.proto.loading.times.map((t) => `${t.label}: ${Math.round(t.ms)}`) }));
   await page.waitForFunction(() => window.__perf, null, { timeout: 300000 });
   const wall = Date.now() - t0;
+  // (a streamed map: the tiles off screen stream in after the first frame, a few milliseconds a frame)
+  const settled = await page.waitForFunction(() => !window.proto.regionView || window.proto.regionView.stream.settled(), null, { timeout: 180000, polling: 500 }).then(() => page.evaluate(() => Math.round(performance.now())), () => 'not settled');
   // (views: the whole map from as far out as the camera goes, and close over the busiest centre)
   const views = await page.evaluate(() => {
     const P = window.proto, lim = P.nav.limits ?? {}, s = [...(P.map.settlements ?? [])].sort((a, b) => b.r - a.r)[0];
@@ -30,6 +32,10 @@ for (const map of maps) {
   });
   for (const [name, v] of Object.entries(views)) {
     await page.evaluate((v) => { const P = window.proto; P.nav.animateTo({ ...P.view, x: v.x, z: v.z, h: v.h }); }, v);
+    // (a streamed map: once the camera's there, every tile gets its level before frames are timed)
+    await page.waitForTimeout(3000);
+    const streamMs = await page.evaluate(async () => { const P = window.proto, R = P.regionView; if (!R) return 0; const t0 = performance.now(); await R.settle(P.view, innerWidth / innerHeight, undefined, true); return Math.round(performance.now() - t0); });
+    if (streamMs) console.log(map, name, 'streamed in', streamMs, 'ms more');
     for (const t of tiers) {
       await page.evaluate((t) => window.proto.quality(t), t);
       await page.waitForTimeout(2500);
@@ -71,8 +77,8 @@ for (const map of maps) {
   }, views.near);
   console.log(map, 'edit', JSON.stringify(edit));
   results.push({ map, edit });
-  results.push({ map, startMs: start.ms, wallMs: wall, stages: start.stages, errors: errs.slice(0, 5) });
-  console.log(map, 'start', start.ms, 'ms (wall', wall, ')', errs.length ? `errors: ${errs.slice(0, 3).join(' | ')}` : 'no errors');
+  results.push({ map, startMs: start.ms, settledMs: settled, wallMs: wall, stages: start.stages, errors: errs.slice(0, 5) });
+  console.log(map, 'start', start.ms, 'ms (wall', wall, ', streamed in by', settled, ')', errs.length ? `errors: ${errs.slice(0, 3).join(' | ')}` : 'no errors');
   console.log('  ' + start.stages.join('\n  '));
   await page.close();
 }

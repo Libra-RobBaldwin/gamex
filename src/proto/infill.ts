@@ -4,7 +4,7 @@
 // park, a planted verge. This finds the gaps on a 5 m grid and decides what each becomes.
 import { CIVIC } from './buildgen';
 import type { RegionKind } from './buildgen';
-import { closestOnSeg, pathLength, pointAt, rng, type Lot, type Network, type P } from './roads';
+import { closestOnPath, closestOnSeg, pathLength, pointAt, rng, type Lot, type Network, type P, type RSeg } from './roads';
 
 export const CELL = 5;
 export interface Region { id: string; cells: P[]; kind: RegionKind; seed: number; roadEdges: [number, number, number, number][]; centre: P }
@@ -72,6 +72,41 @@ export function findRegions(net: Network, pending: Lot[], within?: Box) {
       else if (occ[k] === FREE && landNear(net, p)) occ[k] = ROAD;
     }
     return occ[k];
+  };
+
+  // For placing community buildings: the frontage roads and the plots near a point, from grids made
+  // the first time they're needed (asking every road and plot on a big map, for each spot tried, cost
+  // seconds). They answer as Network.nearestSeg and lotFree do: the same roads, in the same order.
+  const G = 60, gk = (i: number, j: number) => `${i},${j}`;
+  let segGrid: Map<string, RSeg[]> | null = null, lotGrid: Map<string, Lot[]> | null = null;
+  const nearestFrontage = (p: P, max: number) => {
+    if (!segGrid) {
+      segGrid = new Map();
+      for (const s of net.segs.values()) {
+        if (!net.def(s).frontage) continue;
+        const path = net.path(s);
+        const bx0 = Math.min(...path.map((q) => q.x)) - max, bx1 = Math.max(...path.map((q) => q.x)) + max, bz0 = Math.min(...path.map((q) => q.z)) - max, bz1 = Math.max(...path.map((q) => q.z)) + max;
+        for (let i = Math.floor(bx0 / G); i <= Math.floor(bx1 / G); i++) for (let j = Math.floor(bz0 / G); j <= Math.floor(bz1 / G); j++) { const k = gk(i, j), a = segGrid.get(k); if (a) a.push(s); else segGrid.set(k, [s]); }
+      }
+    }
+    let best: { seg: RSeg; x: number; z: number; s: number; ux: number; uz: number } | null = null, bd = max;
+    for (const s of segGrid.get(gk(Math.floor(p.x / G), Math.floor(p.z / G))) ?? []) {
+      const c = closestOnPath(p, net.path(s));
+      if (c.d < bd) { bd = c.d; best = { seg: s, x: c.x, z: c.z, s: c.s, ux: c.ux, uz: c.uz }; }
+    }
+    return best;
+  };
+  const lotFree = (l: Lot) => {
+    if (!lotGrid) {
+      lotGrid = new Map();
+      for (const o of net.lots) {
+        const c = net.parcelCentre(o), r = net.parcelR(o);
+        for (let i = Math.floor((c.x - r) / G); i <= Math.floor((c.x + r) / G); i++) for (let j = Math.floor((c.z - r) / G); j <= Math.floor((c.z + r) / G); j++) { const k = gk(i, j), a = lotGrid.get(k); if (a) a.push(o); else lotGrid.set(k, [o]); }
+      }
+    }
+    const r = Math.hypot(l.w + 1, l.d + 1) / 2, near = new Set<Lot>();
+    for (let i = Math.floor((l.x - r) / G); i <= Math.floor((l.x + r) / G); i++) for (let j = Math.floor((l.z - r) / G); j <= Math.floor((l.z + r) / G); j++) for (const o of lotGrid.get(gk(i, j)) ?? []) near.add(o);
+    return net.lotFree(l, [], near);
   };
 
   // gaps: connected free cells that are near both a road and buildings
@@ -145,7 +180,7 @@ export function findRegions(net: Network, pending: Lot[], within?: Box) {
           const spec = CIVIC[arch];
           for (const [a, b] of touching.slice().sort(() => rand() - 0.5).slice(0, 10)) {
             const p = { x: cx(a), z: cz(b) };
-            const q = net.nearestSeg(p, 30, (s) => net.def(s).frontage);
+            const q = nearestFrontage(p, 30);
             if (!q) continue;
             const half = net.half(q.seg);
             const side = (p.x - q.x) * -q.uz + (p.z - q.z) * q.ux > 0 ? 1 : -1;
@@ -156,7 +191,7 @@ export function findRegions(net: Network, pending: Lot[], within?: Box) {
             };
             // the whole plot has to sit on the gap (a little slack at the road edge)
             const c = net.parcelCentre(lot), co = Math.cos(lot.rot), si = Math.sin(lot.rot), D = lot.d + lot.front + lot.back;
-            let fits = net.lotFree(lot);
+            let fits = lotFree(lot);
             for (let u = -lot.pw / 2 + 1; fits && u <= lot.pw / 2 - 1; u += 2)
               for (let v = -D / 2 + 1; fits && v <= D / 2 - 2; v += 2) if (!inside(c.x + u * co - v * si, c.z + u * si + v * co)) fits = false;
             if (fits) { civic = lot; break; }

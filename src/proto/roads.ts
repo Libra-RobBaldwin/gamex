@@ -785,14 +785,15 @@ export class Network {
     return false;
   }
 
-  lotFree(l: Lot, extra: Lot[] = []) {
+  // (`near`: the plots that could be in the way, when the caller already knows them; all by default)
+  lotFree(l: Lot, extra: Lot[] = [], near: Iterable<Lot> = this.lots) {
     const poly = rectCorners(l.x, l.z, l.rot, l.w + 1, l.d + 1);
     const r = Math.hypot(l.w + 1, l.d + 1) / 2;
     if (poly.some((p) => this.isWater(p) || Math.abs(p.x) > this.bound || Math.abs(p.z) > this.bound)) return false;
     if (!this.land.free(poly)) return false;
     // a building can't go on somebody else's plot (neighbouring plots may touch)
     const foot = rectCorners(l.x, l.z, l.rot, l.w - 0.4, l.d - 0.4);
-    for (const o of [...this.lots, ...extra]) {
+    for (const o of [...near, ...extra]) {
       if (dist(this.parcelCentre(o), l) > r + this.parcelR(o)) continue;
       if (polysOverlap(foot, this.parcelRect(o))) return false;
     }

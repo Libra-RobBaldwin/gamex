@@ -16,6 +16,7 @@ import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
 import { patchGround, setGroundQuality } from './ground';
+import { Occupancy, planHedges, type HedgeTree, type Piece } from './ground/hedgerows';
 import { GameWater, LAKE, WATER_LEVEL } from './game/water';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
@@ -370,7 +371,7 @@ function commitRoads(made: number[] = []) {
   else lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
-  if (regionView) { gameGround.changed(editBoxes); infillBoxes.push(...editBoxes); }
+  if (regionView) { gameGround.changed(editBoxes); regionView.groundChanged(editBoxes); infillBoxes.push(...editBoxes); }
   else gameGround.invalidate();
   refreshEdge();
 }
@@ -390,7 +391,16 @@ const CH = BIG ? TILE_CELL : 120; // (bigger on a big map, a quarter of a tile: 
 const chunks = new Map<string, { members: Set<Built>; group: THREE.Group; dirty: boolean }>();
 // A big map is drawn in 1 km tiles, each at a level of detail picked from the zoom and whether it's
 // in view (game/regionview.ts); the invented town is drawn whole, as it always was.
-const regionView = BIG ? new RegionView({ scene, net, junctions, editing: () => editJ, treeMats: { trunk: trunkMat, crown: crownMat }, chunks, bound: EDGE, ground: new Set([...GRASS_MATS, ...grassMats()]) }) : null;
+// (its hedgerows are planted a tile at a time, on the near tiles: from the ground's own field layout)
+let hedgeOcc: { input: unknown; occ: Occupancy } | null = null;
+function hedgesIn(box: { x0: number; z0: number; x1: number; z1: number }) {
+  const L = gameGround.ground.layout, R = gameGround.ground.cover!.region, m = 5;
+  if (hedgeOcc?.input !== L.input) hedgeOcc = { input: L.input, occ: new Occupancy(L.input) };
+  const pieces: Piece[] = [], trees: HedgeTree[] = [];
+  for (const g of planHedges(L, box, hedgeOcc.occ, true, { x0: R.x0 + m, z0: R.z0 + m, x1: R.x0 + R.size - m, z1: R.z0 + R.size - m })) { pieces.push(...g.pieces); trees.push(...g.trees); }
+  return { pieces, trees };
+}
+const regionView = BIG ? new RegionView({ scene, net, junctions, editing: () => editJ, treeMats: { trunk: trunkMat, crown: crownMat }, chunks, bound: EDGE, ground: new Set([...GRASS_MATS, ...grassMats()]), hedges: hedgesIn }) : null;
 
 function bakeGroup(group: THREE.Group) {
   group.updateMatrixWorld(true);
@@ -555,6 +565,7 @@ function refreshInfillWithin(boxes: Box[]) {
   for (const r of res.regions) addInfill(r);
   refreshTrees([G]);
   gameGround.changed([G]);
+  regionView?.groundChanged([G]);
 }
 
 // the centre to lay a road's plots out from: its settlement's, as central as its size says (region/mapspec.ts)
@@ -1956,6 +1967,7 @@ setType('street');
 resize();
 await loading.stage('Parks, playgrounds and car parks', 0.14);
 refreshInfill();
+infillBoxes.length = 0; // (the whole map was just looked at)
 await loading.stage(MAP.style === 'arctic' ? 'Laying the snow' : MAP.style === 'desert' ? 'Spreading the sand' : 'Painting the fields and woods', 0.07);
 gameGround.start(trees);
 refreshTrees();
@@ -2073,7 +2085,7 @@ const town = new TownEconomy({
   net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, rail: railGame.econ(),
   standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
   free: () => queue,
-  build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); },
+  build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); regionView?.groundChanged([{ x0: l.x - 40, z0: l.z - 40, x1: l.x + 40, z1: l.z + 40 }]); },
   rebuild: (l, kind) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; l.kind = kind; regenerate(b); placesDirty = true; },
   clear: (l) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; net.lots = net.lots.filter((x) => x !== l); demolish(b); queue.push(l); },
 });

@@ -28,6 +28,8 @@ import { TILE, keyOf, parseKey, type TileKey } from '../world/tiles';
 import { SURFACES, drawRoads, structures, Flat, Solid, type Lamp } from '../roaddraw';
 import { kerbOf, type Lot, type Network, type P, type RSeg } from '../roads';
 import type { Junction } from '../junction';
+import { Hedges } from '../ground/hedges';
+import type { HedgeTree, Piece } from '../ground/hedgerows';
 
 export const CELL = 250; // a road cell: a tile is 4 × 4 of them (and the building chunks are cells)
 const PER = TILE / CELL;
@@ -47,6 +49,8 @@ export interface RegionHost {
   chunks: Map<string, ChunkLike>; // building chunks, CELL metres square
   bound: number;
   ground: Set<THREE.Material>; // grass drawn in the ground's own look (lawns, verges): the ground under a merged tile shows it
+  // the hedgerows (and their trees) whose middles are in a box: planted on near tiles only
+  hedges?: (box: { x0: number; z0: number; x1: number; z1: number }) => { pieces: Piece[]; trees: HedgeTree[] };
 }
 export interface Tree { x: number; z: number; s: number; kind: number }
 export interface View { x: number; z: number; h: number; el: number; az: number }
@@ -58,10 +62,11 @@ interface Tile {
   cells: Map<string, Cell>;
   near: { group: THREE.Group; lamps: Lamp[]; sig: string } | null; // the cells' roads, merged
   ribbon: { mesh: THREE.Mesh | null; sig: string } | null;
-  bld: { mid: THREE.Mesh | null; far: THREE.Mesh | null; stale: boolean };
+  bld: { mid: THREE.Mesh | null; far: THREE.Mesh | null; stale: boolean; version: number };
   trees: { full: THREE.InstancedMesh[]; low: THREE.InstancedMesh[] };
   busy: boolean; again: boolean; // a refresh under way, and another wanted after it
   bldDue: number; // when changed buildings are next merged again
+  hedge: { h: Hedges | null; stale: boolean; due: number };
 }
 
 const cellKey = (ci: number, cj: number) => `${ci},${cj}`;
@@ -70,6 +75,7 @@ export const chunkTile = (chunk: string) => { const [a, b] = chunk.split(',').ma
 
 // one flat colour for a material: its colour, times its texture's average if it has one
 const matCol = new WeakMap<THREE.Material, THREE.Color>();
+let probe: CanvasRenderingContext2D | null = null;
 function colourOf(m: THREE.Material): THREE.Color {
   let c = matCol.get(m);
   if (c) return c;
@@ -78,9 +84,8 @@ function colourOf(m: THREE.Material): THREE.Color {
   const img = mm.map?.image as CanvasImageSource & { width?: number } | undefined;
   if (img && (img as { width?: number }).width) {
     try {
-      const cv = document.createElement('canvas');
-      cv.width = cv.height = 4;
-      const x = cv.getContext('2d', { willReadFrequently: true })!;
+      const x = (probe ??= (() => { const cv = document.createElement('canvas'); cv.width = cv.height = 4; return cv.getContext('2d', { willReadFrequently: true })!; })());
+      x.clearRect(0, 0, 4, 4);
       x.drawImage(img, 0, 0, 4, 4);
       const d = x.getImageData(0, 0, 4, 4).data;
       let r = 0, g = 0, b = 0;
@@ -96,14 +101,26 @@ function colourOf(m: THREE.Material): THREE.Color {
 class Painter {
   pos: number[] = []; nor: number[] = []; col: number[] = [];
   add(g: THREE.BufferGeometry, c: THREE.Color) {
-    const p = g.getAttribute('position'), n = g.getAttribute('normal'), vc = g.getAttribute('color'), idx = g.index;
+    const p = g.getAttribute('position') as THREE.BufferAttribute, n = g.getAttribute('normal') as THREE.BufferAttribute | undefined, vc = g.getAttribute('color') as THREE.BufferAttribute | undefined, idx = g.index;
     if (!p) return;
+    // (straight from the arrays: the attributes baked buildings have are plain, three to a vertex)
+    const plain = (a?: THREE.BufferAttribute) => !a || (a.itemSize === 3 && !a.normalized && !(a as unknown as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute);
     const count = idx ? idx.count : p.count;
+    if (!plain(p) || !plain(n) || !plain(vc)) {
+      for (let k = 0; k < count; k++) {
+        const v = idx ? idx.getX(k) : k;
+        this.pos.push(p.getX(v), p.getY(v), p.getZ(v));
+        if (n) this.nor.push(n.getX(v), n.getY(v), n.getZ(v)); else this.nor.push(0, 1, 0);
+        if (vc) this.col.push(vc.getX(v) * c.r, vc.getY(v) * c.g, vc.getZ(v) * c.b); else this.col.push(c.r, c.g, c.b);
+      }
+      return;
+    }
+    const P = p.array, N = n?.array, C = vc?.array, I = idx?.array, pos = this.pos, nor = this.nor, col = this.col;
     for (let k = 0; k < count; k++) {
-      const v = idx ? idx.getX(k) : k;
-      this.pos.push(p.getX(v), p.getY(v), p.getZ(v));
-      if (n) this.nor.push(n.getX(v), n.getY(v), n.getZ(v)); else this.nor.push(0, 1, 0);
-      if (vc) this.col.push(vc.getX(v) * c.r, vc.getY(v) * c.g, vc.getZ(v) * c.b); else this.col.push(c.r, c.g, c.b);
+      const v = (I ? I[k] : k) * 3;
+      pos.push(P[v], P[v + 1], P[v + 2]);
+      if (N) nor.push(N[v], N[v + 1], N[v + 2]); else nor.push(0, 1, 0);
+      if (C) col.push(C[v] * c.r, C[v + 1] * c.g, C[v + 2] * c.b); else col.push(c.r, c.g, c.b);
     }
   }
   flat(pos: number[], c: THREE.Color, normals = false) {
@@ -141,7 +158,7 @@ export class RegionView {
   private segCells = new Map<number, string>(); // (each road's cell, and each junction's: from roadsChanged)
   private nodeCells = new Map<number, string>();
   private chunkTiles = new Map<string, TileKey>();
-  stats = { cellsDrawn: 0, ribbons: 0, merges: 0, buildings: 0, lastEditMs: 0 };
+  stats = { cellsDrawn: 0, ribbons: 0, merges: 0, buildings: 0, hedgeMs: 0 };
 
   constructor(private host: RegionHost) {
     this.root.name = 'region-tiles';
@@ -208,7 +225,7 @@ export class RegionView {
     let t = this.tiles.get(key);
     if (!t) {
       const { i, j } = parseKey(key);
-      t = { key, i, j, shown: null, cells: new Map(), near: null, ribbon: null, bld: { mid: null, far: null, stale: true }, trees: { full: [], low: [] }, busy: false, again: false, bldDue: 0 };
+      t = { key, i, j, shown: null, cells: new Map(), near: null, ribbon: null, bld: { mid: null, far: null, stale: true, version: 0 }, trees: { full: [], low: [] }, busy: false, again: false, bldDue: 0, hedge: { h: null, stale: true, due: 0 } };
       this.tiles.set(key, t);
     }
     return t;
@@ -242,27 +259,86 @@ export class RegionView {
     (this.stream.rings as Ring[]).splice(0, this.stream.rings.length, ...rings);
     // (the look-at point, the zoom as its span so a zoom re-picks the levels, and which way it looks)
     this.stream.update({ x: v.x, z: v.z, span: v.h, dir: { x: -Math.sin(v.az), z: -Math.cos(v.az) } });
-    this.pump();
+    const R = this.reach(v, aspect);
+    this.ahead = this.band === 'far' ? null : this.band === 'near' ? { x: v.x, z: v.z, nearR: R + TILE, midR: 2 * R + TILE } : { x: v.x, z: v.z, nearR: Math.min(R, 1500), midR: R + TILE };
+    void this.pump();
     // the building chunks: textured only where the tile is near
     for (const [k, c] of this.host.chunks) { const t = this.tiles.get(this.tileOfChunk(k)); c.group.visible = !t || t.shown === 'near' || t.shown === null; }
     // buildings that changed are merged again at most every few seconds a tile (the town grows all the time)
     const now = performance.now();
-    for (const t of this.tiles.values()) if (t.bld.stale && t.bldDue && now > t.bldDue && (t.shown === 'mid' || t.shown === 'far')) { t.bldDue = 0; this.stale(t); }
+    for (const t of this.tiles.values()) {
+      if (t.bld.stale && t.bldDue && now > t.bldDue && (t.shown === 'mid' || t.shown === 'far')) { t.bldDue = 0; this.stale(t); }
+      if (t.hedge.stale && t.hedge.due && now > t.hedge.due && (t.shown === 'near' || t.shown === 'mid')) { t.hedge.due = 0; this.stale(t); }
+    }
   }
-  // let waiting slices run while there's time left this frame (always one)
-  private pump() {
+  // Let waiting slices run, one at a time (each runs as soon as it's let go, before the next is
+  // looked at), while there's time left this frame: always one. When the page is idle between
+  // frames, more run then.
+  private pumping = false;
+  private async pump() {
+    if (this.pumping) return;
+    this.pumping = true;
     let n = 0;
-    while (this.waiting.length && (n === 0 || performance.now() - this.frameStart < this.budget)) { this.waiting.shift()!(); n++; }
+    while (this.waiting.length && (n === 0 || performance.now() - this.frameStart < this.budget)) {
+      this.waiting.shift()!();
+      n++;
+      await Promise.resolve(); await Promise.resolve(); // (the slice's work runs here)
+    }
+    this.pumping = false;
+    this.idle();
+  }
+  private idleArmed = false;
+  private idle() {
+    if (this.idleArmed || typeof requestIdleCallback === 'undefined') return;
+    if (!this.waiting.length && !this.prefetch()) return;
+    this.idleArmed = true;
+    requestIdleCallback(async (d) => {
+      this.idleArmed = false;
+      while (this.waiting.length && d.timeRemaining() > 8 && !this.pumping) { this.waiting.shift()!(); await Promise.resolve(); await Promise.resolve(); }
+      this.idle();
+    });
+  }
+  // With nothing else to do, the page idle: get ready for where the camera may go next, so a zoom
+  // or a pan finds the levels it wants already made and only swaps them in. Near detail for the
+  // tiles just beyond the view (or in it, zoomed out a little), middle detail a ring further.
+  // One tile at a time; returns whether it started one.
+  private ahead: { x: number; z: number; nearR: number; midR: number } | null = null;
+  private prefetching = false;
+  private prefetch() {
+    const a = this.ahead;
+    if (!a || this.prefetching || this.stream.pending().length) return false;
+    const dist = (t: Tile) => Math.hypot(Math.max(t.i * TILE - a.x, 0, a.x - (t.i + 1) * TILE), Math.max(t.j * TILE - a.z, 0, a.z - (t.j + 1) * TILE));
+    const want: { t: Tile; lod: Lod; d: number }[] = [];
+    for (const t of this.tiles.values()) {
+      if (t.busy) continue;
+      const d = dist(t);
+      if (d < a.nearR && t.shown !== 'near' && this.cellsOf(t).length && (!t.near || t.near.sig !== this.tileSig(t))) want.push({ t, lod: 'near', d });
+      else if (d < a.midR && t.shown !== 'mid' && (!t.ribbon || t.ribbon.sig !== this.tileSig(t) || !t.bld.mid || t.bld.stale)) want.push({ t, lod: 'mid', d: d + TILE });
+    }
+    if (!want.length) return false;
+    want.sort((p, q) => p.d - q.d);
+    const { t, lod } = want[0];
+    this.prefetching = true; t.busy = true;
+    void this.build(t, lod).catch((e) => console.warn('prefetch', t.key, e)).finally(() => {
+      this.prefetching = false; t.busy = false;
+      if (t.again) { t.again = false; this.stale(t); }
+    });
+    return true;
   }
   private slice(signal?: AbortSignal) {
     return new Promise<void>((res, rej) => this.waiting.push(() => (signal?.aborted ? rej(new DOMException('aborted', 'AbortError')) : res())));
   }
 
-  // Everything wanted now, built now (the loading screen, and tests): runs slices flat out.
-  async settle(v: View, aspect: number, tick?: (f: number) => Promise<void>) {
+  // What's in view, built now (the loading screen): runs slices flat out till every tile the view
+  // reaches has its level. The rest (off screen) streams in a few milliseconds a frame after; with
+  // `all`, it waits for everything (tests).
+  async settle(v: View, aspect: number, tick?: (f: number) => Promise<void>, all = false) {
+    const R = this.reach(v, aspect) + 350;
+    const inView = () => [...this.tiles.values()].filter((t) => Math.hypot(Math.max(t.i * TILE - v.x, 0, v.x - (t.i + 1) * TILE), Math.max(t.j * TILE - v.z, 0, v.z - (t.j + 1) * TILE)) <= R);
     for (let guard = 0; guard < 100000; guard++) {
       this.update(v, aspect, 40);
-      if (this.stream.settled() && !this.waiting.length && ![...this.tiles.values()].some((t) => t.busy)) break;
+      const done = all ? this.stream.settled() && !this.waiting.length && ![...this.tiles.values()].some((t) => t.busy) : inView().every((t) => t.shown !== null && t.shown === this.stream.wanted(t.key));
+      if (done && guard > 0) break;
       await new Promise((r) => setTimeout(r, 0));
       if (tick && guard % 4 === 0) { const s = this.stream.stats(); await tick((s.byLod.near + s.byLod.mid + s.byLod.far) / Math.max(1, s.wanted)); }
     }
@@ -286,9 +362,11 @@ export class RegionView {
       }
       for (const [k, c] of t.cells) if (!this.cellSigs.has(k)) { this.dropCell(c); t.cells.delete(k); changed = true; }
       if (changed || t.near?.sig !== this.tileSig(t)) { await this.slice(signal); this.mergeNear(t); }
+      if (this.host.hedges && (t.hedge.stale || !t.hedge.h)) { await this.slice(signal); this.plantHedges(t); }
     } else {
       if (!t.ribbon || t.ribbon.sig !== this.tileSig(t)) { await this.slice(signal); this.buildRibbon(t); }
-      if (t.bld.stale || !(lod === 'mid' ? t.bld.mid : t.bld.far)) { await this.slice(signal); this.buildBuildings(t, lod); }
+      if (t.bld.stale || !(lod === 'mid' ? t.bld.mid : t.bld.far)) { await this.slice(signal); await this.buildBuildings(t, lod, signal); }
+      if (lod === 'mid' && this.host.hedges && (t.hedge.stale || !t.hedge.h)) { await this.slice(signal); this.plantHedges(t); }
     }
   }
   // Put a tile's level on show (and the others away), all in one go.
@@ -298,6 +376,7 @@ export class RegionView {
     if (t.ribbon?.mesh) t.ribbon.mesh.visible = lod !== 'near';
     if (t.bld.mid) t.bld.mid.visible = lod === 'mid';
     if (t.bld.far) t.bld.far.visible = lod === 'far';
+    this.showHedges(t);
     for (const [k, c] of this.host.chunks) if (this.tileOfChunk(k) === t.key) c.group.visible = lod === 'near';
     this.showTrees(t);
     this.lampsCache = null;
@@ -453,25 +532,64 @@ export class RegionView {
     this.stats.ribbons++;
   }
 
+  // ---------- hedgerows ----------
+  // (instanced, two draw calls a tile, culled with it; only on near tiles, where they're more than a
+  // pixel or two wide)
+  private plantHedges(t: Tile) {
+    const t0 = performance.now();
+    const x0 = t.i * TILE, z0 = t.j * TILE, got = this.host.hedges!({ x0, z0, x1: x0 + TILE, z1: z0 + TILE });
+    const inside = (p: { x: number; z: number }) => p.x >= x0 && p.x < x0 + TILE && p.z >= z0 && p.z < z0 + TILE;
+    const pieces = got.pieces.filter(inside), trees = got.trees.filter(inside);
+    const old = t.hedge.h;
+    let h: Hedges | null = null;
+    if (pieces.length || trees.length) {
+      h = old ?? new Hedges();
+      h.set(pieces, trees);
+      for (const m of [h.hedges, h.trees]) { m.frustumCulled = true; m.computeBoundingSphere(); }
+      if (!old) this.root.add(h.group);
+    } else if (old) { this.root.remove(old.group); old.dispose(); }
+    t.hedge = { h, stale: false, due: 0 };
+    this.showHedges(t);
+    this.stats.hedgeMs = Math.max(this.stats.hedgeMs, performance.now() - t0);
+  }
+  // (the hedges themselves near, where they're more than a pixel wide; their trees in the middle
+  // distance too, as the woods' trees are)
+  private showHedges(t: Tile) {
+    const h = t.hedge.h;
+    if (!h) return;
+    h.group.visible = true;
+    h.hedges.visible = t.shown === 'near';
+    h.trees.visible = t.shown === 'near' || t.shown === 'mid';
+  }
+  // The ground changed in these boxes (plots built, roads): the hedgerows round them are planted again.
+  groundChanged(boxes: { x0: number; z0: number; x1: number; z1: number }[]) {
+    for (const b of boxes) for (let i = Math.floor((b.x0 - 10) / TILE); i <= Math.floor((b.x1 + 10) / TILE); i++) for (let j = Math.floor((b.z0 - 10) / TILE); j <= Math.floor((b.z1 + 10) / TILE); j++) {
+      const t = this.tiles.get(keyOf(i, j));
+      if (!t || t.hedge.stale) continue;
+      t.hedge.stale = true; t.hedge.due = performance.now() + 2000;
+    }
+  }
+
   // ---------- buildings ----------
   // A chunk's buildings changed: the tile's merged and boxed buildings are built again when next shown.
   chunkChanged(chunk: string) {
     const t = this.tile(this.tileOfChunk(chunk));
-    if (!t.bld.stale) { t.bld.stale = true; t.bldDue = performance.now() + 3000; }
+    t.bld.version++;
+    t.bld.stale = true;
+    if (!t.bldDue) t.bldDue = performance.now() + 3000;
   }
-  private buildBuildings(t: Tile, lod: Lod) {
-    const members: BuiltLike[] = [];
+  private async buildBuildings(t: Tile, lod: Lod, signal?: AbortSignal) {
+    const v0 = t.bld.version, members: BuiltLike[] = [];
     for (const [k, c] of this.host.chunks) if (this.tileOfChunk(k) === t.key) for (const b of c.members) if (!b.dying) members.push(b);
     const P = new Painter();
-    if (lod === 'mid') {
-      for (const b of members) for (const p of b.parts) if (this.solid(p.m)) P.add(p.g, colourOf(p.m));
-    } else {
-      // each building a box of its footprint and height, walls and roof in its own colours; the
-      // parks, grounds and industrial sites as they are
-      for (const b of members) {
-        if (b.region || b.lot.id < 0 || !b.lot.w) { for (const p of b.parts) if (this.solid(p.m)) P.add(p.g, colourOf(p.m)); continue; }
-        this.box(P, b);
-      }
+    let t0 = performance.now();
+    for (const b of members) {
+      // (a slice at a time: a city tile's buildings are a lot of triangles)
+      if (performance.now() - t0 > 4) { await this.slice(signal); t0 = performance.now(); }
+      // middle: as they are, in flat colours; far: each building a box of its footprint and height,
+      // walls and roof in its own colours (the parks, grounds and industrial sites as they are)
+      if (lod === 'mid' || b.region || b.lot.id < 0 || !b.lot.w) { for (const p of b.parts) if (this.solid(p.m)) P.add(p.g, colourOf(p.m)); }
+      else this.box(P, b);
     }
     const mesh = P.mesh(this.flatMat);
     if (mesh) { mesh.castShadow = true; mesh.receiveShadow = true; mesh.visible = t.shown === lod; this.root.add(mesh); }
@@ -480,7 +598,7 @@ export class RegionView {
     if (lod === 'mid') t.bld.mid = mesh; else t.bld.far = mesh;
     // (the other one is out of date now too, if the buildings changed)
     if (t.bld.stale) { const other = lod === 'mid' ? t.bld.far : t.bld.mid; if (other) { this.root.remove(other); other.geometry.dispose(); } if (lod === 'mid') t.bld.far = null; else t.bld.mid = null; }
-    t.bld.stale = false;
+    if (t.bld.version === v0) t.bld.stale = false;
     this.stats.buildings++;
   }
   // (glass and fences are left out of a merged tile, and so is grass: the ground paints its own)
