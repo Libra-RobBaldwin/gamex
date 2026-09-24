@@ -2,8 +2,8 @@
 
 `src/proto/bridges/` is a self-contained library for bridges. It holds a catalogue of bridge
 types, a chooser that picks one for a crossing, a support layout that places piers and prices
-the result, and low-poly three.js geometry for each type. The game doesn't use it yet. This page
-covers the API and the plan for plugging it in. `docs/reports/bridges.md` describes what was
+the result, and low-poly three.js geometry for each type. The game uses it through
+`src/proto/game/bridges.ts` (see **In the game**). This page covers the API and the plan for plugging it in. `docs/reports/bridges.md` describes what was
 built and why.
 
 Try it with `npx vite --port 5173`, then open `/bridges-demo.html`. It has two modes: a gallery
@@ -145,6 +145,39 @@ The layout works like this:
 
 Afterwards, piers taller than `maxPier` are refused, as is structure reaching the ground and any
 span steeper than its type allows.
+
+## In the game
+
+Steps 1–7 of the plan below are in. The glue is `src/proto/game/bridges.ts`:
+
+- `crossingOf(net, path, road)` makes the `Crossing`. It uses the water sampled along the path,
+  the roads and railways underneath from `net.crossings()`, and keep-outs for other junctions'
+  land under a raised deck.
+- `check()` in `roads.ts` calls `priceBridges()`. Inside each extent, the chooser's cost
+  replaces `RAISE_COST`. It passes a `resolve` that re-runs `solveProfile` with the over-limits
+  raised or the gradient eased. If the chosen type needs it, the raised path is the one that
+  gets built.
+- `Check.choices` lists the bridges. The blueprint card shows each one's type, length, cost and
+  first notes.
+- `RSeg.bridges` holds `{ s0, s1, type, override }` for each bridge, and nothing else is
+  stored. `build()` fills it from the blueprint. `split()` carries it to both halves.
+- `BridgeLayer.sync(net)` runs in `commitRoads()` before `drawRoads()`. It lays out each
+  segment whose path, obstacles or stored types changed, keeping the stored type while it still
+  fits. A built bridge keeps its type after that type's era ends.
+- The drawing is one merged mesh per material for every bridge together. The seed town's three
+  bridges take 3 draw calls, and all twelve types together could take at most about 15. The
+  bascule leaves are extra.
+- `structures()` in `roaddraw.ts` skips the extents. The ramps outside them get retaining walls
+  down to the ground, and the thin 24 m piers are gone.
+- To edit a bridge, tap it. Its info sheet has **Change bridge type**, which opens a sheet
+  listing this year's types: the cost and upkeep of each, the recommended one marked, and
+  refused ones greyed out with their reason. Picking one sets the override and re-commits
+  through `commitRoads()`. The editor offers only types that fit the deck as it's built.
+- `Traffic.speedCap` caps cars at the type's `roadMph` on a bridge.
+
+Not done yet: bascule closures in traffic, abnormal loads, water classes and channels (for
+water's `navLimits` and `pierBans`), and land claims for piers (steps 8–11). Money is shown but
+not charged, because the economy isn't wired in yet.
 
 ## Integration plan
 
