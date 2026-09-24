@@ -5,17 +5,19 @@
 
 // ---------------- cargo ----------------
 // Towns take goods (for shops) and materials (for works). Pay is per unit per delivery plus per
-// kilometre as the crow flies, scaled by how fast it got there against `refKmh`.
+// kilometre as the crow flies, scaled by how fast it got there against `refKmh`. The fixed part
+// builds up over the first `fullKm`, so a hop of a few hundred metres earns next to nothing
+// (the 2D game paid by distance alone) and chaining short hops can't farm it.
 export type CargoId = 'pax' | 'coal' | 'wood' | 'grain' | 'stone' | 'goods' | 'materials';
 export const FREIGHT: CargoId[] = ['coal', 'wood', 'grain', 'stone', 'goods', 'materials'];
-export const CARGO: Record<CargoId, { name: string; unit: string; base: number; perKm: number; refKmh: number }> = {
-  pax: { name: 'Passengers', unit: '', base: 1.0, perKm: 0.25, refKmh: 30 },
-  coal: { name: 'Coal', unit: 't', base: 0.6, perKm: 0.15, refKmh: 25 },
-  wood: { name: 'Timber', unit: 't', base: 0.6, perKm: 0.15, refKmh: 25 },
-  grain: { name: 'Grain', unit: 't', base: 0.6, perKm: 0.16, refKmh: 25 },
-  stone: { name: 'Stone', unit: 't', base: 0.5, perKm: 0.14, refKmh: 25 },
-  goods: { name: 'Goods', unit: 'crates', base: 1.2, perKm: 0.3, refKmh: 30 },
-  materials: { name: 'Building materials', unit: 't', base: 0.9, perKm: 0.22, refKmh: 25 },
+export const CARGO: Record<CargoId, { name: string; unit: string; base: number; fullKm: number; perKm: number; refKmh: number }> = {
+  pax: { name: 'Passengers', unit: '', base: 1.0, fullKm: 2, perKm: 0.25, refKmh: 30 },
+  coal: { name: 'Coal', unit: 't', base: 0.6, fullKm: 3, perKm: 0.15, refKmh: 25 },
+  wood: { name: 'Timber', unit: 't', base: 0.6, fullKm: 3, perKm: 0.15, refKmh: 25 },
+  grain: { name: 'Grain', unit: 't', base: 0.6, fullKm: 3, perKm: 0.16, refKmh: 25 },
+  stone: { name: 'Stone', unit: 't', base: 0.5, fullKm: 3, perKm: 0.14, refKmh: 25 },
+  goods: { name: 'Goods', unit: 'crates', base: 1.2, fullKm: 3, perKm: 0.3, refKmh: 30 },
+  materials: { name: 'Building materials', unit: 't', base: 0.9, fullKm: 3, perKm: 0.22, refKmh: 25 },
 };
 
 // ---------------- industries ----------------
@@ -123,9 +125,16 @@ export const TUNE = {
   boardMin: 1, // getting on a vehicle, however frequent
   transferMin: 5, // the dislike of changing, on top of the wait
   maxWaitMin: 30, // people plan round timetables longer than an hour, so waits cap out
+  // Routes and modes are chosen on how long a journey feels: time spent walking to a stop and
+  // waiting weighs about twice time on board (as in the DfT's WebTAG), and taking a bus or train
+  // at all (the fare, the timetable) is worth a few minutes. Reach uses plain minutes.
+  walkWeight: 2, waitWeight: 2, ptBiasMin: 5,
   transferWalkM: 250, // stops this close count as one interchange
-  maxTransitMin: 150,
-  maxPairM: 25000, // zone pairs further apart than this don't trade trips (most commutes are shorter)
+  maxTransitMin: 150, // longest journey (as it feels) worth working out
+  maxPairM: 25000, // places further apart than this don't trade trips (most commutes are shorter)
+  // Zones this close pair one to one; beyond, a zone pairs with blocks of zones, three times
+  // coarser at each step out, so the pairs grow with the zones, not their square.
+  pairCellM: 1000,
   carShare: 0.7, // residents with a car to hand
   // trips
   tripsPerDay: 2.2, // one-way trips per resident per day
@@ -140,14 +149,20 @@ export const TUNE = {
   homeBase: 0.15, // pressure for homes even with nothing in reach
   // how much each kind of reach matters to where people live; multiplied, so every one counts
   homeWeights: { work: 0.55, shop: 0.3, leisure: 0.15 },
-  reachCap: 1.25, // plenty in reach counts, but only up to this
+  reachCap: 2, // plenty in reach counts, but only up to this
   jobCap: 1.3,
   labourSlack: 0.15, // firms open a little ahead of the workers they'll need
+  supplySlack: 0.35, // and up to this much further when what they need is delivered to spare
   // what towns need fed to them
   goodsPerShopJobHour: 0.08,
   materialsPerWorksJobHour: 0.06,
   visitsPerOfficeJobDay: 0.25, // passengers arriving at the town's workplaces
-  local: { goods: 0.55, materials: 0.55, visitors: 0.6 }, // share of what the town started with that it finds for itself
+  // share of what the town started with that it finds for itself: homes for people who don't
+  // need to get to work (the retired, those working from home), and supplies for its businesses
+  local: { homes: 0.5, goods: 0.55, materials: 0.55, visitors: 0.6 },
+  // A town is lifted or held back into balance when the map is made, within this range: one far
+  // short of what it needs (an estate with no jobs in reach) still shrinks, towards its floor.
+  calibrateMin: 0.5, calibrateMax: 1.6,
   // smoothing and hysteresis
   supplyAlpha: 0.35, // a month's deliveries move the town's view of its supply this far
   demandAlpha: 0.5,
@@ -163,10 +178,13 @@ export const TUNE = {
   siteSpread: 0.25, // better-placed buildings fill first and empty last
   demolishAfter: 6, // months a building stands abandoned before it's cleared
   pendingMonths: 2, // how long a request to build waits for the game before it lapses
-  // industries (2D rules, reviewed monthly)
-  industry: { up: 1.12, down: 0.96, max: 4, min: 0.5, collectedUp: 0.6, collectedDown: 0.15, inputUp: 0.5, stockHours: 48 },
+  restMonths: 6, // a zone or building the game couldn't build on isn't asked again for this long
+  // industries (2D rules, reviewed monthly): production never falls below where it started
+  industry: { up: 1.12, down: 0.96, max: 4, min: 1, collectedUp: 0.6, collectedDown: 0.15, inputUp: 0.5, stockHours: 48 },
   indCommuteM: 3000, // an industry's jobs count for zones this close
+  freightHandleMin: 30, // loading, unloading or handing freight between yards, for choosing its route
   dwellAlpha: 0.3,
+  roomAlpha: 0.5, // a month's crowding moves a line's share of people finding room this far
 };
 export type Tune = typeof TUNE;
 

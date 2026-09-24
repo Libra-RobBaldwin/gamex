@@ -5,10 +5,12 @@
 //      shops   follow customers who can reach them and workers, capped by goods supplied
 //      offices follow workers who can reach them, capped by passengers arriving
 //      works   follow workers who can reach them, capped by building materials supplied
-//    (a town finds some of what it needs for itself: a share of what it started with)
+//    (a town finds some of what it needs for itself, a share of what it started with, and some
+//    people live there whatever they can reach, so an unserved town shrinks towards a floor)
 //  - demand is smoothed, and set against capacity with hysteresis: only months of demand above
 //    capacity build (a free plot, or a denser building where people most want to be), and only
-//    months well below it abandon the emptiest buildings, which are cleared later still;
+//    months well below it abandon the emptiest buildings, which are cleared later still, their
+//    plots kept for the same use;
 //  - occupancy drifts towards demand, faster in than out.
 // Everything that happens is explained in plain words for the town panel.
 import { BUILDINGS, ENTRY, GROWN, USES, USE_NAME, type BuildingKind, type Reason, type TownReport, type TownStatus, type Tune, type Use, type UseReport } from './econdefs';
@@ -21,19 +23,25 @@ export interface BState {
   site: number; // 0..1, how well placed: near a served stop and the middle of town
   shown: number; // vacancy last reported to the game
   densify: number; // outstanding request, 0 if none
+  rest: number; // the game couldn't rebuild it: not asked again before this month
 }
 export type PerUse = Record<Use, number>;
 export const perUse = (v = 0): PerUse => ({ home: v, shop: v, office: v, works: v, civic: v });
 
 export interface ZState extends ZoneGeo {
   idx: number; town: TState; plots: number; reserved: number; blocked: number; allow: Set<BuildingKind> | null;
+  // Plots cleared of abandoned buildings, kept for the use they were cleared from (as planning
+  // would: a cleared housing site is rebuilt as housing), so a town doesn't empty its homes only
+  // to fill their land with offices and then want the homes back.
+  cleared: PerUse;
   buildings: BState[]; indJobs: number;
   cov: number; // share of the zone (by capacity) near a served bus or rail stop
   centre: number; // 0..1, how central in its town
   cap: PerUse; occCap: PerUse; // this review's tallies
   pHome: number; labour: number; customers: number;
 }
-export interface UState { demand: number; raw: number; up: number; down: number; grew: number; shrank: number; stuck: boolean }
+// `settled`: the demand at which it last had nothing more worth giving up (0 if it hasn't)
+export interface UState { demand: number; raw: number; up: number; down: number; grew: number; shrank: number; stuck: boolean; settled: number }
 export interface Facts {
   residents: number; homes: number; vacancy: number; jobs: number; workers: number;
   reachWork: number; workCar: number; workNoCar: number; workTransit: number; reachShop: number; reachLeisure: number;
@@ -51,16 +59,18 @@ export interface TState {
   health: PerUse; // how much of each use's capacity businesses want to keep going
   history: number[];
   recent: { built: number[]; lost: number[] }; // capacity built and lost at the last few reviews
+  done: { built: number; lost: number }; // since the last review: built once the game has put it up
   facts: Facts | null;
   report: TownReport | null;
 }
 
 export function newTown(id: number, name: string, x: number, z: number, carShare: number): TState {
-  const u = (): UState => ({ demand: 0, raw: 0, up: 0, down: 0, grew: -99, shrank: -99, stuck: false });
+  const u = (): UState => ({ demand: 0, raw: 0, up: 0, down: 0, grew: -99, shrank: -99, stuck: false, settled: 0 });
   return {
     id, name, x, z, carShare, zones: [], base: perUse(), bias: perUse(1), calibrated: false, primed: false, labour: 1, customers: 1,
     supply: { goods: 0, materials: 0, visitors: 0 }, month: { goods: 0, materials: 0, visitors: 0 },
-    use: { home: u(), shop: u(), office: u(), works: u(), civic: u() }, health: perUse(1), history: [], recent: { built: [], lost: [] }, facts: null, report: null,
+    use: { home: u(), shop: u(), office: u(), works: u(), civic: u() }, health: perUse(1), history: [], recent: { built: [], lost: [] },
+    done: { built: 0, lost: 0 }, facts: null, report: null,
   };
 }
 
@@ -70,7 +80,7 @@ export interface TownCtx {
   work: Reach; shop: Reach; leisure: Reach;
   workSupply: Float64Array; shopSupply: Float64Array;
   pendingCap(t: TState, use: Use): number;
-  add(z: ZState, kind: BuildingKind): void;
+  add(z: ZState, kind: BuildingKind, cleared: boolean): void;
   densify(b: BState, kind: BuildingKind): void;
   abandon(b: BState): void; restore(b: BState): void; demolish(b: BState): void; vacate(b: BState, fraction: number): void;
   service(t: TState): { stops: number; lines: number };
@@ -120,30 +130,44 @@ export function reviewTown(t: TState, c: TownCtx) {
   supplyB.shop = T.local.goods * t.base.shop + t.supply.goods / T.goodsPerShopJobHour;
   supplyB.office = T.local.visitors * t.base.office + t.supply.visitors / (T.visitsPerOfficeJobDay / 24);
   supplyB.works = T.local.materials * t.base.works + t.supply.materials / T.materialsPerWorksJobHour;
-  // A town that starts short of what its size needs is lifted to balance, so it doesn't shrink
-  // just because of how the map was made. One that starts with more than it needs keeps the
-  // headroom and grows into it.
+  // The town as the map made it is taken to be in balance, so it neither shrinks nor grows just
+  // because of how it was laid out: one short of what its size needs is lifted, one with more
+  // is held back, within limits (so a town far short, like an estate with no jobs in reach,
+  // still shrinks, if only towards its floor).
   if (c.calibrate && !t.calibrated) {
-    for (const u of GROWN) t.bias[u] = C[u] > 0 && struct[u] > 0 ? clamp(C[u] / struct[u], 1, 1.6) : 1;
+    for (const u of GROWN) t.bias[u] = C[u] > 0 && struct[u] > 0 ? clamp(C[u] / struct[u], T.calibrateMin, T.calibrateMax) : 1;
     t.calibrated = true;
   }
   const D = perUse();
   for (const u of GROWN) {
     const us = t.use[u];
-    us.raw = u === 'home' ? t.bias.home * struct.home : Math.min(t.bias[u] * struct[u] * (1 + T.labourSlack), supplyB[u]);
+    if (u === 'home') {
+      // some people live here whatever they can reach (the retired, those working from home)
+      us.raw = Math.max(t.bias.home * struct.home, T.local.homes * t.base.home);
+    } else {
+      // Firms open a little ahead of the workers they'll need, and further when what they need
+      // is delivered to spare: well-supplied businesses draw workers, and homes follow the jobs.
+      const staffed = t.bias[u] * struct[u], ahead = staffed * (1 + T.labourSlack);
+      const spare = ahead > 0 ? clamp(supplyB[u] / ahead - 1, 0, 1) : 0;
+      us.raw = Math.min(ahead + staffed * T.supplySlack * spare, supplyB[u]);
+    }
     D[u] = us.raw;
     us.demand = c.assess && us.demand === 0 ? C[u] : us.demand + T.demandAlpha * (D[u] - us.demand);
     if (c.assess && C[u] === 0) us.demand = 0;
   }
-  let built = 0, lost = 0;
   if (!c.assess) {
-    for (const u of GROWN) {
-      const r = decide(t, u, C[u], c);
-      built += r.built; lost += r.lost;
+    for (const u of GROWN) decide(t, u, C[u], c);
+    // clear what has stood empty long enough (filtering each zone once, however many go)
+    for (const z of t.zones) {
+      const gone = new Set<BState>();
+      for (const b of z.buildings)
+        if (b.abandoned && c.month - b.since >= T.demolishAfter && t.use[b.use].up === 0) { c.demolish(b); gone.add(b); }
+      if (gone.size) z.buildings = z.buildings.filter((b) => !gone.has(b));
     }
-    for (const z of t.zones) for (const b of z.buildings)
-      if (b.abandoned && c.month - b.since >= T.demolishAfter && t.use[b.use].up === 0) c.demolish(b);
   }
+  // built counts what the game has put up (and what was brought back), not what was asked for
+  const built = c.assess ? 0 : t.done.built, lost = c.assess ? 0 : t.done.lost;
+  if (!c.assess) t.done = { built: 0, lost: 0 };
   // ---- occupancy follows demand, zone by zone ----
   for (const u of GROWN) {
     let cu = 0, wsum = 0;
@@ -211,8 +235,9 @@ function decide(t: TState, u: Exclude<Use, 'civic'>, cap: number, c: TownCtx) {
   const r = have > 0 ? us.demand / have : us.demand >= BUILDINGS[ENTRY[u]].cap * 0.7 ? T.growAt : 0;
   if (r >= T.growAt) us.up++; else if (r < T.stopGrowBelow) us.up = 0;
   if (r <= T.declineAt && have > 0) us.down++; else if (r >= T.recoverAt) us.down = 0;
+  // settled until demand recovers or falls on further
+  if (us.settled && (r >= T.recoverAt || us.demand < us.settled * 0.95)) us.settled = 0;
   us.stuck = false;
-  let built = 0, lost = 0;
   if (us.up >= T.growAfter) {
     let budget = Math.min(us.demand - have, Math.max(T.growMax * have, BUILDINGS[ENTRY[u]].cap));
     let actions = 0, total = have;
@@ -224,25 +249,25 @@ function decide(t: TState, u: Exclude<Use, 'civic'>, cap: number, c: TownCtx) {
     for (const b of empty) {
       if (budget <= 0 || actions >= T.maxActions) break;
       if (!fits(b.cap)) continue;
-      c.restore(b); budget -= b.cap; total += b.cap; built += b.cap; actions++;
+      c.restore(b); budget -= b.cap; total += b.cap; actions++;
     }
     const cands = candidates(t, u, c);
     for (const cand of cands) {
       if (budget <= 0 || actions >= T.maxActions) break;
       if (!fits(cand.gain)) continue;
-      if (cand.b) c.densify(cand.b, cand.kind); else c.add(cand.z, cand.kind);
-      budget -= cand.gain; total += cand.gain; built += cand.gain; actions++;
+      if (cand.b) c.densify(cand.b, cand.kind); else c.add(cand.z, cand.kind, !!cand.cleared);
+      budget -= cand.gain; total += cand.gain; actions++;
     }
     if (actions) { us.grew = c.month; us.up = T.growAfter - 1; } else us.stuck = !empty.length && !cands.length;
   }
-  if (us.down >= T.declineAfter) {
+  if (us.down >= T.declineAfter && !us.settled) {
     // people leave the emptiest, worst-placed buildings first; those left move to vacancies
     const live = t.zones.flatMap((z) => z.buildings.filter((b) => !b.abandoned && b.use === u && !b.densify))
       .sort((a, b) => a.occ - b.occ || a.site - b.site || a.id - b.id);
     // at most a few per cent a month, but always room for one building, or big ones never go
     const smallest = live.reduce((m, b) => Math.min(m, b.cap), Infinity);
     let excess = Math.min(cap - us.demand / T.recoverAt, Math.max(T.declineMax * cap, smallest));
-    let n = 0, left = cap;
+    let n = 0, left = cap, movers = 0;
     for (const b of live) {
       if (excess <= 0 || live.length - n <= 1) break;
       if (b.cap > excess * 1.5 && n > 0) continue;
@@ -250,15 +275,16 @@ function decide(t: TState, u: Exclude<Use, 'civic'>, cap: number, c: TownCtx) {
       // and never abandon so much that what's left is wanted enough to grow again
       if (left - b.cap <= 0 || us.demand / (left - b.cap) > T.stopGrowBelow) continue;
       left -= b.cap;
-      const movers = b.cap * b.occ;
+      movers += b.cap * b.occ;
       b.occ = 0;
       c.abandon(b);
-      excess -= b.cap; lost += b.cap; n++;
-      rehouse(live.filter((x) => !x.abandoned), movers);
+      excess -= b.cap; n++;
     }
-    if (n) us.shrank = c.month;
+    if (n) {
+      rehouse(live.filter((x) => !x.abandoned), movers);
+      us.shrank = c.month;
+    } else us.settled = us.demand; // what's left is too lumpy to give up any more: it has settled
   }
-  return { built, lost };
 }
 
 function rehouse(into: BState[], movers: number) {
@@ -269,22 +295,24 @@ function rehouse(into: BState[], movers: number) {
   for (const b of into) b.occ += (1 - b.occ) * f;
 }
 
-interface Cand { z: ZState; b?: BState; kind: BuildingKind; gain: number; score: number }
-// Where to build: a free plot where demand is keenest, or a denser building where people most
-// want to be (near a station, with nowhere left to spread), like land values rising.
+interface Cand { z: ZState; b?: BState; kind: BuildingKind; gain: number; score: number; cleared?: boolean }
+// Where to build: a free plot (or one cleared of this use) where demand is keenest, or a denser
+// building where people most want to be (near a station, with nowhere left to spread), like
+// land values rising.
 function candidates(t: TState, u: Exclude<Use, 'civic'>, c: TownCtx): Cand[] {
   const out: Cand[] = [];
   const T = c.tune;
   for (const z of t.zones) {
     const f = factorOf(t, z, u, T);
-    const free = z.plots - z.reserved;
+    const free = z.plots - z.reserved, cleared = z.cleared[u];
     const kind = ENTRY[u];
-    if (free > 0 && z.blocked <= 0 && allowed(z, kind))
-      for (let n = 0; n < Math.min(free, T.maxActions); n++)
-        out.push({ z, kind, gain: BUILDINGS[kind].cap, score: f + (u === 'office' ? 0.2 : 0.1) * z.cov + 0.05 * z.centre - 0.01 * n });
-    if (f < 1) continue;
+    if (free + cleared > 0 && z.blocked <= 0 && allowed(z, kind))
+      for (let n = 0; n < Math.min(free + cleared, T.maxActions); n++)
+        out.push({ z, kind, gain: BUILDINGS[kind].cap, score: f + (u === 'office' ? 0.2 : 0.1) * z.cov + 0.05 * z.centre - 0.01 * n, cleared: n < cleared });
+    // densify only where people want more than there is
+    if (f * t.bias[u] < 1) continue;
     for (const b of z.buildings) {
-      if (b.abandoned || b.use !== u || b.densify || b.occ < 0.85) continue;
+      if (b.abandoned || b.use !== u || b.densify || b.occ < 0.85 || b.rest > c.month) continue;
       const next = BUILDINGS[b.kind].next;
       if (!next || !allowed(z, next)) continue;
       out.push({ z, b, kind: next, gain: BUILDINGS[next].cap - b.cap, score: f + 0.15 * z.cov + (free > 0 ? -0.05 : 0.1) + 0.1 * (b.site - 0.5) });
@@ -312,6 +340,7 @@ function facts(t: TState, c: TownCtx, abandoned: number, built: number, lost: nu
   for (const z of t.zones) {
     const i = z.idx, res = z.occCap.home;
     R += res; homes += z.cap.home; near += z.cap.home * z.cov; plots += Math.max(0, z.plots - z.reserved);
+    for (const u of GROWN) plots += z.cleared[u];
     jobs += z.cap.shop + z.cap.office + z.cap.works + z.cap.civic + z.indJobs;
     wc += res * Math.min(1, c.work.car[i]); wn += res * Math.min(1, c.work.nc[i]); wp += res * Math.min(1, c.work.pt[i]);
     w += res * (cs * Math.min(1, c.work.car[i]) + (1 - cs) * Math.min(1, c.work.nc[i]));
@@ -400,16 +429,21 @@ export function report(t: TState, T: Tune): TownReport {
   };
 }
 
-// Growing or declining is judged on what was built against what was lost lately and on where
-// the population is heading, so a town adding homes while its shops close still reads growing.
+// Growing or declining is judged on what was built (and put up by the game) against what was
+// lost lately and on where the population is heading, so a town adding homes while its shops
+// close still reads growing. Demand for more that nothing comes of (it wouldn't fill another
+// building, or there's nowhere to put one) isn't growth; demand that has fallen and settled
+// isn't stalling.
 function statusOf(t: TState, T: Tune): TownStatus {
-  const f = t.facts!, h = t.history;
+  const h = t.history, f = t.facts!;
   const built = t.recent.built.reduce((a, v) => a + v, 0), lost = t.recent.lost.reduce((a, v) => a + v, 0);
   const trend = h.length >= 4 && h[h.length - 4] > 0 ? h[h.length - 1] / h[h.length - 4] - 1 : 0;
+  // demand well below what's there, counting towards giving some up
+  const falling = (u: Exclude<Use, 'civic'>) => t.use[u].down > 0 && !t.use[u].settled && f.ratio[u] <= T.declineAt;
   if (trend < -0.03 || (lost > built && trend < 0.01)) return 'declining';
   // people no longer want to live here as much: whatever went up lately, it's stalled
-  if (t.use.home.down > 0 || f.ratio.home < T.recoverAt) return 'stalling';
-  if (built > lost || trend > 0.01 || GROWN.some((u) => t.use[u].up > 0 && f.ratio[u] >= T.growAt && !t.use[u].stuck)) return 'growing';
-  if (GROWN.some((u) => t.use[u].down > 0)) return 'stalling';
+  if (falling('home')) return 'stalling';
+  if (built > lost || trend > 0.01) return 'growing';
+  if (GROWN.some(falling)) return 'stalling';
   return 'stable';
 }

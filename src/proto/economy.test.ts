@@ -187,16 +187,24 @@ describe('freight chains (ported from the 2D game)', () => {
 });
 
 describe('industry production (ported from the 2D game)', () => {
-  it('collecting most of an industry’s output raises its production; leaving it lowers it', () => {
+  // As in 2D, production falls back when an industry is left, but never below where it started
+  // (sim.ts: Math.max(1, rate * 0.96)).
+  it('collecting most of an industry’s output raises its production; leaving it lets it fall back', () => {
     const k = new Kit().industry(1, 'coal_mine', 0, 0).industry(2, 'power_station', 6000, 0).industry(3, 'coal_mine', 0, 9000);
     k.stop(1, 'lorry_depot', 50, 0).stop(2, 'lorry_depot', 5950, 0).line(1, [1, 2], 'lorry', 3);
     const e = new Economy(k.world(), k.oracles(), opts);
     months(e, 3);
-    expect(e.industry(1)!.rate).toBeGreaterThan(1.3);
-    expect(e.industry(3)!.rate).toBeLessThan(1);
+    const high = e.industry(1)!.rate;
+    expect(high).toBeGreaterThan(1.3);
+    expect(e.industry(3)!.rate).toBe(1);
     expect(e.takeEvents().some((ev) => ev.t === 'news' && /increases production/.test(ev.text))).toBe(true);
     // the power station, kept busy, grows too
     expect(e.industry(2)!.rate).toBeGreaterThan(1);
+    e.setLines([]);
+    months(e, 3);
+    expect(e.industry(1)!.rate).toBeLessThan(high);
+    months(e, 24);
+    expect(e.industry(1)!.rate).toBe(1);
   });
 });
 
@@ -226,12 +234,16 @@ describe('towns grow and shrink with how well they are fed', () => {
     expect(words.some((w) => /^shops only \d+% supplied with goods/.test(w))).toBe(true);
   });
 
+  // The town starts in balance (it used to start with room to grow from the jobs round it, and
+  // grew on that alone), so this is what the service brings: jobs from the industries it feeds and
+  // offices drawn by rail passengers, then homes for their workers, until its one plot a zone is
+  // used up and it can only get denser.
   it('a well-served town grows and gets denser', () => {
     const e = served();
     const start = e.town(1)!.residents;
     const run = months(e, 18);
     const end = run.reports[run.reports.length - 1];
-    expect(end.residents).toBeGreaterThan(start * 1.25);
+    expect(end.residents).toBeGreaterThan(start * 1.2);
     expect(run.count('add')).toBeGreaterThan(3);
     expect(run.count('densify')).toBeGreaterThan(3);
     expect(run.reports.slice(0, 12).filter((r) => r.status === 'growing').length).toBeGreaterThan(6);

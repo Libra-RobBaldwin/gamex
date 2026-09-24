@@ -40,6 +40,10 @@ interface SState extends StopPos {
   served: boolean; skim: number; // has a running passenger line; index in the skim
   consumes: (IState | TState | null)[]; // who takes each freight cargo delivered here
   carries: Uint8Array; // some line loads this cargo here
+  // freight routing, by cargo: minutes (as routes go) from arriving here, or waiting here, to
+  // somewhere that takes it; whose pool what's dropped here waits in; where the best line from
+  // here takes it
+  fArrive: Float64Array; fPool: Float64Array; drop: (SState | null)[]; next: (SState | null)[];
   visit: { town: TState; w: number }[]; // whose workplaces passengers getting off here arrive at
   inds: IState[]; // industries in reach of a freight stop, nearest first
   near: SState[]; // other freight stops close enough to hand freight between
@@ -54,7 +58,8 @@ interface IState {
   last: { produced: number; moved: number; received: number };
   out: SState[][]; // by cargo: stops that will take it away
 }
-interface Pending { req: number; t: 'add' | 'densify'; zone: ZState; kind: BuildingKind; use: Use; gain: number; month: number; building?: BState }
+// `cleared`: an add on a plot cleared of the same use (taken from the zone's `cleared` at once)
+interface Pending { req: number; t: 'add' | 'densify'; zone: ZState; kind: BuildingKind; use: Use; gain: number; month: number; building?: BState; cleared?: boolean }
 
 class Rand {
   constructor(public s: number) {}
@@ -110,6 +115,7 @@ export class Economy {
   private ctx: LineCtx;
 
   private static restoring = false; // set by load(): the save brings the towns' memory
+  private batching = false; // adding the world's zones: index them once at the end
 
   constructor(world: WorldIn, oracles: Oracles, opts: EconomyOptions = {}) {
     // tuning overrides merge one level deep, so { industry: { max: 3 } } keeps the other rules
@@ -137,14 +143,19 @@ export class Economy {
       arrive: (L, slot, people) => {
         const st = site(L, slot);
         this.totals.delivered.pax = (this.totals.delivered.pax ?? 0) + people;
-        if (!st) return;
-        for (const v of st.visit) v.town.month.visitors += people * v.w;
+        // only those going out to a workplace visit it; the rest are on their way home
+        const v = people * L.visitShare[slot];
+        if (!st || v <= 0) return;
+        for (const x of st.visit) x.town.month.visitors += v * x.w;
       },
       pool: (L, slot) => site(L, slot)?.pool ?? none,
       freight: (L, slot, c, amount) => this.freightArrives(site(L, slot), c, amount),
     };
     for (const t of world.towns) this.setTown(t);
+    this.batching = true;
     for (const z of world.zones) this.setZone(z);
+    this.batching = false;
+    this.reindexZones();
     for (const b of world.buildings) this.addBuilding(b);
     this.setIndustries(world.industries ?? []);
     this.setStops(world.stops ?? []);
@@ -173,12 +184,12 @@ export class Economy {
       return;
     }
     const zs: ZState = {
-      id: z.id, idx: -1, town, x: z.x, z: z.z, r: z.r ?? 120, plots: z.plots, reserved: 0, blocked: 0, allow,
+      id: z.id, idx: -1, town, x: z.x, z: z.z, r: z.r ?? 120, plots: z.plots, reserved: 0, blocked: 0, allow, cleared: perUse(),
       buildings: [], indJobs: 0, cov: 0, centre: 0.5, acc: [], cap: perUse(), occCap: perUse(), pHome: 1, labour: 1, customers: 1,
     };
     this.zoneMap.set(z.id, zs);
     town.zones.push(zs);
-    this.reindexZones();
+    if (!this.batching) this.reindexZones();
   }
 
   private reindexZones() {
@@ -198,22 +209,27 @@ export class Economy {
     if (!p) for (const q of this.pending.values()) if (q.t === 'add' && q.zone === z && q.use === def.use) { p = q; break; }
     if (p && p.t === 'add') {
       this.pending.delete(p.req);
-      z.reserved = Math.max(0, z.reserved - 1);
-      z.plots = Math.max(0, z.plots - 1);
+      if (!p.cleared) {
+        z.reserved = Math.max(0, z.reserved - 1);
+        z.plots = Math.max(0, z.plots - 1);
+      }
     } else p = undefined;
     const occ = b.occupancy ?? (p ? this.tune.newOccupancy : 1);
     const s: BState = {
       id: b.id, zone: z, x: b.x, z: b.z, kind: b.kind, use: def.use, cap: b.capacity ?? def.cap,
-      occ, abandoned: false, since: -1, site: 0.5, shown: Math.round((1 - occ) * 100) / 100, densify: 0,
+      occ, abandoned: false, since: -1, site: 0.5, shown: Math.round((1 - occ) * 100) / 100, densify: 0, rest: -1,
     };
     z.buildings.push(s);
     this.buildingMap.set(b.id, s);
+    // what the town asked for counts as built once it's up
+    if (p) z.town.done.built += s.cap;
   }
 
   // A building changed: densified (answering `req`), resized or moved.
   updateBuilding(id: number, patch: Partial<Pick<BuildingIn, 'kind' | 'capacity' | 'x' | 'z' | 'occupancy'>>, req?: number) {
     const b = this.buildingMap.get(id);
     if (!b) return;
+    const was = b.cap;
     if (patch.x !== undefined) b.x = patch.x;
     if (patch.z !== undefined) b.z = patch.z;
     if (patch.kind && patch.kind !== b.kind) {
@@ -225,25 +241,36 @@ export class Economy {
     } else if (patch.capacity !== undefined) b.cap = patch.capacity;
     if (patch.occupancy !== undefined) b.occ = patch.occupancy;
     const p = req !== undefined ? this.pending.get(req) : b.densify ? this.pending.get(b.densify) : undefined;
-    if (p && p.building === b) this.pending.delete(p.req);
+    if (p && p.building === b) { this.pending.delete(p.req); b.zone.town.done.built += Math.max(0, b.cap - was); }
     b.densify = 0;
   }
 
   removeBuilding(id: number) {
     const b = this.buildingMap.get(id);
     if (!b) return;
-    this.buildingMap.delete(id);
+    this.forget(b);
     b.zone.buildings = b.zone.buildings.filter((x) => x !== b);
-    for (const p of this.pending.values()) if (p.building === b) this.pending.delete(p.req);
   }
 
-  // The game couldn't do what was asked (no plot fits, say): the zone rests a while.
+  // off the books, but left in its zone's list (a town clearing many at once filters that once)
+  private forget(b: BState) {
+    this.buildingMap.delete(b.id);
+    if (b.densify) this.pending.delete(b.densify);
+    b.densify = 0;
+  }
+
+  // The game couldn't do what was asked (no plot fits, or the lot can't take the bigger
+  // building): that zone, or that building, isn't asked again for a while.
   decline(req: number) {
     const p = this.pending.get(req);
     if (!p) return;
     this.pending.delete(req);
-    if (p.t === 'add') { p.zone.reserved = Math.max(0, p.zone.reserved - 1); p.zone.blocked = 3; }
-    if (p.building) p.building.densify = 0;
+    const rest = this.tune.restMonths;
+    if (p.t === 'add') {
+      if (p.cleared) p.zone.cleared[p.use]++; else p.zone.reserved = Math.max(0, p.zone.reserved - 1);
+      p.zone.blocked = rest;
+    }
+    if (p.building) { p.building.densify = 0; p.building.rest = this.month + rest; }
   }
 
   setIndustries(list: IndustryIn[]) {
@@ -269,7 +296,9 @@ export class Economy {
       if (cur && cur.kind === s.kind) { Object.assign(cur, { x: s.x, z: s.z, name: s.name ?? cur.name, radius: s.radius ?? def.radius }); keep.set(s.id, cur); continue; }
       keep.set(s.id, {
         id: s.id, kind: s.kind as StopKind, x: s.x, z: s.z, name: s.name ?? `${def.name} ${s.id}`, def, radius: s.radius ?? def.radius,
-        pool: new Float64Array(NC), slots: [], served: false, skim: -1, consumes: FREIGHT.map(() => null), carries: new Uint8Array(NC), visit: [], inds: [], near: [], fare: 0,
+        pool: new Float64Array(NC), slots: [], served: false, skim: -1, consumes: FREIGHT.map(() => null), carries: new Uint8Array(NC),
+        fArrive: new Float64Array(NC).fill(Infinity), fPool: new Float64Array(NC).fill(Infinity), drop: FREIGHT.map(() => null), next: FREIGHT.map(() => null),
+        visit: [], inds: [], near: [], fare: 0,
         month: { boarded: 0, alighted: 0, overflow: 0 }, last: { boarded: 0, alighted: 0, overflow: 0 },
       });
     }
@@ -431,9 +460,9 @@ export class Economy {
       this.totals.delivered[cargo] = (this.totals.delivered[cargo] ?? 0) + amount;
       return;
     }
-    // nobody takes it here: it waits for the next line on (a transfer), here or at a freight stop
+    // nobody takes it here: it waits for the best line on (a transfer), here or at a freight stop
     // next door (lorries bringing coal to a railhead, say), if there's room
-    const to = st.carries[c] ? st : st.near.find((n) => n.carries[c]) ?? st;
+    const to = st.drop[c] ?? st;
     let held = 0;
     for (let k = 0; k < NC; k++) held += to.pool[k];
     to.pool[c] += Math.max(0, Math.min(amount, to.def.cap - held));
@@ -486,7 +515,7 @@ export class Economy {
     const T = this.tune, grid = new Map<number, SState[]>();
     let cell = 500;
     for (const s of this.stopMap.values()) cell = Math.max(cell, s.radius);
-    const key = (cx: number, cz: number) => (cx + 32768) * 65536 + (cz + 32768);
+    const key = (cx: number, cz: number) => (cx + 16384) * 32768 + (cz + 16384); // small integers make fast keys
     for (const s of this.stopMap.values()) {
       const k = key(Math.floor(s.x / cell), Math.floor(s.z / cell));
       (grid.get(k) ?? grid.set(k, []).get(k)!).push(s);
@@ -581,47 +610,102 @@ export class Economy {
     }
   }
 
-  // Where each freight line takes each cargo from each stop: the first stop on that consumes it,
-  // or failing that, the first where another line goes on to a stop that does (a transfer),
-  // as the 2D game's `wants`.
+  // Where freight goes. For each cargo, how long (riding, waiting for the next vehicle and
+  // handling) it takes from each freight stop to somewhere that takes it, worked back from those
+  // places. A line takes cargo from a stop only to one nearer by that measure, so freight always
+  // gets closer and can't be carried round and round for fares; where it's dropped, it waits for
+  // the best line on, there or at a yard next door. Any number of changes works (the 2D game's
+  // `wants` allowed two).
   private freightRoutes() {
+    const H = this.tune.freightHandleMin;
     const lines = this.lineList.filter((L) => !L.pax && L.running);
-    const at = (L: LineState, j: number) => this.stopMap.get(L.stops[j]);
-    for (const s of this.stopMap.values()) s.carries.fill(0);
-    const onward = new Map<SState, Uint8Array>(); // stops with a line on to a consumer, by cargo
-    for (const L of lines) {
-      L.dest.fill(-1);
-      for (let i = 0; i < L.k; i++)
-        for (let c = 0; c < NC; c++)
-          for (let d = 1; d < L.k; d++) {
-            const j = (i + d) % L.k, st = at(L, j);
-            if (L.stops[j] === L.stops[i] || !st?.consumes[c]) continue;
-            L.dest[c * L.k + i] = j;
-            const here = at(L, i);
-            if (here) (onward.get(here) ?? onward.set(here, new Uint8Array(NC)).get(here)!)[c] = 1;
-            break;
-          }
-    }
-    for (const L of lines)
-      for (let i = 0; i < L.k; i++)
-        for (let c = 0; c < NC; c++) {
-          if (L.dest[c * L.k + i] >= 0) continue;
-          for (let d = 1; d < L.k; d++) {
-            const j = (i + d) % L.k, st = at(L, j);
-            if (!st || L.stops[j] === L.stops[i]) continue;
-            const here = !!onward.get(st)?.[c] && st.slots.some((x) => x.line !== L && !x.line.pax && x.line.running && x.line.dest[c * x.line.k + x.slot] >= 0);
-            if (!here && !st.near.some((n) => onward.get(n)?.[c])) continue;
-            L.dest[c * L.k + i] = j;
-            break;
-          }
-        }
+    const stops = [...this.stopMap.values()].filter((s) => s.def.freight), N = stops.length;
+    const at = new Map<SState, number>();
+    stops.forEach((s, i) => at.set(s, i));
+    const slotAt = (L: LineState, j: number) => { const s = this.stopMap.get(L.stops[j]); return s ? at.get(s) ?? -1 : -1; };
+    // the legs arriving at each stop
+    const into: { u: number; cost: number }[][] = stops.map(() => []);
     for (const L of lines)
       for (let i = 0; i < L.k; i++) {
-        const st = at(L, i);
-        if (st) for (let c = 0; c < NC; c++) if (L.dest[c * L.k + i] >= 0) st.carries[c] = 1;
+        const u = slotAt(L, i);
+        if (u < 0) continue;
+        for (let d = 1; d < L.k; d++) {
+          const j = (i + d) % L.k, v = slotAt(L, j);
+          if (v >= 0 && v !== u) into[v].push({ u, cost: L.ride[i * L.k + j] + L.headway / 2 + H });
+        }
       }
-    for (const s of this.stopMap.values())
-      for (const ind of s.inds) for (let c = 0; c < NC; c++) if (s.carries[c]) ind.out[c].push(s);
+    const near = stops.map((s) => s.near.map((n) => at.get(n) ?? -1).filter((n) => n >= 0));
+    const arrive = new Float64Array(N), pool = new Float64Array(N), drop = new Int32Array(N), next = new Int32Array(N), done = new Uint8Array(2 * N);
+    for (let c = 0; c < NC; c++) {
+      // nodes: v is "arrived at v", N + v is "waiting at v"
+      arrive.fill(Infinity); pool.fill(Infinity); drop.fill(-1); next.fill(-1); done.fill(0);
+      const open: [number, number][] = [];
+      stops.forEach((s, v) => { if (s.consumes[c]) { arrive[v] = 0; open.push([0, v]); } });
+      while (open.length) {
+        // there are few freight stops, so picking the nearest by a scan is plenty
+        let bi = 0;
+        for (let q = 1; q < open.length; q++) if (open[q][0] < open[bi][0] || (open[q][0] === open[bi][0] && open[q][1] < open[bi][1])) bi = q;
+        const [d, x] = open[bi];
+        open[bi] = open[open.length - 1]; open.pop();
+        if (done[x]) continue;
+        done[x] = 1;
+        if (x < N) {
+          // arrived at x: a stop with a leg to x can send it here for that leg's cost
+          for (const e of into[x]) if (d + e.cost < pool[e.u]) { pool[e.u] = d + e.cost; next[e.u] = x; open.push([pool[e.u], N + e.u]); }
+        } else {
+          // waiting at v: what's dropped at v waits here, and what's dropped next door is handed over
+          const v = x - N;
+          if (d < arrive[v]) { arrive[v] = d; drop[v] = v; open.push([d, v]); }
+          for (const n of near[v]) if (d + H < arrive[n]) { arrive[n] = d + H; drop[n] = v; open.push([d + H, n]); }
+        }
+      }
+      stops.forEach((s, v) => {
+        s.fArrive[c] = arrive[v]; s.fPool[c] = pool[v];
+        s.drop[c] = drop[v] >= 0 ? stops[drop[v]] : null;
+        s.next[c] = next[v] >= 0 ? stops[next[v]] : null;
+      });
+    }
+    for (const s of this.stopMap.values()) s.carries.fill(0);
+    for (const L of lines) {
+      L.dest.fill(-1);
+      for (let i = 0; i < L.k; i++) {
+        const u = slotAt(L, i);
+        if (u < 0) continue;
+        const here = stops[u];
+        for (let c = 0; c < NC; c++) {
+          let best = Infinity;
+          for (let d = 1; d < L.k; d++) {
+            const j = (i + d) % L.k, v = slotAt(L, j);
+            if (v < 0 || v === u) continue;
+            // only somewhere nearer than here: the best of those this line can manage
+            const a = stops[v].fArrive[c];
+            if (!(a < here.fPool[c] - 1e-9)) continue;
+            const cost = L.ride[i * L.k + j] + a;
+            if (cost < best) { best = cost; L.dest[c * L.k + i] = j; }
+          }
+          if (L.dest[c * L.k + i] >= 0) here.carries[c] = 1;
+        }
+      }
+    }
+    // An industry hands what it makes to the stops by it that have a line to take it away, but
+    // not to one whose route only runs to another of those (a shuttle between neighbouring depots).
+    const reachOf = new Map<IState, SState[]>();
+    for (const s of stops) for (const ind of s.inds) (reachOf.get(ind) ?? reachOf.set(ind, []).get(ind)!).push(s);
+    for (const [ind, list] of reachOf)
+      for (let c = 0; c < NC; c++) {
+        const outlets = new Set(list.filter((s) => s.carries[c]));
+        for (const s of outlets) {
+          let x: SState | null = s, via = false;
+          for (let guard = 0; x && guard < 64 && !via; guard++) {
+            const nx: SState | null = x.next[c];
+            if (!nx) break;
+            const d: SState | null = nx.drop[c];
+            via = outlets.has(nx) || (!!d && d !== s && outlets.has(d));
+            x = nx.fArrive[c] === 0 ? null : d;
+          }
+          if (!via) ind.out[c].push(s);
+        }
+      }
   }
 
   // zone figures for the reach and trip models
@@ -629,7 +713,7 @@ export class Economy {
     const Z = this.zoneList.length, T = this.tune;
     const a = {
       residents: new Float64Array(Z), workers: new Float64Array(Z), work: new Float64Array(Z), shop: new Float64Array(Z),
-      leisure: new Float64Array(Z), car: new Float64Array(Z), attraction: new Float64Array(Z), cover: new Float64Array(Z),
+      leisure: new Float64Array(Z), car: new Float64Array(Z), attraction: new Float64Array(Z), visit: new Float64Array(Z), cover: new Float64Array(Z),
     };
     for (const z of this.zoneList) {
       const i = z.idx, h = z.town.health;
@@ -646,7 +730,8 @@ export class Economy {
       a.shop[i] = shop * T.customersPerShopJob;
       a.leisure[i] = civic * T.leisurePerCivicJob + shop * T.leisurePerShopJob;
       a.car[i] = z.town.carShare;
-      a.attraction[i] = jobs + 2 * shop + 2 * civic + 0.1 * res;
+      a.visit[i] = jobs + 2 * shop + 2 * civic; // what draws people who don't live there
+      a.attraction[i] = a.visit[i] + 0.1 * res;
       a.cover[i] = z.cov;
     }
     return a;
@@ -655,7 +740,7 @@ export class Economy {
   private trips() {
     if (!this.pairs) return;
     const a = this.zoneArrays();
-    const t = assignTrips(this.pairs, this.skim, a.residents, a.attraction, a.car, a.cover, this.tune);
+    const t = assignTrips(this.pairs, this.skim, a.residents, a.attraction, a.visit, a.car, a.cover, this.tune);
     installTrips(this.lineList, t);
     this.reviewWork += t.work;
   }
@@ -681,9 +766,9 @@ export class Economy {
     this.refreshService(false);
     const t0 = performance.now();
     const za = this.zoneArrays(), p = this.pairs!;
-    const work = reach(p, za.workers, za.work, za.car, T.workMin, true);
-    const shop = reach(p, za.residents, za.shop, za.car, T.shopMin, true);
-    const leisure = reach(p, za.residents, za.leisure, za.car, T.leisureMin, false);
+    const work = reach(p, za.workers, za.work, za.car, T.workMin, true, T.reachCap);
+    const shop = reach(p, za.residents, za.shop, za.car, T.shopMin, true, T.reachCap);
+    const leisure = reach(p, za.residents, za.leisure, za.car, T.leisureMin, false, T.reachCap);
     this.lastReach = { work, shop, leisure };
     const t1 = performance.now();
     this.timing.parts.reach += t1 - t0;
@@ -691,11 +776,11 @@ export class Economy {
     const ctx: TownCtx = {
       tune: T, month: this.month, calibrate: this.opts.calibrate !== false, assess,
       work, shop, leisure, workSupply: za.work, shopSupply: za.shop, pendingCap,
-      add: (z, kind) => this.requestAdd(z, kind),
+      add: (z, kind, cleared) => this.requestAdd(z, kind, cleared),
       densify: (b, kind) => this.requestDensify(b, kind),
-      abandon: (b) => { b.abandoned = true; b.since = this.month; b.occ = 0; b.shown = 1; this.actions.push({ t: 'abandon', building: b.id }); },
-      restore: (b) => { b.abandoned = false; b.occ = T.newOccupancy; b.shown = Math.round((1 - b.occ) * 100) / 100; this.actions.push({ t: 'restore', building: b.id }); },
-      demolish: (b) => { this.removeBuilding(b.id); b.zone.plots++; this.actions.push({ t: 'demolish', building: b.id }); },
+      abandon: (b) => { b.abandoned = true; b.since = this.month; b.occ = 0; b.shown = 1; b.zone.town.done.lost += b.cap; this.actions.push({ t: 'abandon', building: b.id }); },
+      restore: (b) => { b.abandoned = false; b.occ = T.newOccupancy; b.shown = Math.round((1 - b.occ) * 100) / 100; b.zone.town.done.built += b.cap; this.actions.push({ t: 'restore', building: b.id }); },
+      demolish: (b) => { this.forget(b); b.zone.cleared[b.use]++; this.actions.push({ t: 'demolish', building: b.id }); },
       vacate: (b, fraction) => { if (!assess) this.actions.push({ t: 'vacate', building: b.id, fraction }); },
       service: (t) => this.svc.get(t) ?? { stops: 0, lines: 0 },
     };
@@ -720,10 +805,10 @@ export class Economy {
       this.emit({ t: 'news', text: `${t.name}: ${r.headline.charAt(0).toLowerCase()}${r.headline.slice(1)}.`, x: t.x, z: t.z, town: t.id });
   }
 
-  private requestAdd(z: ZState, kind: BuildingKind) {
-    const req = this.reqNo++;
-    this.pending.set(req, { req, t: 'add', zone: z, kind, use: BUILDINGS[kind].use, gain: BUILDINGS[kind].cap, month: this.month });
-    z.reserved++;
+  private requestAdd(z: ZState, kind: BuildingKind, cleared = false) {
+    const req = this.reqNo++, use = BUILDINGS[kind].use;
+    this.pending.set(req, { req, t: 'add', zone: z, kind, use, gain: BUILDINGS[kind].cap, month: this.month, cleared });
+    if (cleared) z.cleared[use]--; else z.reserved++;
     this.actions.push({ t: 'add', req, zone: z.id, kind });
     if (this.opts.autoBuild) {
       // somewhere in the zone, away from its middle a little each time
@@ -823,14 +908,15 @@ export class Economy {
       reqNo: this.reqNo, nextId: this.nextId, totals: structuredClone(this.totals),
       towns: [...this.townMap.values()].map((t) => ({
         id: t.id, base: { ...t.base }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, labour: t.labour, customers: t.customers,
-        supply: { ...t.supply }, month: { ...t.month }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history], report: t.report ? structuredClone(t.report) : null,
+        supply: { ...t.supply }, month: { ...t.month }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
+        recent: structuredClone(t.recent), done: { ...t.done }, report: t.report ? structuredClone(t.report) : null,
       })),
-      zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked })),
-      buildings: [...this.buildingMap.values()].map((b) => ({ id: b.id, zone: b.zone.id, x: b.x, z: b.z, kind: b.kind, cap: b.cap, occ: b.occ, abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify })),
+      zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared } })),
+      buildings: [...this.buildingMap.values()].map((b) => ({ id: b.id, zone: b.zone.id, x: b.x, z: b.z, kind: b.kind, cap: b.cap, occ: b.occ, abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest })),
       industries: [...this.indMap.values()].map((i) => ({ id: i.id, rate: i.rate, stock: arr(i.stock), input: arr(i.input), produced: i.produced, moved: i.moved, received: i.received, converted: i.converted, last: { ...i.last } })),
       stops: [...this.stopMap.values()].map((s) => ({ id: s.id, pool: arr(s.pool), month: { ...s.month }, last: { ...s.last } })),
       lines: this.lineList.map((L) => ({ id: L.id, ...L.save() })),
-      pending: [...this.pending.values()].map((p) => ({ req: p.req, t: p.t, zone: p.zone.id, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building?.id })),
+      pending: [...this.pending.values()].map((p) => ({ req: p.req, t: p.t, zone: p.zone.id, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building?.id, cleared: !!p.cleared })),
     };
   }
 
@@ -847,7 +933,7 @@ export class Economy {
     for (const b of s.buildings) {
       e.addBuilding({ id: b.id, zone: b.zone, x: b.x, z: b.z, kind: b.kind, capacity: b.cap, occupancy: b.occ });
       const q = e.buildingMap.get(b.id);
-      if (q) Object.assign(q, { abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify });
+      if (q) Object.assign(q, { abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest });
     }
     for (const t of s.towns) {
       const q = e.townMap.get(t.id);
@@ -863,7 +949,7 @@ export class Economy {
     for (const l of s.lines) e.lineMap.get(l.id)?.restore(l);
     for (const p of s.pending) {
       const zone = e.zoneMap.get(p.zone);
-      if (zone) e.pending.set(p.req, { req: p.req, t: p.t as Pending['t'], zone, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building !== undefined ? e.buildingMap.get(p.building) : undefined });
+      if (zone) e.pending.set(p.req, { req: p.req, t: p.t as Pending['t'], zone, kind: p.kind, use: p.use, gain: p.gain, month: p.month, building: p.building !== undefined ? e.buildingMap.get(p.building) : undefined, cleared: p.cleared });
     }
     e.dirty.times = e.dirty.service = true;
     return e;

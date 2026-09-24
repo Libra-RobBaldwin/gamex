@@ -48,6 +48,15 @@ export class LineState {
   genIdx = new Int32Array(0);
   genRate = new Float64Array(0);
   onward: Onward[][];
+  // of those getting off at each slot at the end of their journey, the share visiting a workplace
+  // (rather than going home)
+  visitShare: Float64Array;
+  // Of those wanting to board at each slot, the share who found room last month (smoothed), and
+  // this month's counts. Reach counts a journey on a full line only as far as people get on.
+  readonly room: Float64Array;
+  private readonly want: Float64Array;
+  private readonly got: Float64Array;
+  private readonly judged: Uint8Array; // the first month with people to judge by is taken as it is
   sites: unknown[] = []; // whatever the owner keeps for each slot's stop
   // freight on board by (cargo, alight slot); where each cargo boarding at a slot is taken
   readonly fonb: Float64Array;
@@ -82,6 +91,11 @@ export class LineState {
     this.owed = new Float64Array(k);
     this.fare = new Float64Array(this.def.pax ? k * k : 0);
     this.onward = Array.from({ length: k }, () => []);
+    this.visitShare = new Float64Array(k);
+    this.room = new Float64Array(k).fill(1);
+    this.want = new Float64Array(k);
+    this.got = new Float64Array(k);
+    this.judged = new Uint8Array(k);
     this.fonb = new Float64Array(this.def.pax ? 0 : NC * k);
     this.fowed = new Float64Array(this.def.pax ? 0 : NC * k);
     this.dest = new Int16Array(this.def.pax ? 0 : NC * k).fill(-1);
@@ -142,18 +156,20 @@ export class LineState {
     if (this.pax) for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) this.fare[i * k + j] = i === j ? 0 : this.unitFare(0, i, j);
   }
 
-  // £ per unit carried from slot i to slot j: a fixed part and a part by distance, more for
-  // getting there faster than the reference speed (and less for dawdling), like the 2D game.
+  // £ per unit carried from slot i to slot j: a fixed part (in full from `fullKm`) and a part by
+  // distance, more for getting there faster than the reference speed (and less for dawdling),
+  // like the 2D game.
   unitFare(cargo: number, i: number, j: number) {
     const c = CARGO[this.pax ? 'pax' : FREIGHT[cargo]];
     const km = this.km[i * this.k + j], t = this.ride[i * this.k + j];
     const speed = Math.max(0.6, Math.min(1.6, ((km / c.refKmh) * 60) / Math.max(0.5, t)));
-    return c.base + c.perKm * km * speed;
+    return c.base * Math.min(1, km / c.fullKm) + c.perKm * km * speed;
   }
 
   addWaiting(board: number, alight: number, n: number) {
     this.q[board * this.k + alight] += n;
     this.qsum[board] += n;
+    this.want[board] += n;
   }
   // some of those waiting at a slot give up (the stop is full)
   scaleWaiting(slot: number, f: number) {
@@ -166,9 +182,10 @@ export class LineState {
   generate(dt: number, hour: number) {
     const f = dt * hour, k = this.k, idx = this.genIdx, rate = this.genRate;
     for (let n = 0; n < idx.length; n++) {
-      const add = rate[n] * f;
+      const add = rate[n] * f, slot = (idx[n] / k) | 0;
       this.q[idx[n]] += add;
-      this.qsum[(idx[n] / k) | 0] += add;
+      this.qsum[slot] += add;
+      this.want[slot] += add;
     }
     this.work += idx.length;
   }
@@ -233,6 +250,7 @@ export class LineState {
         this.qsum[i] = Q - take;
         this.load += take;
         this.boarded[i] = take;
+        this.got[i] += take;
         this.month.carried += take;
       }
       if (this.load < 1e-9) this.load = 0;
@@ -279,11 +297,19 @@ export class LineState {
     }
   }
 
-  // Close the month's books: returns what it cost to run.
+  // Close the month's books, and see how many of those who wanted to board found room.
   roll() {
     const m = this.month;
     this.last = { carried: m.carried, revenue: m.revenue, running: m.running, loadFactor: m.loadDen > 0 ? m.loadNum / m.loadDen : 0 };
     this.month = { carried: 0, revenue: 0, running: 0, loadNum: 0, loadDen: 0 };
+    const a = this.tune.roomAlpha;
+    for (let i = 0; i < this.k; i++) {
+      // a few people aren't enough to judge by; those left from last month may board this one
+      const r = this.want[i] > 1 ? Math.min(1, this.got[i] / this.want[i]) : 1;
+      this.room[i] += (this.judged[i] ? a : 1) * (r - this.room[i]);
+      if (this.want[i] > 1) this.judged[i] = 1;
+      this.want[i] = this.got[i] = 0;
+    }
   }
 
   // Each vehicle's place on the loop, `since` minutes after the last step. Vehicles are spread
@@ -316,6 +342,7 @@ export class LineState {
     return {
       phase: this.phase, dwell: [...this.dwell], q: [...this.q], onboard: [...this.onboard], owed: [...this.owed],
       fonb: [...this.fonb], fowed: [...this.fowed], load: this.load, month: { ...this.month }, last: { ...this.last },
+      room: [...this.room], want: [...this.want], got: [...this.got], judged: [...this.judged],
     };
   }
   restore(s: ReturnType<LineState['save']>) {
@@ -330,5 +357,9 @@ export class LineState {
     this.load = s.load;
     this.month = { ...s.month };
     this.last = { ...s.last };
+    s.room.forEach((v, i) => (this.room[i] = v));
+    s.want.forEach((v, i) => (this.want[i] = v));
+    s.got.forEach((v, i) => (this.got[i] = v));
+    s.judged.forEach((v, i) => (this.judged[i] = v));
   }
 }
