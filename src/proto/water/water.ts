@@ -185,6 +185,26 @@ export class WaterSystem {
     return out;
   }
 
+  // The same along a polyline (a road's centre line), s measured along it from its start.
+  crossingsAlong(path: { x: number; z: number }[], step = 2): Crossing[] {
+    const out: Crossing[] = [];
+    let s0 = 0;
+    for (let i = 0; i + 1 < path.length; i++) {
+      const L = Math.hypot(path[i + 1].x - path[i].x, path[i + 1].z - path[i].z);
+      for (const c of this.crossings(path[i], path[i + 1], step)) {
+        const m = { ...c, s0: c.s0 + s0, s1: c.s1 + s0, channel: c.channel ? ([c.channel[0] + s0, c.channel[1] + s0] as [number, number]) : null };
+        // one body running on across a vertex is one crossing
+        const last = out[out.length - 1];
+        if (last && last.body === m.body && m.s0 - last.s1 <= step + 1e-6) {
+          last.s1 = m.s1; last.maxDepth = Math.max(last.maxDepth, m.maxDepth);
+          if (m.channel) last.channel = last.channel ? [last.channel[0], m.channel[1]] : m.channel;
+        } else out.push(m);
+      }
+      s0 += L;
+    }
+    return out;
+  }
+
   // ---------- tiles ----------
   tile(ti: number, tj: number, o: { size?: number; res?: number; margin?: number } = {}): WaterTile {
     const size = o.size ?? TILE, res = o.res ?? 4, mg = Math.round((o.margin ?? 64) / res);

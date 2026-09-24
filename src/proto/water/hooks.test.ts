@@ -86,5 +86,9 @@ describe('bridges', () => {
     expect(ban[0]).toBeGreaterThanOrEqual(c.s0); expect(ban[1]).toBeLessThanOrEqual(c.s1);
     expect(lim[1].lo).toBeCloseTo(c.soffit + 1.5, 6);
     expect(lim[1].lo!).toBeGreaterThan(lim[0].lo!);
+    // along a bent line the crossing is found at the right distance from its start
+    const along = w.crossingsAlong([{ x: 900, z: 900 }, { x: 900, z: 1000 }, { x: 1100, z: 1000 }]);
+    expect(along.length).toBe(1);
+    expect(along[0].s0).toBeCloseTo(100 + c.s0, 5);
   });
 });

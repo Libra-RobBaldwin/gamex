@@ -23,25 +23,41 @@ export interface WaterMesh {
 
 // The water surface over the tile (null if the tile is dry). Every cell with a wet corner is drawn;
 // its dry corners take the level of the nearest water, so the surface runs flat a little under
-// the shore and the ground mesh, drawn first, cuts the exact waterline.
-export function waterSurface(t: WaterTile, stride = 1): WaterMesh | null {
-  const { g, margin: mg } = t, n = g.nx, cells = Math.round(t.size / g.step / stride), M = cells + 1;
-  const at = (a: number, b: number) => (mg + b * stride) * n + mg + a * stride;
+// the shore and the ground mesh, drawn first, cuts the exact waterline. Open water (deep, still,
+// well away from any shore) is drawn in blocks of 8×8 cells as a fan from the middle to every
+// vertex round the edge: a quarter of the triangles, and no T-junctions against the fine cells.
+const OPEN = 8;
+export function waterSurface(t: WaterTile): WaterMesh | null {
+  const { g, margin: mg } = t, n = g.nx, cells = Math.round(t.size / g.step), M = cells + 1;
+  const at = (a: number, b: number) => (mg + b) * n + mg + a;
   const vid = new Int32Array(M * M).fill(-1);
-  const quads: number[] = [];
+  const quads: number[] = [], fans: number[] = [];
+  const open = new Uint8Array(cells * cells);
+  for (let b0 = 0; b0 + OPEN <= cells; b0 += OPEN) for (let a0 = 0; a0 + OPEN <= cells; a0 += OPEN) {
+    const k0 = at(a0, b0), lv = t.level[k0];
+    let ok = t.kind[k0] === KIND_CODE.sea || t.kind[k0] === KIND_CODE.lake;
+    for (let y = 0; y <= OPEN && ok; y++) for (let x = 0; x <= OPEN && ok; x++) {
+      const k = at(a0 + x, b0 + y);
+      if (t.kind[k] !== t.kind[k0] || t.level[k] !== lv || lv - t.ground[k] < 5 || t.shore[k] < 16) ok = false;
+    }
+    if (!ok) continue;
+    fans.push(b0 * M + a0);
+    for (let y = 0; y < OPEN; y++) for (let x = 0; x < OPEN; x++) open[(b0 + y) * cells + a0 + x] = 1;
+    for (let q = 0; q <= OPEN; q++) { vid[b0 * M + a0 + q] = vid[(b0 + OPEN) * M + a0 + q] = vid[(b0 + q) * M + a0] = vid[(b0 + q) * M + a0 + OPEN] = 0; }
+    vid[(b0 + OPEN / 2) * M + a0 + OPEN / 2] = 0;
+  }
   for (let b = 0; b < cells; b++) for (let a = 0; a < cells; a++) {
-    // a cell is drawn if water reaches any raster point in it
-    let hit = false;
-    for (let y = 0; y <= stride && !hit; y++) for (let x = 0; x <= stride && !hit; x++) if (t.cover[(mg + b * stride + y) * n + mg + a * stride + x]) hit = true;
-    if (!hit) continue;
+    if (open[b * cells + a]) continue;
+    // a cell is drawn if water reaches any of its corners
+    if (!t.cover[at(a, b)] && !t.cover[at(a + 1, b)] && !t.cover[at(a, b + 1)] && !t.cover[at(a + 1, b + 1)]) continue;
     quads.push(b * M + a);
     for (const v of [b * M + a, b * M + a + 1, (b + 1) * M + a, (b + 1) * M + a + 1]) vid[v] = 0;
   }
-  if (!quads.length) return null;
+  if (!quads.length && !fans.length) return null;
   let V = 0;
   for (let v = 0; v < vid.length; v++) if (vid[v] === 0) vid[v] = V++;
   const pos = new Float32Array(V * 3), wat = new Float32Array(V * 4), kind = new Float32Array(V);
-  const step = g.step * stride;
+  const step = g.step;
   let min = Infinity, max = -Infinity;
   for (let b = 0; b < M; b++) for (let a = 0; a < M; a++) {
     const v = vid[b * M + a];
@@ -58,14 +74,25 @@ export function waterSurface(t: WaterTile, stride = 1): WaterMesh | null {
     if (y < min) min = y;
     if (y > max) max = y;
   }
-  const idx = V > 65535 ? new Uint32Array(quads.length * 6) : new Uint16Array(quads.length * 6);
-  quads.forEach((c, q) => {
+  const T = quads.length * 2 + fans.length * 4 * OPEN;
+  const idx = V > 65535 ? new Uint32Array(T * 3) : new Uint16Array(T * 3);
+  let o = 0;
+  for (const c of quads) {
     const a = c % M, b = (c - a) / M, v00 = vid[c], v10 = vid[c + 1], v01 = vid[c + M], v11 = vid[c + M + 1];
     // faces up (x east, z south), diagonal alternating like the ground mesh
-    if ((a + b) & 1) idx.set([v00, v01, v11, v00, v11, v10], q * 6);
-    else idx.set([v00, v01, v10, v10, v01, v11], q * 6);
-  });
-  return { positions: pos, water: wat, kind, indices: idx, vertexCount: V, triangleCount: quads.length * 2, offset: [t.ti * t.size, t.tj * t.size], min, max };
+    if ((a + b) & 1) { idx.set([v00, v01, v11, v00, v11, v10], o); } else { idx.set([v00, v01, v10, v10, v01, v11], o); }
+    o += 6;
+  }
+  for (const c of fans) {
+    const a0 = c % M, b0 = (c - a0) / M, ctr = vid[(b0 + OPEN / 2) * M + a0 + OPEN / 2], ring: number[] = [];
+    // round the edge: west side southwards, south side eastwards, east side northwards, north side westwards
+    for (let q = 0; q < OPEN; q++) ring.push(vid[(b0 + q) * M + a0]);
+    for (let q = 0; q < OPEN; q++) ring.push(vid[(b0 + OPEN) * M + a0 + q]);
+    for (let q = OPEN; q > 0; q--) ring.push(vid[(b0 + q) * M + a0 + OPEN]);
+    for (let q = OPEN; q > 0; q--) ring.push(vid[b0 * M + a0 + q]);
+    for (let q = 0; q < ring.length; q++) { idx[o++] = ctr; idx[o++] = ring[q]; idx[o++] = ring[(q + 1) % ring.length]; }
+  }
+  return { positions: pos, water: wat, kind, indices: idx, vertexCount: V, triangleCount: T, offset: [t.ti * t.size, t.tj * t.size], min, max };
 }
 
 // ---------- the ground by the water ----------

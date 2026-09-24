@@ -233,24 +233,73 @@ function showProbe(e: PointerEvent) {
 }
 
 // ---------- measuring the water's cost ----------
-// Frames timed with the water drawn and hidden. gl.finish() makes each frame complete before the
-// clock stops, so the difference is the water's GPU cost (roughly: the CPU side is tiny).
-function bench(frames = 40) {
-  const gl = renderer.getContext(), time = (on: boolean) => {
+// Frames timed with the water drawn and hidden, alternately. Reading back one pixel after each
+// frame makes the GPU finish it before the clock stops (gl.finish() doesn't block in Chrome), so
+// the difference is the water's cost. Where the browser has a GPU timer query, its numbers are
+// reported too (they leave out the read-back).
+function bench(frames = 30) {
+  const gl = renderer.getContext() as WebGL2RenderingContext, px = new Uint8Array(4);
+  const tq = gl.getExtension('EXT_disjoint_timer_query_webgl2') as { TIME_ELAPSED_EXT: number } | null;
+  const gpu: Record<string, number[]> = { on: [], off: [] }, cpu: Record<string, number[]> = { on: [], off: [] };
+  const queries: [WebGLQuery, boolean][] = [];
+  const one = (on: boolean) => {
     waterMeshes.forEach((m) => (m.visible = on));
-    renderer.render(scene, cam); gl.finish();
+    waterMat.uniforms.uTime.value += 1 / 60;
+    const q = tq ? gl.createQuery() : null;
+    if (q) gl.beginQuery(tq!.TIME_ELAPSED_EXT, q);
     const t0 = performance.now();
-    for (let i = 0; i < frames; i++) { waterMat.uniforms.uTime.value += 1 / 60; renderer.render(scene, cam); }
-    gl.finish();
-    return (performance.now() - t0) / frames;
+    renderer.render(scene, cam);
+    if (q) gl.endQuery(tq!.TIME_ELAPSED_EXT);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    cpu[on ? 'on' : 'off'].push(performance.now() - t0);
+    if (q) queries.push([q, on]);
   };
-  const off1 = time(false), on1 = time(true), off2 = time(false), on2 = time(true);
+  for (let i = 0; i < 4; i++) { one(true); one(false); } // warm up
+  cpu.on.length = cpu.off.length = 0; queries.length = 0;
+  for (let i = 0; i < frames; i++) { one(true); one(false); }
   waterMeshes.forEach((m) => (m.visible = true));
-  const on = (on1 + on2) / 2, off = (off1 + off2) / 2, px = canvas.width * canvas.height;
-  const res = { withWater: on, withoutWater: off, water: on - off, pixels: px, renderer: (gl.getParameter(gl.RENDERER) as string) ?? '' };
-  (window as unknown as { waterBench: typeof res }).waterBench = res;
-  $('#probe').innerHTML = `Frame ${on.toFixed(1)} ms with water, ${off.toFixed(1)} ms without: water ${(on - off).toFixed(1)} ms at ${canvas.width}×${canvas.height}`;
-  return res;
+  const med = (a: number[]) => { const b = [...a].sort((x, y) => x - y); return b.length ? b[b.length >> 1] : NaN; };
+  // query results arrive a frame or two later
+  setTimeout(() => {
+    for (const [q, on] of queries) if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) gpu[on ? 'on' : 'off'].push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6);
+    const on = med(cpu.on), off = med(cpu.off), g = gpu.on.length ? med(gpu.on) - med(gpu.off) : NaN;
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const px = pixelCost(frames);
+    const res = { withWater: on, withoutWater: off, water: on - off, gpuWater: g, ...px, width: canvas.width, height: canvas.height, renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER) };
+    (window as unknown as { waterBench: typeof res }).waterBench = res;
+    $('#probe').innerHTML = `Frame ${on.toFixed(1)} ms with water, ${off.toFixed(1)} ms without: water ${(on - off).toFixed(1)} ms${g === g ? ` (GPU timer ${g.toFixed(2)} ms)` : ''} at ${canvas.width}×${canvas.height}<br>Full screen: water ${px.waterFull.toFixed(1)} ms, the game's ground ${px.groundFull.toFixed(1)} ms (${(px.waterFull / px.groundFull).toFixed(2)}×)`;
+  }, 300);
+}
+// Cost per pixel: the water shader and the ground's material each filling the whole screen with
+// nothing else drawn, so the ratio carries over to a phone's GPU better than absolute times from
+// a software renderer do.
+function pixelCost(frames: number) {
+  const gl = renderer.getContext(), px = new Uint8Array(4), s2 = new THREE.Scene();
+  s2.add(hemi.clone(), sun.clone());
+  const quad = (mat: THREE.Material, extra: (g: THREE.BufferGeometry) => void) => {
+    const g = new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2);
+    extra(g);
+    const m = new THREE.Mesh(g, mat);
+    m.position.set(view.x, view.y, view.z);
+    return m;
+  };
+  const w = quad(waterMat, (g) => {
+    g.setAttribute('aWater', new THREE.BufferAttribute(new Float32Array([2, 20, 0.6, 0.2, 0.3, 1, 0.6, 0.2, 4, 40, 0.6, 0.2, 1, 5, 0.6, 0.2]), 4));
+    g.setAttribute('aKind', new THREE.BufferAttribute(new Float32Array([3, 3, 3, 3]), 1));
+  });
+  const gr = quad(groundMat, (g) => g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(16).fill(0.5), 4)));
+  const time = (m: THREE.Mesh) => {
+    s2.add(m);
+    for (let i = 0; i < 3; i++) renderer.render(s2, cam);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const t = performance.now();
+    for (let i = 0; i < frames; i++) { waterMat.uniforms.uTime.value += 1 / 60; renderer.render(s2, cam); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+    s2.remove(m);
+    return (performance.now() - t) / frames;
+  };
+  const waterFull = time(w), groundFull = time(gr);
+  w.geometry.dispose(); gr.geometry.dispose();
+  return { waterFull, groundFull };
 }
 
 // ---------- loop ----------
