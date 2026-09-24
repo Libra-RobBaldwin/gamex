@@ -67,11 +67,11 @@ body[data-step='area'] main { padding: 0; max-width: none; }
 label { display: block; font: 600 13px/1 var(--font-ui); color: var(--muted); margin: 12px 0 6px; }
 .row { display: flex; gap: 8px; align-items: stretch; margin: 8px 0; }
 .row.end { justify-content: flex-end; margin-top: 12px; }
-input[type='text'] { flex: 1; min-width: 0; height: var(--tap); padding: 0 12px; border: 2px solid var(--faint); background: var(--ink); color: var(--paper); font: 600 17px var(--font-ui); border-radius: 0; outline: none; }
+input[type='text'] { flex: 1; min-width: 0; height: var(--tap); padding: 0 12px; border: 2px solid rgba(242, 245, 239, 0.5); background: var(--ink); color: var(--paper); font: 600 17px var(--font-ui); border-radius: 0; outline: none; }
 #pc { text-transform: uppercase; letter-spacing: 0.05em; }
 #pc::placeholder { text-transform: none; letter-spacing: 0; }
 input[type='text']:focus { border-color: var(--lime); }
-input::placeholder { color: rgba(179, 203, 188, 0.6); font-weight: 400; }
+input::placeholder { color: rgba(179, 203, 188, 0.85); font-weight: 400; }
 
 /* ---- buttons ---- */
 .act { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--tap); min-width: var(--tap); padding: 0 14px; border: 0; background: var(--fill); color: var(--paper); font: 600 15px var(--font-ui); cursor: pointer; border-radius: 0; touch-action: manipulation; }
@@ -103,7 +103,7 @@ input::placeholder { color: rgba(179, 203, 188, 0.6); font-weight: 400; }
 #area .sheet .msg { margin: 2px 0; font-size: 13px; color: var(--muted); min-height: 0; }
 .hint { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
 .sizes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-.chip { min-height: 40px; border: 2px solid var(--faint); background: transparent; color: var(--paper); font: 700 14px var(--font-ui); cursor: pointer; padding: 0 2px; touch-action: manipulation; }
+.chip { min-height: 44px; border: 2px solid rgba(242, 245, 239, 0.45); background: transparent; color: var(--paper); font: 700 14px var(--font-ui); cursor: pointer; padding: 0 2px; touch-action: manipulation; }
 .chip[aria-checked='true'] { background: var(--lime); border-color: var(--lime); color: var(--ink); }
 #square-here span { white-space: nowrap; }
 body[data-step='area'] .leaflet-bottom { bottom: var(--sheet-h, 250px); }
@@ -112,7 +112,7 @@ body[data-step='area'] .leaflet-bottom { bottom: var(--sheet-h, 250px); }
 .leaflet-touch .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; }
 .area-handle { display: grid; place-items: center; background: var(--lime); color: var(--ink); border: 3px solid #fff; border-radius: 50%; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45); cursor: grab; touch-action: none; }
 .area-handle .ic { width: 24px; height: 24px; }
-.area-handle:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.area-handle:focus-visible { outline: 3px solid var(--deep); outline-offset: 1px; box-shadow: 0 0 0 7px #fff, 0 2px 8px rgba(0, 0, 0, 0.45); }
 body.dragging-square .area-handle { cursor: grabbing; transform-origin: center; background: var(--lime-hi); }
 .area-pin { color: #c8102e; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); }
 .area-pin .ic { width: 36px; height: 36px; fill: rgba(255, 255, 255, 0.85); }

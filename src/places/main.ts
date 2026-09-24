@@ -10,7 +10,7 @@ import './places.css';
 import { markSvg } from '../proto/ui/brand';
 import { fixtureText, mergeTiles, trimJson } from '../proto/osm/fetch';
 import type { LatLon } from '../proto/osm/projection';
-import { SIZES_KM, areaId, bboxCentre, tilesOf } from './area';
+import { SIZES_KM, areaId, bboxCentre, snapCentre, tilesOf } from './area';
 import type { Built } from './build';
 import { icon } from './icons';
 import { AreaMap } from './map';
@@ -44,29 +44,31 @@ document.body.innerHTML = `
   <section id="find" class="step">
     <div class="card facet">
       <span class="tab">Step 1</span>
-      <h1>Find your town</h1>
+      <h1 tabindex="-1">Find your town</h1>
       <p class="lede">Type a UK postcode. The game’s map importer will build a plan of the area around it, right here in your browser.</p>
       <form id="pc-form" autocomplete="off" novalidate>
         <label for="pc">Postcode</label>
         <div class="row">
-          <input id="pc" name="pc-lookup" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="search" maxlength="10" placeholder="e.g. OX16 5QA" aria-describedby="pc-msg pc-privacy" />
+          <input id="pc" name="pc-lookup" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="search" maxlength="16" placeholder="e.g. SW1A 1AA" aria-describedby="pc-msg pc-privacy" />
           <button class="act primary" type="submit" id="pc-go">${icon('search')}<span>Find</span></button>
         </div>
         <p id="pc-msg" class="msg" role="status" aria-live="polite"></p>
       </form>
-      <p id="pc-privacy" class="fine">${icon('info', 'ic sm')}Your postcode goes only to <a href="https://postcodes.io" target="_blank" rel="noopener">postcodes.io</a> to find the spot. This page never saves it, and it isn’t kept with your areas.</p>
+      <p id="pc-privacy" class="fine">${icon('info', 'ic sm')}Your postcode goes only to <a href="https://postcodes.io" target="_blank" rel="noopener">postcodes.io</a> to find the spot, and this page never saves it. The square starts a few hundred metres off the exact spot, so the area the map servers see, and the area kept on this device, don’t point back to the postcode.</p>
     </div>
     <div class="card facet" id="saved-card">
       <span class="tab">Saved on this device</span>
       <ul id="saved" class="saved"></ul>
     </div>
     <p class="credit">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>, under the Open Database Licence.</p>
+    <p class="credit">Postcode locations from <a href="https://postcodes.io" target="_blank" rel="noopener">postcodes.io</a>. Contains OS data © Crown copyright and database right; contains Royal Mail data © Royal Mail copyright and database right; contains National Statistics data © Crown copyright and database right; Northern Ireland postcodes: LPS Intellectual Property © Crown copyright.</p>
   </section>
 
   <section id="area" class="step" hidden>
+    <h1 class="vh" tabindex="-1">Choose the area</h1>
     <div id="map" aria-label="Map: move the square to the area you want"></div>
     <div class="sheet facet" role="group" aria-label="Choose the area">
-      <p class="hint">${icon('move', 'ic sm')}Drag the handle, or tap the map, to move the square.</p>
+      <p class="hint">${icon('move', 'ic sm')}Drag the handle (or focus it and use the arrow keys), or tap the map, to move the square.</p>
       <div class="sizes" role="radiogroup" aria-label="Size of the square">
         ${SIZES_KM.map((s) => `<button type="button" role="radio" class="chip" data-size="${s}" aria-checked="false">${km(s)}</button>`).join('')}
       </div>
@@ -75,7 +77,7 @@ document.body.innerHTML = `
         <input id="area-name" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Name this area" />
         <button type="button" class="act" id="square-here" title="Move the square to the middle of the map">${icon('here')}<span>Square here</span></button>
       </div>
-      <p id="area-note" class="msg"></p>
+      <p id="area-note" class="msg" aria-live="polite"></p>
       <div class="row end">
         <button type="button" class="act ghost" id="area-back">${icon('back')}<span>Back</span></button>
         <button type="button" class="act primary" id="area-build">${icon('check')}<span>Build plan</span></button>
@@ -86,7 +88,7 @@ document.body.innerHTML = `
   <section id="fetch" class="step" hidden>
     <div class="card facet">
       <span class="tab">Step 3</span>
-      <h1 id="f-title">Fetching the map</h1>
+      <h1 id="f-title" tabindex="-1">Fetching the map</h1>
       <p id="f-what" class="lede"></p>
       <div class="bar" role="progressbar" aria-labelledby="f-title" aria-valuemin="0" id="f-bar"><i></i></div>
       <p id="f-count" class="big"></p>
@@ -103,7 +105,7 @@ document.body.innerHTML = `
   <section id="plans" class="step" hidden>
     <div class="plans-head">
       <button type="button" class="act ghost icon-only" id="p-back" aria-label="Back to your areas">${icon('back')}</button>
-      <h1 id="p-name"></h1>
+      <h1 id="p-name" tabindex="-1"></h1>
     </div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="t-game" aria-selected="true" aria-controls="p-view">Game build</button>
@@ -138,13 +140,29 @@ document.body.innerHTML = `
 </main>`;
 
 type Step = 'find' | 'area' | 'fetch' | 'plans';
-function go(step: Step) {
+let at: Step = 'find';
+// Each step is a history entry (holding only the step's name), so the phone's Back button goes back
+// a step rather than leaving the page.
+function go(step: Step, push = true) {
+  if (push && step !== at) history.pushState({ step }, '');
+  at = step;
   for (const s of ['find', 'area', 'fetch', 'plans'] as Step[]) $(`#${s}`).hidden = s !== step;
   document.body.dataset.step = step;
   window.scrollTo(0, 0);
   if (step === 'area') areaMap?.resize();
   if (step === 'find') refreshSaved();
+  // move focus to the new step's heading, so screen readers announce it and Tab starts there
+  $(`#${step} h1`).focus({ preventScroll: true });
 }
+window.addEventListener('popstate', (e) => {
+  let step = (e.state?.step ?? 'find') as Step;
+  if (at === 'fetch') { job?.abort(); clearInterval(tick); }
+  if (step === 'fetch') step = areaMap ? 'area' : 'find'; // never back into a fetch that has stopped
+  if (step === 'area' && !areaMap) step = 'find';
+  if (step === 'plans' && !current) step = 'find';
+  if (step !== 'plans') viewer.dispose();
+  go(step, false);
+});
 
 // ---------------- step 1: the postcode ----------------
 
@@ -158,12 +176,15 @@ $<HTMLFormElement>('#pc-form').addEventListener('submit', async (e) => {
   btn.disabled = true;
   pcMsg.className = 'msg';
   pcMsg.innerHTML = `${icon('spinner', 'ic sm spin')}Looking it up…`;
+  const asked = pcInput.value;
   try {
-    const place = await lookupPostcode(pcInput.value);
+    const place = await lookupPostcode(asked);
+    // typed something else while waiting: that's the one they want now
+    if (pcInput.value !== asked) { pcMsg.textContent = 'Press Find again for the new postcode.'; return; }
     // the postcode has done its job: clear it so nothing on the page holds it any longer
     pcInput.value = '';
     pcMsg.textContent = '';
-    openArea({ lat: place.lat, lon: place.lon }, place.suggest);
+    openArea({ lat: place.lat, lon: place.lon }, place.suggest, true);
   } catch (err) {
     pcMsg.className = 'msg bad';
     pcMsg.textContent = err instanceof PostcodeError ? err.message : 'Something went wrong looking that up. Try again.';
@@ -213,10 +234,13 @@ new ResizeObserver(() => document.body.style.setProperty('--sheet-h', `${sheet.o
 let sizeKm = 1.5;
 const nameInput = $<HTMLInputElement>('#area-name');
 
-function openArea(at: LatLon, suggest: string) {
+function openArea(pin: LatLon, suggest: string, fromPostcode = false) {
   go('area');
+  // PRIVACY: a square centred exactly on the postcode would carry the postcode's own point to
+  // Overpass, into the saved box and into the downloaded file. Start it on a nearby grid point.
+  const start = fromPostcode ? snapCentre(pin) : pin;
   if (!areaMap) {
-    areaMap = new AreaMap($('#map'), at, sizeKm);
+    areaMap = new AreaMap($('#map'), start, sizeKm);
     areaMap.onChange = () => areaNote();
     areaMap.cover = () => {
       const m = $('#map').getBoundingClientRect(), s = sheet.getBoundingClientRect();
@@ -224,17 +248,17 @@ function openArea(at: LatLon, suggest: string) {
     };
     areaMap.fit();
   } else {
-    areaMap.moveTo(at);
+    areaMap.moveTo(start);
     areaMap.fit();
   }
-  areaMap.setPin(at);
+  if (fromPostcode) areaMap.setPin(pin);
   nameInput.value = suggest;
   setSize(sizeKm);
 }
 
 function setSize(s: number) {
   sizeKm = s;
-  for (const b of document.querySelectorAll<HTMLButtonElement>('.chip')) b.setAttribute('aria-checked', String(+b.dataset.size! === s));
+  for (const b of document.querySelectorAll<HTMLButtonElement>('.chip')) { b.setAttribute('aria-checked', String(+b.dataset.size! === s)); b.tabIndex = +b.dataset.size! === s ? 0 : -1; }
   areaMap?.setSize(s);
   areaNote();
 }
@@ -243,6 +267,15 @@ function areaNote() {
   $('#area-note').textContent = `${km(sizeKm)} × ${km(sizeKm)}: ${n === 1 ? 'one request' : `${n} requests`} to the map servers.${sizeKm >= 2.5 ? ' Big areas take a while on a busy day.' : ''}`;
 }
 $('.sizes').addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.chip'); if (b) setSize(+b.dataset.size!); });
+// a radio group is one Tab stop; the arrow keys pick within it
+$('.sizes').addEventListener('keydown', (e) => {
+  const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  if (!d) return;
+  e.preventDefault();
+  const i = Math.max(0, Math.min(SIZES_KM.length - 1, SIZES_KM.indexOf(sizeKm as never) + d));
+  setSize(SIZES_KM[i]);
+  document.querySelector<HTMLButtonElement>(`.chip[data-size="${SIZES_KM[i]}"]`)?.focus();
+});
 $('#square-here').addEventListener('click', () => areaMap?.here());
 $('#area-back').addEventListener('click', () => go('find'));
 $('#area-build').addEventListener('click', () => {
@@ -341,11 +374,20 @@ function showTab(which: 'game' | 'raw') {
   if (!current) return;
   $('#t-game').setAttribute('aria-selected', String(which === 'game'));
   $('#t-raw').setAttribute('aria-selected', String(which === 'raw'));
+  $('#t-game').tabIndex = which === 'game' ? 0 : -1;
+  $('#t-raw').tabIndex = which === 'raw' ? 0 : -1;
   viewer.el.setAttribute('aria-label', which === 'game' ? 'Plan: what the game built' : 'Plan: the raw OpenStreetMap data');
   viewer.show(which === 'game' ? current.built.gameSvg : current.built.rawSvg);
 }
 $('#t-game').addEventListener('click', () => showTab('game'));
 $('#t-raw').addEventListener('click', () => showTab('raw'));
+$('.tabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  const raw = $('#t-game').getAttribute('aria-selected') === 'true';
+  showTab(raw ? 'raw' : 'game');
+  $(raw ? '#t-raw' : '#t-game').focus();
+});
 $('#z-in').addEventListener('click', () => viewer.zoomBy(1.6));
 $('#z-out').addEventListener('click', () => viewer.zoomBy(1 / 1.6));
 $('#z-fit').addEventListener('click', () => viewer.reset());
@@ -357,7 +399,7 @@ function showPlans(meta: AreaMeta, text: string, built: Built, saved = true) {
   const s = built.stats;
   const rows: [string, string][] = [
     ['Road and rail pieces', `${s.segments.toLocaleString('en-GB')}`],
-    ['Roads · railways', `${s.roads} · ${s.railways}`],
+    ['Roads · railways', `${s.roads.toLocaleString('en-GB')} · ${s.railways}`],
     ['Junctions', `${s.junctions}`],
     ['Building plots', `${s.plots.toLocaleString('en-GB')}`],
     ['Roundabouts', `${s.roundabouts}`],
@@ -397,16 +439,11 @@ $('#p-new').addEventListener('click', () => {
   if (areaMap && current) { areaMap.moveTo(bboxCentre(current.meta.bbox)); setSize(current.meta.sizeKm); nameInput.value = current.meta.name; go('area'); areaMap.fit(); }
   else if (current) openArea(bboxCentre(current.meta.bbox), current.meta.name);
   else go('find');
-
-// the site's offline worker (public/sw.js, shared with the game): with it, this page and every area
-// saved on the device open without a connection
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
-}
 });
 $('#p-back').addEventListener('click', () => { viewer.dispose(); go('find'); });
 
-go('find');
+history.replaceState({ step: 'find' }, '');
+go('find', false);
 
 // the site's offline worker (public/sw.js, shared with the game): with it, this page and every area
 // saved on the device open without a connection

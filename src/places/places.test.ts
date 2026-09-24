@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { localProjection } from '../proto/osm/projection';
-import { SIZES_KM, TILE_KM, areaId, squareBbox, tilesOf } from './area';
+import { SIZES_KM, TILE_KM, areaId, snapCentre, squareBbox, tilesOf } from './area';
 import { MIRRORS, backoffMs, fetchTiles, judge, type Deps, type Progress } from './overpass';
 import { parsePostcode, lookupPostcode } from './postcode';
 
@@ -26,6 +26,21 @@ describe('the square', () => {
     expect(b.every(Number.isFinite)).toBe(true);
     expect(b[2]).toBeLessThan(85);
     expect(b[1]).toBeGreaterThanOrEqual(-180);
+  });
+});
+
+describe('where a postcode’s square starts', () => {
+  it('is off the exact point, but keeps it inside even a 1 km square', () => {
+    for (let i = 0; i < 200; i++) {
+      const c = { lat: 50 + i * 0.0437, lon: -5 + i * 0.0311 };
+      const s = snapCentre(c), q = localProjection(c).toLocal(s.lat, s.lon);
+      expect(Math.abs(q.x)).toBeLessThan(300);
+      expect(Math.abs(q.z)).toBeLessThan(300);
+    }
+    const s = snapCentre({ lat: 52.061234, lon: -1.332111 });
+    expect(s).not.toEqual({ lat: 52.061234, lon: -1.332111 });
+    // many postcodes share one starting point
+    expect(snapCentre({ lat: 52.0612, lon: -1.3321 })).toEqual(snapCentre({ lat: 52.0608, lon: -1.3308 }));
   });
 });
 
@@ -156,7 +171,8 @@ describe('postcodes', () => {
     expect(parsePostcode('JE2 3AB')).toEqual({ kind: 'crown' });
     expect(parsePostcode('GY1 1AA')).toEqual({ kind: 'crown' });
     expect(parsePostcode('IM1 1AA')).toEqual({ kind: 'crown' });
-    for (const bad of ['', 'hello', '12345', 'OX16 5QAA', '<script>']) expect(parsePostcode(bad)).toEqual({ kind: 'bad' });
+    for (const bad of ['', 'hello', '12345', 'OX16 5QAA', '<script>', 'M1 1', 'B1 2A']) expect(parsePostcode(bad)).toEqual({ kind: 'bad' });
+    expect(parsePostcode(' s w1a  1aa ')).toEqual({ kind: 'full', text: 'SW1A 1AA' });
   });
 
   const reply = (status: number, result?: object) => ({ status, json: async () => ({ status, result }) });

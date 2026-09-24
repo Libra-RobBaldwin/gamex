@@ -11,6 +11,17 @@ const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
 /** Keeps a centre where a square around it still makes sense (Leaflet's own limit is ±85°). */
 export const clampCentre = (c: LatLon): LatLon => ({ lat: Math.max(-84, Math.min(84, c.lat)), lon: ((((c.lon + 180) % 360) + 360) % 360) - 180 });
 
+/**
+ * Where a square found from a postcode starts: the nearest point on a grid about 550 m apart, so
+ * the square (and everything sent or saved from it) never holds the postcode's exact point. The
+ * postcode stays inside even the smallest square: the grid moves the centre at most about 280 m.
+ */
+export function snapCentre(c: LatLon): LatLon {
+  const lat = Math.round(c.lat / 0.005) * 0.005;
+  const step = 0.005 / Math.max(0.2, Math.cos((lat * Math.PI) / 180)); // about the same distance east-west
+  return { lat: r6(lat), lon: r6(Math.round(c.lon / step) * step) };
+}
+
 /** A square `sizeKm` on a side, centred on `c`, measured on the ground (not in degrees). */
 export function squareBbox(c: LatLon, sizeKm: number): Bbox {
   const centre = clampCentre(c);

@@ -17,6 +17,7 @@ export const TILE_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyri
 export class AreaMap {
   readonly map: L.Map;
   private square: L.Rectangle;
+  private casing: L.Rectangle;
   private handle: L.Marker;
   private pin?: L.Marker;
   centre: LatLon;
@@ -32,10 +33,12 @@ export class AreaMap {
     L.tileLayer(TILE_URL, { maxZoom: 19, minZoom: 3, attribution: TILE_CREDIT, crossOrigin: false, referrerPolicy: 'strict-origin-when-cross-origin' } as L.TileLayerOptions).addTo(this.map);
     L.control.zoom({ position: 'topright', zoomInTitle: 'Zoom in', zoomOutTitle: 'Zoom out' }).addTo(this.map);
 
+    // a dark casing under the lime line, so the square stands out on pale and dark map alike
+    this.casing = L.rectangle(this.bounds(), { color: '#0f3322', weight: 7, opacity: 0.85, fill: false, interactive: false }).addTo(this.map);
     this.square = L.rectangle(this.bounds(), { color: '#5cb83a', weight: 3, fillColor: '#5cb83a', fillOpacity: 0.12, interactive: false, className: 'area-square' }).addTo(this.map);
     this.handle = L.marker(this.handleAt(), {
       icon: L.divIcon({ className: 'area-handle', html: icon('move'), iconSize: [44, 44], iconAnchor: [22, 22] }),
-      keyboard: true, title: 'Drag to move the square', zIndexOffset: 1000, interactive: true, bubblingMouseEvents: false,
+      keyboard: true, title: 'Drag, or use the arrow keys, to move the square', zIndexOffset: 1000, interactive: true, bubblingMouseEvents: false,
     }).addTo(this.map);
     this.map.setView([centre.lat, centre.lon], 14);
     this.makeDraggable(this.handle.getElement() ?? null);
@@ -45,6 +48,9 @@ export class AreaMap {
       if (!k) return;
       e.preventDefault(); e.stopPropagation();
       this.moveTo({ lat: this.centre.lat + k[0], lon: this.centre.lon + k[1] / Math.cos((this.centre.lat * Math.PI) / 180) });
+      // keep the square's middle and its handle on screen
+      this.map.panInside(this.handleAt(), { padding: [48, 48] });
+      this.map.panInside([this.centre.lat, this.centre.lon], { padding: [48, 48] });
     });
     this.map.on('click', (e: L.LeafletMouseEvent) => this.moveTo({ lat: e.latlng.lat, lon: e.latlng.lng }));
     this.fit();
@@ -77,6 +83,7 @@ export class AreaMap {
 
   private redraw() {
     this.square.setBounds(this.bounds() as L.LatLngBoundsLiteral);
+    this.casing.setBounds(this.bounds() as L.LatLngBoundsLiteral);
     this.handle.setLatLng(this.handleAt());
     this.onChange();
   }

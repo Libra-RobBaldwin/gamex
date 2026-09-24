@@ -15,6 +15,9 @@ const CROWN = /^(GY|JE|IM)[0-9]/; // Guernsey, Jersey, the Isle of Man: outside 
 export type Parsed = { kind: 'full' | 'outward'; text: string } | { kind: 'crown' } | { kind: 'bad' };
 
 export function parsePostcode(input: string): Parsed {
+  // "M1 1" is a postcode half typed, not the district M11: the space says where the halves meet
+  const words = input.toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim().split(/\s+/);
+  if (words.length === 2 && OUTWARD.test(words[0]) && /^[0-9][A-Z]?$/.test(words[1])) return { kind: 'bad' };
   const s = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!s) return { kind: 'bad' };
   if (CROWN.test(s)) return { kind: 'crown' };

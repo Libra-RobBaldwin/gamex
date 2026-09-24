@@ -50,13 +50,22 @@ The postcode is personal data: it can point at someone's home.
 - It is never stored: not in localStorage, IndexedDB, the URL or history, and the form's
   autocomplete is off. It is never logged.
 - The input box is cleared as soon as the postcode is found.
+- The square doesn't start on the postcode's exact point. It starts on the nearest point of a
+  grid about 550 m apart (`snapCentre`), which keeps the postcode inside even a 1 km square.
+  Otherwise the point would go to Overpass in the tile boxes and end up in the saved box and in
+  the downloaded file, and a reverse lookup of that point gives the postcode back.
 - Saved areas are keyed by their box and name (`areaId`). The suggested name is the parish or
   ward, never the postcode.
+- Each step is a history entry holding only the step's name, so the phone's Back button moves
+  back a step.
 
 The end-to-end test checks all of this. It looks through every request, localStorage,
 sessionStorage, cookies, IndexedDB, the URL and the page for the postcode.
 
 ## Credits
+
+Postcode locations come from postcodes.io. The ONS, OS, Royal Mail and LPS (Northern Ireland)
+credits appear at the foot of the first step.
 
 Map data is © OpenStreetMap contributors under the ODbL. The credit appears:
 
