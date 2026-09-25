@@ -236,6 +236,7 @@ export class Network {
   edge: number;
   private rand: Rng;
   zoneAt: (p: P) => Zone = () => 'town';
+  turningHeads = false; // a dead end just stops, as a standard UK dead end does; true draws a turning circle at each one (the old look)
   // lots whose plots the last build() cut into (their gardens get trimmed)
   touched: Lot[] = [];
   // who owns the ground (see land.ts): roads claim theirs here, junctions theirs when designed

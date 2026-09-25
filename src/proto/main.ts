@@ -46,6 +46,7 @@ import { makeRelief } from './region/terrain';
 import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; // a big map streamed in tiles (docs/region.md R4)
 import { isRealQuery, loadRealMap } from './real/load';
 import { clearOf, greenRegions, layReal, placeLots } from './real/lay';
+import { DeadEndPaths } from './game/paths';
 import type { RealMap } from './real/map';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type MapSpec, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
@@ -98,6 +99,7 @@ const EDGE = gameWater.half; // (where the ground ends, in a cut face: game/edge
 const net = new Network(isWater, BOUND, 11);
 net.edge = EDGE; // (roads running off the map run on to the ground's edge)
 const railway = new Railway(net); // (rebuilt with the roads: commitRoads)
+const footpaths = new DeadEndPaths(); // (a path on from each dead end, which just stops: game/paths.ts)
 gameWater.claim(net.land); // the water's land ('water', 3 m past the waterline): plots and parks keep off it
 // the map's industrial estates (the town's is south of the centre)
 const INDUSTRIAL = (p: P) => zoneOf(MAP, p) === 'industrial';
@@ -274,6 +276,7 @@ function refreshTrees(only?: Lot | Box[]) {
 // ---------------- roads ----------------
 const roadGroup = new THREE.Group();
 scene.add(roadGroup);
+scene.add(footpaths.mesh);
 // every bridge in the town: one mesh per material (game/bridges.ts)
 const bridgeLayer = new BridgeLayer();
 scene.add(bridgeLayer.group);
@@ -404,6 +407,7 @@ function commitRoads(made: number[] = []) {
   else lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
+  footpaths.update(net, net.lots); // (a path on from each dead end: game/paths.ts)
   // (a big map's ground is repainted round the edit on the next frame, so the edit and the repaint don't land in one)
   if (regionView) { groundBoxes.push(...editBoxes); infillBoxes.push(...editBoxes); }
   else gameGround.invalidate();
@@ -635,6 +639,7 @@ async function seedTown() {
     await loading.stage('Laying out the roads and the railway', 0.08);
     const laid = layReal(net, (MAP as RealMap).real.overpass, MAP.settlements);
     commitRoads([...net.segs.keys()]);
+    footpaths.clear(net); // (the real buildings go up first; the dead ends' paths keep clear of them)
     const lots = placeLots(net, laid.lots);
     await loading.stage(`Putting up ${lots.length.toLocaleString('en-GB')} buildings`, 0.3);
     const clear = clearOf(lots);
@@ -645,6 +650,7 @@ async function seedTown() {
       if (i % 64 === 0) await loading.tick(i / lots.length);
     }
     REAL!.parks = greenRegions(net, lots, (MAP as RealMap).real.green);
+    footpaths.update(net, net.lots);
     return;
   }
   // a generated region's railway first: a main line through the city and two towns, a branch to a
@@ -2660,7 +2666,7 @@ Object.assign((window as unknown as { proto: object }).proto, { interchanges, bl
 Object.assign((window as unknown as { proto: object }).proto, { railway, railDraw, railGame }); // (rail/)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
-Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView }); // (the map being played, and how long its loading took, stage by stage)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, footpaths }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

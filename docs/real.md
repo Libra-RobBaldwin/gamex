@@ -173,6 +173,28 @@ real city has many materials a chunk.
   uniform.
 - **Edits on a real map:** they don't look again for leftover land.
 
+## Dead ends and their paths (every map)
+
+A dead end just stops, as a UK cul-de-sac does. There are no turning circles any more:
+`Network.turningHeads` is off, and a test turns it on to keep the old shape working.
+
+A footpath carries on from each dead end (`src/proto/game/paths.ts`):
+- **Through:** to the nearest street within 90 m straight ahead (inside a 40° cone), stopping at its
+  footway.
+- **Stub:** failing that, 12 m on into the ground.
+- **Where they go:**
+  - only to streets at ground level that have a footway;
+  - never over a building, water, another road or a railway;
+  - on a real map, worked out after the real buildings go up.
+- **Land:** each path claims its land (`path:<node>`), so nothing is built on it.
+- **Drawing:** the paths are drawn as one draped tarmac mesh, 2 m wide, 6 cm above the ground.
+- **Edits:** worked out again with every road edit.
+
+Exeter has 526 of them, 108 running through to the next street. The starter town has 8. So the
+starter town now differs from before at its cul-de-sacs.
+
+Free OS data has no real footpaths. OSM's (`highway=footway`) would replace these where they exist.
+
 ## Priors (`src/proto/region/priors.ts`)
 
 `PRIORS` holds every number with where it came from: both regions, `[exe, teme]` where they differ.
