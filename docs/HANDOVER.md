@@ -57,7 +57,10 @@ nothing should be built at the start, the HUD was too big, and the tools were to
   layouts that suit the line as buttons with prices. Build is in the strip; More options opens the
   full sheet (tracks, style, crossing, canopies, length), and closing it goes back to the card.
   `e2e/rail.e2e.mjs` builds from the card; `e2e/stations.e2e.mjs` builds through More options.
-- **Still open:**
+- **#39 merged:** traffic takes gaps quicker, pulls out onto roundabouts under UK rules, and
+  steers with a bicycle model. The traffic session is archived. That was the last parallel
+  session; none are running now.
+- **Still open (as of the night before):**
   - #39: traffic. Gap-taking is done; the roundabout pull-out and steering are to follow on the
     same branch.
   - #36: follow-up commits.
