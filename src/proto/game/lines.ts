@@ -22,6 +22,11 @@ export interface Line {
   bus: BusLine; // what the traffic follows (the same object, so edits reach the vehicles at once)
 }
 
+export interface LinesSave {
+  nextId: number; used: number; names: [number, string][];
+  list: { id: number; num: number; stops: number[]; loop: boolean; offer?: string; mode: 'bus' | 'rail'; train?: TrainDef; vehicles: number }[];
+}
+
 const NAMES = [
   'Market Place', 'Church Street', 'Mill Lane', 'Station Road', 'The Green', 'Victoria Road', 'Park Road', 'Bridge Street',
   'School Lane', 'The Parade', 'Chapel Row', 'Elm Grove', 'Oak Avenue', 'Hill Rise', 'Brook Lane', 'Castle Street',
@@ -94,6 +99,27 @@ export class Lines {
     }
   }
   buses(l: Line) { return l.mode === 'rail' ? this.traffic.trainsOn(l.id) : this.traffic.busesOn(l.id); }
+
+  // ---------- saving (game/save.ts) ----------
+  // The lines, how many vehicles each runs, and the stops' names. The vehicles themselves start
+  // again spread along their lines, as a new line's do.
+  save(): LinesSave {
+    return {
+      nextId: this.nextId, used: this.used, names: [...this.names],
+      list: this.list.map((l) => ({ id: l.id, num: l.num, stops: [...l.stops], loop: l.loop, offer: l.offer, mode: l.mode, train: l.train ? structuredClone(l.train) : undefined, vehicles: this.buses(l).length })),
+    };
+  }
+  // (after the stops and stations are back, into an empty list; false for a vehicle with no room)
+  restore(s: LinesSave) {
+    this.nextId = s.nextId; this.used = s.used; this.names = new Map(s.names);
+    let all = true;
+    for (const x of s.list) {
+      const l: Line = { id: x.id, num: x.num, stops: [...x.stops], loop: x.loop, offer: x.offer, mode: x.mode, train: x.train, bus: { id: x.id, seq: callOrder(x.stops, x.loop) } };
+      this.list.push(l);
+      for (let i = 0; i < x.vehicles; i++) if (!this.addBus(l)) all = false;
+    }
+    return all;
+  }
   of(bus: number) { const id = this.traffic.bus(bus)?.line ?? this.traffic.train(bus)?.line; return this.list.find((l) => l.id === id) ?? null; }
 }
 

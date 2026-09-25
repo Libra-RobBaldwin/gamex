@@ -53,9 +53,15 @@ export function bandPolys(path: XZ[], l: number, r: number): XZ[][] {
   return out;
 }
 
+// A claim's pieces are filed separately, each under the cells its own box covers: a long road's
+// claim is hundreds of pieces along a line, and filing it under its whole box would put all of
+// them in front of every question asked anywhere in that box (a motorway across a 6 km map).
+interface Piece { claim: Claim; poly: XZ[]; box: [number, number, number, number] }
+
 export class Land {
   private claims = new Map<string, Claim>();
-  private grid = new Map<string, Set<Claim>>();
+  private grid = new Map<string, Set<Piece>>();
+  private pieces = new Map<Claim, Piece[]>();
   version = 0;
 
   private cells(b: [number, number, number, number], f: (k: string) => void) {
@@ -66,13 +72,16 @@ export class Land {
     if (!polys.length) return;
     const c: Claim = { key, owner, polys, box: boxOf(polys) };
     this.claims.set(key, c);
-    this.cells(c.box, (k) => { let s = this.grid.get(k); if (!s) this.grid.set(k, (s = new Set())); s.add(c); });
+    const ps = polys.map((poly) => ({ claim: c, poly, box: boxOf([poly]) }));
+    this.pieces.set(c, ps);
+    for (const pc of ps) this.cells(pc.box, (k) => { let s = this.grid.get(k); if (!s) this.grid.set(k, (s = new Set())); s.add(pc); });
     this.version++;
   }
   release(key: string) {
     const c = this.claims.get(key);
     if (!c) return;
-    this.cells(c.box, (k) => this.grid.get(k)?.delete(c));
+    for (const pc of this.pieces.get(c) ?? []) this.cells(pc.box, (k) => this.grid.get(k)?.delete(pc));
+    this.pieces.delete(c);
     this.claims.delete(key);
     this.version++;
   }
@@ -80,24 +89,33 @@ export class Land {
   get(key: string) { return this.claims.get(key); }
   all() { return this.claims.values(); }
 
-  private near(b: [number, number, number, number]) {
-    const out = new Set<Claim>();
-    this.cells(b, (k) => { for (const c of this.grid.get(k) ?? []) if (c.box[0] <= b[2] && c.box[2] >= b[0] && c.box[1] <= b[3] && c.box[3] >= b[1]) out.add(c); });
-    return out;
+  // the pieces whose boxes overlap a box, cell by cell, each claim's in the order it was made
+  private near(b: [number, number, number, number], f: (pc: Piece) => boolean | void) {
+    const seen = new Set<Piece>();
+    let stop = false;
+    this.cells(b, (k) => {
+      if (stop) return;
+      for (const pc of this.grid.get(k) ?? []) {
+        if (seen.has(pc)) continue;
+        seen.add(pc);
+        if (pc.box[0] <= b[2] && pc.box[2] >= b[0] && pc.box[1] <= b[3] && pc.box[3] >= b[1] && f(pc) === true) { stop = true; return; }
+      }
+    });
   }
   // Claims overlapping a polygon (optionally ignoring some).
   hits(poly: XZ[], skip?: (c: Claim) => boolean): Claim[] {
-    const out: Claim[] = [];
-    for (const c of this.near(boxOf([poly]))) {
-      if (skip?.(c)) continue;
-      if (c.polys.some((p) => polysTouch(p, poly))) out.push(c);
-    }
+    const out: Claim[] = [], done = new Set<Claim>();
+    this.near(boxOf([poly]), (pc) => {
+      if (done.has(pc.claim) || skip?.(pc.claim)) return;
+      if (polysTouch(pc.poly, poly)) { done.add(pc.claim); out.push(pc.claim); }
+    });
     return out;
   }
   free(poly: XZ[], skip?: (c: Claim) => boolean) { return this.hits(poly, skip).length === 0; }
   // Who owns this spot (if anyone)?
   at(p: XZ): Claim | undefined {
-    for (const c of this.near([p.x, p.z, p.x, p.z])) if (c.polys.some((q) => pointInPoly(p, q))) return c;
-    return undefined;
+    let hit: Claim | undefined;
+    this.near([p.x, p.z, p.x, p.z], (pc) => { if (pointInPoly(p, pc.poly)) { hit = pc.claim; return true; } });
+    return hit;
   }
 }

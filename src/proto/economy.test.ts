@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { budget, cpuMs } from './test/speed';
 import { Economy, type EconomyOptions } from './economy';
 import { BALANCED, Kit } from './econkit';
 import { VEHICLES, type Action, type LineIn } from './econdefs';
@@ -480,19 +481,19 @@ describe('deterministic, saveable and cheap', () => {
     // The machine is shared (other test files run alongside, and a busy one can take several
     // times as long), so the same month is timed up to three times from scratch and the
     // quickest counts: it's the economy's cost being measured, not the queue for a processor.
+    // (the budget is for the reference machine, scaled to this one's speed: test/speed.ts)
     let e!: Economy, month = Infinity;
-    for (let run = 0; run < 3 && month >= 1000; run++) {
+    for (let run = 0; run < 3 && month >= budget(1000); run++) {
       const t0 = performance.now();
       e = new Economy(k.world(), k.oracles(), opts);
       e.setLines(lines);
       const t1 = performance.now();
-      e.advance(MONTH);
-      const t2 = performance.now();
-      month = Math.min(month, t2 - t1);
-      console.log(`scale: set-up ${(t1 - t0).toFixed(0)} ms, a month ${(t2 - t1).toFixed(0)} ms, ${Math.round(e.population().residents)} people, ${Math.round(e.totals.delivered.pax ?? 0)} journeys`);
+      const cpu = cpuMs(() => e.advance(MONTH));
+      month = Math.min(month, cpu);
+      console.log(`scale: set-up ${(t1 - t0).toFixed(0)} ms, a month ${cpu.toFixed(0)} ms (CPU), ${Math.round(e.population().residents)} people, ${Math.round(e.totals.delivered.pax ?? 0)} journeys`);
     }
     expect(e.totals.delivered.pax ?? 0).toBeGreaterThan(100000);
     expect(e.vehicles().length).toBe(1000);
-    expect(month).toBeLessThan(1000);
+    expect(month).toBeLessThan(budget(1000));
   }, 60_000);
 });

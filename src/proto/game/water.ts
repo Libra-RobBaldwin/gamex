@@ -144,14 +144,22 @@ export class GameWater {
   // for patchGroundMaterial. It's in a PlaneGeometry's frame (x east, y north, z up), so it drops in
   // for the flat plane the game lays down with rotation.x = −π/2. (Rivers are flat here: their beds
   // are separate strips, drawn over it; see beds().)
-  groundGeometry(size: number) {
-    const h = size / 2, lakes = this.shapes.spec.lakes, boxes = lakes.map(lakeBox), xyz: number[] = [], tris: number[] = [];
+  //
+  // On a map with hills (`relief`, region/terrain.ts), the grid is the hills' own (25 m), the lakes'
+  // boxes are snapped out onto it, and every vertex carries the hills' height: the mesh is then
+  // exactly the surface everything else is draped on (drape.ts).
+  groundGeometry(size: number, relief?: { step: number; heightAt: (x: number, z: number) => number }) {
+    const h = size / 2, lakes = this.shapes.spec.lakes, xyz: number[] = [], tris: number[] = [];
+    const cell = relief?.step ?? GRID, snap = (v: number, up: boolean) => (relief ? -h + (up ? Math.ceil : Math.floor)((v + h) / cell) * cell : v);
+    const boxes = lakes.map(lakeBox).map((B) => ({ x0: snap(B.x0, false), z0: snap(B.z0, false), x1: snap(B.x1, true), z1: snap(B.z1, true) }));
     const G = this.shapes.lakesGround; // (rivers' channels aren't in it: see beds())
-    const vert = (x: number, z: number) => { xyz.push(x, G(x, z), z); return xyz.length / 3 - 1; };
+    const H = relief?.heightAt;
+    const vert = (x: number, z: number) => { xyz.push(x, G(x, z) + (H ? H(x, z) : 0), z); return xyz.length / 3 - 1; };
     // the grid outside the boxes (their edges are grid lines)
+    // (on the hills' grid every run between cuts is whole cells)
     const axis = (cuts: number[]) => {
       const out: number[] = [], at = [-h, ...[...new Set(cuts)].filter((c) => c > -h && c < h).sort((p, q) => p - q), h];
-      for (let k = 0; k + 1 < at.length; k++) { const from = at[k], to = at[k + 1], n = Math.max(1, Math.ceil((to - from) / GRID)); for (let i = 0; i < n; i++) out.push(from + ((to - from) * i) / n); }
+      for (let k = 0; k + 1 < at.length; k++) { const from = at[k], to = at[k + 1], n = Math.max(1, (relief ? Math.round : Math.ceil)((to - from) / cell)); for (let i = 0; i < n; i++) out.push(from + ((to - from) * i) / n); }
       out.push(h);
       return out;
     };
@@ -166,7 +174,7 @@ export class GameWater {
     lakes.forEach((L, li) => this.bowl(L, boxes[li], xs, zs, xyz, tris, vert));
     // (shore colours only round the lakes: a river's are on its strip, and on the flat ground's big
     // cells they'd smear out across 100 m)
-    return this.finish(xyz, tris, G, (x, z) => boxes.some((B) => x >= B.x0 - 1e-6 && x <= B.x1 + 1e-6 && z >= B.z0 - 1e-6 && z <= B.z1 + 1e-6));
+    return this.finish(xyz, tris, G, (x, z) => boxes.some((B) => x >= B.x0 - 1e-6 && x <= B.x1 + 1e-6 && z >= B.z0 - 1e-6 && z <= B.z1 + 1e-6), H, cell);
   }
   // One lake's bank ring, bed and box in the ground mesh.
   private bowl(L: LakeSpec, B: { x0: number; z0: number; x1: number; z1: number }, xs: number[], zs: number[], xyz: number[], tris: number[], vert: (x: number, z: number) => number) {
@@ -203,7 +211,8 @@ export class GameWater {
   }
   // Triangles facing up, normals from the ground, shore colours from the water's tiles, in the
   // plane's frame.
-  private finish(xyz: number[], tris: number[], G: (x: number, z: number) => number, shore: (x: number, z: number) => boolean = () => true) {
+  // (`H`: hills already in the heights, for the normals: sloped over a cell's width, so they're smooth)
+  private finish(xyz: number[], tris: number[], G: (x: number, z: number) => number, shore: (x: number, z: number) => boolean = () => true, H?: (x: number, z: number) => number, eH = 25) {
     // every triangle facing up
     for (let t = 0; t < tris.length; t += 3) {
       const a = tris[t], b = tris[t + 1], c = tris[t + 2];
@@ -213,7 +222,9 @@ export class GameWater {
     const V = xyz.length / 3, pos = Float32Array.from(xyz), nor = new Float32Array(V * 3), e = 0.5;
     for (let v = 0; v < V; v++) {
       const x = pos[v * 3], z = pos[v * 3 + 2];
-      const gx = (G(x + e, z) - G(x - e, z)) / (2 * e), gz = (G(x, z + e) - G(x, z - e)) / (2 * e), l = Math.hypot(gx, 1, gz);
+      let gx = (G(x + e, z) - G(x - e, z)) / (2 * e), gz = (G(x, z + e) - G(x, z - e)) / (2 * e);
+      if (H) { gx += (H(x + eH, z) - H(x - eH, z)) / (2 * eH); gz += (H(x, z + eH) - H(x, z - eH)) / (2 * eH); }
+      const l = Math.hypot(gx, 1, gz);
       nor[v * 3] = -gx / l; nor[v * 3 + 1] = 1 / l; nor[v * 3 + 2] = -gz / l;
     }
     // shore colours from each tile with water (alpha 0 elsewhere: the ground as it is), worked out

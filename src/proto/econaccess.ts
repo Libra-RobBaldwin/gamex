@@ -279,6 +279,7 @@ export class Pairs {
   n = 0;
   readonly Z: number;
   readonly N: number; // places
+  readonly rep: Int32Array; // each place's zone: itself, or the zone nearest a block's middle
   readonly levels: number; // levels of blocks
   readonly up: Int32Array; // Z x levels: the block each zone is in at each level (as a place)
   readonly start: Int32Array; // pairs from zone i are start[i] .. start[i+1]-1
@@ -348,6 +349,9 @@ export class Pairs {
       return { x, z, rep, entry: [...near.entries()].sort((a, b) => a[0] - b[0]).map(([s, [w, wt]]) => ({ s, walk: wt / w })) };
     });
     this.N = Z + blocks.length;
+    this.rep = new Int32Array(this.N);
+    for (let i = 0; i < Z; i++) this.rep[i] = i;
+    blocks.forEach((B, b) => (this.rep[Z + b] = B.rep));
     // The places each zone pairs with, in a fixed order: the zones in the level-0 cells next to its
     // own, then at each level the blocks under the 3 x 3 cells above that aren't next to its own.
     const maxPair2 = tune.maxPairM * tune.maxPairM;
@@ -629,6 +633,48 @@ export function assignTrips(p: Pairs, skim: Skim, residents: Float64Array, attra
   }
   for (const k of [...byStops.keys()].sort((a, b) => a - b)) ride(skim.path(Math.floor(k / skim.S), k % skim.S), byStops.get(k)!, visits.get(k) ?? 0);
   return tables;
+}
+
+// Trips between towns (docs/region.md, R5): each zone's trips shared out over where they could
+// go as assignTrips shares them, added up by the town at each end: `all` by any means a day, and
+// `lines` the share of those that go by your lines. A block counts as the town of its middle zone.
+// Only for what the panels say: it changes nothing in the economy.
+export interface TownFlow { all: number; lines: number }
+export function townFlows(p: Pairs, residents: Float64Array, attraction: Float64Array, carShare: Float64Array, cover: Float64Array, homeCover: Float64Array, zoneTown: Int32Array, tune: Tune = TUNE): Map<number, Map<number, TownFlow>> {
+  const out = new Map<number, Map<number, TownFlow>>(), tau = tune.gravityMin, beta = tune.modeBeta;
+  const A = p.sum(attraction), AC = p.sum(attraction.map((a, z) => a * cover[z]));
+  for (let i = 0; i < p.Z; i++) {
+    const R = residents[i];
+    if (R <= 0) continue;
+    const s0 = p.start[i], s1 = p.start[i + 1], from = zoneTown[i];
+    let sumC = 0, sumN = 0;
+    for (let n = s0; n < s1; n++) {
+      const a = A[p.j[n]];
+      if (a <= 0) continue;
+      sumC += a * Math.exp(-p.car[n] / tau);
+      sumN += a * Math.exp(-p.nc[n] / tau);
+    }
+    const c = carShare[i], trips = R * tune.tripsPerDay;
+    let row = out.get(from);
+    if (!row) out.set(from, (row = new Map()));
+    for (let n = s0; n < s1; n++) {
+      const j = p.j[n], a = A[j];
+      if (a <= 0) continue;
+      const withCar = sumC > 0 ? (trips * c * a * Math.exp(-p.car[n] / tau)) / sumC : 0;
+      const noCar = sumN > 0 ? (trips * (1 - c) * a * Math.exp(-p.nc[n] / tau)) / sumN : 0;
+      const to = zoneTown[p.rep[j]];
+      let f = row.get(to);
+      if (!f) row.set(to, (f = { all: 0, lines: 0 }));
+      f.all += withCar + noCar;
+      const pg = p.gen[n], cov = Number.isFinite(pg) ? homeCover[i] * (AC[j] / a) : 0;
+      if (cov <= 0) continue;
+      const uw = -beta * p.walk[n], up = -beta * (pg + tune.ptBiasMin), ud = -beta * (p.drive[n] + tune.carBiasMin);
+      const mx = Math.max(uw, up, Number.isFinite(ud) ? ud : -Infinity);
+      const ew = Math.exp(uw - mx), ep = Math.exp(up - mx), ed = Number.isFinite(ud) ? Math.exp(ud - mx) : 0;
+      f.lines += (withCar * (ep / (ew + ep + ed)) + noCar * (ep / (ew + ep))) * cov;
+    }
+  }
+  return out;
 }
 
 // Put the tables onto the lines: generation rates, for each slot where people get off the

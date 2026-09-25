@@ -14,7 +14,7 @@ import {
   type BridgeChoice, type BridgeGeometry, type BridgeId, type BridgeLayout, type BridgeOption, type Crossing, type Mat, type Obstacle,
 } from '../bridges';
 import type { RoadDef } from '../catalog';
-import { RAISE_COST, TUNNEL_COST, closestOnPath, pathLength, pointAt, type Network, type P, type RSeg } from '../roads';
+import { RAISE_COST, TUNNEL_COST, closestOnPath, closestOnSeg, pathLength, type Network, type P, type RSeg } from '../roads';
 import { gameYear } from './era';
 
 // What's stored on a segment (RSeg.bridges): where each bridge is and its type. `override` is the
@@ -38,21 +38,70 @@ const box = (path: P[], pad: number) => {
 // Roads underneath are found by walking the deck: wherever a pier (a line across the deck's
 // width, and a bit) would touch a road's full width below, that stretch is kept clear. That covers roads crossed at
 // a skew, the arms of a junction, and a road running along under a viaduct alike.
+// pointAt for arc lengths that only go up: it carries on from where it got to, instead of walking
+// from the start each time (a road kilometres long is sampled every metre, many times over)
+function walker(path: P[]) {
+  let i = 1, before = 0; // (the arc length at the start of piece i)
+  return (s: number) => {
+    for (;;) {
+      const a = path[i - 1], b = path[i], L = Math.hypot(b.x - a.x, b.z - a.z);
+      if (s - before <= L || i === path.length - 1) {
+        const t = L ? Math.max(0, Math.min(1, (s - before) / L)) : 0;
+        const ya = a.y ?? 0, yb = b.y ?? 0;
+        return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, y: ya + (yb - ya) * t, ux: (b.x - a.x) / (L || 1), uz: (b.z - a.z) / (L || 1) };
+      }
+      before += L; i++;
+    }
+  };
+}
+
+// closestOnPath, when only a near answer matters: `near(p, max)` is closestOnPath(p, path) if the
+// nearest point is within `max`, else d = Infinity. A long path's pieces are filed in 16 m cells so
+// only those nearby are looked at (the same pieces, in the same order, so the same answer).
+function nearFinder(path: P[]) {
+  if (path.length < 48) return (p: P, max: number) => { const q = closestOnPath(p, path); return q.d < max ? q : { ...q, d: Infinity }; };
+  const C = 16, cells = new Map<number, number[]>(), acc = [0];
+  const key = (i: number, j: number) => (i + 40000) * 80000 + (j + 40000);
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i];
+    acc.push(acc[i - 1] + Math.hypot(b.x - a.x, b.z - a.z));
+    for (let ci = Math.floor(Math.min(a.x, b.x) / C); ci <= Math.floor(Math.max(a.x, b.x) / C); ci++) for (let cj = Math.floor(Math.min(a.z, b.z) / C); cj <= Math.floor(Math.max(a.z, b.z) / C); cj++) {
+      const k = key(ci, cj), l = cells.get(k);
+      if (l) l.push(i); else cells.set(k, [i]);
+    }
+  }
+  return (p: P, max: number) => {
+    const found = new Set<number>(), r = Math.ceil(max / C), ci = Math.floor(p.x / C), cj = Math.floor(p.z / C);
+    for (let di = -r; di <= r; di++) for (let dj = -r; dj <= r; dj++) for (const i of cells.get(key(ci + di, cj + dj)) ?? []) found.add(i);
+    let best = { d: Infinity, x: 0, z: 0, y: 0, s: 0, ux: 1, uz: 0 };
+    for (const i of [...found].sort((x, y) => x - y)) {
+      const a = path[i - 1], b = path[i], L = Math.hypot(a.x - b.x, a.z - b.z), c = closestOnSeg(p, a, b);
+      if (c.d < best.d) best = { d: c.d, x: c.x, z: c.z, y: (a.y ?? 0) + ((b.y ?? 0) - (a.y ?? 0)) * c.t, s: acc[i - 1] + c.t * L, ux: (b.x - a.x) / (L || 1), uz: (b.z - a.z) / (L || 1) };
+    }
+    return best.d < max ? best : { ...best, d: Infinity };
+  };
+}
+
 export function obstaclesOf(net: Network, path: P[], road: RoadDef, skip: (seg: number) => boolean = () => false, extra: Under[] = []): Obstacle[] {
   const L = pathLength(path), out: Obstacle[] = [];
+  if (path.length < 2) return out;
   // water, sampled as roads.ts check() does
   const step = 2;
   let w0 = -1;
+  const wAt = walker(path);
   for (let s = 0; s <= L + 1e-6; s += step) {
-    const wet = net.isWater(pointAt(path, s));
+    const wet = net.isWater(wAt(s));
     if (wet && w0 < 0) w0 = Math.max(0, s - step);
     if (w0 >= 0 && (!wet || s + step > L)) { out.push({ kind: 'water', s0: w0, s1: Math.min(L, s), level: 0, name: 'the water' }); w0 = -1; }
   }
   // roads and railways underneath: no piers on them, and headroom over them
   const reach = deckWidth(road) / 2 + 1;
   if (path.some((p) => (p.y ?? 0) > 2.5)) {
-    const me = box(path, 0);
-    const under: (Under & { b: readonly number[] })[] = [];
+    // (sampled once; only where the deck is up can a road be underneath it)
+    const rAt = walker(path), samples: ReturnType<typeof rAt>[] = [];
+    for (let s = 0; s <= L + 1e-6; s += 1) samples.push(rAt(s));
+    const me = box(samples.filter((p) => p.y > 2.5), 0);
+    const under: (Under & { b: readonly number[]; near?: ReturnType<typeof nearFinder> })[] = [];
     for (const s of net.segs.values()) {
       if (skip(s.id)) continue;
       const sp = net.path(s), h = net.half(s), b = box(sp, h + reach);
@@ -67,16 +116,17 @@ export function obstaclesOf(net: Network, path: P[], road: RoadDef, skip: (seg: 
       out.push({ kind: under[i].rail ? 'rail' : 'road', s0: Math.max(0, r.s0 - 0.5), s1: Math.min(L, r.s1 + 0.5), surface: r.y, name: under[i].rail ? 'the railway' : 'the road' });
       runs[i] = { s0: -1, s1: -1, y: Infinity };
     };
-    for (let s = 0; s <= L + 1e-6; s += 1) {
-      const p = pointAt(path, s);
+    for (let k = 0; k < samples.length; k++) {
+      const s = k, p = samples[k];
       under.forEach((u, i) => {
         let hit = false;
         if (p.y > 2.5 && p.x >= u.b[0] && p.x <= u.b[2] && p.z >= u.b[1] && p.z <= u.b[3]) {
           // a pier here is a line across the deck: does any of it come within the road's width?
-          const q = closestOnPath(p, u.path);
+          const near = (u.near ??= nearFinder(u.path));
+          const q = near(p, u.half + reach + 1);
           if (p.y - q.y > 2 && q.d < u.half + reach + 1) {
             for (let k = -reach; k <= reach + 1e-6 && !hit; k += 1) {
-              const e = closestOnPath({ x: p.x - p.uz * k, z: p.z + p.ux * k }, u.path);
+              const e = near({ x: p.x - p.uz * k, z: p.z + p.ux * k }, u.half + 1);
               if (e.d < u.half + 1 && p.y - e.y > 2) { hit = true; const r = runs[i]; if (r.s0 < 0) r.s0 = s; r.s1 = s; r.y = Math.min(r.y, e.y); }
             }
           }
@@ -88,8 +138,9 @@ export function obstaclesOf(net: Network, path: P[], road: RoadDef, skip: (seg: 
   }
   // keep-outs: other junctions' land (their islands and slip roads) under a raised deck
   let k0 = -1, key = '';
+  const kAt = walker(path);
   for (let s = 0; s <= L + 1e-6; s += step) {
-    const p = pointAt(path, s);
+    const p = kAt(s);
     const cl = p.y > 3 ? net.land.at(p) : undefined;
     const hit = cl && cl.owner !== 'road' && !out.some((o) => o.kind !== 'water' && s >= o.s0 && s <= o.s1) ? cl.key : '';
     if (hit && k0 < 0) { k0 = s; key = hit; }
@@ -224,13 +275,16 @@ export class BridgeLayer {
   // whether anything changed. Call before drawRoads().
   // `reserve`: how far from each end of a segment (a, b) the junction there reaches: no bridge
   // runs into a junction (its deck and parapets would cut across the roads leaving it).
-  sync(net: Network, reserve: (s: RSeg) => [number, number] = () => [0, 0]) {
+  // `near`: when given, only roads it picks are looked at again (a big map's edit); the rest keep
+  // the bridges they have.
+  sync(net: Network, reserve: (s: RSeg) => [number, number] = () => [0, 0], near?: (s: RSeg) => boolean) {
     // nothing to do if no road changed and no type was picked (the common case: a junction edit)
     const topo = [...net.segs.values()].map((s) => `${s.id}:${s.mid.length}:${JSON.stringify(s.bridges ?? 0)}`).join();
     if (topo === this.topo && !this.dirty) return false;
     this.topo = topo;
     for (const id of [...this.segs.keys()]) if (!net.segs.has(id)) { this.drop(id); this.dirty = true; }
     for (const s of net.segs.values()) {
+      if (near && this.segs.has(s.id) && !near(s)) continue;
       const path = net.path(s);
       if (!path.some((p) => (p.y ?? 0) > 3)) { if (s.bridges || this.segs.has(s.id)) { s.bridges = undefined; this.drop(s.id); this.dirty = true; } continue; }
       const c = crossingOf(net, path, net.def(s), (id) => id === s.id), keep = reserve(s);

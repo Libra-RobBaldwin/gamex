@@ -7,8 +7,7 @@
 // Pure: no three.js, no DOM.
 
 export type Style = 'temperate' | 'desert' | 'arctic';
-// How hilly the ground is (the terrain library's presets). Recorded in the map now; the game's
-// ground turns hilly once the terrain integration lands (docs/regiongen.md, "Hills").
+// How hilly the ground is (region/terrain.ts): flat to mountain. Rolling by default.
 export type Relief = 'flat' | 'lowland' | 'rolling' | 'upland' | 'mountain';
 export interface RegionOptions {
   seed: number;
@@ -26,7 +25,7 @@ export const RELIEFS: readonly Relief[] = ['flat', 'lowland', 'rolling', 'upland
 export const LIMITS = { rivers: [0, 3], lakes: [0, 4], towns: [0, 6], villages: [0, 12] } as const;
 
 // The defaults: the region as it was first made (one river, one or two lakes, a city, three towns, six to eight villages).
-export const DEFAULT_OPTIONS: RegionOptions = { seed: 7, rivers: 1, lakes: -1, city: true, towns: 3, villages: -1, style: 'temperate', relief: 'flat' };
+export const DEFAULT_OPTIONS: RegionOptions = { seed: 7, rivers: 1, lakes: -1, city: true, towns: 3, villages: -1, style: 'temperate', relief: 'rolling' };
 // (−1: let the seed decide: one or two lakes, six to eight villages)
 
 const clampInt = (v: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, Math.round(v)));
@@ -42,7 +41,7 @@ export function regionOptions(o: Partial<RegionOptions> = {}): RegionOptions {
     towns: clampInt(Number.isFinite(d.towns) ? d.towns : 3, LIMITS.towns),
     villages: d.villages === -1 ? -1 : clampInt(Number.isFinite(d.villages) ? d.villages : 7, LIMITS.villages),
     style: STYLES.includes(d.style) ? d.style : 'temperate',
-    relief: RELIEFS.includes(d.relief) ? d.relief : 'flat',
+    relief: RELIEFS.includes(d.relief) ? d.relief : 'rolling',
   };
   // (a map needs somewhere to start: with nothing asked for, one village)
   if (!out.city && out.towns === 0 && out.villages === 0) out.villages = 1;

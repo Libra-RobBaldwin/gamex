@@ -113,7 +113,7 @@ function makeWater(r: Rand, B: number, o: RegionOptions): WaterSpec {
 
 // ---------------- settlements ----------------
 // how far a settlement's land reaches from its centre: the built-up area and its industrial edge
-const reach = (kind: Kind, r: number) => r + (KINDS[kind].industrial ? KINDS[kind].spacing * (KINDS[kind].industrial!.rows + 1) : 0) + 30;
+export const reach = (kind: Kind, r: number) => r + (KINDS[kind].industrial ? KINDS[kind].spacing * (KINDS[kind].industrial!.rows + 1) : 0) + 30;
 
 // Poisson-disc sampling (dart throwing): each new place lands at random, and is kept only if it's
 // far enough from every place already there (by both their sizes) and from the water. The city

@@ -44,6 +44,9 @@ export interface BenchOptions {
   budgetMs?: number;
   rings?: Ring[];
   maxInFlight?: number;
+  // how slow this machine is against the reference (test/speed.ts slowness): the manager's real
+  // bookkeeping time is taken as it would be there, so the budget means the same everywhere
+  slowness?: number;
 }
 export interface BenchResult {
   seconds: number; frames: number; km: number;
@@ -101,7 +104,7 @@ export async function runBenchmark(o: BenchOptions = {}): Promise<BenchResult> {
     r0 = performance.now();
     m.update(cam);
     real = performance.now() - r0;
-    const ms = work + real;
+    const ms = work + real / (o.slowness ?? 1);
     frameMs.push(ms);
     realSum += real; realMax = Math.max(realMax, real);
     if (ms > budget + maxItem) over++;

@@ -59,16 +59,23 @@ a stream with review and fixes takes 45–90 minutes, and a merge about 5.
   Then tune growth, money and decline on the region.
 - [ ] Growth and the town panel for each district and each town.
 - [ ] A "Stop catchments" layer that means something at region scale.
-- [ ] **Save and load:** versioned saves in IndexedDB, autosave, and the menu's Load. The
-  economy already has `save()`. Nothing in the game saves yet, and that blocks release.
+- [x] **Save and load:** versioned saves in IndexedDB with migrations, autosave, Menu > Save
+  town and Load town, and the start menu's Continue and Saved towns (docs/save.md).
 - [ ] Bulldoze and undo for roads, stops and stations.
 - [ ] Freight after passengers: industries in the economy, lorries, terminals (backlog C).
 
 ### 5. Ready for real players
 - [ ] **A green CI:**
   - fix the economy test (above);
-  - scale timing budgets by a measured machine factor (bridges, terrain and water benchmarks);
-  - run the Playwright phone tests (`e2e/*.e2e.mjs`) in CI.
+  - [x] scale timing budgets by a measured machine factor: every timed test's budget goes
+    through `budget()` (src/proto/test/speed.ts) and is timed in CPU time (bridges, terrain,
+    water, game water, ground, world and economy benchmarks). Four budgets are loose enough that
+    a 2× slowdown still passes on a reference-speed machine: water bench (42 ms of 200), terrain
+    (34 of 250), game water (390 of 1500) and the conurbation month (90 of 1000). Tightening them
+    is their streams' call;
+  - [x] run the Playwright phone tests in CI: the `phone` job in .github/workflows/ci.yml runs
+    lines, loop, rail, saving and loading, and the start menu (Playwright's own Chromium, via
+    `CHROME`).
 - [ ] **Performance on a real Pixel:** frame time, memory and heat on each quality tier. Every
   check so far ran under SwiftShader.
 - [ ] **Known bugs:**

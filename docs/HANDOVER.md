@@ -1,6 +1,21 @@
 # Handover: where everything stands
 
-## Latest: the player builds everything, and simpler tools (24 Sep 2026, night)
+## Latest: saving and loading (24 Sep 2026, night)
+
+Session https://claude.ai/code/session_01PQ93PyRyTyLaPDoybw2MMw. **Read `docs/save.md`.**
+- **Save and load work:**
+  - versioned saves in IndexedDB with a migration chain;
+  - autosave every 4 game hours and when the page is hidden;
+  - Menu > Save town and Load town;
+  - the start menu's Continue and Saved towns;
+  - a loaded town continues exactly as saved (`game/save.test.ts`, `e2e/save.e2e.mjs`).
+- **The economy library changed slightly (`economy.ts`):** its save also keeps each zone's review
+  tallies, each building's site score and the order its town met its zones. The game makes a save
+  a round trip for its own economy too (docs/ENGINE.md).
+- **CI:** timing budgets scale with the machine, and the phone tests run in CI. That's a second
+  PR from `claude/work-save-ci`.
+
+## Earlier: the player builds everything, and simpler tools (24 Sep 2026, night)
 
 Session https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8, on the user's feedback:
 nothing should be built at the start, the HUD was too big, and the tools were too complicated.
@@ -27,6 +42,20 @@ nothing should be built at the start, the HUD was too big, and the tools were to
 - **Build sheet:** the cards for things not in the game yet are gone (bus station, lorry depot,
   Freight, Landscape). Add them back when they exist. Save and Load in the menu are left to the
   save session.
+- **Merged overnight (24–25 Sep):**
+  - #35: save and load;
+  - #36: CI timing budgets scaled by machine speed, and the phone tests in CI;
+  - #37: region hills, place names, Places, and trips between towns;
+  - #38: region streaming.
+
+  The merges were checked with tsc, vitest (only the known economy test fails), the lines, loop,
+  rail and save phone tests, and a region-map smoke test (it loads in 29 s with no errors). The
+  region and streaming sessions are archived.
+- **Still open:**
+  - #39: traffic. Gap-taking is done; the roundabout pull-out and steering are to follow on the
+    same branch.
+  - #36: follow-up commits.
+  - Stations session: `work-stations-2`.
 - **Parallel sessions** each push a `claude/work-*` branch; merge them here as they land:
   - traffic feel: `work-traffic-2`;
   - save and CI: `work-save`;

@@ -459,7 +459,10 @@ export const RAIL_MATS = { ballast: ballastMat, sleeper: sleeperMat, rail: railM
 // (pedx: a pelican crossing's, whose lights follow its people rather than a junction's)
 export interface Lamp { mesh: THREE.Mesh; node: number; seg: number; col: 'red' | 'amber' | 'green'; pedx?: string }
 
-export function drawRoads(net: Network, group: THREE.Group, junctions: Map<number, Junction>, trunkMat: THREE.Material, crownMat: THREE.Material, editing: number | null = null): Lamp[] {
+// Only some of the roads and junctions (a streamed map draws a tile at a time: game/regionview.ts).
+// Each road and junction is drawn exactly as it is when everything is drawn together.
+export interface DrawOnly { seg: (s: RSeg) => boolean; node: (id: number) => boolean }
+export function drawRoads(net: Network, group: THREE.Group, junctions: Map<number, Junction>, trunkMat: THREE.Material, crownMat: THREE.Material, editing: number | null = null, only?: DrawOnly): Lamp[] {
   for (const c of [...group.children]) { group.remove(c); (c as THREE.Mesh).geometry.dispose(); }
   const F = () => new Flat();
   const pave = F(), asph = F(), lines = F(), verge = F(), median = F(), yellow = F(), bus = F(), cyc = F(), bays = F();
@@ -485,6 +488,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   }
   const inJunction = (x: number, z: number) => jland.some((l) => x >= l.box[0] && x <= l.box[2] && z >= l.box[1] && z <= l.box[3] && l.polys.some((q) => inPoly({ x, z }, q)));
   for (const s of net.segs.values()) {
+    if (only && !only.seg(s)) continue;
     const d = net.def(s), path = finePath(net, s), A = arcs(path), L = A[A.length - 1];
 
     const half = net.half(s);
@@ -879,6 +883,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   };
   for (const n of net.nodes.values()) {
     lift = null;
+    if (only && !only.node(n.id)) continue;
     const segs = net.segsAt(n.id);
     if (!segs.length) continue;
     // (track joins up round a curve like a road; only where lines branch is there a bed of ballast)
@@ -890,7 +895,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     if (!j || !sh) {
       if (segs.length === 1) {
         // a cul-de-sac's turning head (a road running off the map, or a big road that just stops, has none)
-        const s = segs[0], head = courses.get(s.id)?.heads[s.a === n.id ? 0 : 1];
+        const s = segs[0], head = (courses.get(s.id) ?? (only ? courseOf(net, s) : undefined))?.heads[s.a === n.id ? 0 : 1];
         if (head) { (noPave ? verge : pave).poly(head.pave, y + 0.15); asph.poly(head.apron, y + 0.25); }
       } else if (segs.length > 2) {
         // roads meeting with no junction designed yet: fill the middle

@@ -64,15 +64,19 @@ export interface End extends P { node?: number; seg?: number }
 
 const dist = (a: P, b: P) => Math.hypot(a.x - b.x, a.z - b.z);
 
-export function rng(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
+// A seeded stream of numbers in [0, 1). Its `state` can be read and set, so a saved game carries
+// on drawing exactly the numbers it would have (game/save.ts).
+export interface Rng { (): number; state: number }
+export function rng(seed: number): Rng {
+  const f = (() => {
+    f.state = (f.state + 0x6d2b79f5) >>> 0;
+    let t = f.state;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  }) as Rng;
+  f.state = seed >>> 0;
+  return f;
 }
 
 export function closestOnSeg(p: P, a: P, b: P) {
@@ -230,7 +234,7 @@ export class Network {
   bound: number;
   // where the ground ends (half its width): roads running off the map are drawn out to here
   edge: number;
-  private rand: () => number;
+  private rand: Rng;
   zoneAt: (p: P) => Zone = () => 'town';
   // lots whose plots the last build() cut into (their gardens get trimmed)
   touched: Lot[] = [];
@@ -244,6 +248,9 @@ export class Network {
     this.rand = rng(seed);
   }
 
+  // where its own random stream has got to (plots' sizes and seeds), for saving
+  get randState() { return this.rand.state; }
+  set randState(v: number) { this.rand.state = v; }
   node(id: number) { return this.nodes.get(id)!; }
   segEnds(s: RSeg) { return [this.node(s.a), this.node(s.b)] as const; }
   segsAt(n: number) { return [...this.segs.values()].filter((s) => s.a === n || s.b === n); }
@@ -626,8 +633,13 @@ export class Network {
       const shared = [a.node, b.node].some((id) => id === s.a || id === s.b) || a.seg === s.id || b.seg === s.id;
       if (shared) continue;
       const sp = this.path(s), near = (half + this.half(s)) * 0.7;
+      // (its box, grown by `near`: a point outside it can't be that close)
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const q of sp) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
+      x0 -= near; z0 -= near; x1 += near; z1 += near;
       for (let i = 1; i < path.length; i++) {
         const m = { x: (path[i - 1].x + path[i].x) / 2, z: (path[i - 1].z + path[i].z) / 2 };
+        if (m.x < x0 || m.x > x1 || m.z < z0 || m.z > z1) continue;
         if (path.length > 2 && (dist(m, a) < near * 1.5 || dist(m, b) < near * 1.5)) continue;
         const c = closestOnPath(m, sp);
         if (c.d >= near || Math.abs(c.y - ((path[i - 1].y ?? 0) + (path[i].y ?? 0)) / 2) > 3) continue;
@@ -785,14 +797,15 @@ export class Network {
     return false;
   }
 
-  lotFree(l: Lot, extra: Lot[] = []) {
+  // (`near`: the plots that could be in the way, when the caller already knows them; all by default)
+  lotFree(l: Lot, extra: Lot[] = [], near: Iterable<Lot> = this.lots) {
     const poly = rectCorners(l.x, l.z, l.rot, l.w + 1, l.d + 1);
     const r = Math.hypot(l.w + 1, l.d + 1) / 2;
     if (poly.some((p) => this.isWater(p) || Math.abs(p.x) > this.bound || Math.abs(p.z) > this.bound)) return false;
     if (!this.land.free(poly)) return false;
     // a building can't go on somebody else's plot (neighbouring plots may touch)
     const foot = rectCorners(l.x, l.z, l.rot, l.w - 0.4, l.d - 0.4);
-    for (const o of [...this.lots, ...extra]) {
+    for (const o of [...near, ...extra]) {
       if (dist(this.parcelCentre(o), l) > r + this.parcelR(o)) continue;
       if (polysOverlap(foot, this.parcelRect(o))) return false;
     }

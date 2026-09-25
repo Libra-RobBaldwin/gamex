@@ -4,7 +4,7 @@
 import { chromium } from 'playwright-core';
 const url = process.argv[2] ?? 'http://localhost:5173/?map=town';
 const out = process.argv[3] ?? '.';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
@@ -37,26 +37,44 @@ await page.waitForTimeout(400);
 await page.screenshot({ path: `${out}/m1-1-lines.png` });
 if (await page.$('[data-line="0"]')) fail('a line is listed before one was drawn');
 
+// (on a slow machine, SwiftShader draws a frame or two a second: wait for the camera to stop
+// moving before working out where to tap, and for each tap to take, rather than for fixed times)
+async function settle(p = { x: 0, z: 0 }) {
+  let last = null;
+  for (let i = 0; i < 60; i++) {
+    const s = await page.evaluate((p) => window.proto.toScreen(p), p);
+    if (last && Math.hypot(s.x - last.x, s.y - last.y) < 0.5) return;
+    last = s; await page.waitForTimeout(400);
+  }
+}
+const drafted = () => page.evaluate(() => document.querySelector('#tpanel')?.textContent ?? '');
+
 // New line: frame the town, tap three stop badges
 await page.tap('[data-newline]');
 await page.evaluate(() => window.proto.focusOn({ x: 0, z: -60 }, 900));
-await page.waitForTimeout(2500);
-// (the camera glides there; under SwiftShader that can outlast the wait, and screen points read
-// mid-glide are stale by the time they're tapped)
-await page.waitForFunction(() => !window.proto.nav.busy, null, { timeout: 30000 });
+await page.waitForTimeout(1000);
+await settle();
 const targets = [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }];
-const picks = await page.evaluate((targets) => {
+const pickOf = (q) => page.evaluate((q) => {
   const P = window.proto, places = P.markers.places();
-  return targets.map((q) => { const b = places.map((m) => ({ m, d: Math.hypot(m.p.x - q.x, m.p.z - q.z) })).sort((a, b) => a.d - b.d)[0].m; const s = P.toScreen(b.p); return { id: b.id, x: s.x, y: s.y }; });
-}, targets);
-for (const p of picks) {
-  if (p.x < 10 || p.x > 402 || p.y < 110 || p.y > 760) fail(`stop ${p.id} is off screen at ${Math.round(p.x)},${Math.round(p.y)}`);
-  await page.touchscreen.tap(p.x, p.y); await page.waitForTimeout(500);
+  const b = places.map((m) => ({ m, d: Math.hypot(m.p.x - q.x, m.p.z - q.z) })).sort((a, b) => a.d - b.d)[0].m, s = P.toScreen(b.p);
+  return { id: b.id, x: s.x, y: s.y };
+}, q);
+for (const [i, q] of targets.entries()) {
+  // (tapped until the line takes it, twice at most: a tap can land between frames)
+  for (let tries = 0; tries < 2; tries++) {
+    const p = await pickOf(q);
+    if (p.x < 10 || p.x > 402 || p.y < 110 || p.y > 760) { fail(`stop ${p.id} is off screen at ${Math.round(p.x)},${Math.round(p.y)}`); break; }
+    await page.touchscreen.tap(p.x, p.y);
+    const took = await page.waitForFunction((n) => (document.querySelector('#tpanel')?.textContent ?? '').includes(`${n} `), i + 1, { timeout: 10000 }).then(() => true, () => false);
+    if (took) break;
+    await settle();
+  }
 }
 await page.screenshot({ path: `${out}/m1-2-drawing.png` });
-const drafted = await page.evaluate(() => document.querySelector('#tpanel')?.textContent ?? '');
-console.log('drafted:', drafted.trim());
-if (!/1.*2.*3/.test(drafted)) fail('three stops were not all picked');
+const draft = await drafted();
+console.log('drafted:', draft.trim());
+if (!/1.*2.*3/.test(draft)) fail('three stops were not all picked');
 await page.tap('#t-prim button');
 await page.waitForTimeout(1500);
 await page.screenshot({ path: `${out}/m1-3-line-sheet.png` });
@@ -94,10 +112,13 @@ if (calls < line.buses.length) fail(`only ${calls} calls`);
 // tap one of its buses
 await page.evaluate(() => window.proto.setSpeed(0));
 const bus = await page.evaluate((ids) => { const P = window.proto; for (const id of ids) { const b = P.traffic.bus(id); if (b) { P.focusOn({ x: b.x, z: b.z }, 90); return id; } } return null; }, line.buses);
-await page.waitForTimeout(2500);
-const at = await page.evaluate((id) => { const P = window.proto, b = P.traffic.bus(id); return P.toScreen({ x: b.x, z: b.z, y: 1.5 }); }, bus);
-await page.touchscreen.tap(at.x, at.y);
-await page.waitForTimeout(800);
+await page.waitForTimeout(1000);
+for (let tries = 0; tries < 2; tries++) {
+  await settle(await page.evaluate((id) => { const b = window.proto.traffic.bus(id); return { x: b.x, z: b.z }; }, bus));
+  const at = await page.evaluate((id) => { const P = window.proto, b = P.traffic.bus(id); return P.toScreen({ x: b.x, z: b.z, y: 1.5 }); }, bus);
+  await page.touchscreen.tap(at.x, at.y);
+  if (await page.waitForFunction(() => (document.querySelector('#sheet h2')?.textContent ?? '').startsWith('Bus'), null, { timeout: 10000 }).then(() => true, () => false)) break;
+}
 await page.screenshot({ path: `${out}/m1-4-bus-sheet.png` });
 const title = await page.evaluate(() => document.querySelector('#sheet h2')?.textContent ?? '');
 console.log('sheet after tapping a bus:', title);

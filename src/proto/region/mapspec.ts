@@ -6,7 +6,7 @@ import type { Kind, Link, StreetCall, ZoneRule } from './generate';
 import type { WaterSpec, XZ } from './water';
 import type { RegionOptions, Relief, Style } from './options';
 
-export interface SettlementInfo { id: number; name: string; kind: Kind; x: number; z: number; r: number }
+export interface SettlementInfo { id: number; name: string; kind: Kind; x: number; z: number; r: number; gates?: XZ[] } // (gates: where its high street leaves it)
 // A street as the map describes it: the region's calls, plus the few options the town's
 // hand-drawn roads use (a bridge over, a tunnel under, a steeper grade, a railway not snapped).
 export interface MapStreet extends Omit<StreetCall, 'settlement' | 'role'> {
