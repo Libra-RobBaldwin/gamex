@@ -98,10 +98,10 @@ export function planWorld(opts: Partial<RegionOptions> = {}): WorldPlan {
   const settlements = placeSettlements(rng(mix(seed, 203)), seed, half, water, o);
   const grid = new SettlementGrid(settlements);
   const terrain = new WorldTerrain({ seed, relief: o.relief, half, water, grid });
-  // (exact gates for the places A roads meet: the ends of their high streets, from their own street layout)
-  for (const s of settlements) if (s.kind !== 'village') layStreets(s, water, half);
+  // (exact gates for the places the roads meet: the ends of their high streets, from their own street layout)
+  for (const s of settlements) layStreets(s, water, half);
   const links = suggestLinks(settlements, water).filter((l) => !crossesSea(water, settlements[l.a], settlements[l.b]));
-  const { roads, rails } = planRoutes({ seed, half, settlements, links, water, grid });
+  const { roads, rails } = planRoutes({ seed, half, settlements, links, water, grid, heightAt: terrain.heightAt });
   const ms = typeof performance !== 'undefined' ? performance.now() - t0 : 0;
   return { seed, options: o, size: half * 2, half, water, settlements, start: 0, links, roads, rails, terrain, grid, ms };
 }
@@ -162,14 +162,32 @@ function makeWater(r: Rand, H: number, o: RegionOptions): WorldWaterSpec {
     k++;
   }
   const withRivers = new WorldWater({ sea, rivers, lakes: [] });
-  const lakes: LakeSpec[] = [];
+  // Lakes: never circles. Each is a chain of overlapping bowls of different sizes along a wandering
+  // line (the water is where any of them is), so its shore has lobes, bays and narrows, long one way
+  // as a lake in a valley is. They keep out of the live play area (its water is one bowl a lake).
+  const lakes: LakeSpec[] = [], clusters: { x: number; z: number; R: number }[] = [];
   const want = o.lakes === -1 ? (small ? 1 : AUTO.lakes[0] + Math.floor(r() * (AUTO.lakes[1] - AUTO.lakes[0] + 1))) : o.lakes;
-  for (let tries = 0; tries < 3000 && lakes.length < want; tries++) {
-    const L: LakeSpec = { x: range(r, -H + 1500, H - 1500), z: range(r, -H + 1500, H - 1500), r: Math.round(range(r, 160, 650) * (r() < 0.25 ? 1.4 : 1)), waves: [range(r, 0, 6.28), range(r, 0, 6.28), range(r, 0, 6.28)] };
-    if (Math.hypot(L.x, L.z) < 2600 + L.r) continue;
-    if (withRivers.edgeDistance(L, 4000) < L.r * 1.35 + 450) continue;
-    if (lakes.some((q) => Math.hypot(q.x - L.x, q.z - L.z) < (q.r + L.r) * 1.35 + 2500)) continue;
-    lakes.push(L);
+  for (let tries = 0; tries < 3000 && clusters.length < want; tries++) {
+    const x = range(r, -H + 1800, H - 1800), z = range(r, -H + 1800, H - 1800), size = range(r, 220, 700) * (r() < 0.25 ? 1.5 : 1);
+    const n = 4 + Math.floor(r() * 5), parts: LakeSpec[] = [];
+    let a = range(r, 0, 6.28), px = x, pz = z;
+    for (let k = 0; k < n; k++) {
+      const rr = Math.round(size * range(r, 0.22, k === 0 ? 0.6 : 0.5));
+      parts.push({ x: px, z: pz, r: rr, waves: [range(r, 0, 6.28), range(r, 0, 6.28), range(r, 0, 6.28)] });
+      a += range(r, -1.1, 1.1);
+      const step = rr * range(r, 0.7, 1.4);
+      // (and now and then a bay off to one side)
+      if (r() < 0.35) { const b = a + (r() < 0.5 ? 1.6 : -1.6), br = rr * range(r, 0.4, 0.7); parts.push({ x: px + Math.cos(b) * rr * 0.9, z: pz + Math.sin(b) * rr * 0.9, r: Math.round(br), waves: [range(r, 0, 6.28), range(r, 0, 6.28), range(r, 0, 6.28)] }); }
+      px += Math.cos(a) * step; pz += Math.sin(a) * step;
+    }
+    const cx = parts.reduce((t, p) => t + p.x, 0) / parts.length, cz = parts.reduce((t, p) => t + p.z, 0) / parts.length;
+    const R = Math.max(...parts.map((p) => Math.hypot(p.x - cx, p.z - cz) + p.r * 1.35));
+    if (Math.max(Math.abs(cx), Math.abs(cz)) < LIVE_HALF + R + 800) continue;
+    if (Math.abs(cx) > H - R - 600 || Math.abs(cz) > H - R - 600) continue;
+    if (parts.some((p) => withRivers.edgeDistance(p, 4000) < p.r * 1.35 + 450)) continue;
+    if (clusters.some((q) => Math.hypot(q.x - cx, q.z - cz) < q.R + R + 2500)) continue;
+    clusters.push({ x: cx, z: cz, R });
+    lakes.push(...parts);
   }
   return { sea, rivers, lakes };
 }

@@ -27,7 +27,7 @@ export type Detail = 'near' | 'mid' | 'far' | 'vast';
 export const LEVEL_SIZE = [1000, 4000, 16000] as const; // metres across a tile at each level
 export const LEVEL_OF: Record<Detail, number> = { near: 0, mid: 0, far: 1, vast: 2 };
 const TEXEL: Record<Detail, number> = { near: 4, mid: 8, far: 16, vast: 64 }; // cover metres per texel
-const STEP: Record<Detail, number> = { near: 25, mid: 50, far: 100, vast: 400 }; // ground grid (the drape field's is 50 m)
+const STEP: Record<Detail, number> = { near: 25, mid: 50, far: 100, vast: 200 }; // ground grid (the drape field's is 50 m)
 // how much wider trunk roads, railways and rivers are drawn further out, so the network reads as a map
 const WIDEN: Record<Detail, number> = { near: 1, mid: 1.15, far: 1.8, vast: 3.2 };
 
@@ -112,6 +112,7 @@ export function normals(P: XZ[]): XZ[] {
     return { x: -(b.z - a.z) / L, z: (b.x - a.x) / L };
   });
 }
+const DOORS = ['#5a3a2a', '#2f4a3a', '#2d3e5a', '#6b2a2a', '#3a3a3a'];
 const shade = (c: [number, number, number], k: number): [number, number, number] => [c[0] * k, c[1] * k, c[2] * k];
 
 // A building: walls (darker at the foot), and a flat roof or a gable along its width. `far` draws a
@@ -132,6 +133,34 @@ function building(o: Out, b: SceneBuilding, detail: Detail) {
       const ex = 0.06, ox = n[0] * ex, oz = n[2] * ex, m = 0.9;
       const A = at(u0 * m + u1 * (1 - m), v0 * m + v1 * (1 - m), y), B = at(u1 * m + u0 * (1 - m), v1 * m + v0 * (1 - m), y);
       o.quad([B[0] + ox, y, B[2] + oz], [A[0] + ox, y, A[2] + oz], [A[0] + ox, y + 1.4, A[2] + oz], [B[0] + ox, y + 1.4, B[2] + oz], n, g);
+    }
+  }
+  // houses, terraces, shops and farmhouses up close: windows on both long sides, a door at the front
+  // (the street side), and a chimney on the ridge
+  if (detail === 'near' && (b.kind === 'house' || b.kind === 'terrace' || b.kind === 'shop' || b.kind === 'farm')) {
+    const g = rgb('#3a4450'), dr = rgb(DOORS[(b.wall + b.roof) % DOORS.length]), floors = Math.max(1, Math.round(h / 2.7)), slots = Math.max(1, Math.floor(b.w / 2.9));
+    const put = (u: number, y: number, ww: number, hh: number, front: boolean, c: [number, number, number]) => {
+      const v = front ? -hd - 0.04 : hd + 0.04, n: [number, number, number] = front ? [si, 0, -co] : [-si, 0, co];
+      const a = at(u - ww / 2, v, y), e = at(u + ww / 2, v, y);
+      if (front) o.quad([e[0], y, e[2]], [a[0], y, a[2]], [a[0], y + hh, a[2]], [e[0], y + hh, e[2]], n, c);
+      else o.quad([a[0], y, a[2]], [e[0], y, e[2]], [e[0], y + hh, e[2]], [a[0], y + hh, a[2]], n, c);
+    };
+    for (let f = 0; f < floors; f++) for (let k = 0; k < slots; k++) {
+      const u = -hw + (b.w / slots) * (k + 0.5), y = 0.9 + f * 2.7;
+      if (y + 1.2 > h - 0.2) continue;
+      const door = f === 0 && k === (slots > 2 ? 1 : 0) && b.kind !== 'shop';
+      if (door) put(u, 0, 0.95, 2.1, true, dr);
+      else if (f === 0 && b.kind === 'shop') put(u, 0.5, (b.w / slots) * 0.8, 2.2, true, g);
+      else put(u, y, 1.1, 1.25, true, g);
+      put(u, y, 1.1, 1.25, false, g);
+    }
+    if (top && b.kind !== 'shop') {
+      const cu = hw - 0.9, ch = h + top + 0.9, cw = 0.35;
+      const C = (du: number, dv: number, y: number) => at(cu + du, dv, y);
+      const cc = rgb(WALLS[b.wall] ?? WALLS[0]), cn: [number, number, number][] = [[si, 0, -co], [co, 0, si], [-si, 0, co], [-co, 0, -si]];
+      const cs: [number, number, number, number][] = [[-cw, -cw, cw, -cw], [cw, -cw, cw, cw], [cw, cw, -cw, cw], [-cw, cw, -cw, -cw]];
+      cs.forEach(([u0, v0, u1, v1], k) => o.quad(C(u1, v1, h + top - 0.6), C(u0, v0, h + top - 0.6), C(u0, v0, ch), C(u1, v1, ch), cn[k], shade(cc, 0.85)));
+      o.quad(C(-cw, -cw, ch), C(-cw, cw, ch), C(cw, cw, ch), C(cw, -cw, ch), UP, shade(cc, 0.6));
     }
   }
   if (!top) { o.quad(at(-hw, -hd, h), at(-hw, hd, h), at(hw, hd, h), at(hw, -hd, h), UP, roof); return; }
@@ -160,7 +189,7 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
   // the ground: its cover, and the grid (the beds of lakes and the sea; the heights are the drape's)
   const input = countryInput(plan, box, fine);
   const { layout, data: cover, n } = paintCover(input, box, TEXEL[detail]);
-  const ground = groundGrid(plan, box, STEP[detail]);
+  const ground = groundGrid(plan, box, STEP[detail], touchesLive(box) ? LIVE : null);
   const water = waterMesh(plan, box, STEP[detail], detail);
 
   // everything solid
@@ -170,6 +199,7 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
   for (const s of places) {
     if (Math.max(Math.abs(s.x), Math.abs(s.z)) < LIVE_HALF) continue; // (the live play area's are the game's)
     const sc = settlementScene(plan, s);
+    if (detail === 'vast' && inTile(s)) patch(o, s.x, s.z, s.r * (s.kind === 'village' ? 0.9 : 1.05), s.seed);
     for (const b of sc.buildings) if (inTile(b)) { building(o, b, detail); nb++; }
     if (detail === 'vast') continue;
     const widen = detail === 'far' ? 1.6 : 1;
@@ -195,11 +225,11 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
   // trees in the woods, hedgerows
   let trees = new Float32Array(0), hedge: TileData['hedges'] = null;
   if (fine) {
-    const all = woodTrees(layout, box, detail === 'near' ? 12 : 15, look.trees.pines, plan.seed + level * 7 + 3);
+    const all = woodTrees(layout, box, detail === 'near' ? 16 : 19, look.trees.pines, plan.seed + level * 7 + 3);
     // (clear of the roads, railways and plots: they're painted as verge and garden, not wood)
     const occ = new OccFree(input);
     const kept: number[] = [];
-    for (let k = 0; k < all.length; k += 4) if (inTile({ x: all[k], z: all[k + 1] }) && occ.free(all[k], all[k + 1])) kept.push(all[k], all[k + 1], all[k + 2] * (detail === 'mid' ? 1.35 : 1.2), all[k + 3]);
+    for (let k = 0; k < all.length; k += 4) if (inTile({ x: all[k], z: all[k + 1] }) && occ.free(all[k], all[k + 1])) kept.push(all[k], all[k + 1], all[k + 2] * (detail === 'mid' ? 1.6 : 1.45), all[k + 3]);
     trees = new Float32Array(kept);
     if (detail === 'near') {
       const hg = hedges(layout, input, box), keep = (p: XZ) => inTile(p);
@@ -242,6 +272,15 @@ function placeTile(plan: WorldPlan, id: number, detail: Detail): TileData {
 // is a point clear of the roads, railways, plots and water? (as the ground's hedge planner asks it)
 class OccFree { private o: Occupancy; constructor(input: ConstructorParameters<typeof Occupancy>[0]) { this.o = new Occupancy(input); } free(x: number, z: number) { return this.o.free(x, z, 3); } }
 
+// a place's built-up area from far off: a wobbly patch of streets and yards
+function patch(o: Out, x: number, z: number, r: number, seed: number) {
+  const n = 28, c = rgb('#8c847a'), w1 = (seed % 628) / 100, w2 = ((seed >> 10) % 628) / 100;
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2, b = ((k + 1) / n) * Math.PI * 2;
+    const ra = r * (1 + 0.14 * Math.sin(3 * a + w1) + 0.08 * Math.sin(5 * a + w2)), rb = r * (1 + 0.14 * Math.sin(3 * b + w1) + 0.08 * Math.sin(5 * b + w2));
+    o.tri([x, 0.08, z], [x + Math.cos(b) * rb, 0.08, z + Math.sin(b) * rb], [x + Math.cos(a) * ra, 0.08, z + Math.sin(a) * ra], UP, c);
+  }
+}
 function disc(o: Out, x: number, z: number, r: number, y: number, c: [number, number, number]) {
   const n = 14;
   for (let k = 0; k < n; k++) {
@@ -315,7 +354,7 @@ function trunk(plan: WorldPlan, o: Out, box: Box, detail: Detail, inTile: (p: XZ
 // the beds of lakes and the sea, with normals from the hills (the heights themselves are added by
 // the drape shader, from the same field everything else follows), and skirts down each edge so a
 // coarser neighbour never shows a crack.
-function groundGrid(plan: WorldPlan, b: Box, step: number) {
+function groundGrid(plan: WorldPlan, b: Box, step: number, hole: Box | null = null) {
   const nx = Math.round((b.x1 - b.x0) / step) + 1, nz = Math.round((b.z1 - b.z0) / step) + 1;
   const T = plan.terrain, pos: number[] = [], nor: number[] = [], idx: number[] = [];
   const e = Math.min(12, step / 2);
@@ -327,7 +366,9 @@ function groundGrid(plan: WorldPlan, b: Box, step: number) {
     nor.push(-dx / l, 1 / l, -dz / l);
   }
   // (split along the (i+1, j)–(i, j+1) diagonal, as the drape field's triangles are)
-  for (let j = 0; j + 1 < nz; j++) for (let i = 0; i + 1 < nx; i++) { const a = j * nx + i, bb = a + 1, c = a + nx, d = c + 1; idx.push(a, c, bb, bb, c, d); }
+  // (a hole where the live play area is, if the tile reaches it: its ground is the game's own)
+  const cut = (i: number, j: number) => !!hole && i >= 0 && j >= 0 && i < nx - 1 && j < nz - 1 && b.x0 + (i + 0.5) * step > hole.x0 && b.x0 + (i + 0.5) * step < hole.x1 && b.z0 + (j + 0.5) * step > hole.z0 && b.z0 + (j + 0.5) * step < hole.z1;
+  for (let j = 0; j + 1 < nz; j++) for (let i = 0; i + 1 < nx; i++) { if (cut(i, j)) continue; const a = j * nx + i, bb = a + 1, c = a + nx, d = c + 1; idx.push(a, c, bb, bb, c, d); }
   // skirts: each edge's vertices again, 40 m down, and a wall between
   const skirt = (ks: number[], flip: boolean) => {
     const base = pos.length / 3;
@@ -336,6 +377,13 @@ function groundGrid(plan: WorldPlan, b: Box, step: number) {
   };
   const row = (j: number) => Array.from({ length: nx }, (_, i) => j * nx + i), col = (i: number) => Array.from({ length: nz }, (_, j) => j * nx + i);
   skirt(row(0), false); skirt(row(nz - 1), true); skirt(col(0), true); skirt(col(nx - 1), false);
+  // (and round the hole: each edge between a cell that's there and one that's cut)
+  if (hole) for (let j = 0; j + 1 < nz; j++) for (let i = 0; i + 1 < nx; i++) {
+    if (cut(i, j)) continue;
+    const a = j * nx + i;
+    if (cut(i, j - 1)) skirt([a, a + 1], true); if (cut(i, j + 1)) skirt([a + nx, a + nx + 1], false);
+    if (cut(i - 1, j)) skirt([a, a + nx], false); if (cut(i + 1, j)) skirt([a + 1, a + nx + 1], true);
+  }
   return { pos: new Float32Array(pos), nor: new Float32Array(nor), idx: new Uint32Array(idx) };
 }
 
@@ -350,12 +398,24 @@ function waterMesh(plan: WorldPlan, b: Box, step: number, detail: Detail): TileD
   const w = plan.water;
   const mayBe = w.world.sea !== null || w.spec.lakes.some((L) => L.x + L.r * 1.4 > b.x0 && L.x - L.r * 1.4 < b.x1 && L.z + L.r * 1.4 > b.z0 && L.z - L.r * 1.4 < b.z1);
   if (mayBe) for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) { const v = T.bed(b.x0 + i * s, b.z0 + j * s) < LEVEL + 0.05 ? 1 : 0; wet[j * (nx + 1) + i] = v; if (v) any = true; }
-  if (any) for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
-    const k = j * (nx + 1) + i;
-    if (!(wet[k] | wet[k + 1] | wet[k + nx + 1] | wet[k + nx + 2])) continue;
-    const x0 = b.x0 + i * s, z0 = b.z0 + j * s, v = pos.length / 3;
-    pos.push(x0, LEVEL, z0, x0 + s, LEVEL, z0, x0 + s, LEVEL, z0 + s, x0, LEVEL, z0 + s);
-    idx.push(v, v + 3, v + 1, v + 1, v + 3, v + 2);
+  // (each row's runs of wet cells as one quad: the open sea is a few big ones)
+  if (any) for (let j = 0; j < nz; j++) {
+    let run = -1;
+    for (let i = 0; i <= nx; i++) {
+      let w = false;
+      if (i < nx) {
+        const k = j * (nx + 1) + i, cx = b.x0 + (i + 0.5) * s, cz = b.z0 + (j + 0.5) * s;
+        const live = cx > LIVE.x0 && cx < LIVE.x1 && cz > LIVE.z0 && cz < LIVE.z1; // (the live area's water is the game's own)
+        w = !live && !!(wet[k] | wet[k + 1] | wet[k + nx + 1] | wet[k + nx + 2]);
+      }
+      if (w && run < 0) run = i;
+      if (!w && run >= 0) {
+        const x0 = b.x0 + run * s, x1 = b.x0 + i * s, z0 = b.z0 + j * s, v = pos.length / 3;
+        pos.push(x0, LEVEL, z0, x1, LEVEL, z0, x1, LEVEL, z0 + s, x0, LEVEL, z0 + s);
+        idx.push(v, v + 3, v + 1, v + 1, v + 3, v + 2);
+        run = -1;
+      }
+    }
   }
   // rivers
   const k = WIDEN[detail];

@@ -66,8 +66,17 @@ export interface Cell {
 // one farm's fields face a different way from the next. Turning falls off smoothly enough that
 // cells never fold over.
 const SWIRL = 900, SWIRL_R = 600, SWIRL_MAX = 0.9;
+// A layout can be given straighter fields, by its seed (a 50 km map's ground: worldmap/country.ts):
+// the same grid, but it wanders less and turns only over kilometres, so each field's hedges run
+// straight and its corners stay near square, while farms across the map still face different ways.
+export interface ParcelStyle { bend: number; jitter: number; swirl: number; swirlR: number; swirlMax: number }
+const STYLES = new Map<number, ParcelStyle>();
+const DEFAULT_STYLE: ParcelStyle = { bend: BEND, jitter: JIT, swirl: SWIRL, swirlR: SWIRL_R, swirlMax: SWIRL_MAX };
+export function setParcelStyle(seed: number, s: Partial<ParcelStyle>) { STYLES.set(seed, { ...DEFAULT_STYLE, ...s }); }
+export const STRAIGHT_FIELDS: Partial<ParcelStyle> = { bend: 25, jitter: 0.09, swirl: 6000, swirlR: 3500, swirlMax: 0.6 };
 export function bend(x: number, z: number, seed: number): XZ {
-  let dx = (worldNoise(x, z, BEND_L, seed + 111) - 0.5) * 2 * BEND, dz = (worldNoise(x, z, BEND_L, seed + 112) - 0.5) * 2 * BEND;
+  const st = STYLES.get(seed) ?? DEFAULT_STYLE, SWIRL = st.swirl, SWIRL_R = st.swirlR, SWIRL_MAX = st.swirlMax;
+  let dx = (worldNoise(x, z, BEND_L, seed + 111) - 0.5) * 2 * st.bend, dz = (worldNoise(x, z, BEND_L, seed + 112) - 0.5) * 2 * st.bend;
   const ci = Math.floor(x / SWIRL), cj = Math.floor(z / SWIRL);
   for (let i = ci - 1; i <= ci + 1; i++) for (let j = cj - 1; j <= cj + 1; j++) {
     const qx = (i + 0.2 + hash2(i, j, seed + 121) * 0.6) * SWIRL, qz = (j + 0.2 + hash2(i, j, seed + 122) * 0.6) * SWIRL;
@@ -80,7 +89,8 @@ export function bend(x: number, z: number, seed: number): XZ {
 }
 // the world position of grid corner (i, j)
 function corner(i: number, j: number, seed: number): XZ {
-  const b = fromGrid(i + (hash2(i, j, seed + 101) - 0.5) * 2 * JIT, j + (hash2(i, j, seed + 102) - 0.5) * 2 * JIT), d = bend(b.x, b.z, seed);
+  const J = (STYLES.get(seed) ?? DEFAULT_STYLE).jitter;
+  const b = fromGrid(i + (hash2(i, j, seed + 101) - 0.5) * 2 * J, j + (hash2(i, j, seed + 102) - 0.5) * 2 * J), d = bend(b.x, b.z, seed);
   return { x: b.x + d.x, z: b.z + d.z };
 }
 

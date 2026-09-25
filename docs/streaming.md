@@ -99,13 +99,23 @@ is still there as `size=6`, and saves made on it open on it). A real 50 km squar
 hundreds of thousands of buildings, so nothing fine is made for the whole map up front. There are
 two levels:
 
-1. **The world plan** (`src/proto/worldmap/plan.ts`, pure, about 0.4 s): the coarse facts of the whole map.
+1. **The world plan** (`src/proto/worldmap/plan.ts`, pure, about 1.2 s): the coarse facts of the whole map.
    - **Where things are.** The places: the start town at (0, 0), two cities, a dozen market towns and
      150 or so villages, each with its size, kind, name and seed.
    - **The water.** The coast along one edge with the sea beyond, rivers widening on their way down
-     to it, and lakes (`water.ts`).
-   - **The trunk network.** Motorways, A roads, B roads and railways, as centre lines (`routes.ts`).
-   - **The hills.** A function of x, z (`terrain.ts`).
+     to it, and lakes (`water.ts`). A lake is never a circle: it's a chain of overlapping bowls of
+     different sizes along a wandering line, with a bay or two off it.
+   - **The roads the map starts with.** Only minor roads between places (`routes.ts`): each place
+     joined to its neighbours, and a few lanes off the map's edges. There are no motorways, A roads
+     or railways at the start: those are the player's to build. (`planRoutes(c, true)` still lays the
+     old trunk network, for maps that want one.)
+
+     Each lane is found over the land: the cheapest path over a 125 m grid, where steep ground is
+     dear, a river crossing dearer, and the sea, lakes and places it doesn't serve are out of bounds.
+     Slow noise makes it wander as old lanes do. It's then smoothed into bends. A lane that would
+     meet another side by side at a place forks off it square instead.
+   - **The hills.** A function of x, z (`terrain.ts`): broad downs up to about 120 m on a rolling map,
+     and rolling hills of up to about 40 m on them.
 2. **Tiles** (`tilegen.ts`, pure, in workers: `tile.worker.ts`): everything fine, made a tile at a time as the
    camera nears it, from the plan and the tile's key alone:
    - streets, plots and buildings (`towns.ts`);
@@ -131,7 +141,18 @@ So the map is always covered exactly once, with no holes and nothing fighting.
 | near | 1 km | 1,000 m tall | 25 m, 4 m texels | every building (gables, window bands on flats and offices), streets with footways, junctions and centre lines, trunk roads with lane markings, railways with rails, stations, farmsteads, the woods' trees, hedgerows |
 | mid | 1 km | 5,000 m | 50 m, 8 m | the same, without markings, window bands or hedgerows; lower trees |
 | far | 4 km | 17,000 m | 100 m, 16 m | buildings as boxes, main streets, trunk roads and railways drawn wider |
-| vast | 16 km | the whole map | 400 m, 64 m | roofs only, trunk roads and railways wider still |
+| vast | 16 km | the whole map | 200 m, 64 m | each place's built-up area as a patch with its roofs over it, roads wider still |
+
+- **The live area.** The 16 km tiles round it show themselves with a hole where it is: its edge is on
+  their grid, with skirts round the hole. So zoomed right out the whole map is 16 tiles.
+- **Far and vast tiles.** They draw woods as their canopy (the woods' own greens on the ground, since
+  no trees stand there) and tone the crops towards grass so the patchwork doesn't speckle. What
+  stands on them is lifted a metre or five clear of where their coarser ground can bulge above the
+  fine heights.
+- **The fields.** A 50 km map's ground has its own seed with straight-edged, near-square fields
+  (`ground/layout.ts` `setParcelStyle`, `STRAIGHT_FIELDS`). It's the same field grid, but it bends
+  only over kilometres, not in swirls, so each field's hedges run straight while farms still face
+  different ways. The starter town's fields are as they were.
 
 - The thresholds have 12% of slack.
 - Heights come from one field on a 50 m grid that everything drawn follows (`drape.ts`). A worker makes
@@ -148,8 +169,8 @@ MapSpec the game gets is that square (`worldMapSpec`); the plan rides along as `
 
 - **Before the first frame:**
   - the start town's streets and buildings;
-  - the plan's railway and the A and B roads through the area, on the Network, ending exactly where
-    the scenery's own stretch begins;
+  - the plan's lanes through the area, on the Network as country roads, ending exactly where the
+    scenery's own stretch begins (country lanes get no plots: fields, not ribbon development);
   - the ground painted round the town.
 - **Once it's running:** the rest of the area's ground and woods are painted a kilometre square at a time.
 - **The other places in the square** stay scenery until the camera gets close. Then they come to life:

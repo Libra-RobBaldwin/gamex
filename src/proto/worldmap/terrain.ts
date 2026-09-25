@@ -19,7 +19,9 @@ import type { WorldWater } from './water';
 import type { SettlementGrid } from './plan';
 
 // the broad swells' height for each relief (the hills' own is RELIEF_HEIGHT)
-export const BROAD_HEIGHT: Record<Relief, number> = { flat: 0, lowland: 14, rolling: 55, upland: 130, mountain: 280 };
+export const BROAD_HEIGHT: Record<Relief, number> = { flat: 0, lowland: 25, rolling: 120, upland: 220, mountain: 420 };
+// and the hills on them (the 6 km region's RELIEF_HEIGHT, a little higher: there's room for them here)
+export const HILL_HEIGHT: Record<Relief, number> = { flat: 0, lowland: 12, rolling: 38, upland: 70, mountain: 130 };
 const smooth = (a: number, b: number, v: number) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 // Seeded gradient noise, as region/terrain.ts has it (about −1 to 1).
@@ -50,7 +52,7 @@ export class WorldTerrain {
   private wd: Float32Array; private wx0: number; private wn: number;
   private static WC = 100;
   constructor(readonly o: TerrainInput) {
-    this.hills = RELIEF_HEIGHT[o.relief];
+    this.hills = HILL_HEIGHT[o.relief] ?? RELIEF_HEIGHT[o.relief];
     this.broad = BROAD_HEIGHT[o.relief];
     this.n = [11, 12, 13, 14, 15].map((k) => noise2(mix(o.seed, k)));
     this.ridged = o.relief === 'upland' || o.relief === 'mountain';
@@ -69,7 +71,9 @@ export class WorldTerrain {
     if (!this.broad) return 0;
     const [n1, n2] = this.n, p = { x: x / 11000, z: z / 11000 };
     const f = 0.7 * n1(p.x + 3.1, p.z - 7.7) + 0.3 * n2(p.x * 2.3 - 4.4, p.z * 2.3 + 1.9);
-    return this.broad * smooth(150, 3500, wd) * Math.max(0, Math.min(1, 0.35 + 0.8 * f));
+    // (downs: broad rises with steeper flanks and flattish tops, and wide vales between)
+    const v = Math.max(0, Math.min(1, 0.3 + 0.85 * f));
+    return this.broad * smooth(150, 3500, wd) * v * v * (3 - 2 * v);
   }
   // The ground's height at a point: the swell, and the hills on it, both easing off to the water;
   // round each place the hills level off onto the swell (the town stands on it, level).

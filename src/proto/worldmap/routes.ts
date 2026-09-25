@@ -16,6 +16,7 @@
 // Routes bend a little (no straight lines across country), go round lakes and the sea, and keep out
 // of the places they don't serve. Pure: no three.js.
 import { mix, range, rng, type Rand } from '../region/random';
+import { worldNoise } from '../ground/noise';
 import { lakeRadiusOf, type XZ } from '../region/water';
 import type { Link } from '../region/generate';
 import type { WorldWater } from './water';
@@ -35,23 +36,159 @@ export const STEP = 25;
 // half-widths of the ground each takes (carriageways and verges; the track bed), for keeping clear
 export const ROUTE_HALF: Record<RouteKind | 'rail', number> = { motorway: 17, A: 6, B: 4.5, rail: 5 };
 
-interface Ctx { seed: number; half: number; settlements: WorldSettlement[]; links: Link[]; water: WorldWater; grid: SettlementGrid }
+interface Ctx { seed: number; half: number; settlements: WorldSettlement[]; links: Link[]; water: WorldWater; grid: SettlementGrid; heightAt: (x: number, z: number) => number }
 const dist = (a: XZ, b: XZ) => Math.hypot(a.x - b.x, a.z - b.z);
 
-export function planRoutes(c: Ctx): { roads: Route[]; rails: Rail[] } {
+// A map starts with only the minor roads between places (the player builds everything bigger: the
+// A roads, motorways and railways): each place joined to its neighbours, and a few lanes off the
+// map's edges. Each road is found over the land (terrain-following: `lane`), round hills and water.
+// (`full`: the old trunk network as well, motorways, A roads and railways: kept for later maps.)
+export function planRoutes(c: Ctx, full = false): { roads: Route[]; rails: Rail[] } {
   const roads: Route[] = [], r = rng(mix(c.seed, 301));
   const add = (kind: RouteKind, path: XZ[] | null, a: number | null, b: number | null) => { if (path && path.length > 1) roads.push({ id: roads.length, kind, path, a, b }); };
-  // motorways
-  for (const line of motorwayLines(c, r)) add('motorway', settle(c, line, r, 'motorway', []), null, null);
-  // A and B roads between places
-  for (const l of [...c.links].sort((p, q) => (p.road === q.road ? p.length - q.length : p.road === 'A' ? -1 : 1))) {
+  if (full) for (const line of motorwayLines(c, r)) add('motorway', settle(c, line, r, 'motorway', []), null, null);
+  const L = new LaneFinder(c);
+  for (const l of [...c.links].sort((p, q) => p.length - q.length)) {
     const A = c.settlements[l.a], B = c.settlements[l.b];
-    const pa = endOf(A, B), pb = endOf(B, A);
-    add(l.road, settle(c, [pa, pb], r, l.road, [A.id, B.id]), A.id, B.id);
+    add(full ? l.road : 'B', L.find(endOf(A, B), endOf(B, A), [A.id, B.id]), A.id, B.id);
   }
-  // a few A roads off the map's edges, from the towns nearest each dry edge
-  for (const e of edgeExits(c, r)) add('A', settle(c, [endOf(e.from, e.to), e.to], r, 'A', [e.from.id]), e.from.id, null);
-  return { roads, rails: planRails(c, r) };
+  for (const e of edgeExits(c, r)) {
+    // (found to just inside the edge, then straight on off it)
+    const H = c.half - 60, inner = { x: Math.max(-H, Math.min(H, e.to.x)), z: Math.max(-H, Math.min(H, e.to.z)) };
+    const p = L.find(endOf(e.from, e.to), inner, [e.from.id]);
+    add(full ? 'A' : 'B', p ? resample([...p, e.to], STEP) : null, e.from.id, null);
+  }
+  forks(roads);
+  return { roads, rails: full ? planRails(c, r) : [] };
+}
+
+// Two lanes into a place by the same street end would meet it side by side, all but parallel (a
+// junction no one would build, and the Network can't shape). The later one instead forks off the
+// earlier where they've come together: it runs as far as it's still 35 m clear of it, then turns in
+// to join it square, a T or a Y junction, as lanes do.
+function forks(roads: Route[]) {
+  const ends = new Map<string, Route>();
+  const nearestOn = (P: XZ[], q: XZ) => { let best = P[0], bd = Infinity, bi = 0; P.forEach((p, i) => { const d = Math.hypot(p.x - q.x, p.z - q.z); if (d < bd) { bd = d; best = p; bi = i; } }); return { p: best, d: bd, i: bi }; };
+  for (const r of roads) for (const first of [true, false]) {
+    const e = first ? r.path[0] : r.path[r.path.length - 1], k = `${Math.round(e.x / 4)},${Math.round(e.z / 4)}`;
+    const q = ends.get(k);
+    if (!q) { ends.set(k, r); continue; }
+    const P = first ? r.path : [...r.path].reverse();
+    let cut = -1;
+    for (let i = 4; i < P.length - 6; i++) if (nearestOn(q.path, P[i]).d > 35) { cut = i; break; }
+    if (cut < 0) continue;
+    const on = nearestOn(q.path, P[cut]);
+    // (joined at a point of the other lane at least 60 m from the place, square to it)
+    const joined = resample([{ ...on.p }, ...P.slice(cut)], STEP);
+    r.path = first ? joined : joined.reverse();
+  }
+}
+
+// ---------------- lanes over the land ----------------
+// A road across country goes the way that's easiest to build and drive, not straight: it keeps to
+// gentle gradients, goes round hills rather than over them, round lakes and the sea, bridges a river
+// only where it must, and keeps out of the places it doesn't serve. So: the cheapest path over a
+// 100 m grid (steep ground dear, a river crossing dearer, water and other places out of bounds, and
+// a little slow noise so it wanders as old lanes do), then smoothed into flowing bends.
+class LaneFinder {
+  static C = 125;
+  private h: Float32Array; private n: number; private x0: number;
+  private wet: Int8Array; // (per cell, worked out once for every road: 1 dry, 2 by a river, -1 standing water)
+  constructor(private c: Ctx) {
+    const C = LaneFinder.C; this.x0 = -Math.ceil((c.half + C) / C) * C; this.n = Math.round((-2 * this.x0) / C) + 1;
+    this.h = new Float32Array(this.n * this.n).fill(NaN);
+    this.wet = new Int8Array(this.n * this.n);
+  }
+  // (slow noise, so a lane wanders as old ones do: per cell, once)
+  private wv: Float32Array | null = null;
+  private wander(i: number, j: number) {
+    const k = j * this.n + i, W = (this.wv ??= new Float32Array(this.n * this.n));
+    if (!W[k]) { const x = this.x0 + i * LaneFinder.C, z = this.x0 + j * LaneFinder.C; W[k] = 0.7 + 0.6 * worldNoise(x, z, 700, this.c.seed + 311) + 0.2 * worldNoise(x, z, 230, this.c.seed + 312); }
+    return W[k];
+  }
+  private water(i: number, j: number) {
+    const k = j * this.n + i;
+    let v = this.wet[k];
+    if (!v) {
+      const x = this.x0 + i * LaneFinder.C, z = this.x0 + j * LaneFinder.C;
+      v = standing(this.c.water, { x, z }) < 70 ? -1 : this.c.water.rivers.some((r) => r.index.near(x, z, r.half + 50) !== Infinity) ? 2 : 1;
+      this.wet[k] = v;
+    }
+    return v;
+  }
+  private height(i: number, j: number) {
+    const k = j * this.n + i; let v = this.h[k];
+    if (Number.isNaN(v)) v = this.h[k] = this.c.heightAt(this.x0 + i * LaneFinder.C, this.x0 + j * LaneFinder.C);
+    return v;
+  }
+  find(a: XZ, b: XZ, serves: number[]): XZ[] | null {
+    const C = LaneFinder.C, n = this.n, x0 = this.x0, c = this.c;
+    const gi = (x: number) => Math.max(0, Math.min(n - 1, Math.round((x - x0) / C)));
+    const si = gi(a.x), sj = gi(a.z), ti = gi(b.x), tj = gi(b.z);
+    const L = Math.hypot(b.x - a.x, b.z - a.z), m = Math.max(8, Math.ceil((0.3 * L + 900) / C));
+    const i0 = Math.max(0, Math.min(si, ti) - m), i1 = Math.min(n - 1, Math.max(si, ti) + m), j0 = Math.max(0, Math.min(sj, tj) - m), j1 = Math.min(n - 1, Math.max(sj, tj) + m);
+    const W = i1 - i0 + 1, Hh = j1 - j0 + 1, N = W * Hh;
+    const g = new Float64Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), done = new Uint8Array(N), bad = new Int8Array(N); // (bad: 0 unknown, 1 open, -1 blocked)
+    const blocked = (i: number, j: number) => {
+      const k = (j - j0) * W + (i - i0);
+      if (bad[k]) return bad[k] < 0;
+      const x = x0 + i * C, z = x0 + j * C;
+      let no = Math.abs(x) > c.half - 20 && !(i === ti && j === tj) || this.water(i, j) < 0;
+      if (!no) for (const s of c.grid.near(x, z)) if (!serves.includes(s.id) && Math.hypot(x - s.x, z - s.z) < s.reach + 60) { no = true; break; }
+      if (!no && Math.abs(z) > c.half - 20 && !(i === ti && j === tj)) no = true;
+      bad[k] = no ? -1 : 1;
+      return no;
+    };
+    // a binary heap of (cost + estimate, cell)
+    const heap: number[] = [], hk: number[] = [];
+    const push = (f: number, k: number) => { heap.push(f); hk.push(k); let q = heap.length - 1; while (q > 0) { const p = (q - 1) >> 1; if (heap[p] <= heap[q]) break; [heap[p], heap[q]] = [heap[q], heap[p]]; [hk[p], hk[q]] = [hk[q], hk[p]]; q = p; } };
+    const pop = () => { const k = hk[0], lf = heap.pop()!, lk = hk.pop()!; if (heap.length) { heap[0] = lf; hk[0] = lk; let q = 0; for (;;) { const l = 2 * q + 1, rr = l + 1; let mn = q; if (l < heap.length && heap[l] < heap[mn]) mn = l; if (rr < heap.length && heap[rr] < heap[mn]) mn = rr; if (mn === q) break; [heap[mn], heap[q]] = [heap[q], heap[mn]]; [hk[mn], hk[q]] = [hk[q], hk[mn]]; q = mn; } } return k; };
+    const est = (i: number, j: number) => Math.hypot(i - ti, j - tj) * C * 0.7;
+    const s0 = (sj - j0) * W + (si - i0), t0 = (tj - j0) * W + (ti - i0);
+    g[s0] = 0; push(est(si, sj), s0);
+    // (sixteen ways out of a cell, knight's moves too, so no heading is forced onto the grid's)
+    const D = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1], [2, 1], [2, -1], [-2, 1], [-2, -1], [1, 2], [1, -2], [-1, 2], [-1, -2]];
+    while (heap.length) {
+      const k = pop();
+      if (done[k]) continue;
+      done[k] = 1;
+      if (k === t0) break;
+      const i = (k % W) + i0, j = Math.floor(k / W) + j0, h0 = this.height(i, j);
+      for (const [di, dj] of D) {
+        const ni = i + di, nj = j + dj;
+        if (ni < i0 || nj < j0 || ni > i1 || nj > j1) continue;
+        const nk = (nj - j0) * W + (ni - i0);
+        if (done[nk] || (blocked(ni, nj) && nk !== t0 && nk !== s0)) continue;
+        const len = C * Math.hypot(di, dj);
+        // (a knight's move jumps a cell: it mustn't jump a lake or a place)
+        if (Math.abs(di) + Math.abs(dj) === 3 && blocked(i + Math.sign(di) * (Math.abs(di) > 1 ? 1 : 0), j + Math.sign(dj) * (Math.abs(dj) > 1 ? 1 : 0)) && nk !== t0) continue;
+        const slope = Math.abs(this.height(ni, nj) - h0) / len;
+        let w = len * (1 + 2 * (slope / 0.05) ** 2) * this.wander(ni, nj);
+        if (this.water(ni, nj) === 2 && this.water(i, j) !== 2) w += 900; // (a bridge: only where it must)
+        const gg = g[k] + w;
+        if (gg < g[nk]) { g[nk] = gg; from[nk] = k; push(gg + est(ni, nj), nk); }
+      }
+    }
+    if (from[t0] < 0) return settle(c, [a, b], rng(mix(c.seed, si, sj, ti, tj)), 'B', serves); // (boxed in: the old way)
+    const cells: XZ[] = [];
+    for (let k = t0; k >= 0; k = from[k]) cells.push({ x: x0 + ((k % W) + i0) * C, z: x0 + (Math.floor(k / W) + j0) * C });
+    cells.reverse();
+    cells[0] = { ...a }; cells[cells.length - 1] = { ...b };
+    // (smoothed into flowing bends: evenly spaced, averaged over about 350 m so the grid's kinks go
+    // but the lane's own wandering stays, then corner-cut; its ends stay where they are)
+    let p = resample(cells, STEP);
+    for (let pass = 0; pass < 2; pass++) {
+      const K = 7, q = p.map((pt, i) => {
+        if (i < 2 || i > p.length - 3) return pt;
+        const k = Math.min(K, i, p.length - 1 - i);
+        let x = 0, z = 0;
+        for (let d = -k; d <= k; d++) { x += p[i + d].x; z += p[i + d].z; }
+        return { x: x / (2 * k + 1), z: z / (2 * k + 1) };
+      });
+      p = q;
+    }
+    return resample(chaikin(chaikin(p)), STEP);
+  }
 }
 
 // where a road from place A towards B leaves A: the end of its high street nearer B (towns and

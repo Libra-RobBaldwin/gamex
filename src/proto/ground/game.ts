@@ -28,9 +28,10 @@ export class GameGround {
   private reach: number; // how far out industrial land is looked for
   // (`texel`: metres per cover texel, coarser on a big map so its covers stay a sensible size; `hedges`: plant hedgerows;
   // `edge`: half the ground's width, if the covers should be painted right out to it)
-  constructor(private w: GameWorld, bound: number, texel?: number, hedges = true, edge?: number) {
+  // (`seed`: the field layout's; a 50 km map's has straighter fields: ground/layout.ts setParcelStyle)
+  constructor(private w: GameWorld, bound: number, texel?: number, hedges = true, edge?: number, private seed = 11) {
     const size = Math.ceil(((edge ? edge * 2 : bound * 2 + 160)) / 10) * 10;
-    this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed: 11, texel, hedges });
+    this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed, texel, hedges });
     this.reach = Math.max(600, Math.ceil((bound * 1.15) / 40) * 40);
   }
   // A map's style: its palette and crops over the British ones (region/styles.ts). Nothing given, nothing changes.
@@ -51,7 +52,7 @@ export class GameGround {
     for (const l of q) { if (this.sites.size >= SITES) break; if (net.lotFree(l)) this.sites.add(l); }
     for (const l of this.sites) plots.push({ poly: net.parcelRect(l), kind: 'site' });
     if (this.w.extra) plots.push(...this.w.extra().plots);
-    return { seed: 11, ...fixed, plots, trees: this.w.trees(), town: q.map((l) => ({ x: l.x, z: l.z })) };
+    return { seed: this.seed, ...fixed, plots, trees: this.w.trees(), town: q.map((l) => ({ x: l.x, z: l.z })) };
   }
   private fixedInput() {
     const { net } = this.w;

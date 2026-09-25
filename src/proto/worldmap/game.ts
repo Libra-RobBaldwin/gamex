@@ -14,6 +14,8 @@ import { settlementInfo, type WorldPlan } from './plan';
 import { settlementScene } from './towns';
 import { WorldView, type ViewState, type WorldViewHost } from './view';
 import { CoarseEconomy } from './econ';
+import { PALETTE } from '../ground/covers';
+import type { GroundUniforms } from '../ground/material';
 
 export interface WorldGameHost extends Omit<WorldViewHost, 'options' | 'half'> {
   plan: WorldPlan;
@@ -78,6 +80,16 @@ export class WorldGame {
     if (!next) return null;
     next.busy = true;
     return next.id;
+  }
+  // Zoomed out past the live area's trees, its woods show as canopy, as the scenery's do.
+  private canopyOn = false; private kept: { wood: THREE.Color; litter: THREE.Color } | null = null;
+  liveCanopy(u: GroundUniforms, h: number) {
+    const on = h > 12000;
+    if (on === this.canopyOn) return;
+    this.canopyOn = on;
+    const keys = Object.keys(PALETTE), P = u.uPal.value;
+    this.kept ??= { wood: P[keys.indexOf('wood')].clone(), litter: P[keys.indexOf('litter')].clone() };
+    this.view.canopy(u, on, this.kept);
   }
   // how many people live in a place that isn't live (the coarse economy's figure)
   people(id: number, day: number) { return this.econ.pop(id, day); }

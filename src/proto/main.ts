@@ -46,7 +46,7 @@ import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; 
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 import { WorldGame } from './worldmap/game'; // a 50 km map: streamed scenery round a live play area (docs/streaming.md)
 import { layLiveRoutes } from './worldmap/live';
-import { woodTrees } from './worldmap/country';
+import { GROUND_SEED, woodTrees } from './worldmap/country';
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
 import { deleteSave, getSave, listSaves, putSave, saveSearch } from './game/savedb';
 
@@ -147,7 +147,7 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half, WORLD ? GROUND_SEED : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
@@ -437,6 +437,7 @@ function hedgesIn(box: { x0: number; z0: number; x1: number; z1: number }) {
   return { pieces, trees };
 }
 const regionView = BIG ? new RegionView({ scene, net, junctions, editing: () => editJ, treeMats: { trunk: trunkMat, crown: crownMat }, chunks, bound: EDGE, ground: new Set([...GRASS_MATS, ...grassMats()]), hedges: hedgesIn }) : null;
+if (regionView && WORLD) regionView.treesUntil = 12000; // (a 50 km map zooms out to 43 km: its live area's woods go flat past 12)
 
 function bakeGroup(group: THREE.Group) {
   group.updateMatrixWorld(true);
@@ -611,6 +612,7 @@ const centreFor = (a: P, b: P = { x: a.x + 1, z: a.z }) => plotCentre(MAP, a, b)
 function queuePlots(segs: number[]) {
   for (const id of segs) {
     const sg = net.segs.get(id);
+    if (WORLD && sg && ROADS[sg.type]?.family === 'Rural') continue; // (a 50 km map's country lanes run through fields, not houses)
     const plots = sg ? net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))) : [];
     // denser, taller near the centre; a few gaps elsewhere
     for (const p of plots) if (centrality(MAP, p) < 200 || rand() < 0.75) queue.push(p);
@@ -699,8 +701,8 @@ function worldIdle(budget: number) {
     const b = worldJobs.shift()!, s0 = WORLD!.settlements[WORLD!.start], R0 = s0.reach + 450;
     // (round the start town it's painted already)
     if (!(b.x0 >= s0.x - R0 && b.x1 <= s0.x + R0 && b.z0 >= s0.z - R0 && b.z1 <= s0.z + R0)) gameGround.paintBox(b);
-    const got = woodTrees(gameGround.ground.layout, b, 12, LOOK.trees.pines, MAP.seed + 17);
-    for (let k = 0; k < got.length; k += 4) trees.push({ x: got[k], z: got[k + 1], s: got[k + 2] * 1.2, kind: got[k + 3] });
+    const got = woodTrees(gameGround.ground.layout, b, 16, LOOK.trees.pines, MAP.seed + 17);
+    for (let k = 0; k < got.length; k += 4) trees.push({ x: got[k], z: got[k + 1], s: got[k + 2] * 1.45, kind: got[k + 3] });
     worldJobAt++;
     if (got.length) refreshTrees([b]);
     regionView?.groundChanged([b]);
@@ -714,25 +716,30 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()
 async function activatePlace(id: number) {
   if (!WORLD || !worldGame) return;
   activating = true;
+  try { await bringToLife(id); } catch (e) { console.warn('[w50] a place failed to come to life', id, e); worldGame.lived(id); } finally { activating = false; }
+}
+async function bringToLife(id: number) {
+  if (!WORLD || !worldGame) return;
   const st = WORLD.settlements[id], q = worldGame.towns.places.find((x) => x.id === id)!;
   const t0 = performance.now();
   q.live = true; // (so the roads to it are built now)
   const made = buildStreets(net, MAP.streets.filter((x) => x.settlement === id), DEFAULT_OPTS, true).made;
   made.push(...layLiveRoutes(net, WORLD, DEFAULT_OPTS, 'road', (k) => !!worldGame.towns.places.find((x) => x.id === k)?.live, id).made);
+  const t1 = performance.now();
   commitRoads(made);
+  const t2 = performance.now();
   await nextFrame();
   // most of it stands at once (as the start town did), the rest grows in front of you
   const R = st.reach + 60, mine = queue.filter((l) => Math.hypot(l.x - st.x, l.z - st.z) < R), now = new Set(mine.slice(0, Math.floor(mine.length * 0.8)));
   queue = queue.filter((l) => !now.has(l));
-  let k = 0;
-  for (const l of now) { if (net.lotFree(l)) spawnLot(l, false); if (++k % 12 === 0) await nextFrame(); }
+  let slice = performance.now();
+  for (const l of now) { if (net.lotFree(l)) spawnLot(l, false); if (performance.now() - slice > 8) { await nextFrame(); slice = performance.now(); } }
   const box = { x0: st.x - R, z0: st.z - R, x1: st.x + R, z1: st.z + R };
   worldGame.lived(id);
   groundBoxes.push(box); infillBoxes.push(box);
   refreshTrees([box]);
   placesDirty = true;
-  console.info(`[w50] ${st.name} came to life in ${Math.round(performance.now() - t0)} ms (${now.size} buildings)`);
-  activating = false;
+  console.info(`[w50] ${st.name} came to life in ${Math.round(performance.now() - t0)} ms (${now.size} buildings; streets ${Math.round(t1 - t0)} ms, commit ${Math.round(t2 - t1)} ms)`);
 }
 
 // ---------------- a saved town ----------------
@@ -2510,6 +2517,7 @@ function frame(now: number) {
     const next = worldGame.frame(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), !activating);
     if (next !== null) void activatePlace(next);
     worldIdle(loaded ? 5 : 0);
+    worldGame.liveCanopy(gameGround.ground.uniforms, view.h);
   }
   const t1 = performance.now();
   const q = TIERS[tier];

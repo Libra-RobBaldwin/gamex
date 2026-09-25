@@ -9,7 +9,7 @@
 // this is where a tile asks for them (`countryInput`, `paintCover`, `woodTrees`, `farms`, `hedges`).
 // Pure: no three.js.
 import { CoverMap } from '../ground/paint';
-import { Layout, type GroundInput } from '../ground/layout';
+import { Layout, STRAIGHT_FIELDS, setParcelStyle, type GroundInput } from '../ground/layout';
 import { Occupancy, planHedges, type HedgeTree, type Piece } from '../ground/hedgerows';
 import { hash2 } from '../ground/noise';
 import { lakeRadiusOf, type XZ } from '../region/water';
@@ -18,7 +18,11 @@ import { rectPoly, settlementScene, type SceneBuilding, type ScenePlot } from '.
 import type { WorldPlan } from './plan';
 
 export interface Box { x0: number; z0: number; x1: number; z1: number }
-export const GROUND_SEED = 11; // (the game's ground's: main.ts GameGround)
+// The fields' layout for a 50 km map: its own seed, with straight-edged, near-square fields (the
+// live area's ground uses the same: main.ts GameGround), set up wherever this module loads (the
+// main thread and the workers alike).
+export const GROUND_SEED = 12;
+setParcelStyle(GROUND_SEED, STRAIGHT_FIELDS);
 
 // A band round a centre line, as a polygon (left side out, right side back).
 export function bandPoly(path: XZ[], half: number): XZ[] {

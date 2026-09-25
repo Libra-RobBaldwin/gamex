@@ -19,7 +19,7 @@ import { Hedges } from '../ground/hedges';
 import type { HedgeTree, Piece } from '../ground/hedgerows';
 import type { StyleLook } from '../region/styles';
 import type { RegionOptions } from '../region/options';
-import { LEVEL_OF, LEVEL_SIZE, LIVE, inLive, tileBox, tileKey, touchesLive, type Detail, type TileData } from './tilegen';
+import { LEVEL_OF, LEVEL_SIZE, LIVE, inLive, tileBox, tileKey, type Detail, type TileData } from './tilegen';
 import type { Box } from './country';
 import type { FieldData, WorkerRequest } from './tile.worker';
 
@@ -56,17 +56,20 @@ export class WorldView {
   private solidMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   private waterMat = new THREE.MeshPhongMaterial({ color: '#3d6f8e', specular: '#5f7f91', shininess: 40 });
   private shared: GroundUniforms;
+  private sharedFar: GroundUniforms; // (far and vast tiles: woods seen from above as their canopy, since no trees stand on them)
   private roots: [number, number, number][] = [];
+  private low: { crown: THREE.BufferGeometry; pine: THREE.BufferGeometry; trunk: THREE.BufferGeometry } | null = null;
   private tick = 0;
   ready = false; // the height field has arrived: tiles can be shown
   stats = { tiles: 0, built: 0, bytes: 0, tris: 0, requested: 0, arrived: 0, buildMs: 0, shown: 0 };
   budgetMs = 4;
-  maxBytes = 160e6;
+  maxBytes = 64e6; // (typed arrays held for tiles, before they reach the GPU and after: a phone has room for more, but there's no need)
 
   constructor(private host: WorldViewHost) {
     this.root.name = 'world-tiles';
     host.scene.add(this.root);
     this.shared = groundUniforms(coverTexture(new Uint8Array([128, 0, 128, 128]), 1));
+    this.sharedFar = groundUniforms(this.shared.uCoverMap.value);
     this.setStyle(host.look);
     const n = Math.max(1, Math.min(3, host.workers ?? Math.min(2, Math.max(1, (navigator.hardwareConcurrency ?? 2) - 2))));
     for (let k = 0; k < n; k++) {
@@ -81,9 +84,19 @@ export class WorldView {
 
   // The map's palette over the ground's (as GameGround.setStyle does for the live ground).
   setStyle(s: StyleLook) {
-    const u = this.shared, keys = Object.keys(PALETTE) as (keyof typeof PALETTE)[];
-    for (const [k, hex] of Object.entries(s.palette)) { const i = keys.indexOf(k as keyof typeof PALETTE); if (i >= 0 && hex) u.uPal.value[i].set(hex); }
-    for (const [k, c] of Object.entries(s.crops)) { const i = CROP_NAMES.indexOf(k as CropName); if (i >= 0 && c) { u.uCropA.value[i].set(c.a); u.uCropB.value[i].set(c.b); } }
+    const keys = Object.keys(PALETTE) as (keyof typeof PALETTE)[];
+    for (const u of [this.shared, this.sharedFar]) {
+      for (const [k, hex] of Object.entries(s.palette)) { const i = keys.indexOf(k as keyof typeof PALETTE); if (i >= 0 && hex) u.uPal.value[i].set(hex); }
+      for (const [k, c] of Object.entries(s.crops)) { const i = CROP_NAMES.indexOf(k as CropName); if (i >= 0 && c) { u.uCropA.value[i].set(c.a); u.uCropB.value[i].set(c.b); } }
+    }
+    // the canopy: the woods' own greens, the broadleaves' and the conifers' (the shader mixes the two)
+    const P = this.sharedFar.uPal.value, crown = new THREE.Color(s.trees.crown), pine = new THREE.Color(s.trees.pine);
+    P[keys.indexOf('wood')].copy(crown).lerp(pine, s.trees.pines * 0.6).multiplyScalar(0.62);
+    P[keys.indexOf('litter')].copy(pine).lerp(crown, 0.3).multiplyScalar(0.55);
+    // (and from far off the crops are toned towards the grass, so the patchwork reads without speckling)
+    const grass = new THREE.Color(PALETTE.pasture);
+    this.sharedFar.uCropA.value.forEach((c, i) => c.copy(this.shared.uCropA.value[i]).lerp(grass, 0.35));
+    this.sharedFar.uCropB.value.forEach((c, i) => c.copy(this.shared.uCropB.value[i]).lerp(grass, 0.35));
   }
 
   // The height field for the drape shader, from a worker (the main thread makes only the live
@@ -132,7 +145,7 @@ export class WorldView {
     // can a node show something (itself, or all of its children)?
     const canShow = (n: Node, depth = 0): boolean => {
       if (inLive(n.box) || !this.onMap(n.box)) return true;
-      if (this.has(n) && !(n.level > 0 && touchesLive(n.box))) return true;
+      if (this.has(n)) return true;
       if (n.level === 0 || depth > 1) return false;
       return kids(n).every(([l, i, j]) => canShow(this.node(l, i, j), depth + 1));
     };
@@ -140,10 +153,9 @@ export class WorldView {
       if (inLive(n.box) || !this.onMap(n.box)) return;
       n.used = this.tick;
       const wd = want(n.box), wl = LEVEL_OF[wd], d = distToBox(v.x, v.z, n.box);
-      const mustSplit = n.level > 0 && touchesLive(n.box);
-      if (n.level > wl || mustSplit) {
+      if (n.level > wl) {
         const ch = kids(n).map(([l, i, j]) => this.node(l, i, j));
-        if (mustSplit || ch.every((c) => canShow(c))) { for (const c of ch) visit(c); return; }
+        if (ch.every((c) => canShow(c))) { for (const c of ch) visit(c); return; }
         // (not all ready yet: show this one meanwhile, and ask for them)
         for (const c of ch) if (!inLive(c.box) && this.onMap(c.box)) ask(c, c.level === 0 ? (LEVEL_OF[want(c.box)] === 0 ? want(c.box) : 'mid') : n.level - 1 === 1 ? 'far' : 'vast', distToBox(v.x, v.z, c.box));
         const got = this.has(n);
@@ -196,7 +208,7 @@ export class WorldView {
     for (const n of this.nodes.values()) for (const b of Object.values(n.built)) if (b) { bytes += b.bytes; tris += b.tris; tiles++; }
     this.stats.bytes = bytes; this.stats.tiles = tiles; this.stats.tris = tris;
     if (bytes < this.maxBytes) return;
-    const old = [...this.nodes.values()].filter((n) => n.level < 2 && !this.shown.has(n.key) && this.has(n)).sort((a, b) => a.used - b.used);
+    const old = [...this.nodes.values()].filter((n) => n.level < 2 && !this.shown.has(n.key) && this.has(n) && n.used < this.tick - 90).sort((a, b) => a.used - b.used);
     for (const n of old) {
       if (bytes < this.maxBytes * 0.85) break;
       for (const d of ORDER) { const b = n.built[d]; if (!b) continue; bytes -= b.bytes; b.dispose(); delete n.built[d]; }
@@ -217,6 +229,8 @@ export class WorldView {
       if (col) g.setAttribute('color', new THREE.BufferAttribute(col, 3));
       g.setIndex(new THREE.BufferAttribute(idx, 1));
       g.computeBoundingSphere();
+      for (const a of Object.values(g.attributes)) (a as THREE.BufferAttribute).onUpload(function (this: THREE.BufferAttribute) { (this as unknown as { array: ArrayLike<number> | null }).array = null; });
+      g.index!.onUpload(function (this: THREE.BufferAttribute) { (this as unknown as { array: ArrayLike<number> | null }).array = null; });
       bytes += pos.byteLength + idx.byteLength + (nor?.byteLength ?? 0) + (col?.byteLength ?? 0);
       tris += idx.length / 3;
       toDispose.push(g);
@@ -224,7 +238,7 @@ export class WorldView {
     };
     if (t.ground) {
       const tex = coverTexture(t.ground.cover, t.ground.n);
-      const u: GroundUniforms = { ...this.shared, uCoverMap: { value: tex }, uCover: { value: new THREE.Vector4() }, uOriginMod: { value: new THREE.Vector2() } };
+      const u: GroundUniforms = { ...(t.detail === 'far' || t.detail === 'vast' ? this.sharedFar : this.shared), uCoverMap: { value: tex }, uCover: { value: new THREE.Vector4() }, uOriginMod: { value: new THREE.Vector2() } };
       setOrigin(u, 0, 0, { x0: t.box.x0, z0: t.box.z0, size: t.box.x1 - t.box.x0, n: t.ground.n });
       const mat = patchGround(new THREE.MeshLambertMaterial(), u);
       const m = new THREE.Mesh(geo(t.ground.pos, t.ground.idx, t.ground.nor), mat);
@@ -233,8 +247,12 @@ export class WorldView {
       bytes += t.ground.cover.byteLength;
       toDispose.push(tex, { dispose: () => { forgetGround(mat); mat.dispose(); } });
     }
-    if (t.water) { const m = new THREE.Mesh(geo(t.water.pos, t.water.idx), this.waterMat); m.name = 'water'; m.renderOrder = 1; m.geometry.computeVertexNormals(); group.add(m); }
-    if (t.solid) { const m = new THREE.Mesh(geo(t.solid.pos, t.solid.idx, t.solid.nor, t.solid.col), this.solidMat); m.castShadow = t.detail === 'near'; m.receiveShadow = true; m.name = 'solid'; group.add(m); }
+    const lift = t.detail === 'far' ? 1.5 : t.detail === 'vast' ? 5 : 0;
+    if (t.water) { const m = new THREE.Mesh(geo(t.water.pos, t.water.idx), this.waterMat); m.name = 'water'; m.position.y = lift * 0.3; m.renderOrder = 1; m.geometry.computeVertexNormals(); group.add(m); }
+    // (a far or vast tile's ground is a coarser grid than the hills everything else follows: what
+    // stands on it is lifted clear of where the coarse ground can bulge above the fine, invisible from
+    // that far out)
+    if (t.solid) { const m = new THREE.Mesh(geo(t.solid.pos, t.solid.idx, t.solid.nor, t.solid.col), this.solidMat); m.castShadow = t.detail === 'near'; m.receiveShadow = true; m.name = 'solid'; m.position.y = lift; group.add(m); }
     if (t.trees.length) {
       const T = this.host.trees, n = t.trees.length / 4;
       const oaks: number[] = [], pines: number[] = [];
@@ -250,10 +268,11 @@ export class WorldView {
         tris += list.length * (g.index ? g.index.count / 3 : g.getAttribute('position').count / 3);
         toDispose.push({ dispose: () => im.dispose() });
       };
-      const low = t.detail !== 'near';
-      plant(oaks, T.crown, T.crownMat, 5.6, 1.1);
-      plant(pines, T.pine, T.pineMat, 7, 1);
-      if (!low) plant([...oaks, ...pines], T.trunk, T.trunkMat, 1.75, 1);
+      // (woods are many trees: their low-poly shapes, a crown on a short trunk, as the live woods' far level has)
+      const L = (this.low ??= { crown: new THREE.IcosahedronGeometry(3.4, 0), pine: new THREE.ConeGeometry(3, 9, 5), trunk: new THREE.CylinderGeometry(0.35, 0.5, 3.5, 4) });
+      plant(oaks, L.crown, T.crownMat, 5.6, 1.1);
+      plant(pines, L.pine, T.pineMat, 7, 1);
+      if (t.detail === 'near') plant([...oaks, ...pines], L.trunk, T.trunkMat, 1.75, 1);
       bytes += t.trees.byteLength;
     }
     if (t.hedges && (t.hedges.pieces.length || t.hedges.trees.length)) {
@@ -292,6 +311,14 @@ export class WorldView {
     }
   }
   placesReady() { return [...this.places.values()].every((p) => !p.pending); }
+
+  // The canopy colours for a ground (the live area's, zoomed out past its trees), or back.
+  canopy(u: GroundUniforms, on: boolean, keep: { wood: THREE.Color; litter: THREE.Color } | null) {
+    const keys = Object.keys(PALETTE) as (keyof typeof PALETTE)[], w = keys.indexOf('wood'), l = keys.indexOf('litter');
+    const src = on ? this.sharedFar.uPal.value : null;
+    if (src) { u.uPal.value[w].copy(src[w]); u.uPal.value[l].copy(src[l]); }
+    else if (keep) { u.uPal.value[w].copy(keep.wood); u.uPal.value[l].copy(keep.litter); }
+  }
 
   // Are all the tiles the view wants shown at the detail it wants? (for tests and the loading screen)
   settled() { return this.ready && this.queue.length === 0 && this.arrived.length === 0 && this.loaders.every((l) => l.busy === 0); }
