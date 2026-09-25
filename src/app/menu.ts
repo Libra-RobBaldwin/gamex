@@ -6,7 +6,7 @@ import { MAPS, type MapInfo } from '../proto/maps';
 import { NAME, markSvg, ridgeSvg } from '../proto/ui/brand';
 import { icon, type Icon } from '../proto/ui/icons';
 import { EXPLORERS, libraryHref } from './library';
-import { bindRegion, lastRegion, regionBody } from './regionsetup';
+import { bindRegion, lastRegion, regionBody, regionFirst } from './regionsetup';
 import { describe, when } from '../proto/game/save';
 import type { SaveEntry } from '../proto/game/savedb';
 import type { Screen } from './route';
@@ -144,7 +144,7 @@ const TITLES: Record<Exclude<Screen, 'home'>, [string, Icon]> = {
 
 /** Draw a screen into the menu's root, and wire it. */
 export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: string) {
-  const body = screen === 'home' ? home(h) : screen === 'saves' ? saves(h) : screen === 'new' ? newGame(notice) : screen === 'region' ? regionBody(lastRegion()) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
+  const body = screen === 'home' ? home(h) : screen === 'saves' ? saves(h) : screen === 'new' ? newGame(notice) : screen === 'region' ? regionFirst(lastRegion()) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
   const [title, ic] = screen === 'home' ? ['', 'home' as Icon] : TITLES[screen];
   root.innerHTML = `<div class="scr scr-${screen}">
       ${screen === 'home' ? '' : `<header class="bar"><button class="back" data-back aria-label="Back">${icon('arrowLeft')}</button><h2 tabindex="-1">${icon(ic)}<span>${title}</span></h2></header>`}

@@ -12,14 +12,15 @@ export const START = 400_000; // £ in the bank on a new game
 // running a bus for a game day (its month): driver, fuel, upkeep
 export const RUNNING: Record<'minibus' | 'bus' | 'decker' | 'coach', number> = { minibus: 700, bus: 1100, decker: 1300, coach: 1500 };
 
-export interface Books { fares: number; running: number; building: number; vehicles: number; sold: number }
-const empty = (): Books => ({ fares: 0, running: 0, building: 0, vehicles: 0, sold: 0 });
+export interface Books { fares: number; running: number; building: number; vehicles: number; sold: number; grants: number }
+const empty = (): Books => ({ fares: 0, running: 0, building: 0, vehicles: 0, sold: 0, grants: 0 });
 
 export class Purse {
   balance = START;
   today = empty(); // since the start of this game day
   yesterday = empty();
   history: number[] = []; // the balance at the end of each game day, the last 60 (Stats > Money)
+  milestones = 0; // how many milestones have been reached (and their grants paid)
   byLine = new Map<number, { fares: number; running: number; lastFares: number; lastRunning: number }>();
   private listeners: (() => void)[] = [];
 
@@ -38,6 +39,8 @@ export class Purse {
   }
   // a bus sold second-hand
   refund(amount: number) { this.balance += amount; this.today.sold += amount; this.changed(); }
+  // a milestone's grant (main.ts): money in, on a line of its own in the books
+  grant(amount: number) { this.balance += amount; this.today.grants += amount; this.changed(); }
 
   // a line's takings and running costs as they come (the balance may go below zero on running
   // costs: buses keep running, but nothing new can be bought)
@@ -59,16 +62,17 @@ export class Purse {
   line(id: number) { return this.byLine.get(id) ?? { fares: 0, running: 0, lastFares: 0, lastRunning: 0 }; }
 
   // ---------- saving (game/save.ts) ----------
-  save(): PurseSave { return { balance: this.balance, today: { ...this.today }, yesterday: { ...this.yesterday }, byLine: [...this.byLine].map(([id, b]) => [id, { ...b }]), history: [...this.history] }; }
+  save(): PurseSave { return { balance: this.balance, today: { ...this.today }, yesterday: { ...this.yesterday }, byLine: [...this.byLine].map(([id, b]) => [id, { ...b }]), history: [...this.history], milestones: this.milestones }; }
   load(s: PurseSave) {
     this.balance = s.balance;
     this.today = { ...empty(), ...s.today };
     this.yesterday = { ...empty(), ...s.yesterday };
     this.byLine = new Map(s.byLine.map(([id, b]) => [id, { ...b }]));
     this.history = [...(s.history ?? [])];
+    this.milestones = s.milestones ?? 0;
     this.changed();
   }
 }
-export interface PurseSave { balance: number; today: Books; yesterday: Books; byLine: [number, { fares: number; running: number; lastFares: number; lastRunning: number }][]; history?: number[] }
+export interface PurseSave { balance: number; today: Books; yesterday: Books; byLine: [number, { fares: number; running: number; lastFares: number; lastRunning: number }][]; history?: number[]; milestones?: number }
 
 export const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
