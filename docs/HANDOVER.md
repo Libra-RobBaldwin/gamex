@@ -1,6 +1,21 @@
 # Handover: where everything stands
 
-## Latest: saving and loading (24 Sep 2026, night)
+## Latest: buildings fit their place, and parked cars are real (25 Sep 2026)
+
+Branch `claude/work-vernacular`. **Read `docs/vernacular.md` and `docs/parking.md`.**
+- **Regional buildings:** on generated maps, houses, terraces, shops and village buildings are
+  built in their settlement's tradition, from the rock (Cotswold, Pennine, Lakeland, Cornish,
+  Scottish, flint, Midland brick, Wealden, Marches) or the climate (Nordic under snow, desert earth,
+  Mediterranean). The age of the street comes from its distance to the centre. `vernacular.ts` is
+  pure and takes the terrain's geology through `setGeology`. The town map is unchanged by it;
+  `?vern=` forces a tradition. Gallery: `/buildings-demo.html`.
+- **Finish, everywhere:** fascias, gutters, ridges, plinths, ambient occlusion, doors set into
+  their walls, textured garden walls and hedges, and layered garden trees.
+- **Parking:** drives and car parks hold the traffic's own vehicles (no extra draw calls). Trips end
+  by driving into a free space and start by pulling out of one. Plots fill and empty with the hour
+  off screen.
+
+## Earlier: saving and loading (24 Sep 2026, night)
 
 Session https://claude.ai/code/session_01PQ93PyRyTyLaPDoybw2MMw. **Read `docs/save.md`.**
 - **Save and load work:**
