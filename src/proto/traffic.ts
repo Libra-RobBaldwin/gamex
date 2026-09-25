@@ -60,6 +60,7 @@ interface Car {
   lorry: boolean; bus?: boolean; heading: number;
   cls?: Cls; hw?: number; dress?: Dress; // the real vehicle (game/fleet.ts): its body for the conflict tables, half its width, its look
   born: number; gone?: number; wait: number;
+  heldAt?: number;
   held?: boolean; // pulling out of a parking space: stands, unseen, where it'll join the road until the parked car reaches it (game/parking.ts)
   lane: number; off: number; // lane (0 = nearside) and current sideways position
   dwell?: number; served?: number; inBay?: boolean; bay?: Stop;
@@ -464,7 +465,7 @@ export class Traffic {
       const c = this.spawn(pu.o, pu.d, false, now, pu.dressed);
       if (!c && this.failed === 'guard') { this.stats.noPlan++; return { x: NaN, z: NaN, hx: 1, hz: 0 }; } // (never room there: it parks again)
       if (!c) return null;
-      c.held = true; c.born = now - 500; // (full size at once: it's been there all along)
+      c.held = true; c.heldAt = now; c.born = now - 500; // (full size at once: it's been there all along)
       this.stats.pulledOut++;
       pu.car = c;
     }
@@ -1666,6 +1667,7 @@ export class Traffic {
     // everything in the way, as the gentlest acceleration that respects all of it
     let acc = idmFree(c.v, v0, dr), gmin = Infinity;
     const ob: Obstacle = (g, vl, s0 = dr.s0) => { acc = Math.min(acc, follow(c.v, v0, g, vl, dr, s0)); gmin = Math.min(gmin, g); };
+    if (c.held && now - (c.heldAt ?? now) > 20000) c.held = false; // (never left holding up the lane)
     const still = c.bus ? this.busStops(c, dt, ob) : !!c.held;
     if (c.inBay) {
       const e = this.leader(keyOf(c.seg, c.from, BAYLANE), c.s, c);
