@@ -1219,7 +1219,7 @@ function civic(k: Kit, l: Lot, r: () => number) {
       k.gable(0, 0, W - 6 * g, D - 2 * g, 7 * g, 5.5 * g, 0.3, roofM(pick(r, SLATE)[0]), fm(S, 'none'));
       // tower and spire at the west end
       k.block(W / 2 - 3 * g, 0, 6 * g, 6 * g, 0, 3, 5 * g, 6, fm(S, 'none'), fm(S, 'none'), fm(S, 'none'), plain(GRAVEL));
-      if (r() < 0.6) { k.prismN(W / 2 - 3 * g, 0, 3.1 * g, 8 * g, 15 * g, 0.1, plain('#bdb6a6'), 13, roofM(SLATE[0][0])); out.push('spire'); }
+      if (r() < 0.6) { k.prismN(W / 2 - 3 * g, 0, 3.1 * g, 8, 15 * g, 0.1, plain('#bdb6a6'), 13 * g, roofM(SLATE[0][0])); out.push('spire'); }
       else { parapet(k, W / 2 - 3 * g, 0, 6.4 * g, 6.4 * g, 15 * g, 1.2, fm(S, 'none')); out.push('square tower'); }
       flat(k, W / 2 - 3.8, zf, W / 2 - 2.2, F, 0.075, gravelM());
       // churchyard
