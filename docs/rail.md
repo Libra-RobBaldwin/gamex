@@ -205,11 +205,12 @@ rw.sim.log                                    // every call: { train, line, stat
   says it was a stand-in until R3.
 - **How the merge resolves it:** the game now uses this railway. Build > Stops > Railway station,
   Transport > Railway, and taps on trains and stations all come here.
-- **What's left of the interim code:** its library code is still there and tested
-  (`game/trains.test.ts`). Its functions in `main.ts` are still wired in but can't be reached from
-  the HUD. It can be deleted, or its line-tool change (a line of stations in the same tool as bus
-  lines) moved over to `Railway`: `lines.isStation(id)` → `railway.stationAt`/`station(id)`, and
-  `lines.add` → `railway.addLine`.
+- **The interim code is gone:** `game/rail.ts` and its test (`game/trains.test.ts`) are deleted.
+  So are its functions in `main.ts`, the rail lines in `game/lines.ts` and the station badges.
+- **In `traffic.ts`:** its line trains and the rule that kept trains apart are removed. The
+  wandering trains (`addTrain`) are back as they were before it. Nothing in the game adds them.
+- **Bus lines** work as before. The Lines tool takes bus stops only.
+- **The economy** counts only this railway's stations as `rail_station` stops (`RailHooks`).
 - **The e2e:** `e2e/rail.e2e.mjs` is this branch's.
 
 ## The adversarial review, and what it changed
