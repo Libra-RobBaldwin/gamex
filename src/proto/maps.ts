@@ -30,8 +30,8 @@ export interface MapInfo {
 
 export const MAPS: MapInfo[] = [
   { id: 'town', name: 'Starter town', blurb: 'A small market town by a lake, with a railway, an estate and room to grow.', icon: 'home', ready: true, guide: true },
-  { id: 'region', name: 'Region', blurb: 'Fifty kilometres of towns, villages, hills and coast, linked by motorways and railways.', icon: 'map', ready: true, setup: true },
-  { id: 'place', name: 'Real town', blurb: 'A real UK town from OpenStreetMap: Horley, or anywhere you pick.', icon: 'pin', ready: false, soon: 'Plans only for now', link: { href: './places.html', label: 'Open Real Town Plans' } },
+  { id: 'region', name: 'Region', blurb: 'Fifty kilometres of towns, villages, hills and coast, joined by country lanes: the rest is yours to build.', icon: 'map', ready: true, setup: true },
+  { id: 'place', name: 'Real town', blurb: 'A real UK town from OpenStreetMap, anywhere you pick.', icon: 'pin', ready: false, soon: 'Plans only for now', link: { href: './places.html', label: 'Open Real Town Plans' } },
   { id: 'sandbox', name: 'Sandbox', blurb: 'Empty land by the lake. Build a town from nothing.', icon: 'hammer', ready: true },
 ];
 

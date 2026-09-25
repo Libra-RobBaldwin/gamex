@@ -1,6 +1,46 @@
 # Handover: where everything stands
 
-## Latest: saving and loading (24 Sep 2026, night)
+## Latest: HUD, start menu and region work (25 Sep 2026)
+
+**PAUSED 25 Sep ~20:40 UTC for a credit limit. To resume:**
+1. All six region sessions were told to commit and push, write a note on where they stopped and
+   stop. Their check-ins were disabled, not deleted: `trig_01AyapkhwsVcMhAMAKQ9caju` (#42),
+   `trig_01Ek1SW3wQooCqKrBfHwT3j9` (#44), `trig_013GtCHP7rnmTLWuPbJjyB2r` (#43) and
+   `trig_01LkUZuKGwCSYrq9QoDTE41o` (#45). The coordinator's check-in is
+   `trig_01UboPgMjMc2T4TShqSC9vTi`. Re-enable them, or message each session to carry on.
+2. Merge order: world50 (PR #42) first. It merged cleanly onto `a024fca` in a trial and passed tsc.
+   Then #41 (countryside), #44 (edge), #43 (OS), #45 (vernacular) and terrain. Run tsc, vitest,
+   the six phone e2es and `?map=region` by eye after each, then push and archive the session.
+   The loop, lines, save, stations and rail suites take the address as their first argument
+   (`node e2e/loop.e2e.mjs http://localhost:5180/?map=town`). The menu suite takes it from `BASE=`.
+3. Then wire terrain's landform presets and islands into the region setup's first step, and do
+   HUD phase 3 (small tap cards for a bus, stop or building).
+4. The user's home town is still named in the repo in a few places, from before the privacy
+   rule (region names, vehicle brands, tests, docs). It's gone from the menu. Ask the user
+   before removing the rest.
+
+Coordinator: https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. Integration branch as before.
+- **HUD, second pass (`ui/shell.ts`, `proto.css`):** a rounded floating dock with a Build button
+  in the middle, and a status pill showing money with its trend, population, the clock and speed.
+  It also has an alert bell (`setAlerts`), a milestone ring that pays grants (`MILESTONES` in
+  `main.ts`, `purse.grant`), a Stats tab (money, lines, towns) and small cards when you tap
+  something. Overlays are Stop coverage and Traffic.
+- **Bus stops reach a three-minute walk (250 m), not 400 m:** `STOP_WALK_M` in `game/econ.ts`, the
+  same in the coverage overlay. Stations stay at 800 m. The loop e2e's profit is unchanged.
+- **Roundabout entries** have painted chevrons, not green splitter islands (`jshape.ts`).
+- **Start menu (`src/app`):**
+  - Home is a picture of the starter town, drifting slowly (`src/app/art/`, taken from the game
+    with `e2e/.scratch/art.mjs`, a local script; retake the pictures when the look changes).
+  - Over it: a Continue card for the last town with its map's picture, New game as the big
+    button, and a row of tiles (How to play, Library, Settings, About).
+  - New game has a card per map with its picture. Loading shows the map's picture and a tip.
+  - Region setup asks one question per step, then shows a summary (`regionsetup.ts`).
+  - Everything is rounded, like the HUD.
+- **Six region sessions (started 25 Sep afternoon):** terrain, countryside (PR #41), edge,
+  world50 (50 km maps, PR #42), OS open data (PR #43) and vernacular buildings. Merge each
+  into the integration branch as it's ready, and test.
+
+## Earlier: saving and loading (24 Sep 2026, night)
 
 Session https://claude.ai/code/session_01PQ93PyRyTyLaPDoybw2MMw. **Read `docs/save.md`.**
 - **Save and load work:**
