@@ -1690,13 +1690,14 @@ function tapMap(sx: number, sy: number): Mode {
 // ---------------- input ----------------
 // The shared camera (kit/camera.ts) pans, pinches, turns and tilts the map (Google Maps style);
 // the game takes the finger when a tool needs it, and hears about taps.
-// In the underground view a tap on a tunnel or an underground station means what's drawn there, deep
-// down, not the ground in front of it.
+// The underground view (game/underview.ts), from its button under the compass.
 function toggleUnderground(on = !underView.on) {
   underView.set(on);
   shell.setUnderground(on);
   hint(on ? 'Underground view: the ground fades so tunnels, underground stations and their trains show · tap again for the surface' : 'Back to the surface', 'tunnel');
 }
+// In the underground view a tap on a tunnel or an underground station means what's drawn there, deep
+// down, not the ground in front of it.
 function deepAt(sx: number, sy: number): P {
   if (!underView.on) return groundAt(sx, sy);
   const g = nav.levelUnder(sx, sy, -DEEP + 1.4);

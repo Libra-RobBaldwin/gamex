@@ -4,9 +4,9 @@
 // It's drawn in two passes split by one level plane just under the ground, so every triangle is
 // drawn exactly once and nothing is sorted against anything else (fading the surface's many
 // materials one by one would sort per object, and flicker as the camera moved):
-//   1. everything below the plane, straight to the screen, over a dark background;
-//   2. everything above it into an off-screen target, which is then laid over the first at the
-//      surface's opacity.
+//   1. everything above it, and the sky, into an off-screen target;
+//   2. everything below it, straight to the screen, over a dark background;
+//   3. the first laid over the second at the surface's opacity.
 // Meshes wholly on one side of the plane are left out of the other pass altogether (and anything
 // that's always on the surface can say so: `userData.surface`).
 // With the surface at full opacity that's the ordinary picture, so the fade in and out runs
@@ -32,8 +32,6 @@ export class UnderView {
   // (the second pass looks through a copy of the camera: three.js only re-applies the clipping
   // planes when the camera changes between draws, so the same camera would keep the first pass's)
   private cam2: THREE.Camera | null = null;
-  private sky = new THREE.Color();
-  private bg = new THREE.Color();
   private size = new THREE.Vector2();
   private clearWas = new THREE.Color();
   private shadowsOwed = false;
@@ -121,27 +119,23 @@ export class UnderView {
       this.rt.texture.colorSpace = THREE.SRGBColorSpace;
     }
     else if (this.rt.width !== this.size.x || this.rt.height !== this.size.y) this.rt.setSize(this.size.x, this.size.y);
-    const t = Math.min(1, (1 - this.k) / (1 - FADED)), was = scene.background, clear = r.getClearColor(this.clearWas), clearA = r.getClearAlpha();
-    if (was instanceof THREE.Color) this.sky.copy(was); else this.sky.set('#000000');
+    const was = scene.background, clear = r.getClearColor(this.clearWas), clearA = r.getClearAlpha();
     this.split(scene);
-    // 1: the surface, off the screen, on nothing. The shadows are drawn with it, as they are every
+    // 1: the surface, off the screen, with the sky behind it (so the sky fades with the rest, and
+    // the dark comes through everywhere evenly). The shadows are drawn with it, as they are every
     // frame: only what's on the surface casts them onto the surface. (They're then left out of
     // the ones below ground, which is why they're drawn again once the view is off.)
-    scene.background = null;
     r.clippingPlanes = this.above;
     r.setRenderTarget(this.rt);
-    r.setClearColor(0x000000, 0);
     this.hide(this.onlyBelow);
     r.render(scene, cam);
     this.show(this.onlyBelow);
     this.shadowsOwed = true;
-    scene.background = was;
-    r.setClearColor(clear, clearA);
     // 2: below the ground, on the screen, over the dark (with the same shadows: not drawn again)
     const hidden = this.hideBelow().filter((o) => o.visible), owed = r.shadowMap.needsUpdate;
     for (const o of hidden) o.visible = false;
     this.hide(this.onlyAbove);
-    scene.background = this.bg.copy(this.sky).lerp(DARK, t);
+    scene.background = DARK;
     r.shadowMap.needsUpdate = false;
     r.clippingPlanes = this.below;
     r.setRenderTarget(null);
@@ -152,6 +146,7 @@ export class UnderView {
     this.show(this.onlyAbove);
     for (const o of hidden) o.visible = true;
     scene.background = was;
+    r.setClearColor(clear, clearA);
     r.clippingPlanes = [];
     // 3: the surface laid over what's below
     this.quad.material.uniforms.map.value = this.rt.texture;

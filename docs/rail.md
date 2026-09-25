@@ -89,12 +89,15 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
   them show (`game/underview.ts`).
 - **How it's drawn:** in two passes split by a level plane 0.3 m under the ground, so every
   triangle is drawn exactly once and nothing is sorted against anything else:
-  1. the surface, into an off-screen target (sRGB, 4× multisampled, with its depth);
-  2. everything under the plane, straight to the screen;
+  1. the surface and the sky, into an off-screen target (sRGB, 4× multisampled, with its depth);
+  2. everything under the plane, straight to the screen, over the dark;
   3. the surface laid over it at 25%.
 - At full opacity the passes give the ordinary picture, pixel for pixel (checked: 0.3/255 on
   average, the rest at anti-aliased edges), so the fade in and out (0.35 s) starts and ends
-  without a jump. Once the view is off, the game draws in one pass again.
+  without a jump. Every frame of it is a straight blend of the two pictures: sampled frame by
+  frame, the screen's brightness runs 78 → 69 → 59 → 50 → 45 and back to exactly 78. (A first go
+  that faded the background from the sky to the dark instead flashed brighter for two frames.)
+  Once the view is off, the game draws in one pass again.
 - Covered tunnels have walls now (roaddraw), hidden under the ground until the view is on, and no
   grass verges inside them.
 - **Taps** in the view mean what's drawn deep down: the station tool and a tap on a station or a
