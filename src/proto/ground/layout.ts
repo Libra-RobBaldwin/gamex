@@ -10,6 +10,7 @@
 // Plain arrays and numbers, no three.js, so the tests run in Node.
 import { hash2, worldNoise } from './noise';
 import { CROP } from './covers';
+import { PlanIndex, type GroundPlan } from './plan';
 
 export interface XZ { x: number; z: number }
 export type ParcelKind = 'arable' | 'grass' | 'wood' | 'rough' | 'town';
@@ -23,7 +24,7 @@ export interface GroundInput {
   // centrelines of country roads and railways, which get hedges along both sides
   lanes?: { path: XZ[]; half: number; hedge?: boolean }[];
   // plots: gardens become lawn, building sites bare earth, yards worn and rough
-  plots?: { poly: XZ[]; kind: 'garden' | 'site' | 'yard' }[];
+  plots?: { poly: XZ[]; kind: 'garden' | 'site' | 'yard' | 'track' }[]; // (a track: a farm's drive, worn earth, not town)
   // parks and playing fields: lawn, with mowing stripes along `stripes` (radians) if given
   parks?: { poly: XZ[]; stripes?: number }[];
   water?: XZ[][];
@@ -240,7 +241,7 @@ export class Parcels {
 }
 
 // ---- what each parcel is ----
-export interface ParcelInfo { kind: ParcelKind; crop: number; dir: number }
+export interface ParcelInfo { kind: ParcelKind; crop: number; dir: number; conifer?: boolean }
 
 // A coarse grid (20 m cells, in 16x16 blocks) of flags marking the town, industry and water, for
 // deciding what parcels are.
@@ -296,11 +297,24 @@ export class Layout {
   coarse = new Coarse();
   private fixed: { parks: GroundInput['parks']; industrial: GroundInput['industrial']; water: GroundInput['water']; coarse: Coarse } | null = null;
   private info = new Map<number, ParcelInfo>();
+  // fields laid out by the map itself (plan.ts), in place of the world-anchored grid: a parcel's id
+  // is then its field's index in the plan
+  plan: PlanIndex | null = null;
   constructor(public input: GroundInput) {
     this.seed = input.seed ?? 1;
     this.parcels = new Parcels(this.seed);
     this.setInput(input);
   }
+  setPlan(plan: GroundPlan | null) { this.plan = plan ? new PlanIndex(plan) : null; this.info.clear(); }
+  // What's either side of a plan's line, at its middle (a line borders one field each side there).
+  sides(n: number): [ParcelKind | null, ParcelKind | null] {
+    const P = this.plan!, { a, b } = P.plan.lines[n], L = Math.hypot(b.x - a.x, b.z - a.z) || 1, nx = -(b.z - a.z) / L * 1.5, nz = (b.x - a.x) / L * 1.5, mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+    const f = P.fieldAt(mx + nx, mz + nz), g = P.fieldAt(mx - nx, mz - nz);
+    return [f < 0 ? null : this.aboutId(f).kind, g < 0 ? null : this.aboutId(g).kind];
+  }
+  // how far a point is from the edge of a wood it's in (or the wood it's near), up to 12 m
+  woodEdge(x: number, z: number) { return this.plan!.edge(x, z, (n) => { const [p, q] = this.sides(n); return (p === 'wood') !== (q === 'wood'); }); }
+  aboutId(id: number) { return this.about({ id, cell: null as unknown as Cell, edge: 0 }); }
   // A new input. With `near` (world boxes round what changed), parcels away from it keep what they
   // were; the boxes of those near it that became something else are returned.
   setInput(input: GroundInput, near?: { x0: number; z0: number; x1: number; z1: number }[]) {
@@ -318,13 +332,14 @@ export class Layout {
     }
     const c = (this.coarse = new Coarse(this.fixed.coarse));
     // the town reaches 30 m past its plots and parks, the industrial estate likewise
-    for (const p of input.plots ?? []) { const m = centroid(p.poly); c.mark(p.kind === 'yard' ? INDUS : TOWN, m.x, m.z, 30); }
+    for (const p of input.plots ?? []) { if (p.kind === 'track') continue; const m = centroid(p.poly); c.mark(p.kind === 'yard' ? INDUS : TOWN, m.x, m.z, 30); }
     for (const p of input.town ?? []) c.mark(TOWN, p.x, p.z, 30);
     const changed: { x0: number; z0: number; x1: number; z1: number }[] = [];
     if (!near) return changed;
     // every parcel with ground within 40 m of the box (a plot marks the town 30 m round it)
     const ids = new Set<number>(), h = { id: 0, cell: this.parcels.cell(0, 0), edge: 0 };
-    for (const b of near) for (const c of this.parcels.cellsNear({ x0: b.x0 - 40, z0: b.z0 - 40, x1: b.x1 + 40, z1: b.z1 + 40 })) { ids.add(this.parcels.owner(c, 0)); ids.add(this.parcels.owner(c, 1)); }
+    if (this.plan) for (const b of near) for (const n of this.plan.fieldsNear({ x0: b.x0 - 40, z0: b.z0 - 40, x1: b.x1 + 40, z1: b.z1 + 40 })) ids.add(n);
+    else for (const b of near) for (const c of this.parcels.cellsNear({ x0: b.x0 - 40, z0: b.z0 - 40, x1: b.x1 + 40, z1: b.z1 + 40 })) { ids.add(this.parcels.owner(c, 0)); ids.add(this.parcels.owner(c, 1)); }
     for (const id of ids) {
       const was = this.info.get(id);
       this.info.delete(id);
@@ -336,6 +351,7 @@ export class Layout {
   }
   // a parcel's bounding box (both cells of a merged pair)
   boxOf(id: number) {
+    if (this.plan) return { ...this.plan.boxes[id] };
     const k = Math.floor(id / 2), c = this.parcels.cell(Math.floor(k / 65536) - 32768, (k % 65536) - 32768);
     const pts = [...this.parcels.polygon(c).pts, ...(c.merge ? this.parcels.polygon(this.parcels.cell(c.i + 1, c.j)).pts : [])];
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
@@ -346,6 +362,7 @@ export class Layout {
   about(h: Hit): ParcelInfo {
     let inf = this.info.get(h.id);
     if (inf) return inf;
+    if (this.plan) return this.aboutPlan(h.id);
     // always judged from the parcel's own cell (a merged pair's left one), whoever asks
     const k = Math.floor(h.id / 2), c = this.parcels.cell(Math.floor(k / 65536) - 32768, (k % 65536) - 32768);
     const { pts } = this.parcels.polygon(c);
@@ -400,6 +417,23 @@ export class Layout {
     dir = ((dir % Math.PI) + Math.PI) % Math.PI;
     inf = { kind, crop, dir };
     this.info.set(h.id, inf);
+    return inf;
+  }
+  // What a plan's field is: what the plan says, unless the town has grown over it (as for the grid).
+  private aboutPlan(id: number): ParcelInfo {
+    const P = this.plan!, f = P.plan.fields[id], b = P.boxes[id];
+    let n = 0, town = 0, ind = 0;
+    for (let x = b.x0 + 8; x < b.x1; x += 16) for (let z = b.z0 + 8; z < b.z1; z += 16) {
+      if (!inPoly(x, z, f.poly)) continue;
+      n++;
+      const fl = this.coarse.at(x, z);
+      if (fl & TOWN) town++;
+      if (fl & INDUS) ind++;
+    }
+    n = Math.max(1, n);
+    const kind: ParcelKind = ind / n > 0.12 ? 'rough' : town / n > 0.15 ? 'town' : f.kind;
+    const inf: ParcelInfo = { kind, crop: kind === 'arable' || kind === 'grass' ? P.crops[id] : CROP.grass, dir: f.dir, conifer: f.conifer };
+    this.info.set(id, inf);
     return inf;
   }
 }

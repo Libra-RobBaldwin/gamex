@@ -1,6 +1,23 @@
 # Handover: where everything stands
 
-## Latest: saving and loading (24 Sep 2026, night)
+## Latest: the region's countryside (25 Sep 2026)
+
+Session https://claude.ai/code/session_01NfUwLYbN2dwfppCiaRHfHK, branch `claude/work-country`, on
+the user's "fields look warped and awful… missing forests". **Read docs/regiongen.md "Farmland and
+woods" and docs/ground.md "Fields on a region".**
+- **Fields:** the region lays out its own (`region/fields.ts`): farm blocks that follow the roads,
+  rivers and contours, cut into square-cornered fields of 2 to 10 ha; hedged, with hedgerow trees;
+  crops coherent per farm; a dark hedge line painted so boundaries read from far out.
+- **Woods:** `region/woods.ts` picks old woods, hanging woods, wet woodland, copses, shelter belts
+  and upland plantations; `ground/canopy.ts` draws them as a low-poly canopy a tile (three levels
+  by zoom), with trees along their edges.
+- **Farmsteads:** `ground/farms.ts`, one merged mesh; yards and tracks painted.
+- **The town is untouched:** it keeps the ground's grid (all of it is behind the field plan, which
+  only the region sets).
+- **Measured** (SwiftShader, 412×915, same spots): zoomed out 253 → 270 draw calls, 961k → 1030k
+  triangles; mid 198 → 188, 632k → 722k; near 210 → 197, 741k → 801k; the paint stage 1.05 → 1.15 s.
+
+## Earlier: saving and loading (24 Sep 2026, night)
 
 Session https://claude.ai/code/session_01PQ93PyRyTyLaPDoybw2MMw. **Read `docs/save.md`.**
 - **Save and load work:**

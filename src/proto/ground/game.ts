@@ -5,6 +5,10 @@ import { circlePoly } from '../land';
 import type { Lot, Network } from '../roads';
 import { Ground, type GroundInput, type XZ } from './index';
 import { CROP_NAMES, PALETTE, type CropName } from './covers';
+import type { GroundPlan } from './plan';
+import { Canopy, type CanopyLook } from './canopy';
+import { farmMesh, farmTrack, farmYard, type FarmSpot } from './farms';
+import * as THREE from 'three';
 
 export interface GameWorld {
   net: Network;
@@ -37,6 +41,32 @@ export class GameGround {
     for (const [k, hex] of Object.entries(s.palette)) { const i = keys.indexOf(k as keyof typeof PALETTE); if (i >= 0 && hex) u.uPal.value[i].set(hex); }
     for (const [k, c] of Object.entries(s.crops)) { const i = CROP_NAMES.indexOf(k as CropName); if (i >= 0 && c) { u.uCropA.value[i].set(c.a); u.uCropB.value[i].set(c.b); } }
   }
+  // A map that lays out its own fields (the region: region/fields.ts) gives them here, before
+  // `start`; its woods are then drawn as a canopy (add `canopy.group` to the scene).
+  // Its farmsteads come with it: drawn in `farms` (add it to the scene too), their yards painted
+  // worn, and a farm goes if a road is built over its yard.
+  canopy: Canopy | null = null;
+  readonly farms = new THREE.Group();
+  private farmList: { spot: FarmSpot; yard: XZ[]; track: XZ[] | null }[] = [];
+  setPlan(plan: GroundPlan, look: CanopyLook, farms: FarmSpot[] = []) {
+    this.ground.layout.setPlan(plan);
+    this.canopy ??= new Canopy(this.ground, look);
+    this.ground.onChanged = (boxes) => this.canopy?.changed(boxes);
+    this.farmList = farms.map((spot) => ({ spot, yard: farmYard(spot), track: farmTrack(spot) })).filter((f) => this.w.net.land.free(f.yard));
+    this.drawFarms();
+  }
+  private drawFarms() {
+    for (const m of this.farms.children as THREE.Mesh[]) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
+    this.farms.clear();
+    const m = farmMesh(this.farmList.map((f) => f.spot));
+    if (m) this.farms.add(m);
+  }
+  // (farms whose yards a road now crosses, within these boxes, go)
+  private clearFarms(boxes: { x0: number; z0: number; x1: number; z1: number }[]) {
+    const n = this.farmList.length;
+    this.farmList = this.farmList.filter((f) => !boxes.some((b) => f.spot.x > b.x0 - 40 && f.spot.x < b.x1 + 40 && f.spot.z > b.z0 - 40 && f.spot.z < b.z1 + 40) || this.w.net.land.free(f.yard));
+    if (this.farmList.length !== n) this.drawFarms();
+  }
   // what only changes with the roads or the landscaping (kept between plots going up)
   private fixed: Pick<GroundInput, 'blocked' | 'lanes' | 'parks' | 'industrial' | 'water'> | null = null;
   input(): GroundInput {
@@ -48,6 +78,7 @@ export class GameGround {
     this.sites = new Set();
     for (const l of q) { if (this.sites.size >= SITES) break; if (net.lotFree(l)) this.sites.add(l); }
     for (const l of this.sites) plots.push({ poly: net.parcelRect(l), kind: 'site' });
+    for (const f of this.farmList) { plots.push({ poly: f.yard, kind: 'yard' }); if (f.track) plots.push({ poly: f.track, kind: 'track' }); }
     return { seed: 11, ...fixed, plots, trees: this.w.trees(), town: q.map((l) => ({ x: l.x, z: l.z })) };
   }
   private fixedInput() {
@@ -71,12 +102,13 @@ export class GameGround {
     return { blocked, lanes, parks, industrial, water: this.w.water?.() ?? [circlePoly(L, L.r + 9, 48)] /* (the beach reaches r + 7) */ };
   }
   // The roads or the landscaping changed: repaint everything (next time `sync` runs).
-  invalidate() { this.full = true; this.fixed = null; }
+  invalidate() { this.full = true; this.fixed = null; if (this.farmList.length) this.clearFarms([{ x0: -1e9, z0: -1e9, x1: 1e9, z1: 1e9 }]); }
   // The roads changed only within these boxes (an edit on a big map): repaint round them rather
   // than everything. (Before the first paint there's nothing to repaint.)
   changed(boxes: { x0: number; z0: number; x1: number; z1: number }[]) {
     if (this.full) return;
     this.fixed = null;
+    if (this.farmList.length) this.clearFarms(boxes);
     if (boxes.length) this.ground.change(this.input(), boxes.map((b) => ({ x0: b.x0 - 10, z0: b.z0 - 10, x1: b.x1 + 10, z1: b.z1 + 10 })));
   }
   // A plot was built: repaint round it (and round the building sites that moved up the queue).
@@ -97,6 +129,7 @@ export class GameGround {
     if (!this.full) return false;
     this.full = false;
     this.ground.paint(this.input());
+    this.canopy?.build();
     return true;
   }
 }

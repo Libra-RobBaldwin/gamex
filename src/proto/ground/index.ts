@@ -65,6 +65,8 @@ export class Ground {
   private origin = { x: 0, z: 0 };
   // timings of the last paint and change, in ms
   stats = { paint: 0, change: 0, hedges: 0, pieces: 0, trees: 0 };
+  // told the boxes a change repainted (the canopy over a plan's woods follows it: canopy.ts)
+  onChanged: ((boxes: Box[]) => void) | null = null;
 
   constructor(o: GroundOptions = {}) {
     const t = o.texel ?? 2.5;
@@ -135,6 +137,7 @@ export class Ground {
       for (let j = r.j0; j < r.j1; j++) this.tex.addUpdateRange((j * n + r.i0) * 4, (r.i1 - r.i0) * 4);
       this.tex.needsUpdate = true;
     }
+    this.onChanged?.(dirty);
     this.stats.change = performance.now() - t0;
   }
 
@@ -173,6 +176,7 @@ export class Ground {
   // many there are, so nothing costs more), for scenes that scattered trees at random.
   settleTrees<T extends XZ>(trees: T[]) {
     if (!this.cover) return trees;
+    if (this.layout.plan) return this.settleOnPlan(trees);
     const R = this.cover.region, spots: XZ[] = [], h = { id: 0, cell: this.layout.parcels.cell(0, 0), edge: 0 };
     for (let x = R.x0 + 6; x < R.x0 + R.size; x += 9) for (let z = R.z0 + 6; z < R.z0 + R.size; z += 9) {
       this.layout.parcels.hit(x, z, h);
@@ -185,6 +189,30 @@ export class Ground {
       if ((kind !== 'arable' && kind !== 'grass') || h.edge < 3 || !spots.length) continue;
       const s = spots[Math.floor(((k++ * 0.618034) % 1) * spots.length)];
       t.x = s.x + ((k * 0.37) % 1 - 0.5) * 8; t.z = s.z + ((k * 0.71) % 1 - 0.5) * 8;
+    }
+    return trees;
+  }
+
+  // (with a plan: trees out in the fields go to the woods' edges, 2 to 6 m in, where they stand
+  // out of the canopy (canopy.ts) and show as trees close up)
+  private settleOnPlan<T extends XZ>(trees: T[]) {
+    const L = this.layout, P = L.plan!, R = this.cover!.region, spots: XZ[] = [];
+    for (const n of P.fieldsNear({ x0: R.x0, z0: R.z0, x1: R.x0 + R.size, z1: R.z0 + R.size })) {
+      if (L.aboutId(n).kind !== 'wood') continue;
+      const b = P.boxes[n];
+      for (let x = Math.ceil(b.x0 / 7) * 7; x < b.x1; x += 7) for (let z = Math.ceil(b.z0 / 7) * 7; z < b.z1; z += 7) {
+        if (P.fieldAt(x, z) !== n) continue;
+        const e = L.woodEdge(x, z);
+        if (e > 2 && e < 6) spots.push({ x, z });
+      }
+    }
+    let k = 0;
+    for (const t of trees) {
+      const f = P.fieldAt(t.x, t.z), kind = f < 0 ? 'grass' : L.aboutId(f).kind;
+      if ((kind !== 'arable' && kind !== 'grass' && kind !== 'wood') || !spots.length) continue;
+      if (kind === 'wood' && L.woodEdge(t.x, t.z) < 6) continue;
+      const s = spots[Math.floor(((k++ * 0.618034) % 1) * spots.length)];
+      t.x = s.x + ((k * 0.37) % 1 - 0.5) * 3; t.z = s.z + ((k * 0.71) % 1 - 0.5) * 3;
     }
     return trees;
   }

@@ -101,6 +101,36 @@ lanes. Each hedge:
 - usually has one gateway, with worn earth either side;
 - has a hedgerow tree about every 70 m.
 
+### Fields on a region: a field plan (`plan.ts`)
+
+A map can lay out its own fields instead of using the world-anchored grid:
+`ground.layout.setPlan(plan)` with convex polygons (`fields`: kind, crop, row direction, conifer
+for a wood) and the lines between them, each once (`lines`, hedged or not). The region does this
+(`region/fields.ts`, below); the town keeps the grid, untouched. With a plan:
+
+- the painter fills each field with its index and bands each boundary for the field margins, as
+  for the grid; a hedged line between farmland is banded again and painted as a dark hedge foot
+  (woodland floor), so field boundaries read from far out, where the 3D hedges aren't drawn;
+- a wood's edge wanders up to 4.5 m in from its boundary (scrub where the trees stop short);
+- hedges go along every hedged line between farmland (not against a wood, not across open rough
+  grazing), with a hedgerow tree every 55 m or so;
+- `settleTrees` moves trees standing in the fields to the woods' edges;
+- the town still takes over a field it grows into (15% of it within 30 m of plots), as before.
+
+**Woods as a canopy (`canopy.ts`).** Over each wood, one low-poly, flat-shaded surface a 1 km
+tile: crowns (domes on a jittered 9 m grid; spires 5.5 m apart in a conifer plantation) with dark
+gaps, going down steeply into the ground at the wood's edge. Its outline is the cover map's
+woodland weight, so it follows the painted wood and a road or the town cuts it. Three levels by
+zoom: a 4 m grid below a view 1,100 m tall, 8 m to 2,900 m, 16 m beyond. The 8 and 16 m levels are
+made for every tile at start-up (about 0.5 s on the cloud box); the 4 m one only near the camera,
+a tile a tick. One draw call a tile that has woods (and one in the shadow pass). The trees the game
+plants along the woods' edges (`fringe`) stand out of it close up.
+
+**Farmsteads (`farms.ts`).** A farmhouse, a barn and a shed round a worn yard; all the map's farms
+are one merged mesh (one draw call). Their yards are plots of kind `yard` (hedges and fields keep
+off them) and a farm standing back from its road has a painted track (`track` plots). A road built
+over a yard removes the farm.
+
 ### Painting and repainting
 
 `paint` fills the whole map. `change(input, boxes)` repaints only round the boxes: each texel

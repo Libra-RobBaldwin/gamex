@@ -70,7 +70,7 @@ export class Occupancy {
 // Walk a line laying hedge pieces wherever `want` says and the ground is free; a gateway gap
 // somewhere along it if it's long enough; a hedgerow tree now and then.
 type Box = { x0: number; z0: number; x1: number; z1: number };
-function walk(g: HedgeGroup, a: XZ, b: XZ, seed: number, occ: Occupancy, want: (x: number, z: number) => boolean, gate: boolean, clip: Box | null, hs: number) {
+function walk(g: HedgeGroup, a: XZ, b: XZ, seed: number, occ: Occupancy, want: (x: number, z: number) => boolean, gate: boolean, clip: Box | null, hs: number, treeRate = 0.11) {
   const inClip = (x: number, z: number) => !clip || (x >= clip.x0 && x <= clip.x1 && z >= clip.z0 && z <= clip.z1);
   const L = Math.hypot(b.x - a.x, b.z - a.z);
   if (L < STEP) return;
@@ -93,7 +93,7 @@ function walk(g: HedgeGroup, a: XZ, b: XZ, seed: number, occ: Occupancy, want: (
     // each piece a little longer than its step, so the line reads as continuous; its height and
     // width wander slowly along the hedge (as a trimmed hedge does), not piece by piece
     g.pieces.push({ x, z, a: ang + (r1 - 0.5) * 0.03, len: step + 0.8, h: 1.45 + worldNoise(x, z, 60, hs) * 0.65, w: 1.35 + worldNoise(x, z, 70, hs + 1) * 0.55 });
-    if (hash2(k, seed, 75) < 0.11 && occ.free(x, z, CLEAR + 2) && inClip(x - 4, z - 4) && inClip(x + 4, z + 4)) g.trees.push({ x: x + (r2 - 0.5) * 1.2, z: z + (r1 - 0.5) * 1.2, s: 0.95 + r2 * 0.5, kind: r1 < 0.15 ? 1 : 0 });
+    if (hash2(k, seed, 75) < treeRate && occ.free(x, z, CLEAR + 2) && inClip(x - 4, z - 4) && inClip(x + 4, z + 4)) g.trees.push({ x: x + (r2 - 0.5) * 1.2, z: z + (r1 - 0.5) * 1.2, s: 0.95 + r2 * 0.5, kind: r1 < 0.15 ? 1 : 0 });
   }
 }
 
@@ -108,7 +108,10 @@ export function planHedges(layout: Layout, box: Box, occ: Occupancy, lanes = tru
   const i0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 3, i1 = Math.floor(Math.max(...corners.map((c) => c[0]))) + 3;
   const j0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 3, j1 = Math.floor(Math.max(...corners.map((c) => c[1]))) + 3;
   const hit = { id: 0, cell: P.cell(0, 0), edge: 0 };
-  const kindAt = (x: number, z: number) => { P.hit(x, z, hit); return { id: hit.id, kind: layout.about(hit).kind }; };
+  const kindAt = (x: number, z: number) => {
+    if (layout.plan) { const f = layout.plan.fieldAt(x, z); return { id: f, kind: f < 0 ? 'grass' : layout.aboutId(f).kind }; }
+    P.hit(x, z, hit); return { id: hit.id, kind: layout.about(hit).kind };
+  };
   // The parcel of cell c at a point (which side of its split, if it has one), and what it is.
   const parcelOf = (c: Cell, x: number, z: number) => {
     let side = 0;
@@ -124,7 +127,24 @@ export function planHedges(layout: Layout, box: Box, occ: Occupancy, lanes = tru
     return !(kindOf(a) === 'town' && kindOf(b) === 'town');
   };
   const touches = (a: XZ, b: XZ) => Math.max(a.x, b.x) >= box.x0 && Math.min(a.x, b.x) <= box.x1 && Math.max(a.z, b.z) >= box.z0 && Math.min(a.z, b.z) <= box.z1;
-  for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+  // a plan's hedged lines (plan.ts), each once: a hedge wherever the fields either side are
+  // farmland (not in or against a wood, not in the town, not across open rough grazing)
+  if (layout.plan) {
+    const PL = layout.plan, kindAt2 = (x: number, z: number) => { const f = PL.fieldAt(x, z); return f < 0 ? null : layout.aboutId(f).kind; };
+    for (const n of PL.linesNear(box)) {
+      const l = PL.plan.lines[n];
+      if (!l.hedge) continue;
+      const [p, q] = layout.sides(n);
+      if (p === 'wood' || q === 'wood' || (p === 'town' && q === 'town')) continue;
+      const L = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z) || 1, nx = -(l.b.z - l.a.z) / L * 2, nz = (l.b.x - l.a.x) / L * 2;
+      const g: HedgeGroup = { key: `p${n}`, pieces: [], trees: [], gates: [] };
+      walk(g, l.a, l.b, (n * 7919 + layout.seed * 613) | 0, occ, (x, z) => {
+        const u = kindAt2(x + nx, z + nz), v = kindAt2(x - nx, z - nz);
+        return u !== 'wood' && v !== 'wood' && !(u === 'town' && v === 'town') && !(u === 'rough' && v === 'rough');
+      }, true, clip, hs, 0.15);
+      out.push(g);
+    }
+  } else for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
     const c = P.cell(i, j), { pts, across } = P.polygon(c);
     for (let e = 0; e < pts.length; e++) {
       const o = across[e];

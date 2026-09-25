@@ -15,6 +15,7 @@ import { CIVIC, grassMats, makeBuilding as generate, makeRegion, USE } from './b
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
+import { countryPlan } from './game/country';
 import { patchGround, setGroundQuality } from './ground';
 import { Occupancy, planHedges, type HedgeTree, type Piece } from './ground/hedgerows';
 import { GameWater, LAKE, WATER_LEVEL } from './game/water';
@@ -2099,7 +2100,10 @@ await loading.stage('Parks, playgrounds and car parks', 0.14);
 refreshInfill();
 infillBoxes.length = 0; // (the whole map was just looked at)
 await loading.stage(MAP.style === 'arctic' ? 'Laying the snow' : MAP.style === 'desert' ? 'Spreading the sand' : 'Painting the fields and woods', 0.07);
+// (the region lays out its own fields and woods: game/country.ts; the town keeps the ground's grid)
+if (BIG) { const plan = countryPlan({ map: MAP, net, heightAt: RELIEF?.heightAt, woods: LOOK.trees, region: gameGround.ground.cover!.region }); gameGround.setPlan(plan, { broadleaf: LOOK.trees.crown, conifer: LOOK.trees.pine }, plan.farms); scene.add(gameGround.canopy!.group, gameGround.farms); nav.onChange(() => gameGround.canopy!.setView(view)); gameGround.canopy!.setView(view); }
 gameGround.start(trees);
+if (gameGround.canopy) for (const p of gameGround.canopy.fringe(15)) trees.push({ x: p.x, z: p.z, s: p.s, kind: p.conifer ? 1 : 0 }); // (the woods' edges: trees standing out of the canopy)
 refreshTrees();
 // every building merged into its chunk before the first frame (not two a frame as it plays)
 await loading.stage('Finishing the buildings', 0.03);

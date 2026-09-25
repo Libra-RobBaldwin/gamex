@@ -3,6 +3,7 @@
 // of texels on its own, giving exactly what a full paint gives there: every texel depends only on
 // the world within a fixed margin of it, and the margin is painted too (then thrown away).
 import { CROP, DIRS } from './covers';
+import { worldNoise } from './noise';
 
 const DPI = DIRS / Math.PI;
 import { bbox, GRID, Layout, toGrid, type Cell, type ParcelInfo, type XZ } from './layout';
@@ -166,6 +167,7 @@ export class CoverMap {
     const [lawn, field, wood, bare, rough, wet, dir, d, tmp, edge] = this.floats(N, 10);
     const [crop, town, blocked, water] = this.bytes(N, 4);
     const pid = this.ints(N);
+    const win0 = { x0, z0, x1, z1 };
     const inWin = (b: { x0: number; z0: number; x1: number; z1: number }, pad = 0) => b.x1 + pad > x0 && b.x0 - pad < x1 && b.z1 + pad > z0 && b.z0 - pad < z1;
 
     // 1. parcels: each cell's Voronoi polygon is filled with the cell; then a band either side of
@@ -180,7 +182,7 @@ export class CoverMap {
     const CA = Math.cos(GRID.angle), SA = Math.sin(GRID.angle), SX = GRID.sx, SZ = GRID.sz;
     edge.fill(1e9);
     pid.fill(-1);
-    const band = (a: XZ, b: XZ) => {
+    const band = (a: XZ, b: XZ, into: Float32Array = edge) => {
       const L = Math.hypot(b.x - a.x, b.z - a.z);
       if (L < 1e-6) return;
       const ux = (b.x - a.x) / L, uz = (b.z - a.z) / L, B = 7;
@@ -194,57 +196,104 @@ export class CoverMap {
           const px = x0 + (i + 0.5) * t - a.x, s = px * ux + pz * uz;
           const d = s < 0 ? Math.sqrt(px * px + pz * pz) : s > L ? Math.sqrt((px - ux * L) ** 2 + (pz - uz * L) ** 2) : Math.abs(px * uz - pz * ux);
           const k = j * W + i;
-          if (d < edge[k]) edge[k] = d;
+          if (d < into[k]) into[k] = d;
         }
       }
     };
-    for (let gi = gi0; gi <= gi1; gi++) for (let gj = gj0; gj <= gj1; gj++) {
-      const c = P.cell(gi, gj), { pts, across } = P.polygon(c), idx = cellOf.length;
-      cellOf.push(c);
-      fill(pts, x0, z0, t, W, H, (a, b) => pid.fill(idx, a, b + 1));
-      own.push(P.owner(c, 0), P.owner(c, 1));
-      for (let e = 0; e < pts.length; e++) {
-        const o = across[e];
-        if (!o || (!c.split && !o.split && P.owner(o, 0) === own[idx * 2])) continue; // (inside a merged pair)
-        band(pts[e], pts[(e + 1) % pts.length]);
+    if (layout.plan) {
+      // fields from a plan (plan.ts): each polygon filled with its index; the boundaries banded as
+      // for the grid (not inside a wood or the town, where there's none to see), and the hedged
+      // ones banded again, for the dark line of the hedge's foot that shows from far off
+      const PL = layout.plan, hedge = d;
+      hedge.fill(1e9);
+      const fs = PL.fieldsNear(win0);
+      for (const n of fs) fill(PL.plan.fields[n].poly, x0, z0, t, W, H, (a, b) => pid.fill(n, a, b + 1));
+      for (const n of PL.linesNear(win0)) {
+        const [p, q] = layout.sides(n);
+        if ((p === 'wood' && q === 'wood') || (p === 'town' && q === 'town')) continue;
+        const l = PL.plan.lines[n];
+        band(l.a, l.b);
+        if (l.hedge && p !== 'wood' && q !== 'wood' && !(p === 'rough' && q === 'rough') && p !== 'town' && q !== 'town') band(l.a, l.b, hedge);
       }
-      const sl = P.splitLine(c);
-      if (sl) band(sl[0], sl[1]);
-    }
-    const infos = new Map<number, ParcelInfo>();
-    const hit = { id: 0, cell: cellOf[0], edge: 0 };
-    let lastId = -1, inf: ParcelInfo = { kind: 'grass', crop: 0, dir: 0 };
-    for (let j = 0; j < H; j++) {
-      const z = z0 + (j + 0.5) * t;
-      for (let i = 0; i < W; i++) {
-        const k = j * W + i, x = x0 + (i + 0.5) * t;
-        let q = pid[k];
-        if (q < 0) { P.hit(x, z, hit); q = cellOf.indexOf(hit.cell); if (q < 0) { cellOf.push(hit.cell); own.push(P.owner(hit.cell, 0), P.owner(hit.cell, 1)); q = cellOf.length - 1; } } // (a texel centre right on an edge)
-        const sp = cellOf[q].split;
-        const id = own[q * 2 + (sp && sp.nu * ((x * CA + z * SA) / SX) + sp.nv * ((-x * SA + z * CA) / SZ) > sp.c ? 1 : 0)];
-        if (id !== lastId) {
-          lastId = id;
-          const got = infos.get(id);
-          if (got) inf = got;
-          else { hit.id = id; inf = layout.about(hit); infos.set(id, inf); }
-        }
+      let lastId = -2, inf: ParcelInfo = { kind: 'grass', crop: 0, dir: 0 };
+      for (let k = 0; k < N; k++) {
+        const id = pid[k];
+        if (id < 0) continue; // (off the plan: plain pasture)
+        if (id !== lastId) { lastId = id; inf = layout.aboutId(id); }
         const ed = edge[k];
         switch (inf.kind) {
-          case 'arable': case 'grass':
+          case 'arable': case 'grass': {
             field[k] = ed >= 4.5 ? 1 : smooth(1.5, 4.5, ed);
-            rough[k] = ed >= 4 ? 0 : (1 - smooth(1, 4, ed)) * 0.85; // the uncut margin along the hedge
+            rough[k] = ed >= 4 ? 0 : (1 - smooth(1, 4, ed)) * 0.7;
             crop[k] = inf.crop; dir[k] = inf.dir;
+            const hd = hedge[k];
+            if (hd < 3) wood[k] = 0.78 * (1 - smooth(0.5, 3, hd));
             break;
-          case 'wood':
-            wood[k] = ed >= 6 ? 1 : smooth(0, 6, ed);
-            rough[k] = (1 - wood[k]) * 0.8; // scrub at the wood's edge
+          }
+          case 'wood': {
+            // (a wood's edge wanders in from the field's: scrub and bramble where the trees stop short)
+            const e = ed < 12 ? ed - 4.5 * worldNoise(x0 + ((k % W) + 0.5) * t, z0 + (Math.floor(k / W) + 0.5) * t, 26, 17) : ed;
+            wood[k] = e >= 6 ? 1 : smooth(0, 6, e);
+            rough[k] = (1 - wood[k]) * 0.8;
             break;
+          }
           case 'rough':
             rough[k] = 0.85;
             break;
           case 'town':
-            lawn[k] = 0.5; town[k] = 1; // amenity grass: mown, but not a lawn
+            lawn[k] = 0.5; town[k] = 1;
             break;
+        }
+      }
+    } else {
+      for (let gi = gi0; gi <= gi1; gi++) for (let gj = gj0; gj <= gj1; gj++) {
+        const c = P.cell(gi, gj), { pts, across } = P.polygon(c), idx = cellOf.length;
+        cellOf.push(c);
+        fill(pts, x0, z0, t, W, H, (a, b) => pid.fill(idx, a, b + 1));
+        own.push(P.owner(c, 0), P.owner(c, 1));
+        for (let e = 0; e < pts.length; e++) {
+          const o = across[e];
+          if (!o || (!c.split && !o.split && P.owner(o, 0) === own[idx * 2])) continue; // (inside a merged pair)
+          band(pts[e], pts[(e + 1) % pts.length]);
+        }
+        const sl = P.splitLine(c);
+        if (sl) band(sl[0], sl[1]);
+      }
+      const infos = new Map<number, ParcelInfo>();
+      const hit = { id: 0, cell: cellOf[0], edge: 0 };
+      let lastId = -1, inf: ParcelInfo = { kind: 'grass', crop: 0, dir: 0 };
+      for (let j = 0; j < H; j++) {
+        const z = z0 + (j + 0.5) * t;
+        for (let i = 0; i < W; i++) {
+          const k = j * W + i, x = x0 + (i + 0.5) * t;
+          let q = pid[k];
+          if (q < 0) { P.hit(x, z, hit); q = cellOf.indexOf(hit.cell); if (q < 0) { cellOf.push(hit.cell); own.push(P.owner(hit.cell, 0), P.owner(hit.cell, 1)); q = cellOf.length - 1; } } // (a texel centre right on an edge)
+          const sp = cellOf[q].split;
+          const id = own[q * 2 + (sp && sp.nu * ((x * CA + z * SA) / SX) + sp.nv * ((-x * SA + z * CA) / SZ) > sp.c ? 1 : 0)];
+          if (id !== lastId) {
+            lastId = id;
+            const got = infos.get(id);
+            if (got) inf = got;
+            else { hit.id = id; inf = layout.about(hit); infos.set(id, inf); }
+          }
+          const ed = edge[k];
+          switch (inf.kind) {
+            case 'arable': case 'grass':
+              field[k] = ed >= 4.5 ? 1 : smooth(1.5, 4.5, ed);
+              rough[k] = ed >= 4 ? 0 : (1 - smooth(1, 4, ed)) * 0.85; // the uncut margin along the hedge
+              crop[k] = inf.crop; dir[k] = inf.dir;
+              break;
+            case 'wood':
+              wood[k] = ed >= 6 ? 1 : smooth(0, 6, ed);
+              rough[k] = (1 - wood[k]) * 0.8; // scrub at the wood's edge
+              break;
+            case 'rough':
+              rough[k] = 0.85;
+              break;
+            case 'town':
+              lawn[k] = 0.5; town[k] = 1; // amenity grass: mown, but not a lawn
+              break;
+          }
         }
       }
     }
@@ -254,7 +303,7 @@ export class CoverMap {
     for (const p of near(inp.blocked, boxOf, win)) if (inWin(boxOf(p), 10)) fill(p, x0, z0, t, W, H, (a, b) => blocked.fill(1, a, b + 1));
     for (const p of near(inp.water, boxOf, win)) if (inWin(boxOf(p), DT * t)) fill(p, x0, z0, t, W, H, (a, b) => water.fill(1, a, b + 1));
     for (const p of inp.plots ?? []) if (inWin(boxOf(p.poly))) {
-      const [l, b, r] = p.kind === 'garden' ? [1, 0, 0] : p.kind === 'site' ? [0, 0.9, 0.1] : [0, 0.45, 0.55];
+      const [l, b, r] = p.kind === 'garden' ? [1, 0, 0] : p.kind === 'site' ? [0, 0.9, 0.1] : p.kind === 'track' ? [0, 0.62, 0.38] : [0, 0.45, 0.55];
       fill(p.poly, x0, z0, t, W, H, (a, e) => { e++; field.fill(0, a, e); wood.fill(0, a, e); town.fill(1, a, e); lawn.fill(l, a, e); bare.fill(b, a, e); rough.fill(r, a, e); });
     }
     for (const p of near(inp.parks, (q) => boxOf(q.poly), win)) if (inWin(boxOf(p.poly))) {

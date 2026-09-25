@@ -52,6 +52,33 @@ The region is rolling by default (`relief=rolling`). `relief` goes from `flat` t
   - vehicles and buildings are sheared by the slope rather than turned (right for gentle hills; towns are flat);
   - traffic's grade speeds ignore the hills.
 
+## Farmland and woods (`fields.ts`, `woods.ts`, `game/country.ts`)
+
+The region lays out its own countryside, after its roads are built (the ground's field plan,
+docs/ground.md):
+
+- **Farm blocks:** Voronoi cells of seeds about 650 m apart. Each block's fields run one way: along
+  the nearest road or river within 380 m, else along the contour where there's a slope, else as
+  the land's grain runs (a noise field over 2.6 km).
+- **Fields:** each block is cut square across its longer side, again and again, until its fields
+  are the size that land has: 4 to 11.5 ha where it's ploughed, less round the villages (down to
+  60%) and on slopes. So they're mostly four-sided with right angles, and meet the block's edge at
+  whatever angle it takes. A road through a field splits it (along its chord). One cut in ten on a
+  big block is a shelter belt, a strip of trees 16 to 24 m wide. Median field about 3 ha, 6 ha far
+  from the villages.
+- **What each is:** woods first (`woods.ts`: old woods in clumps a kilometre or so apart, hanging
+  woods on the steepest slopes, wet woodland on small fields by the water, the odd copse, the
+  belts, conifer plantations a farm block at a time on the high ground). Then rough grazing on the
+  high ground and steep slopes of a hilly map and by the water, then arable where the block is
+  ploughed (flat land away from the villages and the water), else pasture. Each farm grows two
+  main crops, so neighbouring fields are often the same. On the default map: about 12% wood, 57%
+  grass, 30% arable, with rape in flower under 2%.
+- **Farmsteads:** about one a farm block (33 on the default map), beside a road or out in the
+  fields with a track to one, 380 m or more apart, out of the villages, the water and the woods.
+- **Reacting to the land:** `countryPlan` takes the height field (`heightAt`), the water's
+  distance (`MapWater.edgeDistance`: the one place to add a sea's) and the roads as built. It's
+  pure and quick (about 50 ms for the 6 km map).
+
 ## Finding your way (`game/places.ts`)
 
 - **Place names** float over each settlement once you zoom out: the city from 420 m of view height, towns from
