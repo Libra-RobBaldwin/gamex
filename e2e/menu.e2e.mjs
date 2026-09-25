@@ -63,7 +63,8 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   check(t.fcp > 0 && t.fcp < 1000, `the menu's first frame arrives in under 1 s (${Math.round(t.fcp)} ms)`);
   if (!process.env.BASE) check(t.js < 200_000, `the menu loads under 200 kB of script (${Math.round(t.js / 1000)} kB)`);
   check(await page.$('[data-continue]') === null, 'no Continue while nothing is saved');
-  check((await page.$$('.mrow')).length === 5, 'New game, How to play, Library, Settings and About');
+  check((await page.$$('.scr-home [data-go]')).length === 5, 'New game, How to play, Library, Settings and About');
+  check(await page.$eval('.hero img', (i) => i.complete && i.naturalWidth > 0).catch(() => false) || await page.waitForFunction(() => document.querySelector('.hero img')?.naturalWidth > 0, null, { timeout: 5000 }).then(() => true, () => false), 'the town picture behind the menu loads');
   await page.screenshot({ path: `${shots}/1-home.png` });
   for (const s of ['how', 'library', 'settings', 'about', 'new']) {
     await page.tap(`[data-go="${s}"]`);
@@ -234,7 +235,7 @@ for (const id of ['town', 'sandbox']) {
   const { ctx, page } = await phone({ landscape: true });
   await page.goto(BASE + '/');
   await atMenu(page);
-  const fits = await page.evaluate(() => [...document.querySelectorAll('.mrow')].every((b) => { const r = b.getBoundingClientRect(); return r.bottom <= innerHeight && r.right <= innerWidth; }));
+  const fits = await page.evaluate(() => [...document.querySelectorAll('.scr-home [data-go]')].every((b) => { const r = b.getBoundingClientRect(); return r.bottom <= innerHeight && r.right <= innerWidth; }));
   check(fits, 'landscape: every menu button is on screen');
   await page.screenshot({ path: `${shots}/7-landscape.png` });
   await page.tap('[data-go="new"]');

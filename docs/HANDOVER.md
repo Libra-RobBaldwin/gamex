@@ -1,6 +1,29 @@
 # Handover: where everything stands
 
-## Latest: saving and loading (24 Sep 2026, night)
+## Latest: HUD, start menu and region work (25 Sep 2026)
+
+Coordinator: https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. Integration branch as before.
+- **HUD, second pass (`ui/shell.ts`, `proto.css`):** a rounded floating dock with a Build button
+  in the middle, and a status pill showing money with its trend, population, the clock and speed.
+  It also has an alert bell (`setAlerts`), a milestone ring that pays grants (`MILESTONES` in
+  `main.ts`, `purse.grant`), a Stats tab (money, lines, towns) and small cards when you tap
+  something. Overlays are Stop coverage and Traffic.
+- **Bus stops reach a three-minute walk (250 m), not 400 m:** `STOP_WALK_M` in `game/econ.ts`, the
+  same in the coverage overlay. Stations stay at 800 m. The loop e2e's profit is unchanged.
+- **Roundabout entries** have painted chevrons, not green splitter islands (`jshape.ts`).
+- **Start menu (`src/app`):**
+  - Home is a picture of the starter town, drifting slowly (`src/app/art/`, taken from the game
+    with `e2e/.scratch/art.mjs`, a local script; retake the pictures when the look changes).
+  - Over it: a Continue card for the last town with its map's picture, New game as the big
+    button, and a row of tiles (How to play, Library, Settings, About).
+  - New game has a card per map with its picture. Loading shows the map's picture and a tip.
+  - Region setup asks one question per step, then shows a summary (`regionsetup.ts`).
+  - Everything is rounded, like the HUD.
+- **Six region sessions (started 25 Sep afternoon):** terrain, countryside (PR #41), edge,
+  world50 (50 km maps, PR #42), OS open data (PR #43) and vernacular buildings. Merge each
+  into the integration branch as it's ready, and test.
+
+## Earlier: saving and loading (24 Sep 2026, night)
 
 Session https://claude.ai/code/session_01PQ93PyRyTyLaPDoybw2MMw. **Read `docs/save.md`.**
 - **Save and load work:**
