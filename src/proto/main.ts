@@ -2206,6 +2206,43 @@ const railGame = new RailGame({
 });
 rebuildRoads();
 shell.addTransportTab({ id: 'rail', label: 'Railway', icon: 'train', sub: 'Your rail lines and stations', render: (el) => railGame.renderTab(el) });
+// ---- Stats: money over time, every line's takings, and the towns (ui/shell.ts openStats) ----
+function sparkSvg(vals: number[]) {
+  if (vals.length < 2) return '';
+  const lo = Math.min(...vals), hi = Math.max(...vals), span = Math.max(1, hi - lo);
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * 100},${40 - ((v - lo) / span) * 34}`);
+  return `<svg class="spark" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true"><path class="area" d="M0,44 L${pts.join(' L')} L100,44 Z"/><path d="M${pts.join(' L')}"/></svg>`;
+}
+shell.addStatsTab({
+  id: 'money', label: 'Money', icon: 'activity', sub: 'Your balance, and what comes in and goes out each day',
+  render: (el) => {
+    const y = purse.yesterday, t = purse.today, net = y.fares - y.running;
+    const hist = [...purse.history, Math.round(purse.balance)];
+    el.innerHTML = `<div class="tiles"><div><b>${money(purse.balance)}</b><span>In the bank</span></div><div><b class="${net >= 0 ? 'good' : 'badv'}">${net >= 0 ? '+' : '−'}${money(Math.abs(net))}</b><span>Lines made yesterday</span></div></div>
+      ${sparkSvg(hist)}${hist.length > 1 ? `<div class="spark-cap"><span>${hist.length - 1} day${hist.length === 2 ? '' : 's'} ago</span><span>now</span></div>` : '<p class="note">A chart of your balance builds up here, day by day.</p>'}
+      <dl class="facts" style="margin-top:6px">
+        <dt></dt><dd class="colh">Yesterday · today</dd>
+        <dt>Fares</dt><dd>${money(y.fares)} · ${money(t.fares)}</dd>
+        <dt>Running costs</dt><dd>${money(-y.running)} · ${money(-t.running)}</dd>
+        <dt>Building</dt><dd>${money(-y.building)} · ${money(-t.building)}</dd>
+        <dt>Vehicles bought</dt><dd>${money(-y.vehicles)} · ${money(-t.vehicles)}</dd>
+        <dt>Sold</dt><dd>${money(y.sold)} · ${money(t.sold)}</dd>
+      </dl>`;
+  },
+});
+shell.addStatsTab({
+  id: 'lines', label: 'Lines', icon: 'transport', sub: 'What each line carries and makes',
+  render: (el) => {
+    if (!lines.list.length) { el.innerHTML = '<p class="note">No lines yet. Build two stops and draw a line through them, and its numbers show here.</p>'; return; }
+    const rows = lines.list.map((l) => {
+      const b = purse.line(l.id), st = townRef?.line(l.id), p = b.lastFares - b.lastRunning, n = lines.buses(l).length;
+      return { l, p, html: `<button class="lrow tone-stop" data-sl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${st ? `${Math.round((st.carriedLastMonth || st.carried) * 30).toLocaleString('en-GB')} riders a day · ` : ''}${n} ${n === 1 ? 'bus' : 'buses'} · <b class="${p >= 0 ? 'good' : 'badv'}">${p >= 0 ? '+' : '−'}${money(Math.abs(p))}/day</b></span></button>` };
+    }).sort((a, b) => a.p - b.p);
+    el.innerHTML = `<p class="note">Worst first: a line losing money wants more stops where people are, or fewer buses.</p>${rows.map((r) => r.html).join('')}`;
+    el.querySelectorAll<HTMLButtonElement>('[data-sl]').forEach((b) => b.addEventListener('click', () => { const l = lines.list.find((x) => x.id === +b.dataset.sl!); if (l) showLineInfo(l); }));
+  },
+});
+shell.addStatsTab({ id: 'town', label: 'Towns', icon: 'building', sub: 'How the town is doing, and why', render: () => { showTown(); } });
 // the economy runs the town from here on (game/econ.ts): it decides what gets built, and how
 // many wait at the stops
 if (SAVED) purse.load(SAVED.purse);
@@ -2427,7 +2464,13 @@ function frame(now: number) {
     $('#st-buses').textContent = String(traffic.buses);
     $('#st-trains').textContent = String(railway.trains.length);
     $('#st-pop').textContent = count(pop);
-    shell.setMoney(money(purse.balance));
+    // the status pill: money and what yesterday's running made (today's so far on the first day),
+    // and the people with which way the town is heading
+    const y = purse.history.length ? purse.yesterday : purse.today, net = Math.round(y.fares - y.running);
+    const k = (v: number) => (Math.abs(v) >= 1e4 ? `£${(Math.abs(v) / 1e3).toFixed(Math.abs(v) >= 1e5 ? 0 : 1)}k` : money(Math.abs(v)));
+    shell.setMoney(money(purse.balance), lines.list.length ? { text: `${net >= 0 ? '+' : '−'}${k(net)}/day`, dir: net > 0 ? 1 : net < 0 ? -1 : 0 } : undefined);
+    const st = town.report?.status;
+    shell.setPop(count(pop), st === 'growing' ? 1 : st === 'declining' ? -1 : 0);
     if (++goalTick % 4 === 0) updateGoal();
   }
   regionView?.update(view, canvas.clientWidth / Math.max(1, canvas.clientHeight)); // (the tiles' levels, for where the camera is now)

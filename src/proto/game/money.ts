@@ -19,6 +19,7 @@ export class Purse {
   balance = START;
   today = empty(); // since the start of this game day
   yesterday = empty();
+  history: number[] = []; // the balance at the end of each game day, the last 60 (Stats > Money)
   byLine = new Map<number, { fares: number; running: number; lastFares: number; lastRunning: number }>();
   private listeners: (() => void)[] = [];
 
@@ -49,6 +50,8 @@ export class Purse {
     this.changed();
   }
   newDay() {
+    this.history.push(Math.round(this.balance));
+    if (this.history.length > 60) this.history.shift();
     this.yesterday = this.today;
     this.today = empty();
     for (const b of this.byLine.values()) { b.lastFares = b.fares; b.lastRunning = b.running; b.fares = 0; b.running = 0; }
@@ -56,15 +59,16 @@ export class Purse {
   line(id: number) { return this.byLine.get(id) ?? { fares: 0, running: 0, lastFares: 0, lastRunning: 0 }; }
 
   // ---------- saving (game/save.ts) ----------
-  save(): PurseSave { return { balance: this.balance, today: { ...this.today }, yesterday: { ...this.yesterday }, byLine: [...this.byLine].map(([id, b]) => [id, { ...b }]) }; }
+  save(): PurseSave { return { balance: this.balance, today: { ...this.today }, yesterday: { ...this.yesterday }, byLine: [...this.byLine].map(([id, b]) => [id, { ...b }]), history: [...this.history] }; }
   load(s: PurseSave) {
     this.balance = s.balance;
     this.today = { ...empty(), ...s.today };
     this.yesterday = { ...empty(), ...s.yesterday };
     this.byLine = new Map(s.byLine.map(([id, b]) => [id, { ...b }]));
+    this.history = [...(s.history ?? [])];
     this.changed();
   }
 }
-export interface PurseSave { balance: number; today: Books; yesterday: Books; byLine: [number, { fares: number; running: number; lastFares: number; lastRunning: number }][] }
+export interface PurseSave { balance: number; today: Books; yesterday: Books; byLine: [number, { fares: number; running: number; lastFares: number; lastRunning: number }][]; history?: number[] }
 
 export const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
