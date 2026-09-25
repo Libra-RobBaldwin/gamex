@@ -28,6 +28,17 @@
      and edges, so no part of the 50 km is empty (for example a minimum per 10 km square,
      scaled by terrain: fewer in mountains, some on the coast). Link them all into the road and
      rail network, and have the edge portals carry the traffic that runs on off the map.
+   - **Also (the user, 25 Sep, late):**
+     - Fold the OS real regions into the Region flow as the alternative to a seeded map. Both use
+       one WORLD pipeline.
+     - Seeded maps as good as real ones, by learning from the OS data.
+     - Shopping complexes of variable size in town centres. Each is one coherent building with
+       its own walls, roof and look, not 20 buildings squashed together or overlapping.
+     - Less ugly buildings.
+   - **Overnight run:** every session writes `docs/briefs/<name>.md` first, listing everything asked
+     of it by the coordinator and by the user directly. At 01:45 UTC the coordinator dovetails the
+     briefs into `docs/briefs/PLAN.md` (the ownership map, requests, interfaces and merge order),
+     then merges hourly. Morning summary at 06:15 UTC.
 4. Then wire terrain's landform presets and islands into the region setup's first step, and do
    HUD phase 3 (small tap cards for a bus, stop or building).
 5. The user's home town is still named in the repo in a few places, from before the privacy
