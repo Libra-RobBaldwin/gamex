@@ -106,7 +106,12 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
 - **Taps** in the view mean what's drawn deep down: the station tool and a tap on a station or a
   train look at the level of the deep track under the finger. Otherwise an underground station is
   found only by its entrance, so a tap on a building over its platforms still picks the building.
+- **On a hilly map** (the region), everything is lifted onto the hills in its vertex shader
+  (`drape.ts`); the clipping planes cut by height above the ground there, not in world height, so
+  the view splits the same way over a hill as on the flat.
 - **Deep** always goes under what it crosses (it implies Under).
+- **Saving:** a station's structure and height are part of the railway's save (`RailwaySave`), so
+  viaduct and underground stations come back as they were.
 - A station remembers the rails' height it was built at, and only finds track at that height
   again: a surface line laid over a tunnel doesn't take its underground station.
 - **What it costs** (the whole town, SwiftShader, Fast tier, 412×915 DPR 2, median frame):
@@ -275,7 +280,8 @@ rw.sim.log                                    // every call: { train, line, stat
   - trains call at it, and it gets no depot;
   - an underground station in a Deep tunnel: platforms 10 m down or more, only the entrance
     claimed, dearer than a viaduct one, found by a tap over it, trains calling;
-  - refused in a cutting.
+  - refused in a cutting;
+  - viaduct and underground stations saved and restored as they were.
 - `e2e/stations.e2e.mjs`: by touch at 412×915, DPR 2, in the starter town: a curve, a viaduct and a
   deep tunnel laid; a station built on each from Build > Stops (the underground ones by tapping
   the track in the underground view); a line drawn between the two underground stations and its

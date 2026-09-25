@@ -165,3 +165,18 @@ function segDist(q: { x: number; z: number }, a: P3, b: P3) {
   const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.z - a.z) * dz) / L2));
   return Math.hypot(a.x + dx * t - q.x, a.z + dz * t - q.z);
 }
+
+describe('saving', () => {
+  it('brings viaduct and underground stations back as they were', () => {
+    const v = line({ limits: [{ s0: 1050, s1: 1950, lo: 9, hi: 9, why: 'the viaduct' }] }), d = line({ cross: 'tunnel', height: 'deep' });
+    for (const { net, rw, seg, L } of [v, d]) {
+      const st = rw.build(rw.plan(seg.id, L / 2, 1, 130).plans[0]).station, was = rw.shapes.get(st.id)!;
+      const again = new Railway(net);
+      again.restore(JSON.parse(JSON.stringify(rw.save())));
+      const sh = again.shapes.get(st.id)!;
+      expect(again.station(st.id)?.structure).toBe(st.structure);
+      expect(sh.structure).toBe(was.structure);
+      expect(sh.platforms[0].y).toBeCloseTo(was.platforms[0].y, 5);
+    }
+  });
+});
