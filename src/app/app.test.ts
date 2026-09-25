@@ -6,7 +6,7 @@ import { gameSearch, route, screenOf } from './route';
 
 describe('maps.ts, the registry the menu lists', () => {
   it('has the starter town (ready and the default), the region, real places and the sandbox', () => {
-    expect(MAPS.map((m) => m.id)).toEqual(['town', 'region', 'place', 'sandbox']);
+    expect(MAPS.map((m) => m.id)).toEqual(['town', 'region', 'exe', 'place', 'sandbox']);
     expect(mapById(DEFAULT_MAP)?.ready).toBe(true);
     expect(mapById('region')).toMatchObject({ ready: true, setup: true });
   });

@@ -57,16 +57,18 @@ const SHP = encodeURIComponent('ESRI® Shapefile');
 const oml = letters.map((t) => ({ t, zip: fetchTo(`oml_${t}.zip`, `${API}/OpenMapLocal/downloads?area=${t}&format=${SHP}&redirect`) }));
 const green = letters.map((t) => ({ t, zip: fetchTo(`gs_${t}.zip`, `${API}/OpenGreenspace/downloads?area=${t}&format=${SHP}&redirect`) }));
 const t50 = fetchTo('t50.zip', `${API}/Terrain50/downloads?area=GB&format=${encodeURIComponent('ASCII Grid and GML (Grid)')}&redirect`);
+const riversZip = fetchTo('rivers.zip', `${API}/OpenRivers/downloads?area=GB&format=${SHP}&redirect`);
 const names = fetchTo('names.zip', `${API}/OpenNames/downloads?area=GB&format=CSV&redirect`);
 const X = join(CACHE, 'x');
 rmSync(X, { recursive: true, force: true });
 mkdirSync(X, { recursive: true });
 const unzip = (zip, ...pats) => { try { execFileSync('unzip', ['-oq', zip, ...pats, '-d', X], { stdio: ['ignore', 'ignore', 'inherit'] }); } catch (e) { if (e.status !== 11) throw e; } };
 for (const { zip } of [...oml, ...green]) unzip(zip);
+unzip(riversZip, '*WatercourseLink*');
 const find = (dir, re, out = []) => { for (const f of readdirSync(dir)) { const p = join(dir, f); if (statSync(p).isDirectory()) find(p, re, out); else if (re.test(f)) out.push(p); } return out; };
 const layer = (name) => {
   const out = [];
-  for (const p of find(X, new RegExp(`^[A-Z]{2}_${name}\\.shp$`))) for (const r of readShapefile(p.slice(0, -4), { bbox: BBOX })) out.push(r);
+  for (const p of find(X, new RegExp(`^([A-Z]{2}_)?${name}\\.shp$`))) for (const r of readShapefile(p.slice(0, -4), { bbox: BBOX })) out.push(r);
   return out;
 };
 
@@ -209,6 +211,50 @@ addPolys('sea', layer('TidalWater'), () => 0, { tol: 1.5 });
 addPolys('foreshore', layer('Foreshore'), () => 0, { tol: 1.5 });
 addPolys('woods', layer('Woodland'), () => 0, { tol: 2.5, minArea: 50 });
 log('water', stats.water, 'sea', stats.sea, 'woods', stats.woods);
+// rivers (OS Open Rivers centre lines), each as wide as the water it runs down: sampled every
+// 15 m, twice the distance to the nearest bank where the point is in a water polygon; the median
+{
+  const polys = [];
+  for (const t of tiles) for (const k of ['water', 'sea']) for (const f of t.layers[k] ?? []) polys.push(f);
+  const C = 100, edges = new Map();
+  polys.forEach((f, fi) => { for (const a of f.parts) for (let k = 0; k < a.length; k += 2) {
+    const j = (k + 2) % a.length, x0 = Math.min(a[k], a[j]), x1 = Math.max(a[k], a[j]), z0 = Math.min(a[k + 1], a[j + 1]), z1 = Math.max(a[k + 1], a[j + 1]);
+    // (the tile edge a clipped polygon was cut along isn't a bank)
+    const t = tileAt((a[k] + a[j]) / 2, (a[k + 1] + a[j + 1]) / 2);
+    const cut = t && ((a[k] === a[j] && (Math.abs(a[k] - t.x0) < 0.01 || Math.abs(a[k] - t.x0 - TILE) < 0.01)) || (a[k + 1] === a[j + 1] && (Math.abs(a[k + 1] - t.z0) < 0.01 || Math.abs(a[k + 1] - t.z0 - TILE) < 0.01)));
+    for (let ci = Math.floor(x0 / C); ci <= Math.floor(x1 / C); ci++) for (let cj = Math.floor(z0 / C); cj <= Math.floor(z1 / C); cj++) { const key = ci * 100000 + cj; (edges.get(key) ?? edges.set(key, []).get(key)).push([a[k], a[k + 1], a[j], a[j + 1], fi, cut]); }
+  } });
+  const inside = (x, z) => { // crossings of edges to the east, in this cell row: even-odd per polygon
+    const cj = Math.floor(z / C), counts = new Map();
+    for (let ci = Math.floor(x / C); ci < Math.floor(x / C) + 60; ci++) for (const [ax, az, bx, bz, fi] of edges.get(ci * 100000 + cj) ?? []) {
+      if ((az > z) === (bz > z)) continue;
+      const xc = ax + ((z - az) * (bx - ax)) / (bz - az);
+      if (xc > x && Math.floor(xc / C) === ci) counts.set(fi, (counts.get(fi) ?? 0) + 1);
+    }
+    for (const n of counts.values()) if (n % 2) return true;
+    return false;
+  };
+  const bank = (x, z, max = 400) => { let best = max;
+    for (let r = 0; r * C <= best + C; r++) for (let di = -r; di <= r; di++) for (let dj = -r; dj <= r; dj++) { if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+      for (const [ax, az, bx, bz, , cut] of edges.get((Math.floor(x / C) + di) * 100000 + Math.floor(z / C) + dj) ?? []) { if (cut) continue; const ux = bx - ax, uz = bz - az, L2 = ux * ux + uz * uz || 1, t = Math.max(0, Math.min(1, ((x - ax) * ux + (z - az) * uz) / L2)); best = Math.min(best, Math.hypot(x - ax - ux * t, z - az - uz * t)); } }
+    return best; };
+  const FORM = { inlandRiver: 0, tidalRiver: 1, canal: 2, lake: 3 };
+  for (const r of layer('WatercourseLink')) for (const p of r.parts) {
+    const a = simplify(toGame(p), 1.5), ws = [];
+    for (let k = 0; k + 2 < a.length; k += 2) {
+      const L = Math.hypot(a[k + 2] - a[k], a[k + 3] - a[k + 1]);
+      for (let s = 0; s < L; s += 15) { const x = a[k] + ((a[k + 2] - a[k]) * s) / L, z = a[k + 1] + ((a[k + 3] - a[k + 1]) * s) / L; ws.push(inside(x, z) ? 2 * bank(x, z) : 0); }
+    }
+    ws.sort((u, v) => u - v);
+    const w = Math.min(255, Math.round(ws[Math.floor(ws.length / 2)] ?? 0));
+    const m = Math.floor(a.length / 4) * 2, t = tileAt(a[m], a[m + 1]);
+    if (!t) continue;
+    const f = { c: (FORM[r.attrs.form] ?? 0) + F.WIDTH * w, parts: [a] };
+    if (r.attrs.name1) f.name = r.attrs.name1;
+    push(t, 'rivers', f); count('rivers');
+  }
+  log('rivers', stats.rivers);
+}
 // functional sites (schools, hospitals…) and green space
 const SITE = (c) => /University/.test(c) ? 'university' : /Further/.test(c) ? 'college' : /Education/.test(c) ? 'school' : /Hospital/.test(c) ? 'hospital' : /Medical|Hospice/.test(c) ? 'care' : /Transport|Ferry|Airport|Bus|Coach|Port|Helicopter|Road User/.test(c) ? 'transport' : 'other';
 addPolys('sites', layer('FunctionalSite'), (a) => F.SITE_CLASSES.indexOf(SITE(a.CLASSIFICA)), { tol: 1, nameOf: (a) => a.DISTNAME || undefined });

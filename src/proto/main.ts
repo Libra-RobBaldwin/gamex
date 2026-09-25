@@ -43,7 +43,10 @@ import { Drape } from './drape';
 import { PlaceLabels, openPlaces } from './game/places';
 import { makeRelief } from './region/terrain';
 import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; // a big map streamed in tiles (docs/region.md R4)
-import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type SettlementInfo } from './region'; // maps as data (docs/region.md)
+import { isRealQuery, loadRealMap } from './real/load';
+import { clearOf, greenRegions, layReal, placeLots } from './real/lay';
+import type { RealMap } from './real/map';
+import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type MapSpec, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
 import { deleteSave, getSave, listSaves, putSave, saveSearch } from './game/savedb';
 
@@ -65,7 +68,10 @@ if (PARAMS.get('save')) {
   catch (e) { saveProblem = `${e instanceof SaveError ? e.message : 'The saved town couldn’t be read'} · here’s a new one`; console.warn('save', e); }
 }
 // The map is data (region/mapspec.ts): ?map= picks it (a region with its options), the invented town by default.
-const MAP = mapFromQuery(SAVED ? new URLSearchParams(SAVED.map.query) : PARAMS);
+// A real region (public/regions, real/: Ordnance Survey data) is fetched first.
+const MAP_Q = SAVED ? new URLSearchParams(SAVED.map.query) : PARAMS;
+const MAP: MapSpec = isRealQuery(MAP_Q) ? await loadRealMap(MAP_Q) : mapFromQuery(MAP_Q);
+const REAL: { parks: Region[] } | null = 'real' in MAP ? { parks: [] } : null; // (a real map: real/)
 // (the query that makes this map, kept with its saves)
 const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(PARAMS); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
@@ -183,9 +189,9 @@ for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshL
 interface Tree { x: number; z: number; s: number; kind: number }
 let trees: Tree[] = [];
 for (let i = 0; i < MAP.trees.count; i++) {
-  const p = { x: (rand() * 2 - 1) * BOUND, z: (rand() * 2 - 1) * BOUND };
+  const p = MAP.trees.spots?.[i] ?? { x: (rand() * 2 - 1) * BOUND, z: (rand() * 2 - 1) * BOUND }; // (a real map's trees are where its woods are)
   // woods on the outskirts, a few in town
-  if (inCentre(MAP, p) && rand() < 0.85) continue;
+  if (!MAP.trees.spots && inCentre(MAP, p) && rand() < 0.85) continue;
   if (isWater(p) || gameWater.near(p, 10)) continue;
   trees.push({ ...p, s: 0.8 + rand() * 0.7, kind: rand() < LOOK.trees.pines ? 1 : 0 });
 }
@@ -553,6 +559,7 @@ const groundBoxes: Box[] = []; // (and since the ground was last repainted)
 // Find the gaps the plots leave and fill them: community buildings where one fits, else parks,
 // playgrounds, allotments, car parks, verges. Plots still waiting to be built count as taken.
 function refreshInfill() {
+  if (REAL) { for (const r of REAL.parks) addInfill(r); REAL.parks = []; return; } // (a real map's gaps are its gardens; its parks are its real ones: real/lay.ts)
   for (const b of infill) { fromChunk(b); for (const p of b.parts) p.g.dispose(); }
   infill = [];
   infillCells.clear();
@@ -574,6 +581,7 @@ function addInfill(r: Region) {
 // grows until no gap it cuts across reaches what changed, so every gap re-found is whole; gaps
 // wholly inside it are replaced, the rest kept.
 function refreshInfillWithin(boxes: Box[]) {
+  if (REAL) return;
   const pad = (b: Box, m: number): Box => ({ x0: b.x0 - m, z0: b.z0 - m, x1: b.x1 + m, z1: b.z1 + m });
   const union = (list: Box[]): Box => ({ x0: Math.min(...list.map((b) => b.x0)), z0: Math.min(...list.map((b) => b.z0)), x1: Math.max(...list.map((b) => b.x1)), z1: Math.max(...list.map((b) => b.z1)) });
   const meets = (a: Box, b: Box) => a.x0 <= b.x1 && a.x1 >= b.x0 && a.z0 <= b.z1 && a.z1 >= b.z0;
@@ -620,6 +628,24 @@ function queuePlots(segs: number[]) {
 
 // ---------------- the map's roads and towns ----------------
 async function seedTown() {
+  // a real map (real/): its roads, railway and buildings as they are, through the OSM importer's
+  // stages; the junctions design themselves, and the town grows on plots between its buildings
+  if (REAL) {
+    await loading.stage('Laying out the roads and the railway', 0.08);
+    const laid = layReal(net, (MAP as RealMap).real.overpass);
+    commitRoads([...net.segs.keys()]);
+    const lots = placeLots(net, laid.lots);
+    await loading.stage(`Putting up ${lots.length.toLocaleString('en-GB')} buildings`, 0.3);
+    const clear = clearOf(lots);
+    queue = queue.filter(clear);
+    for (const [i, l] of lots.entries()) {
+      net.lots.push(l);
+      spawnLot(l, false, true);
+      if (i % 64 === 0) await loading.tick(i / lots.length);
+    }
+    REAL!.parks = greenRegions(net, lots, (MAP as RealMap).real.green);
+    return;
+  }
   // a generated region's railway first: a main line through the city and two towns, a branch to a
   // village, stations and a line on each (rail/region.ts); the streets then cross it on the level
   // or bridge it, and keep out of its stations

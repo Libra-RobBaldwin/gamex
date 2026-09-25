@@ -12,12 +12,12 @@ export const FORMAT = 1;
 export const Q = 0.5; // m: the coordinate quantum (OS OpenMap Local is surveyed to about 1 m)
 
 // the layers, in the order they're written
-export const LAYERS = ['heights', 'buildings', 'roads', 'rail', 'water', 'streams', 'sea', 'foreshore', 'woods', 'green', 'sites', 'points'] as const;
+export const LAYERS = ['heights', 'buildings', 'roads', 'rail', 'water', 'streams', 'sea', 'foreshore', 'woods', 'green', 'sites', 'points', 'rivers'] as const;
 export type LayerName = (typeof LAYERS)[number];
 export type GeomLayer = Exclude<LayerName, 'heights'>;
 // how each layer's geometry is read: rings (polygons), lines, or single points
 export const GEOM: Record<GeomLayer, 'poly' | 'line' | 'point'> = {
-  buildings: 'poly', roads: 'line', rail: 'line', water: 'poly', streams: 'line', sea: 'poly', foreshore: 'poly', woods: 'poly', green: 'poly', sites: 'poly', points: 'point',
+  buildings: 'poly', roads: 'line', rail: 'line', water: 'poly', streams: 'line', sea: 'poly', foreshore: 'poly', woods: 'poly', green: 'poly', sites: 'poly', points: 'point', rivers: 'line',
 };
 
 // Classes, by layer. The number is what's stored; the name is what the game reads.
@@ -27,6 +27,10 @@ export const RAIL_CLASSES = ['multi', 'single', 'narrow', 'multi-tunnel', 'singl
 export const BUILDING_CLASSES = ['building', 'education', 'religious', 'medical', 'sport', 'retail', 'culture', 'transport', 'emergency', 'leisure', 'glasshouse'] as const;
 export const GREEN_CLASSES = ['park', 'playing', 'golf', 'allotment', 'cemetery', 'religious', 'play', 'sport', 'bowls', 'tennis', 'other'] as const;
 export const SITE_CLASSES = ['school', 'college', 'university', 'hospital', 'care', 'transport', 'other'] as const;
+// a river's class is its form plus WIDTH × its width in whole metres at the waterline (measured
+// from the water's polygons; 0 for a stream too narrow to have one)
+export const RIVER_FORMS = ['inland', 'tidal', 'canal', 'lake'] as const;
+export const WIDTH = 8;
 export const POINT_CLASSES = ['station', 'roundabout', 'junction', 'place'] as const;
 // a road's flags (stored in the class number's high bits)
 export const DUAL = 16; // a collapsed dual carriageway
@@ -86,15 +90,16 @@ export function encodeTile(t: Tile): Uint8Array {
     if (name === 'heights') return;
     const fs = t.layers[name];
     if (!fs?.length) return;
-    const poly = GEOM[name] === 'poly';
-    w.uv(id); w.uv(fs.length);
+    const poly = GEOM[name] === 'poly', min = poly ? 6 : GEOM[name] === 'point' ? 2 : 4;
+    // (a feature whose every part rounds away to nothing is left out)
+    const kept = fs.map((f) => ({ f, parts: f.parts.map((p, k) => ({ p: quantise(p, t.x0, t.z0, poly), hole: !!f.holes?.[k] })).filter(({ p }) => p.length >= min) })).filter((k) => k.parts.length);
+    if (!kept.length) return;
+    w.uv(id); w.uv(kept.length);
     let px = 0, pz = 0;
-    for (const f of fs) {
+    for (const { f, parts } of kept) {
       w.uv(f.c); w.uv(f.name ? index.get(f.name)! : 0);
-      const parts = f.parts.map((p) => quantise(p, t.x0, t.z0, poly));
-      const keep = parts.map((p, k) => ({ p, hole: !!f.holes?.[k] })).filter(({ p }) => p.length >= (poly ? 6 : GEOM[name] === 'point' ? 2 : 4));
-      w.uv(keep.length);
-      for (const { p, hole } of keep) {
+      w.uv(parts.length);
+      for (const { p, hole } of parts) {
         w.uv((p.length / 2) * 2 + (hole ? 1 : 0));
         for (let k = 0; k < p.length; k += 2) { w.sv(p[k] - px); w.sv(p[k + 1] - pz); px = p[k]; pz = p[k + 1]; }
       }
