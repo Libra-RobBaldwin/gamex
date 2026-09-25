@@ -16,7 +16,7 @@ import { BAY, bayWeight, closestOnPath, HALF, pathLength, pointAt, type Lot, typ
 import { junctionLift, legsAt, moveOf, type Junction, type Leg, type Move } from './junction';
 import { TRAINS, laneBase, trainSpeed, type TrainDef } from './catalog';
 import { courseOf, laneSpan, sectionAt, taperOf, type Course, type Ends2 } from './xsection';
-import { DIMS, bodyOf, overlapping, type Kind, type Pose } from './footprint';
+import { BODIES, DIMS, overlapping, steered, type Axles, type Kind, type Pose } from './footprint';
 import { STEP, Track, View, table, tableStats, type Cls } from './conflicts';
 import { Fleet, type Dress, type Dressed } from './game/fleet';
 
@@ -35,6 +35,7 @@ interface JPath {
   // it has to have found a gap in the lane it joins (worked out for each body as it's first needed)
   leave?: number[]; gate?: number[]; lanes?: [P[], P[]];
   inb?: (e: Entry) => boolean; // (see inbound)
+  hold?: Map<Cls, [string, number]>; // (see holdAt)
 }
 // a junction, or a bend where two roads meet end to end and the road runs on round a curve
 interface JData { node: number; j: Junction | null; live: boolean; legs: Leg[]; paths: Map<string, JPath> }
@@ -76,7 +77,7 @@ interface Car {
   sold?: boolean; // taken off the roads as soon as it's clear of junctions
   divertAt?: number; // when it last looked for another way out of a junction with no room beyond
   readmit?: number; // when it last asked, standing at the line, whether it could go ahead of whoever it waits for
-  pose?: Pose;
+  pose?: Pose; axles?: Axles; // where it was last drawn, and where its axles are (footprint.steered)
 }
 interface Train {
   def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; dress: Dress; gone?: boolean;
@@ -104,6 +105,7 @@ const DRIVE: Record<Kind, { a: number; b: number; T: number; s0: number }> = {
 };
 const BMAX = 9; // emergency stop
 const E_IN = 10, E_OUT = 10; // how far either side of a junction its paths are followed
+const E_PRE = 16; // how far back up the approach its courses run
 const BUSLANE = 8, BAYLANE = 9;
 const LONGEST = 10; // the furthest any vehicle reaches in front of or behind its centre (an 18.5 m bendy bus)
 const WIDEST = 1.3; // half the widest vehicle's width (2.55 m buses and trailers, as game/fleet.ts rounds it)
@@ -126,6 +128,8 @@ function offIn(m: number, lanes: number, w: number, bus: number, lane: number) {
 }
 // the speed allowed at t along a junction's path (for the bends at and beyond it)
 const spd = (P: JPath, t: number) => P.env[Math.max(0, Math.min(P.env.length - 1, Math.floor(t / STEP)))];
+// a body that swings wide of its course turning: articulated, or rigid and long (a bus, a big lorry)
+const isLong = (k: Cls) => { const b = BODIES[k]; return !!b.trailer || b.front + b.back > 9; };
 // Does the limit `it` at p puts on us move along with it (following it into the same lane) rather
 // than stay put (a crossing)? (judged over a few metres: the table is in metre steps, and where a
 // body's chord cuts a bend the limit can stand still for a metre or two while it moves on)
@@ -295,6 +299,16 @@ export class Traffic {
     return { x: q.x + q.uz * off, z: q.z - q.ux * off, y: q.y };
   }
   private laneIdx(c: Car) { return c.bus && this.net.def(c.seg).bus ? BUSLANE : c.lane; }
+  // How far out from the road's middle the back of the vehicle is, as last drawn (its rear dragged
+  // after its front: see footprint.steered), in the same terms as c.off
+  private rearOff(c: Car) {
+    const r = c.pose?.parts[c.pose.parts.length - 1];
+    if (!r || c.turn) return c.off;
+    const path = this.pathOf(c.seg, c.from), L = this.len(c.seg), q0 = pointAt(path, Math.min(c.s, L));
+    const along = (r.x - r.hx * r.hl - q0.x) * q0.ux + (r.z - r.hz * r.hl - q0.z) * q0.uz;
+    const q = pointAt(path, Math.max(0, Math.min(L, c.s + along)));
+    return (r.x - r.hx * r.hl - q.x) * q.uz - (r.z - r.hz * r.hl - q.z) * q.ux;
+  }
 
   private adj() {
     if (this.graph) return this.graph;
@@ -769,7 +783,7 @@ export class Traffic {
       if (c.oldLane !== undefined) this.put(keyOf(c.seg, c.from, c.oldLane), c, c.s, 3);
       // a bus turning round at a dead end is across every lane, both ways, until it's straightened up
       if (c.uturn) {
-        if (Math.abs(c.off - this.laneOff(c.seg, c.from, c.s, this.laneIdx(c))) < 1) c.uturn = false;
+        if (Math.abs(c.off - this.laneOff(c.seg, c.from, c.s, this.laneIdx(c))) < 1 && Math.abs(this.rearOff(c) - this.laneOff(c.seg, c.from, c.s, this.laneIdx(c))) < 1) c.uturn = false;
         else for (const [from, pos] of [[c.from, c.s], [this.net.other(c.seg, c.from), this.len(c.seg) - c.s]]) for (const l of [...Array(this.net.def(c.seg).lanes).keys(), BUSLANE]) if (from !== c.from || l !== this.laneIdx(c)) this.put(keyOf(c.seg, from, l), c, pos, 3);
       }
       if (c.merge !== undefined) this.put(keyOf(c.seg, c.from, c.merge), c, c.s, 4);
@@ -965,14 +979,19 @@ export class Traffic {
     const lf = j ? junctionLift(this.net, node, j.shape?.mouth) : null;
     if (lf) turn = turn.map((p, i) => (i === 0 || i === turn.length - 1 ? p : { ...p, y: (p.y ?? y) + lf(p.x, p.z) }));
     // a stretch of the approach before it and of the road beyond
+    // (a little further back for the tables than E_IN: a long vehicle held short of its line by one
+    // coming out of the junction across its path has to know how far short)
     const pre: P[] = [];
-    for (let s = Math.max(0, lineS - E_IN); s < lineS - 0.3; s += 2) pre.push(this.lanePoint(seg, from, s, lane));
+    for (let s = Math.max(0, lineS - E_PRE); s < lineS - 0.3; s += 2) pre.push(this.lanePoint(seg, from, s, lane));
     const post: P[] = [];
     const s1 = Math.min(Lo, outS + E_OUT);
     for (let s = outS + 2; s < s1 - 0.3; s += 2) post.push(this.lanePoint(next, node, s, exitLane));
     post.push(this.lanePoint(next, node, s1, exitLane));
     const track = new Track([...pre, ...turn, ...post]);
     const ext0 = track.cum[pre.length], ext1 = track.cum[pre.length + turn.length - 1];
+    // (out of the junction the vehicles' rear axles and trailers start to settle
+    // back onto the lane: footprint.ts)
+    track.settle = ext1;
     // as fast as each bend allows, slowing comfortably before the tight ones (through a merge or a
     // diverge, where the carriageway runs straight on, as fast as the roads either side)
     const env = new Float32Array(track.n).fill(40);
@@ -1088,17 +1107,62 @@ export class Traffic {
     if (!list) return;
     const me = u.c, cm = clsOf(me);
     for (const x of list) {
-      if (x.c === me || (x.adm === Infinity && u.adm === Infinity) || !this.related(u.path, x.path)) continue;
+      if (x.c === me || !this.related(u.path, x.path)) continue;
+      // (nor anyone queued behind us in our lane, whatever their places in the order: they follow us)
+      if (x.path.inKey === u.path.inKey && !x.c.turn && !me.turn && x.c.seg === me.seg && x.c.s < me.s) continue;
+      if (x.adm === Infinity && u.adm === Infinity) {
+        // Neither has a place yet: we still don't draw up into the way of one already waiting at its
+        // line to go (a long vehicle's swing reaches back across the lines of the arms beside it), or
+        // it could never go, and neither could we
+        // (nor into where a long vehicle on its way to the junction will swing: it would have to wait for
+        // us to go before it could, and we may be waiting for it)
+        const swings = isLong(clsOf(x.c)) && !isLong(cm);
+        if ((!this.waitingAt(x) && !swings) || (this.waitingAt(u) && me.wait >= x.c.wait && !swings) || x.path.inSeg === u.path.inSeg) continue;
+        const vw = this.view(u.path, cm, x.path, clsOf(x.c));
+        if (vw.empty || vw.apart(x.t, u.t)) continue;
+        const lim = u.t < vw.limitMe(x.t) ? vw.limitMe(x.t) : vw.nowMe(x.t);
+        if (lim < Infinity) ob(lim - u.t, 0, 0.5);
+        continue;
+      }
       const vw = this.view(u.path, cm, x.path, clsOf(x.c));
       if (vw.empty || vw.apart(x.t, u.t)) continue;
       const limMe = vw.limitMe(x.t), limIt = vw.limitIt(u.t);
       // whoever is already where the other would have to wait goes first; otherwise precedence
       const eIt = x.t >= limIt, eMe = u.t >= limMe;
-      if (!(eIt !== eMe ? eIt : this.first(x, u))) continue;
+      if (eIt && eMe) {
+        // Each already where the other would have to wait (a long vehicle's swing reaching one standing
+        // at its line, say): the one whose turn it is still mustn't drive into where the other is now
+        // (or will be a moment on), and if that leaves it stuck behind us, we may move on instead, clear
+        // of where it is now.
+        if (!this.first(x, u)) { const now = vw.nowMe(x.t, 1 + x.v * 0.5); if (now < Infinity) ob(now - u.t, 0, 0.5); continue; }
+        if (vw.nowIt(u.t) - x.t < 0.5) { const now = vw.nowMe(x.t, 1 + x.v * 0.5); if (now < Infinity) ob(now - u.t, 0, 0.5); continue; }
+      } else if (!(eIt !== eMe ? eIt : this.first(x, u))) continue;
       const band = movesWith(vw, x.t, limMe);
       ob(limMe - u.t, band ? x.v : 0, 0.5);
     }
   }
+  // Where along its lane a vehicle waiting to go stands: at its line, or short of it where the line is
+  // inside the swept path of traffic it gives way to (a car's front swings out and a bus's rear cuts in
+  // turning into its road), as a give-way line is set back for it. Worked out from the courses through
+  // the junction there are so far, for a car's body and a bus's on them.
+  private holdAt(pl: Plan, c: Car) {
+    const P = pl.path, k = clsOf(c), key = `${k}:${pl.jd.paths.size}`;
+    const hc = (P.hold ??= new Map());
+    let h = hc.get(k);
+    if (!h || h[0] !== key) {
+      let lim = Infinity;
+      for (const Q of pl.jd.paths.values()) {
+        if (Q === P || Q.inSeg === P.inSeg || Q.rank >= P.rank || !this.related(P, Q)) continue;
+        for (const q of [0, 2]) { const vw = this.view(P, k, Q, q); if (!vw.empty) lim = Math.min(lim, vw.limitMe(0)); }
+      }
+      // (as a place along the lane, for the reference point; only where it's short of the line)
+      h = [key, lim < P.ext0 ? P.lineS - (P.ext0 - lim) - 0.3 : Infinity];
+      hc.set(k, h);
+    }
+    return h[1];
+  }
+  // standing at its give-way line, first in the queue, not yet on its way
+  private waitingAt(x: User) { const c = x.c; return !c.turn && c.v < 0.3 && x.t <= x.path.ext0 && x.t > x.path.ext0 - c.front - 3; }
   // A slip road only meets the rest of the junction in the lane they both join, where merging and
   // following settle who goes first; its course doesn't also hold the junction's own traffic back.
   private related(a: JPath, b: JPath) { return a.slip === b.slip; }
@@ -1258,11 +1322,10 @@ export class Traffic {
       // course sweeps past) is in our way until it goes, like anyone we give way to
       else if (x.t >= o.vw.limitIt(me.t)) yieldTo.push(o);
     }
-    // (but we don't take a place in the order while one of those is in our way: it hasn't a place to
-    // go ahead of, so everyone after us would wait for us while we wait for it, and it may itself be
-    // waiting for one of them; we wait at our line until it has gone. Unless we're in its way too,
-    // two lorries at their lines each across the other's path, say: then the order settles it.)
-    const inWay = yieldTo.find((o) => o.x.adm === Infinity && me.t < o.vw.limitMe(o.x.t));
+    // (but we don't take a place in the order while one of those stands on our way: it hasn't a place
+    // to go ahead of, so everyone after us would wait for us while we wait for it, and it may itself be
+    // waiting for one of them; we wait at our line until it has gone)
+    const inWay = yieldTo.find((o) => o.x.adm === Infinity && o.vw.nowMe(o.x.t) < Infinity);
     if (inWay && !c.turn) return this.no(c, `waits for #${inWay.x.c.id} to go`);
     // (not those coming up behind us on our own approach: whatever they're doing, they're queued behind us)
     for (const x of this.approaching(pl.jd, now)) { if (x.c !== c && (x.rank ?? 0) < P.rank && x.path.inSeg !== P.inSeg && this.related(P, x.path)) { const o = near(x); if (o) outside.push(o); } }
@@ -1270,8 +1333,9 @@ export class Traffic {
     for (let it = 0; it < 5; it++) {
       const q = this.trajectory(c, P, me, lead, yieldTo, ring);
       if (!q) return this.no(c, `would be left standing${yieldTo.length ? ` behind #${yieldTo[yieldTo.length - 1].x.c.id}` : ''}`);
-      // only commit once we'll be nosing over the line within a few seconds
-      if (q[20] < P.ext0 - c.front + 1) return this.no(c, 'not moving off yet');
+      // only commit once we'll be nosing over the line within a few seconds (or standing where we wait
+      // to go, which may be short of the line where it's set back out of others' swept paths: holdAt)
+      if (q[20] < P.ext0 - c.front + 1 && !(c.v < 0.3 && c.s >= this.holdAt(pl, c) - 0.5)) return this.no(c, 'not moving off yet');
       // vehicles still on their way in have priority: we don't go unless they needn't slow for us
       for (const o of outside) if (!this.keepsBehind(o.vw, o.x, q, c)) return this.no(c, `gives way to #${o.x.c.id}`);
       // (on a roundabout, whoever is already going round has priority: we only go ahead of them
@@ -1382,7 +1446,9 @@ export class Traffic {
     const n = this.net.def(c.seg).lanes, L = this.len(c.seg);
     // finish moving across before thinking again
     if (c.oldLane !== undefined) {
-      if (Math.abs(c.off - this.laneOff(c.seg, c.from, c.s, c.lane)) < 1.0) c.oldLane = undefined;
+      // (and its rear too: a long vehicle's trails behind it across the lane it's leaving)
+      const want = this.laneOff(c.seg, c.from, c.s, c.lane);
+      if (Math.abs(c.off - want) < 1.0 && Math.abs(this.rearOff(c) - want) < 1.0) c.oldLane = undefined;
       else return;
     }
     if (n < 2) { c.merge = undefined; c.mergeBy = undefined; return; }
@@ -1600,7 +1666,7 @@ export class Traffic {
       }
       // a lane that ends (where a wider road narrows), the line at a junction, the end of a dead end
       if (this.laneIdx(c) !== BUSLANE) { const sp = this.span(c.seg, c.from, c.lane); if (sp[1] < L - 0.5) ob(sp[1] - c.s - c.front, 0, 0.3); }
-      if (hold && pl) ob(pl.path.lineS - c.s - c.front, 0, 0.3);
+      if (hold && pl) ob(Math.min(pl.path.lineS - c.front, this.holdAt(pl, c)) - c.s, 0, 0.3);
       if (c.merge !== undefined && c.mergeBy !== undefined) ob(c.mergeBy - 0.5 - c.s, 0, 0.3);
       if (c.bus && !pl && this.nextOf(c, at) === c.seg) ob(L - 1 - c.s - c.front, 0, 0.3);
       for (const u of c.uref) this.junctionLimits(u, ob);
@@ -1707,11 +1773,18 @@ export class Traffic {
     if (ns.st.kind === 'layby' && c.front + c.back <= BAY.stand) {
       c.bay = ns.st;
       // it's out of the lane once its side is clear of anything in the lane
-      if (c.off - this.laneOff(c.seg, c.from, c.s, this.laneIdx(c)) >= 2.6) { c.inBay = true; if (c.entry) c.entry.kind = 3; }
+      const lo = this.laneOff(c.seg, c.from, c.s, this.laneIdx(c));
+      if (c.off - lo >= 2.6 && this.rearOff(c) - lo >= 2.6) { c.inBay = true; if (c.entry) c.entry.kind = 3; }
     }
     if (togo < 60) ob(togo, 0, 0.2);
     if (togo < 0.8 && c.v < 0.6) c.dwell = this.onBusStop?.(c.seg, ns.st, c.id) ?? 7;
     return false;
+  }
+  // a bus in the last few metres of drawing up to its stop, at walking pace
+  private drawingUp(c: Car) {
+    if (c.v > 2) return false;
+    const ns = this.nextStop(c);
+    return !!ns && ns.at - c.s < 3;
   }
   // The stop a bus is pulling in to (or standing at), if any: a lay-by it's using on this road, or
   // the next stop along it on its side.
@@ -2104,12 +2177,13 @@ export class Traffic {
     const net = this.net;
     this.fleet.begin(dt);
     for (const c of this.cars) {
-      let x: number, z: number, y: number, grade = 0, at: (d: number) => { x: number; z: number };
+      let x: number, z: number, y: number, grade = 0, at: (d: number) => { x: number; z: number }, settle = true;
       if (c.turn) {
         // in a junction the vehicle sits exactly where its conflicts were worked out
         const tr = c.turn.path.track, t = c.turn.t, q = tr.at(t);
         x = q.x; z = q.z; y = q.y;
         at = (d) => tr.point(t + d);
+        settle = t > tr.settle;
       } else {
         const L = this.len(c.seg), path = this.pathOf(c.seg, c.from), q = pointAt(path, Math.min(c.s, L));
         // lane position, easing across on lane changes; buses swing into lay-bys
@@ -2126,16 +2200,21 @@ export class Traffic {
         const pl = c.plan && !c.plan.wrong && c.plan.path.lineS - s < E_IN && c.plan.path.inSeg === c.seg.id ? c.plan.path : undefined;
         const af = c.after && c.after.path.next === c.seg.id && c.after.path.exitLane === this.laneIdx(c) && c.s - c.after.path.outS < E_OUT ? c.after.path : undefined;
         const onCourse = Math.abs(off - want) < 0.3;
-        if (onCourse && pl) { const tr = pl.track, t = pl.ext0 - (pl.lineS - s); at = (d) => tr.point(t + d); }
-        else if (onCourse && af) { const tr = af.track, t = af.ext1 + (s - af.outS); at = (d) => tr.point(t + d); }
+        if (onCourse && pl) { const tr = pl.track, t = pl.ext0 - (pl.lineS - s); at = (d) => tr.point(t + d); settle = false; }
+        else if (onCourse && af) { const tr = af.track, t = af.ext1 + (s - af.outS); at = (d) => tr.point(t + d); settle = t > tr.settle; }
         else at = (d) => {
           const r = s + d, p = pointAt(path, Math.max(0, Math.min(L, r))), o = r < 0 ? r : r > L ? r - L : 0;
           return { x: p.x + p.uz * off + p.ux * o, z: p.z - p.ux * off + p.uz * o };
         };
       }
       const k = Math.min(1, Math.max(0, (now - c.born) / 500), c.gone !== undefined ? 1 - (now - c.gone) / 600 : 1);
-      // each part lies along its own chord (an artic's trailer hangs on its hitch, see footprint.ts)
-      const pose = (c.pose ??= { x, z, y, k, kind: c.kind, id: c.id, parts: [] }), parts = bodyOf(c.cls ?? c.kind, at, k, pose.parts);
+      // the front axle on the course, the rear axle and any trailer dragged after it (footprint.ts)
+      const pose = (c.pose ??= { x, z, y, k, kind: c.kind, id: c.id, parts: [] });
+      // (a bus turning round at a dead end is drawn sliding across, lined up with the road, as ever;
+      // and one standing at a stop stands square to its kerb, having straightened up as it drew up)
+      const ax = (c.axles ??= { fx: 0, fz: 0, rx: 0, rz: 0, tx: 0, tz: 0, body: NaN });
+      if (c.uturn || (c.bus && (c.dwell !== undefined || this.drawingUp(c)))) ax.body = NaN;
+      const parts = steered(c.cls ?? c.kind, at, ax, k, pose.parts, settle);
       pose.x = x; pose.z = z; pose.y = y; pose.k = k;
       c.heading = Math.atan2(parts[0].hz, parts[0].hx);
       this.fleet.drawCar(c, parts, y, Math.atan(grade), k, dt);

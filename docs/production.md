@@ -42,14 +42,27 @@ a stream with review and fixes takes 45–90 minutes, and a merge about 5.
   standing on the ring further round no longer holds an entry for ever. Vehicles leaving before
   the arm, at it, or already past are no conflict (the conflict tables already had that; `ringTrial`
   and `traffic.gaps.test.ts` check it).
-- [ ] **Front-wheel steering:** vehicles yaw as if every wheel steers. They should follow a
-  bicycle model:
+- [x] **Front-wheel steering** (work-traffic-2): a bicycle model (`footprint.ts`: `steered`
+  for drawing, `bodiesAlong` for the conflict tables, the same dragging in both):
   - the front axle follows the lane;
-  - the rear axle trails, so it cuts corners;
-  - body heading comes from the axle line;
-  - articulated buses and lorries have a pivot for each section.
+  - the rear axle is dragged after it at the wheelbase, so it cuts corners (and the front
+    overhang swings out);
+  - the body points along the axle line;
+  - an artic's or bendy bus's trailer hangs on its hitch with its own axles dragged after it.
 
-  The swept path then matches real turns, and the conflict tables must use it.
+  Out of a junction the rear settles back onto the lane over 1.5 m, so a long vehicle is
+  straight before the tables stop following it. A bus draws up to a stop square to the kerb.
+
+  The real swept paths needed some junction changes:
+  - a give-way line's hold point is set back out of the swept paths of the traffic it gives way
+    to (a car's and a bus's);
+  - two vehicles each already in the other's way are kept from driving into where the other
+    stands now;
+  - a driver doesn't draw up into the way of one already waiting at its line;
+  - the queue behind a vehicle in its own lane never holds it;
+  - the tables keep 0.3 m between bodies (0.15 m each), not 0.5 m, so a car can pass another
+    waiting at its line as closely as drivers do.
+
 - [ ] Simulate near the camera and use flows far away, so the region's traffic stays cheap
   (ENGINE.md: "simulate flows, show agents").
 

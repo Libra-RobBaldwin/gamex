@@ -80,6 +80,20 @@ Session https://claude.ai/code/session_018DK8CF7BYZZHj49auA1MyH, production.md Â
   harness counts a driver as gone only once it's through the mouth of the junction; before, one that
   rolled over its line and waited there looked as if it had gone. A driver doesn't commit while
   someone uncommitted stands in its way, unless each is in the other's way (two lorries).
+- **Bicycle-model steering (done):** `footprint.steered` keeps each vehicle's axles from frame to
+  frame. `bodiesAlong` drags them the same way along each course for the conflict tables.
+  `Track.settle` is where the rear starts settling back onto the lane (the end of the junction).
+  `fleet.bodyFor` gives each real vehicle its axles. `footprint.test.ts` checks the geometry, and
+  that drawn bodies and table bodies agree.
+  - **Knock-on changes in `traffic.ts`:** `holdAt` (give-way hold points set back out of
+    higher-rank swept paths); `nowMe`/`nowIt` in `conflicts.View` (where the other is right now),
+    used when both are engaged; `waitingAt` (don't draw up into the way of someone waiting);
+    same-lane followers skipped in `junctionLimits`; `E_PRE = 16` (courses start 16 m up the
+    approach, so a long vehicle held short of its line has samples). In `conflicts.ts`,
+    `MARGIN = 0.15`: with 0.25 the front overhang's swing made cars at their lines block turning
+    traffic.
+  - **Still to watch:** a bus's swept path at small junctions is real and wide. Give-way lines set
+    back for it (DMRB swept paths) would belong in `jshape.ts`.
 - Bench: `src/proto/*.local.test.ts` in this session only; to rebuild it, run `simulate` over the
   scenarios with `{ gaps: true }` on seeds 11â€“13.
 

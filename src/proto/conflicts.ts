@@ -9,13 +9,13 @@
 // that stays put for a crossing and moves along behind it for a merge), and has either of them
 // already got past everything the other could hit?
 import type { P } from './roads';
-import { BODIES, bodiesAlong, rectsTouch, type Kind, type Rect } from './footprint';
+import { BODIES, bodiesAlong, reachOf, rectsTouch, type Kind, type Rect } from './footprint';
 
 // a body in footprint.BODIES: 0 a car, 1 a lorry, 2 a bus, then the real vehicles the fleet registers
 export type Cls = number;
 export const KINDS: Kind[] = ['car', 'lorry', 'bus'];
 export const STEP = 1;
-const MARGIN = 0.25; // clearance kept all round each footprint
+const MARGIN = 0.15; // clearance kept all round each footprint
 
 let nextId = 1;
 
@@ -29,6 +29,9 @@ export class Track {
   n: number; // samples at 0, STEP, 2·STEP … and one at the end
   sx: Float32Array; sz: Float32Array; shx: Float32Array; shz: Float32Array;
   box: [number, number, number, number];
+  // From where along it the vehicles' rear axles and trailers settle back onto it (footprint.ts):
+  // as it comes out of the junction, so a long vehicle is straight again by the course's end
+  settle = Infinity;
   constructor(pts: P[]) {
     this.pts = pts;
     this.cum = [0];
@@ -74,7 +77,8 @@ export class Track {
 
 // The conflict table for vehicles of classes ca on A and cb on B. Per sample of A: the lowest and
 // highest position on B that touches it from there on (suffix min / max), and the same the other way.
-export interface Table { lowB: Float32Array; hiB: Float32Array; lowA: Float32Array; hiA: Float32Array; nA: number; nB: number; empty: boolean }
+// (nowB, nowA: the same lowest positions without the suffix, for the other where it is right now)
+export interface Table { lowB: Float32Array; hiB: Float32Array; lowA: Float32Array; hiA: Float32Array; nowB: Float32Array; nowA: Float32Array; nA: number; nB: number; empty: boolean }
 
 // how many tables have been worked out, and the time it took (ms): for performance readouts
 export const tableStats = { n: 0, ms: 0, worst: 0 };
@@ -88,9 +92,10 @@ function work(A: Track, ca: Cls, B: Track, cb: Cls): Table {
   const nA = A.n, nB = B.n;
   const lowB = new Float32Array(nA + 1).fill(Infinity), hiB = new Float32Array(nA + 1).fill(-Infinity);
   const lowA = new Float32Array(nB + 1).fill(Infinity), hiA = new Float32Array(nB + 1).fill(-Infinity);
+  const nowB = new Float32Array(nA + 1).fill(Infinity), nowA = new Float32Array(nB + 1).fill(Infinity);
   const da = BODIES[ca], db = BODIES[cb];
   // (every part of a body is within this of its reference point)
-  const reach = Math.max(da.front, da.back) + da.hw + Math.max(db.front, db.back) + db.hw + 2 * MARGIN;
+  const reach = reachOf(da) + reachOf(db) + 2 * MARGIN;
   let empty = A.box[0] - reach > B.box[1] || B.box[0] - reach > A.box[1] || A.box[2] - reach > B.box[3] || B.box[2] - reach > A.box[3];
   if (!empty) {
     empty = true;
@@ -113,10 +118,11 @@ function work(A: Track, ca: Cls, B: Track, cb: Cls): Table {
         if (p > hiA[j]) hiA[j] = p;
       }
     }
+    nowB.set(lowB); nowA.set(lowA);
     for (let i = nA - 1; i >= 0; i--) { lowB[i] = Math.min(lowB[i], lowB[i + 1]); hiB[i] = Math.max(hiB[i], hiB[i + 1]); }
     for (let j = nB - 1; j >= 0; j--) { lowA[j] = Math.min(lowA[j], lowA[j + 1]); hiA[j] = Math.max(hiA[j], hiA[j + 1]); }
   }
-  return { lowB, hiB, lowA, hiA, nA, nB, empty };
+  return { lowB, hiB, lowA, hiA, nowB, nowA, nA, nB, empty };
 }
 
 // One vehicle's view of a table: `me` on one course, `it` on the other.
@@ -142,6 +148,19 @@ export class View {
   reachIt(q: number) {
     const v = this.swap ? this.t.hiB[this.idx(q, this.t.nA)] : this.t.hiA[this.idx(q, this.t.nB)];
     return v === -Infinity ? -Infinity : v + STEP;
+  }
+  // With `it` staying where it is at p (or moving on up to `ahead` metres): the furthest `me` may
+  // come without touching it there (Infinity if it's clear of it)
+  nowMe(p: number, ahead = 0) {
+    const a = this.swap ? this.t.nowA : this.t.nowB, n = this.swap ? this.t.nB : this.t.nA;
+    let v = Infinity;
+    for (let i = this.idx(p, n), e = this.idx(p + ahead, n); i <= e; i++) v = Math.min(v, a[i]);
+    return v === Infinity ? Infinity : v - STEP;
+  }
+  // and the other way: with `me` staying at q, the furthest `it` may come
+  nowIt(q: number) {
+    const v = this.swap ? this.t.nowB[this.idx(q, this.t.nA)] : this.t.nowA[this.idx(q, this.t.nB)];
+    return v === Infinity ? Infinity : v - STEP;
   }
   // nothing left between them: one of the two is past everything the other could still hit
   apart(p: number, q: number) { return q > this.reachMe(p) || p > this.reachIt(q); }

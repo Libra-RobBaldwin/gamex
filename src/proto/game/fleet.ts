@@ -102,18 +102,26 @@ const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.lengt
 // The body the traffic uses for a chain: its true length and width (rounded up a touch, so near
 // enough the same sizes share a body and its conflict tables), and for an artic or a bendy bus
 // the trailer on its hitch. The reference point is the middle of the whole vehicle.
+// (axles: the steered front one and the middle of those behind it, from the model's middle, to the
+// half metre so that near enough the same vehicles still share a body)
+const halfM = (x: number) => Math.round(x * 2) / 2;
+function axlesOf(m: Model, off = 0): { fa?: number; ra?: number } {
+  const ax = m.dims.axles;
+  if (ax.length < 2) return {};
+  return { fa: halfM(ax[0] - off), ra: halfM(mean(ax.slice(1)) - off) };
+}
 export function bodyFor(chain: Model[]): Body {
   const lead = chain[0], tr = chain[1];
   if (!tr || lead.hitch?.rear === undefined || tr.hitch?.front === undefined) {
     const L = up(lead.dims.length, 0.25), hw = up(lead.dims.width / 2, 0.05);
-    return { parts: [{ a: -L / 2, b: L / 2, hw }], front: L / 2, back: L / 2, hw };
+    return { parts: [{ a: -L / 2, b: L / 2, hw, ...axlesOf(lead) }], front: L / 2, back: L / 2, hw };
   }
   const Lt = up(lead.dims.length, 0.05), Ltr = up(tr.dims.length, 0.05), hwt = up(lead.dims.width / 2, 0.05), hwr = up(tr.dims.width / 2, 0.05);
   const hitch = lead.hitch.rear, front = tr.hitch.front, axle = mean(tr.dims.axles);
   // nose and tail, lined up, from the tractor's middle
   const nose = Lt / 2, tail = hitch - front - Ltr / 2, mid = (nose + tail) / 2, half = (nose - tail) / 2;
   return {
-    parts: [{ a: -Lt / 2 - mid, b: Lt / 2 - mid, hw: hwt }], trailer: { hitch, front, axle, len: Ltr, hw: hwr },
+    parts: [{ a: -Lt / 2 - mid, b: Lt / 2 - mid, hw: hwt, ...axlesOf(lead, mid) }], trailer: { hitch, front, axle: halfM(axle), len: Ltr, hw: hwr },
     front: half, back: half, hw: Math.max(hwt, hwr),
   };
 }
