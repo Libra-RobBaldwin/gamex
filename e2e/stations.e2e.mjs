@@ -53,6 +53,9 @@ async function buildStation(label, x, z, y = 0, side = 4) {
   const s = await page.evaluate(({ x, z, y, side }) => window.proto.toScreen({ x, y, z: z + side }), { x, z, y, side });
   await page.touchscreen.tap(s.x, s.y);
   await wait(1500);
+  // the card has the quick picks and Build; More options opens the full plan, built from there
+  await page.tap('#tpanel [data-more]').catch(() => {});
+  await wait(800);
   const title = await page.textContent('#sheet h2').catch(() => '');
   const notes = await page.textContent('#sheet .plan').catch(() => '');
   await page.screenshot({ path: `${out}/stations-${label}-plan.png` });

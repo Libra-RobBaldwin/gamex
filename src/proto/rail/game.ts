@@ -116,8 +116,8 @@ export class RailGame {
     const { shell } = this.c;
     this.end();
     this.active = 'station';
-    this.tool = shell.startTool({ name: 'Railway station', spec: 'Platforms on level track: on the ground, a viaduct or deep underground', icon: 'train', tone: 'rail', onDone: () => this.end(), onCancel: () => this.end() });
-    this.c.hint('Tap a level stretch of railway (straight, or a gentle curve), on the side for the station building · for one underground, use the underground view', 'train');
+    this.tool = shell.startTool({ name: 'Railway station', spec: 'Tap level track', icon: 'train', tone: 'rail', onDone: () => this.end(), onCancel: () => this.end() });
+    this.c.hint('Tap a level stretch of railway, straight or gently curved · underground ones from the underground view', 'train');
   }
   private stationTap(g: P) {
     const { net } = this.c;
@@ -125,8 +125,41 @@ export class RailGame {
     if (!q) { this.c.hint('Tap on a railway · lay track from Build > Rail first', 'alert'); return; }
     this.tapAt = { seg: q.seg.id, s: q.s, side: net.sideOf(q.seg, g) };
     this.cfg = null;
-    this.planSheet();
+    this.c.shell.closeSheet();
+    this.planCard();
     this.c.focusOn({ x: q.x, z: q.z }, 260, { x: q.ux, z: q.uz });
+  }
+  // The quick way, as for a bus stop: the layouts that suit this line as buttons with their prices,
+  // the blueprint on the map, and Build in the tool strip. Every other choice (tracks, style, how
+  // people cross, canopies, length) is a tap away in the full sheet.
+  private planCard() {
+    const { railway } = this.c, at = this.tapAt!, tool = this.tool;
+    if (!tool) return;
+    const presets = railway.plan(at.seg, at.s, at.side, this.len);
+    if (presets.reason || !presets.plans.length) {
+      this.preview(null);
+      tool.setPanel(`<div class="bad">${icon('alert')}<span>${esc(presets.reason ?? 'That doesn’t fit here')}</span></div>`);
+      tool.setPrimary(null);
+      return;
+    }
+    // (the one picked: what the full sheet set up, else the recommended layout)
+    const res = this.cfg ? railway.plan(at.seg, at.s, at.side, this.len, this.cfg) : presets;
+    const same = (c: StationConfig) => !!this.cfg && c.tracks === this.cfg.tracks && c.layout === this.cfg.layout;
+    let pick = this.cfg ? presets.plans.findIndex((q) => same(q.config)) : presets.plans.findIndex((q) => q.recommended && q.ok);
+    if (!this.cfg && pick < 0) pick = Math.max(0, presets.plans.findIndex((q) => q.ok));
+    const p = this.cfg ? res.plans[0] : presets.plans[pick];
+    if (!p) { tool.setPanel(null); tool.setPrimary(null); return; }
+    this.preview(p);
+    const short = (t: string) => t.replace('Passing loop, ', 'Loop · ').replace('two platforms', '2 platforms').replace('Two side platforms', '2 side platforms').replace('island platform', 'island');
+    const kind = p.station.structure === 'viaduct' ? 'On a viaduct · ' : p.station.structure === 'underground' ? 'Underground · ' : '';
+    const why = p.blocked ?? (!this.can(this.price(p.cost)) ? this.short(this.price(p.cost)) : `${kind}${p.notes[0] ?? ''}`);
+    tool.setPanel(`<div class="choice">${presets.plans.map((q, i) => `<button data-pick="${i}" class="${i === pick ? 'on' : ''}" ${q.ok ? '' : 'disabled'}><b>${esc(short(q.title))}</b><span>${money(this.price(q.cost))}</span></button>`).join('')}</div>
+      <p class="why">${esc(why)}</p>
+      <button class="act" data-more="1">${icon('adjustments')}<span>More options${this.cfg && pick < 0 ? ' · custom' : ''}</span></button>`, (el) => {
+      el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => b.addEventListener('click', () => { const q = presets.plans[+b.dataset.pick!]; this.cfg = { seg: at.seg, ...q.config }; this.planCard(); }));
+      el.querySelector('[data-more]')?.addEventListener('click', () => this.planSheet());
+    });
+    tool.setPrimary({ label: `Build · ${money(this.price(p.cost))}`, icon: 'check', kind: 'primary', disabled: !(p.ok && this.can(this.price(p.cost))), onClick: () => this.buildStation(p) });
   }
   // The station sheet: quick picks (the layouts that suit this line), then every choice on its own
   // row (tracks, platforms, style, how people cross, canopies, length) and the one blueprint they
@@ -161,7 +194,7 @@ export class RailGame {
       : `<div class="bad">${icon('alert')}<span>${esc(res.reason ?? 'That doesn’t fit here')}</span></div>`;
     const body = presets.reason ? `<div class="bad">${icon('alert')}<span>${esc(presets.reason)}</span></div>${choices}` : `${plan}${choices}`;
     const kind = structure === 'viaduct' ? 'Viaduct station' : structure === 'underground' ? 'Underground station' : 'Railway station';
-    const el = shell.openSheet({ key: 'rail-station', title: presets.reason ? 'Can’t build a station here' : kind, icon: 'train', tone: 'rail', body, onClose: () => { this.preview(null); this.cfg = null; } });
+    const el = shell.openSheet({ key: 'rail-station', title: presets.reason ? 'Can’t build a station here' : kind, icon: 'train', tone: 'rail', body, onClose: () => { if (this.active === 'station' && this.tapAt) this.planCard(); else { this.preview(null); this.cfg = null; } } });
     el.querySelectorAll<HTMLButtonElement>('[data-len]').forEach((b) => b.addEventListener('click', () => { this.len = +b.dataset.len!; this.planSheet(); }));
     el.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((b) => b.addEventListener('click', () => { Object.assign(cfg, presets.plans[+b.dataset.preset!].config); this.planSheet(); }));
     el.querySelectorAll<HTMLButtonElement>('[data-opt]').forEach((b) => b.addEventListener('click', () => {
@@ -180,6 +213,9 @@ export class RailGame {
     this.c.clear(cleared);
     this.c.rebuildRoads();
     this.preview(null);
+    this.tapAt = null;
+    this.tool?.setPanel(null);
+    this.tool?.setPrimary(null);
     shell.closeSheet();
     this.end();
     this.c.hint(`${station.name} built${cleared.length ? ` · ${cleared.length} building${cleared.length === 1 ? '' : 's'} cleared` : ''} · start a line from its sheet`, 'check');

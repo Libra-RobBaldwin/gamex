@@ -379,3 +379,4 @@ body.tooling #goal, #drawer:not([hidden]) ~ #goal { display: none; }
 #tpanel .choice button:disabled { background: transparent; color: var(--muted); }
 #tpanel .choice button:disabled span { color: var(--muted); }
 #tpanel .why { margin: 0; font-size: 12px; line-height: 1.35; color: var(--muted); }
+#tpanel [data-more] { align-self: flex-start; min-height: 36px; padding: 0 12px; }
