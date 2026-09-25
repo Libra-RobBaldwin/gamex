@@ -2221,6 +2221,7 @@ shell.addStatsTab({
         <dt>Building</dt><dd>${money(-y.building)} · ${money(-t.building)}</dd>
         <dt>Vehicles bought</dt><dd>${money(-y.vehicles)} · ${money(-t.vehicles)}</dd>
         <dt>Sold</dt><dd>${money(y.sold)} · ${money(t.sold)}</dd>
+        <dt>Grants</dt><dd>${money(y.grants)} · ${money(t.grants)}</dd>
       </dl>`;
   },
 });
@@ -2401,6 +2402,46 @@ function drawFlow(now: number) {
   fs.forEach((f, i) => { if (f.pos.length) { const m = f.mesh(flowMats[i]); m.renderOrder = 4; flowGroup.add(m); } });
 }
 
+// ---------------- milestones (the gold ring by the bell, once the guide is done) ----------------
+// Goals that grow with the network, each paying a grant when it's reached (money, like CS2's
+// milestones): riders a day across all the player's lines, and a few firsts.
+const ridersADay = () => lines.list.reduce((a, l) => { const st = townRef?.line(l.id); return a + (st ? (st.carriedLastMonth || st.carried) * 30 : 0); }, 0);
+const MILESTONES: { title: string; sub: string; grant: number; at: () => number }[] = [
+  { title: '500 riders a day', sub: 'Across all your lines', grant: 50_000, at: () => ridersADay() / 500 },
+  { title: 'A second line', sub: 'Link another part of town', grant: 60_000, at: () => lines.list.length / 2 },
+  { title: '2,000 riders a day', sub: 'Stops where people live and work, buses often enough', grant: 100_000, at: () => ridersADay() / 2000 },
+  { title: 'A railway line', sub: 'Two stations and trains between them', grant: 150_000, at: () => railway.lines.length / 1 },
+  { title: '5,000 riders a day', sub: 'A network people rely on', grant: 250_000, at: () => ridersADay() / 5000 },
+  { title: 'Five lines', sub: 'Most of the town within reach', grant: 300_000, at: () => lines.list.length / 5 },
+  { title: '12,000 riders a day', sub: 'Buses and trains working together', grant: 500_000, at: () => ridersADay() / 12000 },
+];
+function updateMilestone() {
+  if (!goalDone) { shell.setMilestone(null); return; }
+  let m = MILESTONES[purse.milestones];
+  // (reached: pay the grant and move on, one a check)
+  if (m && m.at() >= 1) {
+    purse.grant(m.grant);
+    purse.milestones++;
+    hint(`Milestone ${purse.milestones}: ${m.title} · ${money(m.grant)} grant`, 'sparkles');
+    m = MILESTONES[purse.milestones];
+  }
+  if (!m) { shell.setMilestone(null); return; }
+  shell.setMilestone({ n: purse.milestones + 1, frac: m.at(), title: m.title, onClick: openMilestones });
+}
+function openMilestones() {
+  // (one thing at a time: the goal now, big, with how far there is to go; the one after it; and
+  // how many are done, rather than the whole list)
+  const k = purse.milestones, m = MILESTONES[k], nx = MILESTONES[k + 1];
+  if (!m) return;
+  const f = Math.max(0, Math.min(1, m.at()));
+  shell.openInfo({
+    key: 'milestones', title: `Milestone ${k + 1}`, sub: k ? `${k} reached so far` : 'Reach it for a grant', icon: 'sparkles',
+    stats: [['Goal', m.title], ['Grant', money(m.grant)]],
+    html: `<div class="meter msmeter"><i style="width:${Math.round(f * 100)}%"></i></div><p class="note">${esc(m.sub)} · ${Math.round(f * 100)}% there</p>
+      ${nx ? `<div class="msrow"><span class="n">${k + 2}</span><span><small>Then</small><b>${esc(nx.title)}</b></span><span class="cost">${money(nx.grant)}</span></div>` : ''}`,
+  });
+}
+
 // ---------------- alerts (the bell by the speed buttons) ----------------
 // What wants the player's attention, each one tap from dealing with it: lines losing money or with
 // no buses, crowded stops, a town shrinking, money running out.
@@ -2549,7 +2590,7 @@ function frame(now: number) {
     shell.setMoney(money(purse.balance), lines.list.length ? { text: `${net >= 0 ? '+' : '−'}${k(net)}/day`, dir: net > 0 ? 1 : net < 0 ? -1 : 0 } : undefined);
     const st = town.report?.status;
     shell.setPop(count(pop), st === 'growing' ? 1 : st === 'declining' ? -1 : 0);
-    if (++goalTick % 4 === 0) { updateGoal(); updateAlerts(); drawCoverage(); }
+    if (++goalTick % 4 === 0) { updateGoal(); updateAlerts(); updateMilestone(); drawCoverage(); }
   }
   regionView?.update(view, canvas.clientWidth / Math.max(1, canvas.clientHeight)); // (the tiles' levels, for where the camera is now)
   const t1 = performance.now();
