@@ -9,7 +9,9 @@ import type { SettlementInfo } from '../region';
 import type { Shell } from '../ui/shell';
 
 const CSS = `
-.place-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+/* (the HUD gives its children pointer events, #ui > *: this layer covers the map, so it must win
+   that back, or every drag lands on it instead of the camera; only a shown label takes a tap) */
+#ui > .place-labels, .place-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .place-label { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; margin: 0; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none; cursor: pointer;
   font: 700 15px/1 'League Spartan', 'Archivo', system-ui, sans-serif; color: #fff; letter-spacing: 0.02em; padding: 6px 8px; border: 0; background: none;
   text-shadow: 0 0 3px #0f3322, 0 0 6px rgba(15, 51, 34, 0.9), 0 1px 2px #0f3322; transition: opacity 0.25s ease; }

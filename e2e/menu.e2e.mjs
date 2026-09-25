@@ -265,6 +265,20 @@ for (const id of ['town', 'sandbox']) {
   const q = new URLSearchParams(new URL(page.url()).search);
   check(q.get('map') === 'region' && q.get('seed') === '42' && q.get('rivers') === '2' && q.get('style') === 'arctic', `the region starts from the menu with its options (${new URL(page.url()).search})`);
   check(await page.evaluate(() => !!window.proto?.shell && document.body.dataset.app === 'game'), 'the region loads');
+  // a finger dragged over the map moves it (the place names' layer once caught every touch)
+  {
+    await page.waitForTimeout(3000);
+    const at = () => page.evaluate(() => ({ x: window.proto.nav.view.x, z: window.proto.nav.view.z }));
+    const v0 = await at(), cdp = await page.context().newCDPSession(page);
+    const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts });
+    await touch('touchStart', [{ x: 200, y: 450 }]);
+    for (let i = 1; i <= 12; i++) { await touch('touchMove', [{ x: 200 + i * 10, y: 450 + i * 15 }]); await page.waitForTimeout(40); }
+    await touch('touchEnd', []);
+    await page.waitForTimeout(1500);
+    const v1 = await at();
+    check(Math.hypot(v1.x - v0.x, v1.z - v0.z) > 20, `dragging moves the region map (moved ${Math.round(Math.hypot(v1.x - v0.x, v1.z - v0.z))} m)`);
+    await cdp.detach();
+  }
   await page.screenshot({ path: `${shots}/9-region.png` });
   await page.goBack();
   await page.waitForTimeout(800);
