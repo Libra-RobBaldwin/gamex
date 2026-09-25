@@ -148,8 +148,10 @@ describe('underground stations', () => {
     // the entrance is the station's; the ground over the platforms is free for building
     expect(net.land.at({ x: p.shape.building.x, z: p.shape.building.z })?.owner).toBe('station');
     expect(net.land.at({ x: st.x + 30, z: st.z })?.owner).not.toBe('station');
-    // and a tap finds it there all the same
-    expect(rw.stationAt({ x: st.x + 30, z: st.z })?.id).toBe(st.id);
+    // and a tap there finds it in the underground view, but not on the surface (a building over it)
+    expect(rw.stationAt({ x: st.x + 30, z: st.z }, true)?.id).toBe(st.id);
+    expect(rw.stationAt({ x: st.x + 30, z: st.z })).toBeUndefined();
+    expect(rw.stationAt({ x: p.shape.building.x, z: p.shape.building.z })?.id).toBe(st.id);
     expect(runs(rw, ends, st.id)).toBeGreaterThan(1);
   }, 120_000);
   it('are refused in a cutting or a shallow tunnel', () => {

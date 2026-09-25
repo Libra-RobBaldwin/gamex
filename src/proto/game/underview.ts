@@ -4,15 +4,16 @@
 // It's drawn in two passes split by one level plane just under the ground, so every triangle is
 // drawn exactly once and nothing is sorted against anything else (fading the surface's many
 // materials one by one would sort per object, and flicker as the camera moved):
-//   1. everything above it, and the sky, into an off-screen target;
-//   2. everything below it, straight to the screen, over a dark background;
+//   1. everything above it into an off-screen target;
+//   2. everything below it, straight to the screen, over a dark floor under the deepest tunnel
+//      (and the sky fading to dark beyond it);
 //   3. the first laid over the second at the surface's opacity.
 // Meshes wholly on one side of the plane are left out of the other pass altogether (and anything
 // that's always on the surface can say so: `userData.surface`).
 // With the surface at full opacity that's the ordinary picture, so the fade in and out runs
 // smoothly from it, and once the view is off the passes stop and the game draws as it always has.
-// The sun's shadows are drawn with the surface pass (the clipping leaves what's under the ground
-// out of them, which only matters under the ground), and drawn whole again once the view is off.
+// The sun's shadows are drawn with the surface pass (so what's left out of that pass casts none),
+// and drawn whole again once the view is off.
 import * as THREE from 'three';
 
 export const FADED = 0.25; // how much of the surface shows in the underground view
@@ -34,6 +35,12 @@ export class UnderView {
   private cam2: THREE.Camera | null = null;
   private size = new THREE.Vector2();
   private clearWas = new THREE.Color();
+  private sky = new THREE.Color();
+  private bg = new THREE.Color();
+  // under everything, only in the below-ground pass: a dark floor below the deepest tunnel, so
+  // wherever the ground fades it fades to the dark evenly (not to the sky's colour behind it),
+  // while the sky itself fades from its own colour
+  private bedrock = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: DARK }));
   private shadowsOwed = false;
   private last = 0;
   private box = new THREE.Box3();
@@ -64,6 +71,10 @@ export class UnderView {
     }));
     this.quad.frustumCulled = false;
     this.qScene.add(this.quad);
+    this.bedrock.frustumCulled = false;
+    this.bedrock.visible = false;
+    this.bedrock.position.y = -70; // (under FLOOR, the deepest a tunnel goes)
+    this.bedrock.scale.set(1e5, 1, 1e5);
   }
   get showing() { return this.on || this.k < 1; }
   set(on: boolean) { this.on = on; }
@@ -109,22 +120,31 @@ export class UnderView {
     this.k = to < this.k ? Math.max(to, this.k - (dt * (1 - FADED)) / FADE_S) : Math.min(to, this.k + (dt * (1 - FADED)) / FADE_S);
     if (this.k >= 1 && !this.on) {
       if (this.shadowsOwed) { r.shadowMap.needsUpdate = true; this.shadowsOwed = false; }
+      // (and the off-screen target's memory goes back until the view is on again)
+      if (this.rt) { this.rt.depthTexture?.dispose(); this.rt.dispose(); this.rt = null; }
       r.render(scene, cam);
       return;
     }
     r.getDrawingBufferSize(this.size);
     // (stored as sRGB, like the screen: linear light in 8 bits would band away the ground's fine detail)
     if (!this.rt) {
-      this.rt = new THREE.WebGLRenderTarget(this.size.x, this.size.y, { samples: 4, depthTexture: new THREE.DepthTexture(this.size.x, this.size.y) });
+      // (with a stencil: the ground leaves out the cuttings and river beds that mark it first)
+      const depth = new THREE.DepthTexture(this.size.x, this.size.y, THREE.UnsignedInt248Type);
+      depth.format = THREE.DepthStencilFormat;
+      this.rt = new THREE.WebGLRenderTarget(this.size.x, this.size.y, { samples: 4, stencilBuffer: true, depthTexture: depth });
       this.rt.texture.colorSpace = THREE.SRGBColorSpace;
     }
     else if (this.rt.width !== this.size.x || this.rt.height !== this.size.y) this.rt.setSize(this.size.x, this.size.y);
-    const was = scene.background, clear = r.getClearColor(this.clearWas), clearA = r.getClearAlpha();
+    const t = Math.min(1, (1 - this.k) / (1 - FADED)), was = scene.background, clear = r.getClearColor(this.clearWas), clearA = r.getClearAlpha();
+    if (was instanceof THREE.Color) this.sky.copy(was); else this.sky.copy(DARK);
+    if (this.bedrock.parent !== scene) scene.add(this.bedrock);
     this.split(scene);
-    // 1: the surface, off the screen, with the sky behind it (so the sky fades with the rest, and
-    // the dark comes through everywhere evenly). The shadows are drawn with it, as they are every
-    // frame: only what's on the surface casts them onto the surface. (They're then left out of
-    // the ones below ground, which is why they're drawn again once the view is off.)
+    // 1: the surface, off the screen, on nothing (where the ground has holes, the cuttings below
+    // show through them, as they do on the screen). The shadows are drawn with it, as they are
+    // every frame (what this pass leaves out, being wholly under the ground, casts none: they're
+    // drawn whole again once the view is off).
+    scene.background = null;
+    r.setClearColor(0x000000, 0);
     r.clippingPlanes = this.above;
     r.setRenderTarget(this.rt);
     this.hide(this.onlyBelow);
@@ -135,7 +155,8 @@ export class UnderView {
     const hidden = this.hideBelow().filter((o) => o.visible), owed = r.shadowMap.needsUpdate;
     for (const o of hidden) o.visible = false;
     this.hide(this.onlyAbove);
-    scene.background = DARK;
+    this.bedrock.visible = true;
+    scene.background = this.bg.copy(this.sky).lerp(DARK, t); // (the sky, where no ground is)
     r.shadowMap.needsUpdate = false;
     r.clippingPlanes = this.below;
     r.setRenderTarget(null);
@@ -144,6 +165,7 @@ export class UnderView {
     r.render(scene, this.cam2);
     r.shadowMap.needsUpdate = owed;
     this.show(this.onlyAbove);
+    this.bedrock.visible = false;
     for (const o of hidden) o.visible = true;
     scene.background = was;
     r.setClearColor(clear, clearA);

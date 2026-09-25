@@ -89,19 +89,26 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
   them show (`game/underview.ts`).
 - **How it's drawn:** in two passes split by a level plane 0.3 m under the ground, so every
   triangle is drawn exactly once and nothing is sorted against anything else:
-  1. the surface and the sky, into an off-screen target (sRGB, 4× multisampled, with its depth);
-  2. everything under the plane, straight to the screen, over the dark;
+  1. the surface, into an off-screen target (sRGB, 4× multisampled, with its depth and a stencil:
+     the ground leaves out the cuttings and river beds that mark the stencil first);
+  2. everything under the plane, straight to the screen, over a dark floor 70 m down (under the
+     deepest tunnel), with the sky fading to dark beyond it;
   3. the surface laid over it at 25%.
 - At full opacity the passes give the ordinary picture, pixel for pixel (checked: 0.3/255 on
-  average, the rest at anti-aliased edges), so the fade in and out (0.35 s) starts and ends
-  without a jump. Every frame of it is a straight blend of the two pictures: sampled frame by
-  frame, the screen's brightness runs 78 → 69 → 59 → 50 → 45 and back to exactly 78. (A first go
-  that faded the background from the sky to the dark instead flashed brighter for two frames.)
+  average, with a cutting in view; the rest at anti-aliased edges, and along the line where a
+  cutting's walls cross the plane), so the fade in and out (0.35 s) starts and ends without a
+  jump. Every frame of it is a straight blend of the two pictures: sampled frame by frame, the
+  screen's brightness runs 78 → 69 → 59 → 50 → 45 and back to exactly 78. (A first go let the
+  ground fade to the sky's colour behind it, and flashed brighter for two frames.)
   Once the view is off, the game draws in one pass again.
 - Covered tunnels have walls now (roaddraw), hidden under the ground until the view is on, and no
   grass verges inside them.
 - **Taps** in the view mean what's drawn deep down: the station tool and a tap on a station or a
-  train look 12.6 m under the ground.
+  train look at the level of the deep track under the finger. Otherwise an underground station is
+  found only by its entrance, so a tap on a building over its platforms still picks the building.
+- **Deep** always goes under what it crosses (it implies Under).
+- A station remembers the rails' height it was built at, and only finds track at that height
+  again: a surface line laid over a tunnel doesn't take its underground station.
 - **What it costs** (the whole town, SwiftShader, Fast tier, 412×915 DPR 2, median frame):
   | View | Frame | Draw calls | Triangles |
   |---|---|---|---|
@@ -113,7 +120,8 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
   extra is the off-screen target and laying it over. (The shadow passes are counted in the calls.)
 - **Gotchas found on the way:** three.js only re-applies clipping planes when the camera changes
   between draws, so the second pass looks through a copy of the camera. And the sun's shadows are
-  drawn with the surface pass (only what's on the surface casts them there).
+  drawn with the surface pass (only what's on the surface casts them there). The off-screen target
+  is freed once the view is off.
 - **Rail lines:** use **New line from here** on a station's sheet, or **Transport > Railway >
   New rail line**. Tap stations in order, then Create. Tapping the first station again (with three
   or more) makes the line circular.

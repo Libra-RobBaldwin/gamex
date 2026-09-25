@@ -1597,12 +1597,13 @@ function tapMap(sx: number, sy: number): Mode {
   }
   if (mode === 'stop') { stopTap(g); return mode; }
   if (mode === 'line') { lineTap(sx, sy); return mode; }
-  if (railGame.tap(sx, sy, underView.on ? deepAt(sx, sy) : g)) return 'stop'; // (a railway tool: rail/game.ts)
+  const deep = underView.on ? deepAt(sx, sy) : null;
+  if (railGame.tap(sx, sy, deep ?? g)) return 'stop'; // (a railway tool: rail/game.ts)
   const bus = traffic.busNear(g);
   if (bus !== null) { showBusInfo(bus); return 'look'; }
   const ixAt = interchangeAt(g); // (a motorway junction is one junction, whichever part of it is tapped)
   if (ixAt) { showInterchangeInfo(ixAt); return 'look'; }
-  if (underView.on && railGame.inspect(deepAt(sx, sy))) return 'look'; // (deep down, in the underground view)
+  if (deep && railGame.inspect(deep, true)) return 'look'; // (deep down, in the underground view)
   if (railGame.inspect(g)) return 'look'; // a train or a station
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
@@ -1628,10 +1629,18 @@ function toggleUnderground(on = !underView.on) {
   hint(on ? 'Underground view: the ground fades so tunnels, underground stations and their trains show · tap again for the surface' : 'Back to the surface', 'tunnel');
 }
 // In the underground view a tap on a tunnel or an underground station means what's drawn there, deep
-// down, not the ground in front of it.
-function deepAt(sx: number, sy: number): P {
-  if (!underView.on) return groundAt(sx, sy);
-  const g = nav.levelUnder(sx, sy, -DEEP + 1.4);
+// down, not the ground in front of it: the level of the deep track under the finger (found by
+// looking at one depth, then at the track's own there), or null if there's none.
+function deepAt(sx: number, sy: number): P | null {
+  let y = -DEEP + 1.4, g = nav.levelUnder(sx, sy, y);
+  for (let i = 0; i < 4; i++) {
+    const q = net.nearestSeg(g, 40, (s) => net.def(s).cls === 'rail' && net.path(s).some((p) => (p.y ?? 0) < -9));
+    const c = q && closestOnPath(g, net.path(q.seg));
+    if (!c || c.y > -9) return null;
+    const next = c.y + 1.4; // (about the platforms' level)
+    if (Math.abs(next - y) < 0.2) break;
+    y = next; g = nav.levelUnder(sx, sy, y);
+  }
   return { x: g.x, z: g.z };
 }
 function groundAt(sx: number, sy: number): P {
@@ -1850,7 +1859,7 @@ const railDraw = new RailDraw(railway, traffic.fleet);
 railway.useRoads(traffic);
 traffic.onDraw = (dt) => railDraw.drawTrains(dt);
 const railGame = new RailGame({
-  net, shell, railway, draw: railDraw, people, scene, toScreen, focusOn, hint, purse,
+  net, shell, railway, draw: railDraw, people, scene, toScreen, focusOn, hint, purse, below: () => underView.on,
   rebuildRoads: () => { rebuildRoads(); refreshTrees(); }, // (a station's platforms and building take their land: trees there go)
   clear: (lots) => { for (const l of lots) { const b = buildings.find((x) => x.lot === l); if (b && !b.dying) demolish(b); } placesDirty = true; },
 });

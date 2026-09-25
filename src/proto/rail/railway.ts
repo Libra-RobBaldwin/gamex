@@ -94,9 +94,10 @@ export class Railway {
     this.rebuild();
   }
   station(id: number) { return this.stations.find((s) => s.id === id); }
-  // the station standing on a spot (its platforms, building or forecourt; above or below ground)
-  stationAt(p: P): Station | undefined {
-    for (const [id, sh] of this.shapes) if (sh.area.some((poly) => pointInPoly(p, poly))) return this.station(id);
+  // the station standing on a spot: its platforms, building, forecourt or depot on the ground (or
+  // a viaduct's deck); with `below`, an underground station's platforms too (the underground view)
+  stationAt(p: P, below = false): Station | undefined {
+    for (const [id, sh] of this.shapes) if ((below ? sh.area : sh.deckLand ? [...sh.land, ...sh.deckLand] : sh.land).some((poly) => pointInPoly(p, poly))) return this.station(id);
     return undefined;
   }
   private nameFor(st: Station) {

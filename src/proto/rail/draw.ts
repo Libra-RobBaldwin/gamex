@@ -161,7 +161,7 @@ export class RailDraw {
         return { x: (e.x + b.x) / 2, z: (e.z + b.z) / 2, y: pl.y, rot: Math.atan2(n.z - p.z, n.x - p.x) };
       });
       if (raised) viaduct(G, sh, stairs, (p) => this.pierFree(p, id));
-      else if (deep) underground(G, sh, stairs);
+      else if (deep) { const w = rw.works().find((x) => x.id === id), seg = w && rw.net.segs.get(w.seg); underground(G, sh, stairs, seg ? kerbOf(rw.net.def(seg)) + 0.8 : 5); }
       else if (sh.footbridge) {
         if (sh.access === 'subway') for (const q of [...stairs, { ...sh.footbridge.a, y: sh.footbridge.y, rot: sh.footbridge.rot }]) subwayStairs(G, q.x, q.y, q.z, q.rot);
         else footbridge(G, sh.footbridge.a, sh.footbridge.b, sh.footbridge.y, sh.footbridge.rot, sh.platforms[0]?.y ?? sh.mid.y + 1.3, stairs);
@@ -240,9 +240,12 @@ export class RailDraw {
     return true;
   }
   // can a viaduct station's pier stand here? (not on a road, a junction or another railway passing under)
+  // (every claim over the pier's footing counts, not just the first found: the viaduct's own track
+  // is usually claimed first there)
   private pierFree(p: XZ, id: number) {
-    const c = this.rw.net.land.at(p), seg = this.rw.works().find((w) => w.id === id)?.seg;
-    return !c || c.key === `road:${seg}` || c.key.startsWith('station:') || (c.owner !== 'road' && c.owner !== 'junction' && c.owner !== 'slip');
+    const seg = this.rw.works().find((w) => w.id === id)?.seg, r = 0.8;
+    const foot = [{ x: p.x - r, z: p.z - r }, { x: p.x + r, z: p.z - r }, { x: p.x + r, z: p.z + r }, { x: p.x - r, z: p.z + r }];
+    return !this.rw.net.land.hits(foot, (c) => c.key === `road:${seg}` || c.key.startsWith('station:') || (c.owner !== 'road' && c.owner !== 'junction' && c.owner !== 'slip')).length;
   }
   private dropInstanced() {
     for (const m of [this.lamps, this.arms, this.xLights]) if (m) { this.group.remove(m); m.geometry.dispose(); m.dispose(); }
@@ -502,13 +505,14 @@ function viaduct(G: Record<string, Geo>, sh: StationShape, stairs: { x: number; 
 // An underground station: the box round its tracks and platforms (walls, a floor; no roof, so the
 // underground view sees in), a passage over the tracks at the middle with stairs down to each
 // platform, and a shaft of stairs, escalators and lifts from it up to just under the entrance.
-function underground(G: Record<string, Geo>, sh: StationShape, stairs: { x: number; y: number; z: number; rot: number }[]) {
+// (`half`: the approach tunnel's half-width, its walls' offset in roaddraw, for the openings in the ends)
+function underground(G: Record<string, Geo>, sh: StationShape, stairs: { x: number; y: number; z: number; rot: number }[], half: number) {
   const bed = sh.bed!, pts = bed.pts, H = 8.4, P = 6.2; // (the box's walls over the rails, and the passage's floor)
   G.floor.band(pts, bed.l, bed.r, -0.06);
   wall(G.lining, pts, bed.l, -0.4, H); wall(G.lining, pts, bed.r, -0.4, H);
   // the ends, round the tunnel mouths
   for (const [e, o] of [[pts[0], pts[1]], [pts[pts.length - 1], pts[pts.length - 2]]]) {
-    const L = Math.hypot(e.x - o.x, e.z - o.z) || 1, nx = (o.z - e.z) / L, nz = -(o.x - e.x) / L, half = 3.2;
+    const L = Math.hypot(e.x - o.x, e.z - o.z) || 1, nx = (o.z - e.z) / L, nz = -(o.x - e.x) / L;
     const q = (a: number, b: number, y0: number, y1: number) => G.lining.quad([e.x + nx * a, e.y + y0, e.z + nz * a], [e.x + nx * b, e.y + y0, e.z + nz * b], [e.x + nx * b, e.y + y1, e.z + nz * b], [e.x + nx * a, e.y + y1, e.z + nz * a]);
     if (bed.l - half > 0.2) q(bed.l, half, -0.4, H);
     if (-half - bed.r > 0.2) q(-half, bed.r, -0.4, H);

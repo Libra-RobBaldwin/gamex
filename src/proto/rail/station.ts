@@ -26,6 +26,7 @@ export interface Station {
   tracks?: number; style?: StationStyle; access?: Access; canopy?: boolean;
   depot?: { end: 1 | -1; side: 1 | -1; len: number };
   structure?: Structure; // (ground level when missing)
+  y?: number; // the rails' height where it was built: it only finds track at that height again (not a line laid over a tunnel)
   cost: number;
 }
 // Where a station stands: on the ground, up on a viaduct (platforms on the deck, stairs and lifts
@@ -80,7 +81,7 @@ export function worksFor(net: Network, st: Station): StationWorks | null {
     if (net.def(seg).cls !== 'rail') continue;
     const c = closestOnPath(st, net.path(seg));
     const dot = c.ux * st.hx + c.uz * st.hz;
-    if (c.d > 6 || Math.abs(dot) < 0.95 || (best && c.d >= best.d)) continue;
+    if (c.d > 6 || Math.abs(dot) < 0.95 || (best && c.d >= best.d) || (st.y !== undefined && Math.abs(c.y - st.y) > 4)) continue;
     best = { seg: seg.id, s: c.s, d: c.d, sign: dot >= 0 ? 1 : -1 };
   }
   if (!best) return null;
@@ -107,7 +108,7 @@ export interface StationShape {
   depot?: { pts: P3[]; shed: { x: number; z: number; y: number; rot: number; w: number; d: number } }; // its siding, and a shed over the far end
   land: XZ[][]; // the ground the station claims as its own (its platforms, building and forecourt, and its depot's siding last)
   deckLand?: XZ[][]; // a viaduct's deck, over the ground: roads may pass under it, buildings can't
-  area: XZ[][]; // where a tap finds the station (its platforms and its building, above or below ground)
+  area: XZ[][]; // all of the station, above or below ground (its platforms, building and depot), for a tap in the underground view
   mid: P3; ux: number; uz: number; // the middle of the platforms, and the track's direction there (along its seg)
   outer: [number, number]; // how far the platforms reach right (−) and left (+) of the centre line
 }
@@ -185,8 +186,9 @@ export function stationShape(net: Network, g: TrackGraph, w: StationWorks, look:
     depot = { pts: pc.pts, shed };
     land.push(...bandPolys(pc.pts, 3, 3), rectCorners(shed.x, shed.z, drot, sl + 2, 10));
   }
+  const area = [...band, hall, ...(depot ? land.slice(-(depot.pts.length)) : [])];
   return {
-    platforms, building, footbridge, depot, land, deckLand: raised ? band : undefined, area: [...band, hall],
+    platforms, building, footbridge, depot, land, deckLand: raised ? band : undefined, area,
     access: look.access ?? 'footbridge', style: look.style ?? 'victorian', canopy: deep ? false : look.canopy ?? true, structure,
     // (a little past the station's own track at each end: the bridge stops short of it, the box's
     // end walls stand clear of the platforms' ends, and no face of one lies in the plane of another)
@@ -263,7 +265,7 @@ export function planStation(net: Network, segId: number, s: number, tapSide: 1 |
     ];
     if (clears.length) notes.push(`${clears.length} building${clears.length === 1 ? '' : 's'} in the way ${clears.length === 1 ? 'is' : 'are'} bought and cleared`);
     const title = c.title ?? (loop ? `Passing loop, ${n} tracks` : `${n} track${n === 1 ? '' : 's'}`) + ` · ${layout === 'side' ? 'side platforms' : layout === 'island' ? 'island' : 'platforms both sides'}`;
-    const station: Station = { id, name: o.name ?? '', x: q.x, z: q.z, hx, hz, len, layout, loop, tracks: n, side: tapSide, building: tapSide, cost, style: c.style, access: c.access, canopy: c.canopy, ...(structure !== 'surface' ? { structure } : {}) };
+    const station: Station = { id, name: o.name ?? '', x: q.x, z: q.z, hx, hz, len, layout, loop, tracks: n, side: tapSide, building: tapSide, cost, style: c.style, access: c.access, canopy: c.canopy, y: q.y, ...(structure !== 'surface' ? { structure } : {}) };
     plans.push({ layout, loop, title, notes, cost, ok: !blocked, blocked, station, works: w, shape, clears, recommended: c.recommended, config: { tracks: n, layout, style: c.style, access: c.access, canopy: c.canopy } });
   }
   if (!plans.length) return { plans, reason: reason ?? 'A station can’t go here' };

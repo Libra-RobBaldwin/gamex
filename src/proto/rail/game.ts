@@ -24,6 +24,7 @@ export interface RailGameCtx {
   clear(lots: Lot[]): void; // take these buildings down (a station or its siding is built on their plots)
   hint(text: string, ic?: Parameters<typeof icon>[0]): void;
   purse?: Purse; // stations and trains are paid for (game/money.ts)
+  below?: () => boolean; // the underground view is on: underground stations are tapped where they're drawn
 }
 // the economy's ids for stations and rail lines, clear of the bus stops' and lines'
 export const RAIL_ID = 1_000_000;
@@ -93,10 +94,10 @@ export class RailGame {
     return false;
   }
   // With no tool: a train or a station, if the tap landed on one.
-  inspect(g: P): boolean {
+  inspect(g: P, below = false): boolean {
     const t = this.trainNear(g);
     if (t) { this.showTrain(t); return true; }
-    const st = this.c.railway.stationAt(g);
+    const st = this.c.railway.stationAt(g, below);
     if (st) { this.showStation(st); return true; }
     return false;
   }
@@ -216,7 +217,7 @@ export class RailGame {
   }
   private lineTap(sx: number, sy: number, g: P) {
     const { railway } = this.c;
-    let id: number | null = railway.stationAt(g)?.id ?? null, bd = 44;
+    let id: number | null = railway.stationAt(g, this.c.below?.() ?? false)?.id ?? null, bd = 44;
     if (id === null) for (const [sid, sh] of railway.shapes) { const q = this.c.toScreen(sh.mid), d = Math.hypot(q.x - sx, q.y - sy); if (d < bd) { bd = d; id = sid; } }
     if (id === null) { this.c.hint('Tap one of the stations (the blue badges)', 'alert'); return; }
     if (this.draft.length && this.draft[this.draft.length - 1] === id) return;
