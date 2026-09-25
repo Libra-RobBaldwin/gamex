@@ -59,7 +59,10 @@ views (412 x 915): temperate 487 → 427 and 643 → 512 calls, triangles +1%; a
 Every building (not only the regional ones) has a little more depth: fascia boards, gutters and
 verge boards on pitched roofs, ridge tiles, a plinth where the walls meet the ground, glass with a
 reveal's shadow and a glint of sky, sills with shadows under them, and ambient occlusion from
-vertex colours (walls darker over their first couple of metres, roofs towards the eaves). None of
+vertex colours (walls darker over their first couple of metres, roofs towards the eaves). Front doors are let into the wall: the wall is cut round the opening (each door takes the place of
+the ground-floor window in its bay), lined with painted reveals, with the door set back behind a
+frame and a fanlight. Garden walls are textured in the local walling, hedges leafy, roofs
+weathered, and garden trees fork into layered crowns. None of
 it adds a material; it adds a few dozen triangles a house.
 
 ## Seeing it

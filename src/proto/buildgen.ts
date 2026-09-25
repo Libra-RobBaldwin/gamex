@@ -40,6 +40,7 @@ const hash = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; 
 const rgb = (hex: string) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
 const shade = (hex: string, f: number) => `rgb(${rgb(hex).map((v) => Math.max(0, Math.min(255, Math.round(v * f)))).join(',')})`;
 const pick = <T,>(r: () => number, arr: readonly T[]) => arr[Math.floor(r() * arr.length) % arr.length];
+const mix = (a: string, b: string, t: number) => { const A = rgb(a), B = rgb(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
 
 // ---------------- textures ----------------
 // Facade textures hold 2 x 2 window cells (one bay by one floor each), so neighbouring windows
@@ -258,10 +259,12 @@ function facadeTex(win: Win, skin: Skin, wall: string, frame: string, fascia = '
     for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) drawWindow(x, r, win, i * 64, j * 64, wall, frame, win === 'shop' ? pick(r, [fascia, fascia, pick(r, FASCIA)]) : fascia);
   });
 }
-const roofTex = (col: string) => tex(`r|${col}`, 64, 64, (x, r) => {
+const roofTex = (col0: string) => tex(`r|${col0}`, 64, 64, (x, r) => {
+  // (weathered: a touch greyer than new, some tiles darker or mossy)
+  const col = mix(col0, '#6f6a64', 0.16);
   x.fillStyle = col; x.fillRect(0, 0, 64, 64);
   for (let y = 0, row = 0; y < 64; y += 6, row++) {
-    for (let bx = row % 2 ? -4 : 0; bx < 64; bx += 8) { x.fillStyle = shade(col, 0.9 + r() * 0.2); x.fillRect(bx, y, 7.4, 5.4); }
+    for (let bx = row % 2 ? -4 : 0; bx < 64; bx += 8) { const k = r(); x.fillStyle = k < 0.08 ? mix(col, '#5f6b45', 0.35) : shade(col, 0.84 + r() * 0.3); x.fillRect(bx, y, 7.4, 5.4); }
     x.fillStyle = shade(col, 0.7); x.fillRect(0, y + 5.4, 64, 0.8);
   }
 });
@@ -385,14 +388,73 @@ class Kit {
       const p = pts[i], q = pts[(i + 1) % pts.length];
       const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
       const u = cellW ? Math.max(1, Math.round(len / cellW)) / 2 : len / 6, v = cellW ? floors / 2 : (y1 - y0) / 6;
-      if (y0 > 0.01 || y1 - y0 < 0.6) g.quad(this.T(p[0], y0, p[1]), this.T(q[0], y0, q[1]), this.T(q[0], y1, q[1]), this.T(p[0], y1, p[1]), 0, 0, u, v);
+      if (y0 > 0.01) g.quad(this.T(p[0], y0, p[1]), this.T(q[0], y0, q[1]), this.T(q[0], y1, q[1]), this.T(p[0], y1, p[1]), 0, 0, u, v);
+      else if (y1 - y0 < 0.6) this.ground(g, p, q, y0, y1, 0, u, 0, v, 1, 1);
       else {
         // (darker where the wall meets the ground, over its first couple of metres)
         const ym = Math.min(y1, y0 + 2.4), vm = (v * (ym - y0)) / (y1 - y0);
-        g.quadAO(this.T(p[0], y0, p[1]), this.T(q[0], y0, q[1]), this.T(q[0], ym, q[1]), this.T(p[0], ym, p[1]), 0, 0, u, vm, 0.72, 1);
-        if (y1 > ym + 0.01) g.quad(this.T(p[0], ym, p[1]), this.T(q[0], ym, q[1]), this.T(q[0], y1, q[1]), this.T(p[0], y1, p[1]), 0, vm, u, v);
+        this.ground(g, p, q, y0, ym, 0, u, 0, vm, 0.72, 1);
+        if (y1 > ym + 0.01) this.ground(g, p, q, ym, y1, 0, u, vm, v, 1, 1);
       }
     }
+  }
+  // Wall faces standing on the ground are remembered (at the top level), so a door can be let into one.
+  private faces: { g: Geo; at: number; col: THREE.Color; p: XZ; q: XZ; y0: number; y1: number; u0: number; u1: number; v0: number; v1: number; fb: number; ft: number }[] = [];
+  private ground(g: Geo, p: XZ, q: XZ, y0: number, y1: number, u0: number, u1: number, v0: number, v1: number, fb: number, ft: number) {
+    if (!this.frames.length) this.faces.push({ g, at: g.p.length, col: g.col, p, q, y0, y1, u0, u1, v0, v1, fb, ft });
+    g.quadAO(this.T(p[0], y0, p[1]), this.T(q[0], y0, q[1]), this.T(q[0], y1, q[1]), this.T(p[0], y1, p[1]), u0, v0, u1, v1, fb, ft);
+  }
+  // Where a door near x on the wall along z = zf goes: the middle of the window bay it's in, so it
+  // takes that bay's ground-floor window's place rather than cutting one in half
+  doorAt(x: number, zf: number) {
+    for (const f of this.faces) {
+      const dx = f.q[0] - f.p[0], dz = f.q[1] - f.p[1], len = Math.hypot(dx, dz);
+      if (len < 1e-6 || Math.abs(dz) > 1e-6 * len || dx <= 0 || Math.abs(f.p[1] - zf) > 0.06) continue;
+      const tc = x - f.p[0];
+      if (tc < 0 || tc > len) continue;
+      const cells = 2 * (f.u1 - f.u0), n = Math.round(cells);
+      if (n < 1 || Math.abs(cells - n) > 1e-6) return x;
+      const cw = len / n;
+      return f.p[0] + (Math.min(n - 1, Math.floor(tc / cw)) + 0.5) * cw;
+    }
+    return x;
+  }
+  // Let an opening (centred at x on the wall along z = zf, w wide, h high) into the walls there: the
+  // faces are cut round it, and it's lined with reveals `depth` deep. Returns whether a wall was there.
+  opening(x: number, zf: number, w: number, h: number, depth: number, lining: THREE.Material, back: THREE.Material) {
+    let cut = false;
+    for (const f of [...this.faces]) {
+      const dx = f.q[0] - f.p[0], dz = f.q[1] - f.p[1], len = Math.hypot(dx, dz);
+      if (len < 1e-6 || f.y0 >= h) continue;
+      const ux = dx / len, uz = dz / len, nx = -uz, nz = ux; // (along the face, and out of it)
+      const off = (x - f.p[0]) * nx + (zf - f.p[1]) * nz;
+      if (Math.abs(off) > 0.06 || nz < 0.9) continue;
+      const tc = (x - f.p[0]) * ux + (zf - f.p[1]) * uz, ta = tc - w / 2, tb = tc + w / 2;
+      if (ta < 0.05 || tb > len - 0.05) continue;
+      // (the old face made empty, and put back in pieces round the hole)
+      const P = f.g.p;
+      for (let i = f.at; i < f.at + 18; i++) P[i] = P[f.at + (i - f.at) % 3];
+      const hy = Math.min(h, f.y1), g = f.g, col = g.col;
+      g.col = f.col;
+      const piece = (t0: number, t1: number, y0: number, y1: number) => {
+        const U = (t: number) => f.u0 + ((f.u1 - f.u0) * t) / len, Vv = (y: number) => f.v0 + ((f.v1 - f.v0) * (y - f.y0)) / (f.y1 - f.y0), F = (y: number) => f.fb + ((f.ft - f.fb) * (y - f.y0)) / (f.y1 - f.y0);
+        const A = (t: number, y: number): V => this.T(f.p[0] + ux * t, y, f.p[1] + uz * t);
+        g.quadAO(A(t0, y0), A(t1, y0), A(t1, y1), A(t0, y1), U(t0), Vv(y0), U(t1), Vv(y1), F(y0), F(y1));
+      };
+      piece(0, ta, f.y0, f.y1);
+      piece(tb, len, f.y0, f.y1);
+      if (hy < f.y1) piece(ta, tb, hy, f.y1);
+      g.col = col;
+      cut = true;
+    }
+    if (!cut) return false;
+    // the reveals, the head and what's at the back of the opening
+    const L = this.g(lining), x0 = x - w / 2, x1 = x + w / 2, zi = zf - depth;
+    this.face(L, [x0, 0, zf], [x0, 0, zi], [x0, h, zi], [x0, h, zf], [1, 0, 0]);
+    this.face(L, [x1, 0, zi], [x1, 0, zf], [x1, h, zf], [x1, h, zi], [-1, 0, 0]);
+    this.face(L, [x0, h, zf], [x1, h, zf], [x1, h, zi], [x0, h, zi], [0, -1, 0]);
+    this.face(this.g(back), [x0, 0, zi], [x1, 0, zi], [x1, h, zi], [x0, h, zi], [0, 0, 1]);
+    return true;
   }
   // A block: front face, sides and back can each have their own facade.
   block(cx: number, cz: number, w: number, d: number, y0: number, floors: number, fh: number, cellW: number, front: THREE.Material, side = front, back = side, cap?: THREE.Material) {
@@ -500,13 +562,23 @@ class Kit {
 }
 
 // ---------------- features ----------------
+// A front door, set back in its opening in the wall behind a painted frame (a door on a wall that
+// can't be opened up, a bay or a turned frame, stands on its face as a panel)
 function door(k: Kit, x: number, zf: number, col: string, w = 1.05, h = 2.2) {
+  x = k.doorAt(x, zf);
   k.doorX ??= x;
-  k.box(x, 0, zf + 0.06, w + 0.3, h + 0.2, 0.1, plain(TRIM));
-  k.box(x, 0, zf + 0.1, w, h, 0.1, plain(col));
-  k.box(x, 0, zf + 0.35, w + 0.5, 0.18, 0.6, plain('#b9b3a8')); // step
+  if (k.opening(x, zf, w + 0.16, h + 0.08, 0.16, plain(TRIM), plain(col))) {
+    // (the frame's head and a fanlight over the door, in the top of the opening)
+    k.box(x, h - 0.02, zf - 0.155, w + 0.16, 0.1, 0.02, plain(TRIM));
+    k.box(x, h - 0.34, zf - 0.15, w - 0.24, 0.3, 0.02, plain('#3a4a58'));
+  } else {
+    k.box(x, 0, zf + 0.06, w + 0.3, h + 0.2, 0.1, plain(TRIM));
+    k.box(x, 0, zf + 0.1, w, h, 0.1, plain(col));
+  }
+  k.box(x, 0, zf + 0.25, w + 0.5, 0.16, 0.5, plain('#b9b3a8')); // step
 }
 function porch(k: Kit, x: number, zf: number, w: number, roof: THREE.Material) {
+  x = k.doorAt(x, zf);
   k.box(x, 2.55, zf + 0.7, w + 0.4, 0.18, 1.4, plain(TRIM));
   k.frustum(x, zf + 0.7, w + 0.4, 1.4, w + 0.4, 0.05, 2.73, 0.45, roof);
   for (const s of [-1, 1]) k.box(x + s * (w / 2), 0, zf + 1.3, 0.14, 2.55, 0.14, plain(TRIM));
@@ -527,7 +599,7 @@ function bay(k: Kit, x: number, zf: number, bw: number, y0: number, floors: numb
 function chimney(k: Kit, x: number, z: number, y: number, m: THREE.Material) {
   k.box(x, y - 1.2, z, 0.9, 2.6, 0.7, m);
   k.box(x, y + 1.4, z, 1.05, 0.15, 0.85, plain('#c8c0b0'));
-  for (const s of [-0.22, 0.22]) k.prismN(x + s, z, 0.13, 6, y + 1.55, 0.45, plain('#b0633e'));
+  for (const s of [-0.22, 0.22]) k.prismN(x + s, z, 0.12, 6, y + 1.55, 0.38, plain('#8f5a44'));
 }
 function dormer(k: Kit, x: number, zf: number, y: number, wall: THREE.Material, roof: THREE.Material) {
   k.walls(rect(x, zf - 0.8, 1.7, 1.6), true, y, 1, 1.7, 3, wall);
@@ -1116,7 +1188,7 @@ function industry(k: Kit, l: Lot, r: () => number) {
 }
 
 // ---------------- plots: gardens, drives, car parks, plazas, yards ----------------
-const LEAVES = ['#4f8a36', '#5b9440', '#3e7a35', '#6c9a3a', '#4a8a4a', '#b0782f'];
+const LEAVES = ['#4b7a36', '#557f3d', '#3f6c34', '#5e8639', '#46774a', '#93703a'];
 const gmat = (key: string, draw: (x: CanvasRenderingContext2D, r: () => number) => void) => M(`g|${key}`, () => new THREE.MeshLambertMaterial({ map: tex(`g|${key}`, 64, 64, draw) }));
 const lawnM = (f: number) => gmat(`lawn${f}`, (x, r) => {
   for (let i = 0; i < 4; i++) { x.fillStyle = shade('#6aa046', f * (i % 2 ? 1.07 : 0.95)); x.fillRect(0, i * 16, 64, 16); }
@@ -1149,7 +1221,10 @@ const bedM = () => gmat('bed', (x, r) => {
   x.fillStyle = '#5e4632'; x.fillRect(0, 0, 64, 64);
   for (let i = 0; i < 140; i++) { x.fillStyle = pick(r, ['#d94f6a', '#f2d04a', '#f4f0ea', '#9b59c9', '#e5873a', '#4f8a36', '#4f8a36']); x.fillRect(r() * 64, r() * 64, 2.5, 2.5); }
 });
-const hedgeM = () => plain('#3f6e34');
+const hedgeM = () => gmat('hedge', (x, r) => {
+  x.fillStyle = '#3a6130'; x.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 900; i++) { x.fillStyle = pick(r, ['#2f5227', '#44703a', '#365c2d', '#4f7c42', '#2a4722']); x.fillRect(r() * 64, r() * 64, 1.6 + r() * 2, 1.4 + r() * 1.6); }
+});
 
 const rectXZ = (x0: number, z0: number, x1: number, z1: number): XZ[] => {
   const a = Math.min(x0, x1), b = Math.max(x0, x1), c = Math.min(z0, z1), d = Math.max(z0, z1);
@@ -1184,10 +1259,14 @@ let treeStyle: TreeStyle = 'broad';
 let factoryWall: { skin: Skin; wall: Sw } | null = null;
 function tree(k: Kit, x: number, z: number, s: number, r: () => number) {
   if (treeStyle !== 'broad') return treeAbroad(k, x, z, s, r);
-  k.prismN(x, z, 0.16 * s, 5, 0, 2.6 * s, plain('#6b4a2f'));
-  const leaf = plain(pick(r, LEAVES));
-  sphere(k, x, 3.8 * s, z, 1.9 * s, leaf);
-  if (r() < 0.6) sphere(k, x + 0.7 * s, 4.5 * s, z - 0.4 * s, 1.25 * s, leaf, 6, 3);
+  // a trunk that forks, and a crown of a few overlapping masses, shaded darker underneath
+  const leafC = pick(r, LEAVES), more = r() < 0.6, hq = hash(`${x.toFixed(1)},${z.toFixed(1)}`), q = (i: number) => ((hq >>> (i * 4)) & 15) / 15 - 0.5;
+  const bark = plain('#5e4630');
+  beam(k, [x, 0, z], [x + q(0) * 0.3 * s, 2.7 * s, z + q(1) * 0.3 * s], 0.24 * s, 0.24 * s, bark);
+  const dark = plain(shade(leafC, 0.8)), leaf = plain(leafC), light = plain(shade(leafC, 1.1));
+  sphere(k, x, 3.4 * s, z, 1.75 * s, dark, 7, 4, 0.8);
+  sphere(k, x + q(2) * 1.2 * s, 4.3 * s, z + q(3) * 1.2 * s, 1.45 * s, leaf, 7, 4, 0.85);
+  if (more) sphere(k, x + 0.9 * s + q(4) * 0.6 * s, 3.9 * s, z - 0.5 * s + q(5) * 0.6 * s, 1.15 * s, light, 6, 3, 0.9);
 }
 function treeAbroad(k: Kit, x: number, z: number, s: number, r: () => number) {
   const trunk = plain('#6b4a2f');
@@ -1282,7 +1361,7 @@ function yard(k: Kit, l: Lot, r: () => number, rr: () => number, P: Place | null
     const gaps: [number, number][] = [[door - 0.9, door + 0.9]];
     if (drive) gaps.push(drive);
     const zE = F - 0.35;
-    const wallM = plain(pick(rr, ['#9a4b35', '#b8a08c', '#e8e2d4']));
+    const wc = pick(rr, ['#9a4b35', '#b8a08c', '#e8e2d4']), wallM = facade('none', wc === '#e8e2d4' ? 'render' : 'brick', wc, TRIM);
     if (P && (P.era !== 'modern' || VD[P.vern].climate !== 'uk')) { const V = VD[P.vern]; boundary(k, V, X0, X1, gaps, zE); out.push(BOUND_NAME[V.bound]); }
     else {
       if (edge !== 'open') run(X0, X1, gaps, (a, b) => {
@@ -1306,8 +1385,9 @@ function yard(k: Kit, l: Lot, r: () => number, rr: () => number, P: Place | null
     }
   } else if (l.kind === 'terrace') {
     flat(k, X0, bf, X1, F, 0.05, P ? pick(rr, [slabsM(), gravelM()]) : pick(rr, [slabsM(), gravelM(), tilesM()]));
-    let wallM = plain(pick(rr, ['#9a4b35', '#b8a08c', '#e8e2d4'])), rails = rr() < 0.5;
-    if (P) { const V = VD[P.vern]; wallM = plain(V.stone); rails = rails && V.climate === 'uk' && P.era !== 'medieval'; }
+    const wc = pick(rr, ['#9a4b35', '#b8a08c', '#e8e2d4']);
+    let wallM = facade('none', wc === '#e8e2d4' ? 'render' : 'brick', wc, TRIM), rails = rr() < 0.5;
+    if (P) { const V = VD[P.vern]; wallM = boundaryMat(V); rails = rails && V.climate === 'uk' && P.era !== 'medieval'; }
     run(X0, X1, [[door - 0.6, door + 0.6]], (a, b) => {
       k.box((a + b) / 2, 0, F - 0.2, b - a, 0.6, 0.3, wallM);
       if (rails) k.box((a + b) / 2, 0.6, F - 0.2, b - a, 0.5, 0.04, plain('#1f2226'));
@@ -2367,14 +2447,16 @@ function vBuild(k: Kit, l: Lot, r: () => number, rr: () => number, P: Place) {
 
 // garden boundaries in the local way: dry-stone walls in stone country, flint walls on the chalk,
 // white walls round southern courtyards, picket fences in the North
+// a garden wall's face: the local stone laid dry, flint, brick or whitewash
+const boundaryMat = (V: VD) => facade('none', V.bound === 'drystone' || V.bound === 'cornish' ? 'rubble' : V.bound === 'flintwall' ? 'flint' : V.bound === 'brickwall' ? 'brick' : 'render', V.stone, TRIM);
 function boundary(k: Kit, V: VD, x0: number, x1: number, gaps: [number, number][], z: number) {
-  const m = plain(V.stone);
+  const m = boundaryMat(V);
   run(x0, x1, gaps, (a, b) => {
     const c = (a + b) / 2, w = b - a;
     if (V.bound === 'drystone') { k.box(c, 0, z, w, 0.95, 0.55, m); k.box(c, 0.95, z, w, 0.14, 0.38, plain(shade(V.stone, 0.85))); }
     else if (V.bound === 'flintwall') { k.box(c, 0, z, w, 1.3, 0.35, facade('none', 'flint', V.stone, '#f4f4f0')); k.box(c, 1.3, z, w, 0.12, 0.42, plain('#9a4b35')); }
-    else if (V.bound === 'brickwall') { k.box(c, 0, z, w, 0.9, 0.3, plain('#9a4b35')); k.box(c, 0.9, z, w, 0.1, 0.36, plain('#7e3b2e')); }
-    else if (V.bound === 'whitewall') k.box(c, 0, z, w, 1.4, 0.3, plain(V.stone));
+    else if (V.bound === 'brickwall') { k.box(c, 0, z, w, 0.9, 0.3, m); k.box(c, 0.9, z, w, 0.1, 0.36, plain('#7e3b2e')); }
+    else if (V.bound === 'whitewall') k.box(c, 0, z, w, 1.4, 0.3, m);
     else if (V.bound === 'cornish') { k.box(c, 0, z, w, 1.1, 0.9, m); k.box(c, 1.1, z, w, 0.35, 0.7, hedgeM()); }
     else if (V.bound === 'picket') { for (const y of [0.35, 0.75]) k.box(c, y, z, w, 0.07, 0.05, plain('#f4f4f0')); for (let x = a + 0.1; x < b; x += 0.7) k.box(x, 0, z, 0.08, 0.95, 0.06, plain('#f4f4f0')); }
     else k.box(c, 0, z, w, 0.9, 0.7, hedgeM());
