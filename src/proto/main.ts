@@ -11,7 +11,8 @@ import { Traffic, rushLabel, type Places } from './traffic';
 import { MODEL, purchaseList, type Offer } from './vehicles';
 import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CIVIC, grassMats, makeBuilding as generate, makeRegion, USE } from './buildgen';
+import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setPlaces, USE } from './buildgen';
+import { placeResolver, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
@@ -69,6 +70,9 @@ const MAP = mapFromQuery(SAVED ? new URLSearchParams(SAVED.map.query) : PARAMS);
 // (the query that makes this map, kept with its saves)
 const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(PARAMS); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
+// (a generated map builds in its places' traditions; ?vern=cotswold, nordic, … sets one on any map)
+const VERN = new URLSearchParams(MAP_QUERY).get('vern') as Vern | null, vernForced = VERN && VERNS.includes(VERN) ? VERN : undefined;
+if (MAP.generated || vernForced) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.settlements }, vernForced));
 // the loading screen, while the map is built (it goes once the first frame is drawn)
 const loading = new Loading(MAP.name, mapLine());
 function mapLine() {
