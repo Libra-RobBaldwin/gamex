@@ -15,9 +15,22 @@
    `main.ts` and `ground/game.ts`. Port them onto `WORLD`, not a text merge. Terrain has no branch
    yet. The loop, lines, save, stations and rail suites take the address as their first argument
    (`node e2e/loop.e2e.mjs http://localhost:5180/?map=town`). The menu suite takes it from `BASE=`.
-3. Then wire terrain's landform presets and islands into the region setup's first step, and do
+3. **The user's rules for the 50 km world (25 Sep, at the pause). Do these first, in the port of
+   countryside and edge:**
+   - **One field style everywhere:** straight-edged hedged fields in farm blocks, as world50
+     has. No curvy or warped fields left in any path (the region, the 50 km world, the town's
+     ground). Remove the old curvy generator, don't just hide it.
+   - **Every road respects the terrain, not only lanes:** motorways, A roads and railways too.
+     Follow valleys and contours, keep within a grade limit, curve round hills, woods and water
+     in sweeping bends, and bridge or tunnel only where it pays. No ruler-straight roads across
+     hills.
+   - **The whole map is playable:** seed towns, villages and industries right out to the corners
+     and edges, so no part of the 50 km is empty (for example a minimum per 10 km square,
+     scaled by terrain: fewer in mountains, some on the coast). Link them all into the road and
+     rail network, and have the edge portals carry the traffic that runs on off the map.
+4. Then wire terrain's landform presets and islands into the region setup's first step, and do
    HUD phase 3 (small tap cards for a bus, stop or building).
-4. The user's home town is still named in the repo in a few places, from before the privacy
+5. The user's home town is still named in the repo in a few places, from before the privacy
    rule (region names, vehicle brands, tests, docs). It's gone from the menu. Ask the user
    before removing the rest.
 
