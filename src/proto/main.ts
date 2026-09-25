@@ -49,6 +49,7 @@ import { clearOf, greenRegions, layReal, placeLots } from './real/lay';
 import { DeadEndPaths } from './game/paths';
 import type { RealMap } from './real/map';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type MapSpec, type SettlementInfo } from './region'; // maps as data (docs/region.md)
+import { mapById as menuMap } from './maps';
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
 import { deleteSave, getSave, listSaves, putSave, saveSearch } from './game/savedb';
 
@@ -2317,7 +2318,8 @@ let syncAt = 2;
 // page is hidden (the phone locks, another app comes up, the tab closes) and from Menu > Save town.
 // A loaded town goes on saving over the save it came from. (The junction pages are demos: no saves.)
 const SAVE_ID = SAVED?.id ?? (globalThis.crypto?.randomUUID?.() ?? `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
-const SAVE_NAME = SAVED?.name ?? MAP.name;
+// (named as the start menu lists it: the sandbox plays on the town's map, but isn't the starter town)
+const SAVE_NAME = SAVED?.name ?? menuMap(new URLSearchParams(MAP_QUERY).get('map'))?.name ?? MAP.name;
 const AUTOSAVE_EVERY = 4 * 60; // game minutes
 const canSave = !demo;
 let autoAt = clock + AUTOSAVE_EVERY, lastSaved = SAVED?.savedAt ?? 0, saving: Promise<boolean> | null = null;
