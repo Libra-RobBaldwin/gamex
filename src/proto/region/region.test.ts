@@ -270,7 +270,10 @@ describe('options: a seed and a few settings make the map, repeatably', () => {
       expect(optionsFromQuery(q)).toEqual(full);
       expect(mapFromQuery(q).options).toEqual(full);
     }
-    expect(optionsFromQuery(new URLSearchParams('map=region&rivers=9&style=lava&towns=-2'))).toMatchObject({ rivers: 3, style: 'temperate', towns: 0 });
+    expect(optionsFromQuery(new URLSearchParams('map=region&size=6&rivers=9&style=lava&towns=-2'))).toMatchObject({ rivers: 3, style: 'temperate', towns: 0, size: 6 });
+    // (50 km is the standard map, with its own limits: docs/streaming.md)
+    expect(optionsFromQuery(new URLSearchParams('map=region&rivers=9&style=lava&towns=-2'))).toMatchObject({ rivers: 4, style: 'temperate', towns: 0, size: 50 });
+    expect(optionsFromQuery(new URLSearchParams('map=region&size=13'))).toMatchObject({ size: 50 });
     expect(regionOptions({ city: false, towns: 0, villages: 0 }).villages).toBe(1); // (never an empty map)
     expect(mapFromQuery(new URLSearchParams(''))).toBe(TOWN_MAP);
   });

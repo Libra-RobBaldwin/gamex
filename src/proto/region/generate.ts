@@ -59,7 +59,7 @@ const INDUSTRIAL_ROAD = 'arterial-1-40-0-0-0';
 
 // (a seed alone is the default options with that seed: docs/regiongen.md)
 export function generateRegion(opts: number | Partial<RegionOptions>, bound = REGION_BOUND): Region {
-  const o = regionOptions(typeof opts === 'number' ? { seed: opts } : opts), seed = o.seed;
+  const o = regionOptions({ ...(typeof opts === 'number' ? { seed: opts } : opts), size: 6 }), seed = o.seed; // (the 6 km region, made whole: a 50 km map is worldmap/'s)
   const water = makeWater(rng(mix(seed, 2)), bound, o);
   const mw = new MapWater(water);
   const settlements = placeSettlements(rng(mix(seed, 3)), seed, bound, mw, o);

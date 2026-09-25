@@ -122,7 +122,10 @@ export class Drape {
         if (!g.boundingSphere) g.computeBoundingSphere();
         if (g.boundingSphere) g.boundingSphere.radius += this.field.max;
       }
-      if ((mesh as unknown as THREE.InstancedMesh).isInstancedMesh) (mesh as unknown as THREE.InstancedMesh).frustumCulled = false;
+      // (instanced meshes are drawn uncut, their instances could be anywhere; unless their maker set
+      // `userData.cull` with their bounds worked out, which are then widened by the hills' height)
+      const im = mesh as unknown as THREE.InstancedMesh;
+      if (im.isInstancedMesh) { if (o.userData.cull && im.boundingSphere) im.boundingSphere.radius += this.field.max; else im.frustumCulled = false; }
     });
   }
 }

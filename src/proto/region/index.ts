@@ -11,6 +11,7 @@ import type { MapSpec } from './mapspec';
 import { TOWN_MAP } from './town';
 import { optionsFromQuery, type RegionOptions } from './options';
 import { STYLE_LOOKS } from './styles';
+import { worldMapSpec } from '../worldmap/spec';
 
 export * from './generate';
 export * from './mapspec';
@@ -60,7 +61,7 @@ export function mapOfRegion(g: Region): MapSpec {
 // The map a URL asks for: ?map=region with its options (?seed=7&rivers=2&style=desert…: options.ts),
 // or the town when there's no map or it isn't known.
 export function mapFromQuery(q: URLSearchParams): MapSpec {
-  if (q.get('map') === 'region') return regionMap(optionsFromQuery(q));
+  if (q.get('map') === 'region') { const o = optionsFromQuery(q); return o.size > 6 ? worldMapSpec(o) : regionMap(o); } // (50 km: streamed, docs/streaming.md)
   return mapById(q.get('map'));
 }
 // the maps the game can open, by ?map= id (the town when there's none, or it isn't known)
