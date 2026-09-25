@@ -10,16 +10,12 @@ import * as THREE from 'three';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { pathLength, subPath, type Network, type P, type RSeg } from '../roads';
+import { pathLength, subPath, type Network, type P } from '../roads';
 import type { BusLine, Traffic } from '../traffic';
-import { TRAINS, type TrainDef } from '../catalog';
-import type { Stations } from './rail';
 
 export interface Line {
   id: number; num: number; stops: number[]; loop: boolean; offer?: string;
-  mode: 'bus' | 'rail'; // a bus line calls at stops; a rail line at stations, with trains
-  train?: TrainDef; // the trains a rail line runs
-  bus: BusLine; // what the traffic follows (the same object, so edits reach the vehicles at once)
+  bus: BusLine; // what the traffic follows (the same object, so edits reach the buses at once)
 }
 
 const NAMES = [
@@ -36,13 +32,10 @@ export class Lines {
   private nextId = 1;
   private names = new Map<number, string>();
   private used = 0;
-  constructor(private traffic: Traffic, private stations?: Stations) {}
+  constructor(private traffic: Traffic) {}
 
-  isStation(id: number) { return !!this.stations?.byId(id); }
   // a stop's name: shared with the stop facing it, given the first time either is asked about
   name(stop: number): string {
-    const st = this.stations?.byId(stop);
-    if (st) return st.name;
     const had = this.names.get(stop);
     if (had) return had;
     const pl = this.traffic.place(stop);
@@ -59,42 +52,36 @@ export class Lines {
   // same place (a stop or the one facing it)?
   same(a: number, b: number) { if (a === b) return true; const p = this.traffic.place(a); return !!p?.stops.some((s) => s.id === b); }
 
-  add(stops: number[], loop: boolean, buses = 2, offer?: string, train?: TrainDef): Line {
-    const id = this.nextId++, num = id, mode = this.isStation(stops[0]) ? 'rail' : 'bus';
-    const l: Line = { id, num, stops: [...stops], loop, offer, mode, train: mode === 'rail' ? train ?? TRAINS.dmu : undefined, bus: { id, seq: callOrder(stops, loop) } };
+  add(stops: number[], loop: boolean, buses = 2, offer?: string): Line {
+    const id = this.nextId++, num = id;
+    const l: Line = { id, num, stops: [...stops], loop, offer, bus: { id, seq: callOrder(stops, loop) } };
     this.list.push(l);
     for (let i = 0; i < buses; i++) this.addBus(l);
     return l;
   }
   // a bus for the line, starting part way round it (by the golden ratio, so however many there
   // are they start spread out: 0, 0.62, 0.24, 0.85... of the way)
-  // (a rail line's trains: one standing at each call in turn)
-  addBus(l: Line): { id: number; dress?: { fleetNo?: string } } | null {
-    const n = this.buses(l).length, q = l.bus.seq.length;
-    if (l.mode === 'rail') return this.traffic.addLineTrain(l.train ?? TRAINS.dmu, l.bus, Math.floor(((n * 0.618034) % 1) * q));
-    return this.traffic.addBus(l.offer, l.bus, Math.floor(((n * 0.618034) % 1) * q)) ?? null;
+  addBus(l: Line) {
+    const n = this.traffic.busesOn(l.id).length, q = l.bus.seq.length;
+    return this.traffic.addBus(l.offer, l.bus, Math.floor(((n * 0.618034) % 1) * q));
   }
-  removeBus(l: Line) {
-    const ids = this.buses(l);
-    if (!ids.length) return;
-    if (l.mode === 'rail') this.traffic.removeTrain(ids[ids.length - 1]); else this.traffic.removeBus(ids[ids.length - 1]);
-  }
+  removeBus(l: Line) { const ids = this.traffic.busesOn(l.id); if (ids.length) this.traffic.removeBus(ids[ids.length - 1]); }
   remove(l: Line) {
-    for (const id of this.buses(l)) if (l.mode === 'rail') this.traffic.removeTrain(id); else this.traffic.removeBus(id);
+    for (const id of this.traffic.busesOn(l.id)) this.traffic.removeBus(id);
     this.list = this.list.filter((x) => x !== l);
   }
   // stops that no longer exist leave their lines (a road rebuilt through them); a line left with
   // fewer than two stops goes, and its buses with it
   prune() {
     for (const l of [...this.list]) {
-      const keep = l.stops.filter((id) => (l.mode === 'rail' ? this.stations?.spot(id) : this.traffic.place(id)));
+      const keep = l.stops.filter((id) => this.traffic.place(id));
       if (keep.length === l.stops.length) continue;
       if (keep.length < 2) { this.remove(l); continue; }
       l.stops = keep; l.bus.seq = callOrder(keep, l.loop);
     }
   }
-  buses(l: Line) { return l.mode === 'rail' ? this.traffic.trainsOn(l.id) : this.traffic.busesOn(l.id); }
-  of(bus: number) { const id = this.traffic.bus(bus)?.line ?? this.traffic.train(bus)?.line; return this.list.find((l) => l.id === id) ?? null; }
+  buses(l: Line) { return this.traffic.busesOn(l.id); }
+  of(bus: number) { const id = this.traffic.bus(bus)?.line; return this.list.find((l) => l.id === id) ?? null; }
 }
 
 // ---------- the route drawn on the map ----------
@@ -104,9 +91,8 @@ export class Lines {
 // never to flicker against it, low enough that the buses on it hide it as they pass.
 // Call `resolution.set(w, h)` on its material with the drawing buffer's size.
 const SIDE = 2.4;
-export function routeMesh(net: Network, traffic: Traffic, seq: number[], colour = '#5cb83a', stations?: Stations): LineSegments2 | null {
-  const rail = !!stations && seq.length > 0 && !!stations.byId(seq[0]);
-  const legs = rail ? railLegs(net, stations!, seq) : traffic.lineRoute(seq);
+export function routeMesh(net: Network, traffic: Traffic, seq: number[], colour = '#5cb83a'): LineSegments2 | null {
+  const legs = traffic.lineRoute(seq);
   const pos: number[] = [];
   for (const leg of legs) for (const run of leg) {
     if (run.s1 - run.s0 < 0.5) continue;
@@ -126,18 +112,6 @@ export function routeMesh(net: Network, traffic: Traffic, seq: number[], colour 
   line.frustumCulled = false;
   return line;
 }
-// a rail line's legs: along the track from one station to the next where they share a line of
-// track (they do on the town's main line); straight across otherwise
-function railLegs(net: Network, stations: Stations, seq: number[]) {
-  const legs: { seg: RSeg; from: number; s0: number; s1: number }[][] = [];
-  for (let i = 0; i + 1 < seq.length; i++) {
-    const a = stations.spot(seq[i]), b = stations.spot(seq[i + 1]);
-    if (!a || !b || a.seg !== b.seg) { legs.push([]); continue; }
-    const L = net.length(a.seg), fwd = b.s >= a.s;
-    legs.push([{ seg: a.seg, from: fwd ? a.seg.a : a.seg.b, s0: fwd ? a.s : L - a.s, s1: fwd ? b.s : L - b.s }]);
-  }
-  return legs;
-}
 function offsetLeft(pts: P[]): P[] {
   return pts.map((p, i) => {
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
@@ -153,16 +127,16 @@ function offsetLeft(pts: P[]): P[] {
 // size on screen: orange for a stop, lime with its number once it's on the line. Also drawn over
 // everything, so there's nothing for them to fight with.
 const texCache = new Map<string, THREE.Texture>();
-function badge(label: string, on: boolean, rail = false) {
-  const key = `${label}|${on}|${rail}`;
+function badge(label: string, on: boolean) {
+  const key = `${label}|${on}`;
   let t = texCache.get(key);
   if (t) return t;
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const g = c.getContext('2d')!;
   g.beginPath(); g.arc(32, 32, 26, 0, Math.PI * 2);
-  g.fillStyle = on ? '#5cb83a' : rail ? '#3fb0e0' : '#f28c28'; g.fill();
-  g.lineWidth = 6; g.strokeStyle = on ? '#0f3322' : rail ? '#03233a' : '#361402'; g.stroke();
+  g.fillStyle = on ? '#5cb83a' : '#f28c28'; g.fill();
+  g.lineWidth = 6; g.strokeStyle = on ? '#0f3322' : '#361402'; g.stroke();
   if (label) { g.fillStyle = on ? '#0f3322' : '#fff'; g.font = '700 30px "League Spartan", Archivo, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, 32, 35); }
   t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -171,9 +145,7 @@ function badge(label: string, on: boolean, rail = false) {
 }
 export class StopMarkers {
   readonly group = new THREE.Group();
-  constructor(private net: Network, private traffic: Traffic, private stations?: Stations) { this.group.renderOrder = 21; }
-  // the stations' badges (over the middle of the platforms)
-  stationPlaces(): { id: number; p: P }[] { return (this.stations?.list ?? []).map((st) => ({ id: st.id, p: { x: st.x, z: st.z, y: 6 } })); }
+  constructor(private net: Network, private traffic: Traffic) { this.group.renderOrder = 21; }
   // each place once (a stop and the one facing it share a badge, between the two kerbs)
   places(): { id: number; p: P }[] {
     const seen = new Set<number>(), out: { id: number; p: P }[] = [];
@@ -204,11 +176,10 @@ export class StopMarkers {
   show(numbers: Map<number, string> | null) {
     for (const c of [...this.group.children]) { this.group.remove(c); ((c as THREE.Sprite).material as THREE.Material).dispose(); }
     if (!numbers) return;
-    const all = [...this.places().map((x) => ({ ...x, rail: false })), ...this.stationPlaces().map((x) => ({ ...x, rail: true }))];
-    for (const { id, p, rail } of all) {
-      const key = [...numbers.keys()].find((k) => k === id || (!rail && this.traffic.place(k)?.stops.some((s) => s.id === id)));
+    for (const { id, p } of this.places()) {
+      const key = [...numbers.keys()].find((k) => k === id || this.traffic.place(k)?.stops.some((s) => s.id === id));
       const label = key !== undefined ? numbers.get(key)! : '';
-      const m = new THREE.SpriteMaterial({ map: badge(label, key !== undefined, rail), depthTest: false, depthWrite: false, transparent: true });
+      const m = new THREE.SpriteMaterial({ map: badge(label, key !== undefined), depthTest: false, depthWrite: false, transparent: true });
       const s = new THREE.Sprite(m);
       s.position.set(p.x, p.y ?? 4, p.z);
       s.renderOrder = 21;
