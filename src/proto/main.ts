@@ -4,7 +4,7 @@ import './proto.css';
 import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
 import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
 import { PRESETS, RAIL_PRESETS, filterRoads, isSlip, type RoadFilter } from './catalog';
-import { GRADES } from './grade';
+import { DEEP, GRADES } from './grade';
 import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, GRASS_MATS, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
 import { GRADE_STEPS } from './grade';
 import { Traffic, rushLabel, type Places } from './traffic';
@@ -28,11 +28,10 @@ import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
 import { TownEconomy, TOWN_NAME } from './game/econ';
 import { Purse, PRICE_SHARE } from './game/money';
-import { Stations, STATION_LIST_PRICE } from './game/rail';
-import type { TrainDef } from './catalog';
 import { IX_BLURB, IX_FORMS, IX_NAME, IX_SIZES, IX_SIZE_BLURB, IX_SIZE_NAME, buildPair, motorwayCloverleaf, motorwayWithJunction, pairCrossed, pairToNode, pairUpMotorways, scratch, type Interchange, type IxForm, type IxSize, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
 import { buildSlip, planCloverleaf, planJunction, planSlip, roadCrossed, type IxPlan, type SlipPlan } from './interchange/plan';
 import { Railway } from './rail/railway'; // stations, signalling and rail lines (docs/rail.md)
+import { UnderView } from './game/underview';
 import { RailDraw } from './rail/draw';
 import { RailGame } from './rail/game';
 import { layRegionRail, planRegionRail } from './rail/region';
@@ -156,6 +155,7 @@ ground.receiveShadow = true;
 for (const m of [...GRASS_MATS, ...grassMats()]) { m.color.set('#ffffff'); patchGround(m, gameGround.ground.uniforms); }
 // the ground leaves out any cutting a road or railway runs down into (they mark the stencil first)
 { const gm = ground.material as THREE.MeshLambertMaterial; gm.stencilWrite = true; gm.stencilRef = 1; gm.stencilFunc = THREE.NotEqualStencilFunc; ground.renderOrder = -9; }
+gameGround.ground.hedges.userData.surface = true;
 scene.add(gameGround.ground.hedges);
 scene.add(ground);
 // the cut face round the edge of the map (the roads running off it are added once they're built)
@@ -171,9 +171,13 @@ function refreshEdge() {
 // ground's own patch), and the water and reeds on top: two draw calls
 gameWater.patch(gameGround.ground.material);
 scene.add(gameWater.group);
+// the underground view (game/underview.ts): the surface fades so tunnels and underground stations
+// show (the lake's bed and the map's cut edge, under the ground but not built, stay out of it)
+const underView = new UnderView(renderer, () => [gameWater.group, mapEdge, ...waterBeds]);
+const waterBeds: THREE.Object3D[] = [];
 gameWater.light(scene, sun); // (evening light: the sun, sky and water change together)
 // rivers' beds, in a ground material of their own (the flat ground leaves out what they cover)
-for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshLambertMaterial(), gameGround.ground.uniforms)))) scene.add(BIG ? splitByTile(m) : m); // (a big map's cut into tiles, so only what's in view is drawn)
+for (const m of gameWater.beds(() => gameWater.patch(patchGround(new THREE.MeshLambertMaterial(), gameGround.ground.uniforms)))) { const x = BIG ? splitByTile(m) : m; scene.add(x); waterBeds.push(x); } // (a big map's cut into tiles, so only what's in view is drawn)
 
 // ---------------- trees (instanced) ----------------
 interface Tree { x: number; z: number; s: number; kind: number }
@@ -195,7 +199,7 @@ const MAXT = Math.max(1600, MAP.trees.count + 200);
 const crowns = new THREE.InstancedMesh(crownGeo, crownMat, MAXT);
 const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAXT);
 const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
-for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; if (!BIG) scene.add(m); } // (a big map draws its woods a tile at a time: regionView)
+for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; m.userData.surface = true; if (!BIG) scene.add(m); } // (a big map draws its woods a tile at a time: regionView; surface: the underground view needn't draw them twice)
 
 // Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
 // registry (a spatial hash, so this looks only at claims near the tree); plots through `lots`.
@@ -689,7 +693,7 @@ async function restoreTown(s: GameSave) {
 }
 
 // ---------------- UI ----------------
-type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line' | 'station' | 'bulldoze';
+type Mode = 'look' | 'road' | 'rail' | 'stop' | 'line' | 'bulldoze';
 type RoadKind = 'straight' | 'curve' | 'smooth';
 let mode: Mode = 'look';
 let roadKind: RoadKind = 'straight';
@@ -701,7 +705,7 @@ let draftCheck: Check | null = null;
 let trace: P[] = []; // curve tool: where the finger has been during a drag
 const opts: RoadOpts = { ...DEFAULT_OPTS };
 const lastType = { road: 'street', rail: 'rail-main' };
-const HEIGHTS = [['auto', 'Auto', 'heightAuto'], ['level', 'Level', 'minus'], ['up', 'Climb', 'trendUp']] as const;
+const HEIGHTS = [['auto', 'Auto', 'heightAuto'], ['level', 'Level', 'minus'], ['up', 'Climb', 'trendUp'], ['deep', 'Deep', 'trendDown']] as const;
 const CROSS = [['junction', 'Join', 'arrowsCross'], ['bridge', 'Over', 'bridge'], ['tunnel', 'Under', 'tunnel']] as const;
 const KINDS = [['straight', 'Straight', 'line'], ['curve', 'Curve', 'curve'], ['smooth', 'Smooth', 'smooth']] as const;
 const cls = () => (mode === 'rail' ? 'rail' : 'road') as 'road' | 'rail';
@@ -715,6 +719,7 @@ const shell = new Shell($('#ui'), {
   onRate: () => cycleRate(),
   onPerf: () => togglePerf(),
   onTown: () => showTown(),
+  onUnderground: () => toggleUnderground(),
 });
 // the tool in use (a road or rail type, or bus stops), if any
 let tool: ToolHandle | null = null;
@@ -750,7 +755,7 @@ function setMode(m: Mode) {
   if (building && (mode === 'road' || mode === 'rail') && m !== mode) lastType[mode] = opts.type;
   mode = m;
   // each mode has its colourway (green roads, blue rail, orange stops); the HUD reads it from here
-  document.body.dataset.mode = m === 'line' ? 'stop' : m === 'station' ? 'rail' : m;
+  document.body.dataset.mode = m === 'line' ? 'stop' : m;
   if (m === 'rail' && opts.cross === 'junction') opts.cross = 'bridge';
   clearDraft();
 }
@@ -761,13 +766,12 @@ function setKind(k: RoadKind) {
 }
 // The hint over the map. It leads with the current tool's icon unless given its own. With a tool
 // in use it stays until replaced; otherwise it's a short message that clears itself.
-const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop', line: 'transport', station: 'train', bulldoze: 'bulldozer' };
+const MODE_ICON: Record<Mode, Icon> = { look: 'finger', road: 'road', rail: 'train', stop: 'busStop', line: 'transport', bulldoze: 'bulldozer' };
 function hint(text?: string, ic?: Icon) {
   let t = text;
   if (t === undefined) {
     if (!tool) return shell.hint(null);
     if (mode === 'stop') t = stopPreview ? '' : 'Tap a road, on the side you want the stop'; // (with a blueprint down, the card says it all)
-    else if (mode === 'station') t = 'Tap a straight, level stretch of railway · platforms go either side';
     else if (mode === 'bulldoze') t = doomed ? '' : 'Tap a road or a bus stop to take it away';
     else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : ''; // (then the card says what next)
     else if (draft && slipPlan) t = 'A slip road: drag ahead and out to leave the motorway, back and out to join it · then Build';
@@ -824,7 +828,7 @@ function bulldozeTap(p: P) {
   const hit = stopAt(p);
   const q = hit ? null : net.nearestSeg(p, 14, (x) => net.def(x).cls === 'road');
   if (!hit && !q) { doomed = null; drawGhost(); tool?.setPanel(null); tool?.setPrimary(null); hint('Tap a road or a bus stop', 'alert'); return; }
-  const seg = hit ? hit.seg : q!.seg, calls = (id: number) => lines.list.filter((l) => l.mode === 'bus' && l.stops.some((x) => lines.same(x, id)));
+  const seg = hit ? hit.seg : q!.seg, calls = (id: number) => lines.list.filter((l) => l.stops.some((x) => lines.same(x, id)));
   doomed = { seg, stop: hit?.stop };
   drawGhost();
   let what: string, why: string | null = null, refund = 0;
@@ -870,59 +874,17 @@ function startStopTool() {
   setMode('stop');
   hint();
 }
-// ---- railway stations (game/rail.ts): tap the track ----
-function startStationTool() {
-  tool = shell.startTool({ name: 'Railway station', spec: `Platforms either side of the track · ${money(price(STATION_LIST_PRICE))}`, icon: 'train', tone: 'rail', onDone: endTool, onCancel: endTool });
-  setMode('station');
-  hint();
-}
-function stationTap(g: P) {
-  const pl = stations.plan(g), cost = price(STATION_LIST_PRICE), afford = purse.can(cost);
-  focusOn({ x: pl.x, z: pl.z }, 160);
-  const el = openPanel('station', pl.ok ? 'Railway station here' : 'Can’t put a station here', 'train', pl.ok
-    ? `<div class="plan"><div class="row"><span class="tab">Two side platforms</span><span class="cost">${money(cost)}</span></div>
-        <ul><li>110 m platforms, long enough for a four-car train</li><li>Trains on your rail lines draw up here</li></ul>
-        ${afford ? '' : `<div class="bad">${icon('alert')}<span>${short(cost)}</span></div>`}
-        <button class="act primary" data-build="1" ${afford ? '' : 'disabled'}>${icon('check')}<span>Build station</span></button></div>`
-    : `<div class="bad">${icon('alert')}<span>${esc(pl.reason ?? '')}</span></div>`, true);
-  el.querySelector('[data-build]')?.addEventListener('click', () => {
-    if (!purse.spend(cost, 'building')) { hint(short(cost), 'alert'); return; }
-    const st = stations.add(pl);
-    closeSheet();
-    if (!st) return;
-    town.sync();
-    hint(`${st.name} station built for ${money(cost)} · draw a rail line from Transport > Lines`, 'train');
-  });
-}
-function showStationInfo(id: number) {
-  const st = stations.byId(id);
-  if (!st) return;
-  const on = lines.list.filter((l) => l.stops.includes(id)), e = townRef?.stop(id);
-  shell.openInfo({
-    key: `station:${id}`, title: st.name, sub: 'Railway station', icon: 'train', tone: 'rail',
-    facts: [['Lines', on.map((l) => `${l.num}`).join(', ') || 'None yet'], ['Waiting', `${Math.round(e?.waiting ?? 0)}`], ['Boarded this month', `${Math.round((e?.boarded ?? 0) * 30).toLocaleString('en-GB')}`]],
-    actions: on.slice(0, 3).map((l) => ({ label: `Line ${l.num}`, icon: 'transport' as Icon, onClick: () => showLineInfo(l) })),
-  });
-}
-
 // ---- the line tool: tap stops in the order the buses call; the first again makes it circular ----
 let lineDraft: number[] = [];
 let lineLoop = false;
 let busOffer: string | undefined; // the bus model new lines get (picked in Transport > Buy vehicles)
-let trainChoice: (TrainDef & { offer: string }) | undefined; // the trains new rail lines get
-const NEW_LINE_TRAINS = 1;
-function defaultTrain() { const o = traffic.fleet.offerFor('dmu'); return trainChoice ?? (o ? traffic.fleet.defFor(o) : undefined); }
-function trainPrice(t?: TrainDef & { offer?: string }) { const f = traffic.fleet, o = t?.offer ? f.trainOffers().find((x) => x.id === t.offer) : undefined; return price(o?.cost ?? 1_200_000); }
-const draftRail = () => lineDraft.length > 0 && lines.isStation(lineDraft[0]);
-// what the line being drawn will cost: its buses, or its train
-function draftCost() { return draftRail() ? trainPrice(defaultTrain()) * NEW_LINE_TRAINS : busPrice(busOffer) * NEW_LINE_BUSES; }
 function startLineTool() {
   lineDraft = []; lineLoop = false;
   tool = shell.startTool({ name: 'New line', spec: 'Tap stops in order', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
   setMode('line');
   lineChanged();
   // (every stop and station in view, so they can all be tapped without hunting for them)
-  const pts = [...markers.places(), ...markers.stationPlaces()].map((m) => m.p);
+  const pts = markers.places().map((m) => m.p);
   if (pts.length) {
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const q of pts) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z); }
@@ -933,16 +895,15 @@ function lineChanged() {
   const n = lineDraft.length;
   showLine(n ? callOrder(lineDraft, lineLoop) : [], lineDraft);
   tool?.setUndo(n > 0);
-  const cost = draftCost();
-  tool?.setPrimary({ label: n < 2 ? 'Create' : `Create · ${money(cost)}`, icon: 'check', kind: 'primary', disabled: n < 2 || !purse.can(cost), title: purse.can(cost) ? (draftRail() ? `${NEW_LINE_TRAINS} train` : `${NEW_LINE_BUSES} buses`) : short(cost), onClick: finishLine });
+  const cost = busPrice(busOffer) * NEW_LINE_BUSES;
+  tool?.setPrimary({ label: n < 2 ? 'Create' : `Create · ${money(cost)}`, icon: 'check', kind: 'primary', disabled: n < 2 || !purse.can(cost), title: purse.can(cost) ? `${NEW_LINE_BUSES} buses` : short(cost), onClick: finishLine });
   const next = n === 1 ? 'Tap the next stop' : lineLoop ? 'Circular · tap stop 1 again to make it there and back' : `Tap more stops${n > 2 ? ', or stop 1 again to go round in a circle' : ''} · then Create`;
   tool?.setPanel(n ? `<div class="what">${icon('transport')}<span>${lineDraft.map((id, i) => `<b>${i + 1}</b> ${esc(lines.name(id))}`).join(' · ')}${lineLoop ? ' · <b>back to 1</b>' : n > 2 ? ' · and back' : ''}</span></div><p class="why">${esc(next)}</p>` : null);
   hint();
 }
 function lineTap(sx: number, sy: number) {
   const id = stopNear(sx, sy);
-  if (id === null) { hint(allStops().length || stations.list.length ? 'Tap one of the stop or station badges' : 'There are no stops yet · add them from Build > Stops', 'alert'); return; }
-  if (lineDraft.length && lines.isStation(id) !== draftRail()) { hint('A line calls at bus stops or at stations, not both', 'alert'); return; }
+  if (id === null) { hint(allStops().length ? 'Tap one of the orange stop badges' : 'There are no stops yet · add them from Build > Stops', 'alert'); return; }
   if (lineDraft.length && lines.same(lineDraft[lineDraft.length - 1], id)) return;
   if (lineDraft.length >= 2 && lines.same(lineDraft[0], id)) { lineLoop = !lineLoop; lineChanged(); return; }
   if (lineDraft.some((x) => lines.same(x, id))) { hint('That stop is on the line already · a line calls at each stop once each way', 'alert'); return; }
@@ -952,37 +913,34 @@ function lineTap(sx: number, sy: number) {
 }
 function finishLine() {
   if (lineDraft.length < 2) return;
-  const rail = draftRail(), cost = draftCost();
+  const cost = busPrice(busOffer) * NEW_LINE_BUSES;
   if (!purse.can(cost)) { hint(short(cost), 'alert'); return; }
-  // (the old operator's trains are withdrawn once you run your own: nothing signals them apart)
-  if (rail && !lines.list.some((x) => x.mode === 'rail')) traffic.clearOtherTrains();
-  const l = rail ? lines.add(lineDraft, lineLoop, NEW_LINE_TRAINS, undefined, defaultTrain()) : lines.add(lineDraft, lineLoop, NEW_LINE_BUSES, busOffer);
-  const each = rail ? trainPrice(l.train as TrainDef & { offer?: string }) : busPrice(busOffer), k = lines.buses(l).length;
+  const l = lines.add(lineDraft, lineLoop, NEW_LINE_BUSES, busOffer);
+  const each = busPrice(busOffer), k = lines.buses(l).length;
   purse.spend(each * k, 'vehicles');
   lineDraft = [];
   endTool();
   showLineInfo(l);
   updateGoal();
-  hint(`Line ${l.num} is running · ${k} ${rail ? (k === 1 ? 'train' : 'trains') : 'buses'} · ${money(each * k)}`, rail ? 'train' : 'bus');
+  hint(`Line ${l.num} is running · ${k} buses · ${money(each * k)}`, 'bus');
 }
 // what a bus costs (the model the line runs, or the default one)
 function busPrice(offer?: string) { const f = traffic.fleet, o = (offer && f.busOffers().find((x) => x.id === offer)) || f.defaultBus(); return price(o?.cost ?? 180_000); }
 const NEW_LINE_BUSES = 2;
 // buy a bus for a line: false if there isn't the money or the room
-function vehiclePrice(l: Line) { return l.mode === 'rail' ? trainPrice(l.train as TrainDef & { offer?: string }) : busPrice(l.offer); }
 function buyBus(l: Line) {
-  const cost = vehiclePrice(l);
+  const cost = busPrice(l.offer);
   if (!purse.can(cost)) { hint(short(cost), 'alert'); return false; }
   const c = lines.addBus(l);
-  if (!c) { hint(l.mode === 'rail' ? 'No track there the train can use' : 'No room on the roads for a bus just now', 'alert'); return false; }
+  if (!c) { hint('No room on the roads for a bus just now', 'alert'); return false; }
   purse.spend(cost, 'vehicles');
-  hint(l.mode === 'rail' ? `A train joins line ${l.num} · ${money(cost)}` : `Bus ${c.dress?.fleetNo ?? ''} joins line ${l.num} · ${money(cost)}`, l.mode === 'rail' ? 'train' : 'bus');
+  hint(`Bus ${c.dress?.fleetNo ?? ''} joins line ${l.num} · ${money(cost)}`, 'bus');
   return true;
 }
 // the stop badge nearest a tap, within a finger's width
 function stopNear(sx: number, sy: number): number | null {
   let best: number | null = null, bd = 30;
-  for (const { id, p } of [...markers.places(), ...markers.stationPlaces()]) {
+  for (const { id, p } of markers.places()) {
     const q = toScreen(p), d = Math.hypot(q.x - sx, q.y - sy);
     if (d < bd) { bd = d; best = id; }
   }
@@ -993,7 +951,7 @@ function stopNear(sx: number, sy: number): number | null {
 let routeShown: ReturnType<typeof routeMesh> = null;
 function showLine(seq: number[] | null, stops: number[] = []) {
   if (routeShown) { scene.remove(routeShown); routeShown.geometry.dispose(); routeShown.material.dispose(); routeShown = null; }
-  if (seq && seq.length > 1) { routeShown = routeMesh(net, traffic, seq, '#5cb83a', stations); if (routeShown) scene.add(routeShown); }
+  if (seq && seq.length > 1) { routeShown = routeMesh(net, traffic, seq); if (routeShown) scene.add(routeShown); }
   markers.show(seq ? new Map(stops.map((id, i) => [id, String(i + 1)])) : null);
 }
 
@@ -1043,7 +1001,7 @@ function bindRoadOptions(el: HTMLElement) {
   el.querySelector('#g-h')!.addEventListener('click', () => {
     opts.height = HEIGHTS[(HEIGHTS.findIndex((h) => h[0] === opts.height) + 1) % HEIGHTS.length][0];
     refreshOptions(); draftChanged();
-    hint({ auto: 'Auto: stays near the ground, climbing or diving only to clear what it crosses', level: 'Level: holds the starting height all the way', up: 'Climb: rises at the chosen gradient the whole way' }[opts.height]);
+    hint({ auto: 'Auto: stays near the ground, climbing or diving only to clear what it crosses', level: 'Level: holds the starting height all the way', up: 'Climb: rises at the chosen gradient the whole way', deep: `Deep: dives into a bored tunnel ${DEEP} m down and stays there · deep enough for an underground station` }[opts.height]);
   });
   el.querySelector('#g-g')!.addEventListener('click', () => {
     const steps = gradeSteps();
@@ -1095,9 +1053,9 @@ shell.firstRun('untitled.hint.inspect', 'Tap anything on the map to inspect it �
 // ---------------- sheets ----------------
 // Detail opens in a bottom sheet (a panel down the right in landscape); the camera turns so the
 // thing you picked sits in the clear map left above or beside it, so you can see what each choice does.
-type PanelKind = 'junction' | 'stop' | 'station' | 'roads' | 'reset' | 'quality';
+type PanelKind = 'junction' | 'stop' | 'roads' | 'reset' | 'quality';
 // the colourway a sheet wears: stops are orange, road work green, the rest the house green
-const TONE = { junction: 'road', roads: 'road', stop: 'stop', station: 'rail', reset: 'look', quality: 'look' } as const;
+const TONE = { junction: 'road', roads: 'road', stop: 'stop', reset: 'look', quality: 'look' } as const;
 // what closing each kind of sheet undoes: a junction being edited, a stop being planned
 const leaveJunction = () => { if (editJ !== null) { editJ = null; rebuildRoads(); } };
 const ON_CLOSE: Partial<Record<PanelKind, () => void>> = { junction: leaveJunction, stop: () => { stopPreview = null; drawGhost(); } };
@@ -1180,8 +1138,8 @@ shell.addTransportTab({
   render: (el) => {
     const stops = markers.places().map(({ id }) => { const pl = traffic.place(id)!; return { seg: pl.seg, stop: pl.stops[0], sides: pl.stops.length }; });
     el.innerHTML = `<p class="note">${lines.list.length ? 'Buses call only at their line’s stops. Tap a line to see its route.' : 'No lines yet. A line is stops in order; its buses call at those and nothing else.'}</p>
-      ${lines.list.map((l, i) => `<button class="lrow tone-stop" data-line="${i}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${l.stops.length} ${l.mode === 'rail' ? 'stations' : 'stops'} · ${lines.buses(l).length} ${l.mode === 'rail' ? 'train' : 'bus'}${lines.buses(l).length === 1 ? '' : l.mode === 'rail' ? 's' : 'es'} · ${l.loop ? 'circular' : 'there and back'}</span></button>`).join('')}
-      <div class="acts"><button class="act primary tone-stop" data-newline="1" ${stops.length < 2 && stations.list.length < 2 ? 'disabled' : ''}>${icon('transport')}<span>New line</span></button><button class="act" data-addstop="1">${icon('plus')}<span>Add a bus stop</span></button></div>
+      ${lines.list.map((l, i) => `<button class="lrow tone-stop" data-line="${i}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${l.stops.length} stops · ${lines.buses(l).length} bus${lines.buses(l).length === 1 ? '' : 'es'} · ${l.loop ? 'circular' : 'there and back'}</span></button>`).join('')}
+      <div class="acts"><button class="act primary tone-stop" data-newline="1" ${stops.length < 2 ? 'disabled' : ''}>${icon('transport')}<span>New line</span></button><button class="act" data-addstop="1">${icon('plus')}<span>Add a bus stop</span></button></div>
       <div class="grp"><span class="tab">Stops</span><small>${stops.length ? `${stops.length} stop${stops.length === 1 ? '' : 's'}, tap one to show it` : 'There are no stops yet.'}</small>
       ${stops.map(({ seg, stop, sides }, i) => `<button class="lrow tone-stop" data-stop="${i}"><span class="num">${icon('busStop')}</span><b>${esc(lines.name(stop.id))}</b><span>${sides > 1 ? 'Both sides' : 'One side'} · ${stop.kind === 'kerb' ? 'kerbside' : 'lay-by'} · ${esc(net.def(seg).label)}</span></button>`).join('')}</div>`;
     el.querySelector('[data-addstop]')!.addEventListener('click', () => startStopTool());
@@ -1200,39 +1158,24 @@ function showLineInfo(l: Line) {
   if (!lines.list.includes(l)) { closeSheet(); return; }
   const n = lines.buses(l).length, st = townRef?.line(l.id), books = purse.line(l.id);
   lastLine = l;
-  const profit = books.lastFares - books.lastRunning, sell = Math.round(vehiclePrice(l) / 2), rail = l.mode === 'rail', veh = rail ? 'train' : 'bus';
+  const profit = books.lastFares - books.lastRunning, sell = Math.round(busPrice(l.offer) / 2);
   showLine(l.bus.seq, l.stops);
   shell.openInfo({
     // (the three numbers that matter as tiles, the stops in a line, and the actions in a row;
     // a game day is the town's month, so "a day" is what the player sees)
-    key: `line:${l.id}`, title: `Line ${l.num}`, sub: `${lines.title(l)} · ${l.loop ? 'circular' : 'there and back'}`, icon: l.mode === 'rail' ? 'train' : 'transport', tone: l.mode === 'rail' ? 'rail' : 'stop',
-    stats: [[rail ? 'Trains' : 'Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
-    facts: [[rail ? 'Stations' : 'Stops', l.stops.map((id) => lines.name(id)).join(' · ')]],
-    note: `Each rider pays £2${books.lastRunning ? `; the ${veh}${rail ? 's' : 'es'} cost ${money(books.lastRunning)} a day to run` : `, and the ${veh}${rail ? 's' : 'es'} cost a little each day to run`}.`,
+    key: `line:${l.id}`, title: `Line ${l.num}`, sub: `${lines.title(l)} · ${l.loop ? 'circular' : 'there and back'}`, icon: 'transport', tone: 'stop',
+    stats: [['Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
+    facts: [['Stops', l.stops.map((id) => lines.name(id)).join(' · ')]],
+    note: `Each rider pays £2${books.lastRunning ? `; the buses cost ${money(books.lastRunning)} a day to run` : ', and the buses cost a little each day to run'}.`,
     actions: [
-      { label: `${veh === 'bus' ? 'Bus' : 'Train'} · ${money(vehiclePrice(l))}`, title: `Add a ${veh} for ${money(vehiclePrice(l))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(vehiclePrice(l)), onClick: () => { buyBus(l); showLineInfo(l); } },
-      { label: 'Sell', title: `Sell a ${veh} for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`${rail ? 'Train' : 'Bus'} sold for ${money(sell)}`, rail ? 'train' : 'bus'); setTimeout(() => showLineInfo(l), 50); } },
-      { label: 'Withdraw', title: 'Withdraw the line and sell its vehicles', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} ${veh}${k === 1 ? '' : rail ? 's' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
+      { label: `Bus · ${money(busPrice(l.offer))}`, title: `Add a bus for ${money(busPrice(l.offer))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(busPrice(l.offer)), onClick: () => { buyBus(l); showLineInfo(l); } },
+      { label: 'Sell', title: `Sell a bus for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`Bus sold for ${money(sell)}`, 'bus'); setTimeout(() => showLineInfo(l), 50); } },
+      { label: 'Withdraw', title: 'Withdraw the line and sell its vehicles', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} bus${k === 1 ? '' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
     ],
     onClose: () => { if (mode !== 'line') showLine(null); },
   });
 }
 let lastLine: Line | null = null;
-// A train's sheet, when one of your trains is tapped.
-function showTrainInfo(id: number) {
-  const t = traffic.train(id);
-  if (!t) return;
-  const l = lines.of(id);
-  const facts: [string, string][] = [['Line', l ? `${l.num} · ${lines.title(l)}` : 'Not on a line'], ['Model', t.model]];
-  if (t.next !== undefined) facts.push([t.dwelling ? 'At' : 'Next station', lines.name(t.next)]);
-  facts.push(['Speed', `${Math.round(t.speed * 2.237)} mph`]);
-  if (l) showLine(l.bus.seq, l.stops);
-  shell.openInfo({
-    key: `train:${id}`, title: t.model, sub: l ? `Line ${l.num}` : 'Train', icon: 'train', tone: 'rail', facts,
-    actions: l ? [{ label: `Line ${l.num}`, icon: 'train', onClick: () => showLineInfo(l) }] : [],
-    onClose: () => { if (mode !== 'line') showLine(null); },
-  });
-}
 // A bus's sheet, when it's tapped on the map.
 function showBusInfo(id: number) {
   const b = traffic.bus(id);
@@ -1249,7 +1192,7 @@ function showBusInfo(id: number) {
   });
 }
 shell.addTransportTab({
-  id: 'buy', label: 'Buy vehicles', icon: 'bus', sub: 'Buses, trains and how busy the roads are',
+  id: 'buy', label: 'Vehicles', icon: 'bus', sub: 'The bus or train your lines buy',
   render: (el) => {
     // the vehicle library's fleet for the game year (game/fleet.ts); buses and trains run now
     const year = gameYear(), list = purchaseList(year), fleet = traffic.fleet;
@@ -1257,16 +1200,14 @@ shell.addTransportTab({
     const row = (o: Offer, attr: string, ic: Icon, off = false) => `<button ${attr}${off ? ' disabled' : ''}><b>${icon(ic)}${esc(o.name)}</b><small>${facts(o)}</small></button>`;
     const trainKind = (o: Offer) => (o.kind === 'tram' ? 'tram' : MODEL[o.models[0]].style === 'rack-car' ? 'rack' : MODEL[o.models[0]].stats.power === 'electric' ? 'hs' : 'dmu');
     const buses = list.filter((o) => o.kind === 'bus' || o.kind === 'coach'), trains = list.filter((o) => o.kind === 'train' || o.kind === 'tram');
-    const later = list.filter((o) => !buses.includes(o) && !trains.includes(o));
+    // (lorries, vans, boats and planes get a group here when they're in the game)
     el.innerHTML = `
       <div class="grp"><span class="tab">Buses and coaches</span><small>In your company's colours with fleet numbers. Tap one to put it on ${lastLine && lines.list.includes(lastLine) ? `line ${lastLine.num}` : lines.list.length ? `line ${lines.list[0].num}` : 'your next line'}; new lines get that model.</small>
         ${buses.map((o) => row(o, `data-bus="${o.id}"`, 'bus')).join('')}</div>
       <div class="grp"><span class="tab">Trains and trams</span><small>Each runs only on track it can manage: rack, electric wires, gradient</small>
         ${trains.map((o) => row(o, `data-set="${o.id}"`, trainIcon(trainKind(o)))).join('')}</div>
-      <div class="grp"><span class="tab">Background traffic</span><small>Cars come from homes, jobs, shops and works, and follow the clock</small>
-        <div class="row3" role="group" aria-label="How busy">${LEVELS.map(([n], i) => `<button data-lvl="${i}" class="${i === level ? 'on' : ''}" aria-pressed="${i === level}">${n === 'Traffic' ? 'Normal' : n}</button>`).join('')}</div></div>
-      <div class="grp"><span class="tab">Lorries, vans, boats and planes</span><small>On sale in ${year}; not in the game yet</small>
-        ${later.map((o) => row(o, '', o.kind === 'boat' ? 'droplet' : o.kind === 'plane' ? 'route' : 'building', true)).join('')}</div>`;
+      <div class="grp"><span class="tab">How busy the roads are</span><small>Cars come from homes, jobs, shops and works, and follow the clock</small>
+        <div class="row3" role="group" aria-label="How busy">${LEVELS.map(([n], i) => `<button data-lvl="${i}" class="${i === level ? 'on' : ''}" aria-pressed="${i === level}">${n === 'Traffic' ? 'Normal' : n}</button>`).join('')}</div></div>`;
     el.querySelectorAll<HTMLButtonElement>('[data-bus]').forEach((b) => b.addEventListener('click', () => {
       const o = buses.find((x) => x.id === b.dataset.bus)!, l = lastLine && lines.list.includes(lastLine) ? lastLine : lines.list[0];
       busOffer = o.id;
@@ -1948,17 +1889,14 @@ function tapMap(sx: number, sy: number): Mode {
   if (mode === 'stop') { stopTap(g); return mode; }
   if (mode === 'bulldoze') { bulldozeTap(g); return mode; }
   if (mode === 'line') { lineTap(sx, sy); return mode; }
-  if (railGame.tap(sx, sy, g)) return 'stop'; // (a railway tool: rail/game.ts)
-  if (mode === 'station') { stationTap(g); return mode; } // (the interim stations, game/rail.ts: not offered while rail/ is)
+  const deep = underView.on ? deepAt(sx, sy) : null;
+  if (railGame.tap(sx, sy, deep ?? g)) return 'stop'; // (a railway tool: rail/game.ts)
   const bus = traffic.busNear(g);
   if (bus !== null) { showBusInfo(bus); return 'look'; }
   const ixAt = interchangeAt(g); // (a motorway junction is one junction, whichever part of it is tapped)
   if (ixAt) { showInterchangeInfo(ixAt); return 'look'; }
+  if (deep && railGame.inspect(deep, true)) return 'look'; // (deep down, in the underground view)
   if (railGame.inspect(g)) return 'look'; // a train or a station
-  const train = traffic.trainNear(g);
-  if (train !== null) { showTrainInfo(train); return 'look'; }
-  const sta = stations.near(g, 60);
-  if (sta) { showStationInfo(sta.id); return 'look'; }
   const st = stopAt(g);
   const jn = st ? null : junctionNear(g);
   const br = st || jn !== null ? null : bridgeAt(sx, sy); // (a bridge is tapped where it's drawn, up in the air)
@@ -1976,6 +1914,29 @@ function tapMap(sx: number, sy: number): Mode {
 // ---------------- input ----------------
 // The shared camera (kit/camera.ts) pans, pinches, turns and tilts the map (Google Maps style);
 // the game takes the finger when a tool needs it, and hears about taps.
+// The underground view (game/underview.ts), from its button under the compass.
+function toggleUnderground(on = !underView.on) {
+  underView.set(on);
+  shell.setUnderground(on);
+  hint(on ? 'Underground view: the ground fades so tunnels, underground stations and their trains show · tap again for the surface' : 'Back to the surface', 'tunnel');
+}
+// In the underground view a tap on a tunnel or an underground station means what's drawn there, deep
+// down, not the ground in front of it: the level of the deep track under the finger (found by
+// looking at one depth, then at the track's own there), or null if there's none.
+function deepAt(sx: number, sy: number): P | null {
+  // (heights here are below the ground: on a hilly map, below the ground under the finger)
+  const h0 = nav.groundUnder(sx, sy).y ?? 0, level = (y: number) => nav.levelUnder(sx, sy, h0 + y);
+  let y = -DEEP + 1.4, g = level(y);
+  for (let i = 0; i < 4; i++) {
+    const q = net.nearestSeg(g, 40, (s) => net.def(s).cls === 'rail' && net.path(s).some((p) => (p.y ?? 0) < -9));
+    const c = q && closestOnPath(g, net.path(q.seg));
+    if (!c || c.y > -9) return null;
+    const next = c.y + 1.4; // (about the platforms' level)
+    if (Math.abs(next - y) < 0.2) break;
+    y = next; g = level(y);
+  }
+  return { x: g.x, z: g.z };
+}
 function groundAt(sx: number, sy: number): P {
   const g = nav.groundUnder(sx, sy);
   return { x: g.x, z: g.z };
@@ -2152,17 +2113,11 @@ traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
 onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); townRef?.networkChanged(); };
-const stations = new Stations(net);
-scene.add(stations.group);
-traffic.stationAt = (id) => stations.spot(id);
-traffic.onTrainStop = () => 30; // seconds at the platform
-const lines = new Lines(traffic, stations);
-const markers = new StopMarkers(net, traffic, stations);
+const lines = new Lines(traffic);
+const markers = new StopMarkers(net, traffic);
 scene.add(markers.group);
-// a saved town's own lines and stations, put back now the traffic is here to run them
+// a saved town's own lines, put back now the traffic is here to run them (its railway came back with the network)
 if (SAVED) {
-  stations.restore(SAVED.stations);
-  if (SAVED.lines.list.some((l) => l.mode === 'rail')) traffic.clearOtherTrains();
   if (!lines.restore(SAVED.lines)) console.info('save: a vehicle had no room to start');
 }
 const dbSize = new THREE.Vector2();
@@ -2241,7 +2196,8 @@ const railDraw = new RailDraw(railway, traffic.fleet);
 railway.useRoads(traffic);
 traffic.onDraw = (dt) => railDraw.drawTrains(dt);
 const railGame = new RailGame({
-  net, shell, railway, draw: railDraw, people, scene, toScreen, focusOn, rebuildRoads, hint, purse,
+  net, shell, railway, draw: railDraw, people, scene, toScreen, focusOn, hint, purse, below: () => underView.on,
+  rebuildRoads: () => { rebuildRoads(); refreshTrees(); }, // (a station's platforms and building take their land: trees there go)
   clear: (lots) => { for (const l of lots) { const b = buildings.find((x) => x.lot === l); if (b && !b.dying) demolish(b); } placesDirty = true; },
 });
 rebuildRoads();
@@ -2301,7 +2257,7 @@ function snapshot(): GameSave {
     clock, speed, rate, rand: rand.state,
     net: saveNetwork(net), queue,
     junctions: [...junctions.values()].filter((j) => !j.auto), interchanges,
-    industries: industries.save(), railway: railway.save(), stations: stations.save(), lines: lines.save(), town: t, purse: purse.save(),
+    industries: industries.save(), railway: railway.save(), lines: lines.save(), town: t, purse: purse.save(),
   };
 }
 // Save now (the town is copied as it's written, so play carries straight on). False if it couldn't.
@@ -2475,7 +2431,7 @@ function frame(now: number) {
   const q = TIERS[tier];
   if (q.every && ++frameNo % q.every === 0) renderer.shadowMap.needsUpdate = true;
   drape?.apply(scene); // (whatever's new since the last frame follows the hills)
-  renderer.render(scene, cam);
+  underView.render(scene, cam, now);
   if (!loaded) { loaded = true; loading.done(); } // (the first frame is drawn: the loading screen goes)
   const t2 = performance.now();
   perf.simMs += t1 - t0; perf.drawMs += t2 - t1; perf.worstSim = Math.max(perf.worstSim, t1 - t0);
@@ -2499,7 +2455,8 @@ loading.finish();
 let loaded = false;
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, stations, startStationTool, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+Object.assign((window as unknown as { proto: object }).proto, { underView, toggleUnderground }); // (the underground view: game/underview.ts)
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
 Object.assign((window as unknown as { proto: object }).proto, { interchanges, blueprint: (a: P, b: P) => { draft = { a: net.snapStart(a, 4), b: net.snapEnd(net.snapStart(a, 4), b, 4, true) }; draftChanged(); } });

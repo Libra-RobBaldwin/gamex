@@ -38,7 +38,8 @@ vec4 dWorld = vec4( transformed, 1.0 );
   dWorld = instanceMatrix * dWorld;
 #endif
 dWorld = modelMatrix * dWorld;
-dWorld.y += terrainH( dWorld.xz );
+float dH = terrainH( dWorld.xz );
+dWorld.y += dH;
 vec4 mvPosition = viewMatrix * dWorld;
 gl_Position = projectionMatrix * mvPosition;
 `;
@@ -54,6 +55,11 @@ export function drapeShader(src: string): { src: string; ok: boolean } {
   let ok = false;
   const rep = (a: string | RegExp, b: string) => { const s2 = src.replace(a, b); if (s2 !== src) { ok = true; src = s2; } };
   rep('#include <project_vertex>', PROJECT);
+  // clipping planes (the underground view's, game/underview.ts) cut by height above the ground,
+  // not in the hills' world: where the vertex was before it was lifted onto them
+  if (src.includes('float dH = terrainH')) src = src.replace('#include <clipping_planes_vertex>', `#if NUM_CLIPPING_PLANES > 0
+  vClipPosition = - ( viewMatrix * vec4( dWorld.xyz - vec3( 0.0, dH, 0.0 ), 1.0 ) ).xyz;
+#endif`);
   rep('#include <worldpos_vertex>', WORLDPOS);
   // sprites (badges and icons): their centre
   rep('vec4 mvPosition = modelViewMatrix[ 3 ];', 'vec4 dCentre = modelMatrix[ 3 ]; dCentre.y += terrainH( dCentre.xz ); vec4 mvPosition = viewMatrix * dCentre;');

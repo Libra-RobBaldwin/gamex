@@ -18,7 +18,6 @@ import type { Junction } from '../junction';
 import type { Interchange } from '../interchange/build';
 import type { Owner, XZ } from '../land';
 import type { RailwaySave } from '../rail/railway';
-import type { StationSave } from './rail';
 import type { IndustriesSave } from './industry';
 import type { LinesSave } from './lines';
 import type { TownSave } from './econ';
@@ -50,7 +49,7 @@ export interface GameSave {
   interchanges: Interchange[];
   industries: IndustriesSave;
   railway: RailwaySave; // stations, track signalling and rail lines (rail/)
-  stations: StationSave[]; // the loop's simple stations (game/rail.ts)
+  stations?: unknown[]; // (the loop's interim stations, in saves from before they went: not restored)
   lines: LinesSave;
   town: TownSave;
   purse: PurseSave;

@@ -22,10 +22,11 @@ a stream with review and fixes takes 45–90 minutes, and a merge about 5.
 - [ ] **The front menu and onboarding:** pick a map (`claude/work-front-menu`).
 
 ### 2. Stations (sent to the rail session)
-- [ ] Platforms on curved track: they follow the curve, with a limit on radius.
-- [ ] Stations on bridges where there's room: a viaduct station with stairs down.
-- [ ] Underground stations in tunnels: platforms below ground, entrances at the surface.
-- [ ] **An underground view toggle:** the ground fades and tunnels, underground platforms and
+- [x] Platforms on curved track: they follow the curve, with a limit on radius
+  (`claude/work-stations-2`, docs/rail.md).
+- [x] Stations on bridges where there's room: a viaduct station with stairs down.
+- [x] Underground stations in tunnels: platforms below ground, entrances at the surface.
+- [x] **An underground view toggle:** the ground fades and tunnels, underground platforms and
   their trains show. A HUD view button, like the 3D/map toggle.
 - [ ] Trains open their platform-side doors; people queue on platforms and board through each
   car's `doorPositions`.

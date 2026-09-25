@@ -67,6 +67,8 @@ the screenshots, and frame time no worse than before the milestone at the same q
   withdrawing every line makes it decline.
 - **M4 is done** (`game/rail.ts`, train lines in `traffic.ts`). Checked by `e2e/rail.e2e.mjs`
   and `game/trains.test.ts`.
+  - **Since replaced** by the railway in `rail/` (docs/rail.md). The interim code below has been
+    removed: see "The interim M4 on the integration branch" there.
   - The main line is raised on a 2.5% hump through town, so platforms follow an even gradient
     on solid embankment. They're refused over the road and on the crest.
   - Trains reverse at the ends of a line.

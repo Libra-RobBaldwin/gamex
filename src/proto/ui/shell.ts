@@ -119,6 +119,8 @@ export interface ShellOptions {
   onPerf: () => void;
   /** The town panel, from the drawer's button. */
   onTown?: () => void;
+  /** The underground view button, under the view button: the ground fades so tunnels show. */
+  onUnderground?: () => void;
 }
 export interface Rect { left: number; top: number; right: number; bottom: number }
 
@@ -176,6 +178,7 @@ export class Shell {
         </div>
         <button id="compass" aria-label="Face north and reset the tilt" title="Face north"><span id="needle">${needleSvg()}</span></button>
         <button id="viewbtn" class="round" hidden aria-label="View" title="View">${icon('map')}<span></span></button>
+        <button id="ugbtn" class="round" ${opts.onUnderground ? '' : 'hidden'} aria-pressed="false" aria-label="Underground view" title="Underground view">${icon('tunnel')}</button>
         <div id="firstrun" role="status" hidden></div>
         <button id="goal" hidden></button>
       </div>
@@ -196,6 +199,7 @@ export class Shell {
     this.$('#sp-rate').addEventListener('click', () => opts.onRate());
     this.$('#perfbtn').addEventListener('click', () => opts.onPerf());
     this.$('#townbtn').addEventListener('click', () => { this.toggleDrawer(false); opts.onTown?.(); });
+    this.$('#ugbtn').addEventListener('click', () => opts.onUnderground?.());
     this.$('#clockbtn').addEventListener('click', () => this.toggleDrawer());
     // while a tool hides the bar (and with it Layers), this cycles 3D, Low and Plan
     this.$('#viewbtn').addEventListener('click', () => {
@@ -434,6 +438,12 @@ export class Shell {
     if (!this.$('#layers').hidden) this.openLayers();
   }
   setViews(v: ViewPicker) { this.views = v; }
+  /** Light the underground view button while the view is on. */
+  setUnderground(on: boolean) {
+    const b = this.$('#ugbtn');
+    b.setAttribute('aria-pressed', String(on));
+    b.setAttribute('aria-label', on ? 'Underground view on, tap to show the surface' : 'Underground view');
+  }
   openLayers() {
     this.dismissFirstRun();
     this.closeSheet();
@@ -633,7 +643,7 @@ export class Shell {
     h.style.maxWidth = `${Math.max(160, c.right - c.left - 16)}px`;
     // and keeps clear of the compass and view buttons, if it reaches up beside them
     const hr = h.getBoundingClientRect();
-    for (const s of ['#compass', '#viewbtn']) {
+    for (const s of ['#compass', '#viewbtn', '#ugbtn']) {
       const b = this.$(s);
       if (b.hidden) continue;
       const br = b.getBoundingClientRect();

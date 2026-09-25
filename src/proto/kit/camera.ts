@@ -202,6 +202,13 @@ export class NavCore {
     const dy = Math.min(r.dir.y, -0.02), t = r.origin.y / -dy;
     return { x: r.origin.x + r.dir.x * t, y: 0, z: r.origin.z + r.dir.z * t };
   }
+  /** Where the ray under a screen point meets the level at height y (below the ground: what a tap
+   * means in the underground view). */
+  levelUnder(sx: number, sy: number, y: number, v: View = this.view): V3 {
+    const r = screenRay(v, this.lens(), sx, sy);
+    const dy = Math.min(r.dir.y, -0.02), t = (r.origin.y - y) / -dy;
+    return { x: r.origin.x + r.dir.x * t, y, z: r.origin.z + r.dir.z * t };
+  }
   groundToScreen(p: GroundPoint) { return groundToScreen(this.view, this.lens(), p); }
   /** which way north (-z) points on the screen, radians clockwise from pointing right */
   northAngle() {

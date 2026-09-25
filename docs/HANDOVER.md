@@ -51,6 +51,12 @@ nothing should be built at the start, the HUD was too big, and the tools were to
   The merges were checked with tsc, vitest (only the known economy test fails), the lines, loop,
   rail and save phone tests, and a region-map smoke test (it loads in 29 s with no errors). The
   region and streaming sessions are archived.
+- **#40 merged** (curved, viaduct and underground stations, and the underground view), and the
+  stations session archived.
+- **Station tool now works like the bus stop:** tap level track, and the blueprint shows with the
+  layouts that suit the line as buttons with prices. Build is in the strip; More options opens the
+  full sheet (tracks, style, crossing, canopies, length), and closing it goes back to the card.
+  `e2e/rail.e2e.mjs` builds from the card; `e2e/stations.e2e.mjs` builds through More options.
 - **Still open:**
   - #39: traffic. Gap-taking is done; the roundabout pull-out and steering are to follow on the
     same branch.

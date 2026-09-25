@@ -52,8 +52,9 @@ async function buildStation(x) {
   await page.touchscreen.tap(s.x, s.y);
   await wait(1500);
   await page.screenshot({ path: `${out}/rail-1-plan-${x}.png` });
-  const btn = await page.$('#sheet [data-build]:not([disabled])');
-  if (!btn) { fail(`no station can be built at x=${x}: ${(await page.textContent('#sheet').catch(() => ''))?.slice(0, 200)}`); return; }
+  // the card: the layouts with their prices, and Build in the tool strip
+  const btn = await page.$('#t-prim button:not([disabled])');
+  if (!btn) { fail(`no station can be built at x=${x}: ${(await page.textContent('#tpanel').catch(() => ''))?.slice(0, 200)}`); return; }
   await btn.tap();
   await wait(1500);
 }

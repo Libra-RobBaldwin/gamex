@@ -56,13 +56,15 @@ export class Railway {
     this.sim.rebuild(this.graph, this.crossings);
     this.shapes.clear();
     for (const w of works) {
-      if (this.graph.broken.has(w.id)) { this.net.land.release(`station:${w.id}`); continue; }
-      const st = this.station(w.id), sh = stationShape(this.net, this.graph, w, { style: st?.style, access: st?.access, canopy: st?.canopy });
+      if (this.graph.broken.has(w.id)) { this.release(w.id); continue; }
+      const st = this.station(w.id), sh = stationShape(this.net, this.graph, w, { style: st?.style, access: st?.access, canopy: st?.canopy, structure: st?.structure });
       if (!sh) continue;
       this.shapes.set(w.id, sh);
       this.net.land.claim(`station:${w.id}`, 'station', sh.land);
+      // (a viaduct's deck is the railway's, like a bridge: roads may pass under it, buildings can't)
+      if (sh.deckLand) this.net.land.claim(`station:${w.id}:deck`, 'road', sh.deckLand); else this.net.land.release(`station:${w.id}:deck`);
     }
-    for (const s of this.stations) if (!this.shapes.has(s.id)) this.net.land.release(`station:${s.id}`);
+    for (const s of this.stations) if (!this.shapes.has(s.id)) this.release(s.id);
     this.version++;
   }
 
@@ -81,9 +83,10 @@ export class Railway {
     this.rebuild();
     return { station: st, cleared: plan.clears };
   }
+  private release(id: number) { this.net.land.release(`station:${id}`); this.net.land.release(`station:${id}:deck`); }
   remove(id: number) {
     this.stations = this.stations.filter((s) => s.id !== id);
-    this.net.land.release(`station:${id}`);
+    this.release(id);
     for (const l of [...this.lines]) {
       l.stops = l.stops.filter((s) => s !== id);
       if (l.depot === id) l.depot = undefined;
@@ -92,9 +95,10 @@ export class Railway {
     this.rebuild();
   }
   station(id: number) { return this.stations.find((s) => s.id === id); }
-  // the station standing on a spot (its platforms, building or forecourt)
-  stationAt(p: P): Station | undefined {
-    for (const [id, sh] of this.shapes) if (sh.land.some((poly) => pointInPoly(p, poly))) return this.station(id);
+  // the station standing on a spot: its platforms, building, forecourt or depot on the ground (or
+  // a viaduct's deck); with `below`, an underground station's platforms too (the underground view)
+  stationAt(p: P, below = false): Station | undefined {
+    for (const [id, sh] of this.shapes) if ((below ? sh.area : sh.deckLand ? [...sh.land, ...sh.deckLand] : sh.land).some((poly) => pointInPoly(p, poly))) return this.station(id);
     return undefined;
   }
   private nameFor(st: Station) {
@@ -130,6 +134,8 @@ export class Railway {
   private depotFor(id: number): number | undefined {
     const st = this.station(id);
     if (!st) return undefined;
+    // (no siding off a viaduct or out of a station box: trains start at the platforms)
+    if (st.structure && st.structure !== 'surface') return undefined;
     if (st.depot) return this.graph.depots.has(id) ? id : undefined;
     for (const end of [1, -1] as const) for (const side of [(-st.building) as 1 | -1, st.building]) {
       st.depot = { end, side, len: DEPOT_LEN };

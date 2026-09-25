@@ -178,7 +178,9 @@ export function structures(path: P[], body: Solid, rails: Solid | null, HALF: nu
   // cut the path exactly where each bridge starts and ends, so the walls meet its abutments
   if (bridged?.length) {
     const A = arcs(path), cuts = bridged.flat().filter((t) => t > 0.05 && t < A[A.length - 1] - 0.05);
-    path = [...path.map((p, i) => ({ p, t: A[i] })), ...cuts.map((t) => { const q = pointAt(path, t); return { p: { x: q.x, z: q.z, y: q.y }, t }; })].sort((a, b) => a.t - b.t).map((x) => x.p);
+    // (a cut where one already falls, or on a point of the path, would make a piece of no length:
+    // its sides would have no direction, and its walls would stand across the road)
+    path = [...path.map((p, i) => ({ p, t: A[i] })), ...cuts.map((t) => { const q = pointAt(path, t); return { p: { x: q.x, z: q.z, y: q.y }, t }; })].sort((a, b) => a.t - b.t).filter((x, i, all) => i === 0 || x.t - all[i - 1].t > 1e-3).map((x) => x.p);
   }
   const n = path.length;
   const at = bridged ? arcs(path) : [];
@@ -242,6 +244,7 @@ const cutMat = lit('#6f9446');
 export const GRASS_MATS: THREE.MeshLambertMaterial[] = [vergeMat, islandMat, cutMat];
 const portalMat = new THREE.MeshBasicMaterial({ color: '#0d0f12', side: THREE.DoubleSide });
 const poleMat = lit('#2b2e33');
+const liningMat = lit('#6b6861', { side: THREE.DoubleSide }); // (a covered tunnel's walls)
 const shelterGlass = lit('#b9d6e2', { transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide });
 const shelterFrame = lit('#2e3136', { side: THREE.DoubleSide });
 const stopRed = lit('#c9302c', { side: THREE.DoubleSide });
@@ -453,6 +456,13 @@ export function endsOf(junctions: Map<number, Junction>, s: RSeg, C: Course): En
 // tracks spreading round an island platform), as the points they run between. None by default.
 export let trackSkip: (s: RSeg) => [XZ, XZ][] = () => [];
 export function setTrackSkip(f: (s: RSeg) => [XZ, XZ][]) { trackSkip = f; }
+// stretches (by distance along a segment) whose deck and piers the railway draws itself: a viaduct
+// station's (rail/draw.ts sets this, and game/bridges.ts leaves them out too)
+export let deckSkip: (s: RSeg) => [number, number][] = () => [];
+export function setDeckSkip(f: (s: RSeg) => [number, number][]) { deckSkip = f; }
+// and those where an underground station's box stands in the tunnel (it draws its own walls)
+export let boxSkip: (s: RSeg) => [number, number][] = () => [];
+export function setBoxSkip(f: (s: RSeg) => [number, number][]) { boxSkip = f; }
 // the railway's materials, for rail/draw.ts to lay its own track in
 export const RAIL_MATS = { ballast: ballastMat, sleeper: sleeperMat, rail: railMat, verge: vergeMat };
 
@@ -468,7 +478,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   const pave = F(), asph = F(), lines = F(), verge = F(), median = F(), yellow = F(), bus = F(), cyc = F(), bays = F();
   const ballast = F(), sleepers = F(), railsF = F(), rack = F(), holes = F(), hint = F(), island = F(), wires = F();
   const tactileBuff = F(), tactileRed = F();
-  const cut = new Solid(), body = new Solid(), rails = new Solid(), barrier = new Solid(), kerbs = new Solid(), portal = new Solid(), poles = new Solid();
+  const cut = new Solid(), body = new Solid(), rails = new Solid(), barrier = new Solid(), kerbs = new Solid(), portal = new Solid(), poles = new Solid(), lining = new Solid();
   const parked = carCols.map(() => new Solid());
   const furn = { glass: new Solid(), frame: new Solid(), red: new Solid() };
   const boards = new Boards();
@@ -493,10 +503,11 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
 
     const half = net.half(s);
     // (a raised stretch the library couldn't bridge keeps the old deck on piers, not walls to the ground)
-    structures(path, body, rails, half, s.bridges ? s.bridges.map((b) => [b.s0, b.s1] as [number, number]) : path.every((p) => (p.y ?? 0) <= 6) ? [] : undefined, inJunction); // bridges: game/bridges.ts
+    const decks = deckSkip(s), bridged = s.bridges ? s.bridges.map((b) => [b.s0, b.s1] as [number, number]) : path.every((p) => (p.y ?? 0) <= 6) ? [] : undefined;
+    structures(path, body, rails, half, decks.length ? [...(bridged ?? []), ...decks] : bridged, inJunction); // bridges: game/bridges.ts
     // ---- cuttings and tunnels: open to the sky while shallow, covered once deep ----
     const Y = (i: number) => path[i].y ?? 0;
-    const DEEP = -9;
+    const DEEP = -9, boxes = boxSkip(s);
     for (let i = 1; i < path.length; i++) {
       const y0 = Y(i - 1), y1 = Y(i);
       if (y0 > -0.3 && y1 > -0.3) continue;
@@ -526,7 +537,15 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
           const back = open0 ? 0.6 : -0.6, dx = (piece[1].x - piece[0].x) / (A[i] - A[i - 1] || 1) * back, dz = (piece[1].z - piece[0].z) / (A[i] - A[i - 1] || 1) * back;
           portal.quad([c[0] + dx, yy, c[1] + dz], [e[0] + dx, yy, e[1] + dz], [e[0] + dx, yy + 6.3, e[1] + dz], [c[0] + dx, yy + 6.3, c[1] + dz]);
         }
-      } else hint.dashes(flat, () => 0, 0, A[i] - A[i - 1], 2, 2, 0.35, 0.05); // a covered tunnel: its line on the surface
+      } else {
+        hint.dashes(flat, () => 0, 0, A[i] - A[i - 1], 2, 2, 0.35, 0.05); // a covered tunnel: its line on the surface
+        // and its walls, under the ground (they show in the underground view: game/underview.ts)
+        const nl = { x: (piece[1].z - piece[0].z) / (A[i] - A[i - 1] || 1), z: -(piece[1].x - piece[0].x) / (A[i] - A[i - 1] || 1) }, w = kerbOf(d) + 0.8, mid = (A[i - 1] + A[i]) / 2;
+        if (!boxes.some(([a, b]) => mid > a && mid < b)) for (const k of [1, -1]) {
+          const p0 = [piece[0].x + nl.x * w * k, piece[0].z + nl.z * w * k], p1 = [piece[1].x + nl.x * w * k, piece[1].z + nl.z * w * k];
+          lining.quad([p0[0], y0 - 0.3, p0[1]], [p1[0], y1 - 0.3, p1[1]], [p1[0], y1 + 6.3, p1[1]], [p0[0], y0 + 6.3, p0[1]]);
+        }
+      }
     }
     // ---- everything else follows the road's course: round the curve into the next road, off the map ----
     const C = courseOf(net, s), cp = C.path, CL = C.len;
@@ -545,8 +564,14 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
     if (d.cls === 'rail') {
       // ---- railway: ballast, sleepers, rails, a rack, overhead wires ----
       const q = part(0, CL), K = kerbOf(d);
-      band(verge, q, () => [K, half], 0.12);
-      band(verge, q, () => [-half, -K], 0.12);
+      // grass verges either side, but not down a covered tunnel
+      const open: [number, number][] = [];
+      { const ca = arcs(cp); let o0: number | null = null; cp.forEach((p, i) => { const inside = (p.y ?? 0) < DEEP + 0.5; if (!inside && o0 === null) o0 = ca[i]; if (inside && o0 !== null) { open.push([o0, ca[i]]); o0 = null; } }); if (o0 !== null) open.push([o0, CL]); }
+      for (const [a, b] of open.length === 1 && open[0][0] < 1e-6 && open[0][1] > CL - 1e-6 ? [[0, CL]] : open) {
+        const qv = a < 1e-6 && b > CL - 1e-6 ? q : part(a, b);
+        band(verge, qv, () => [K, half], 0.12);
+        band(verge, qv, () => [-half, -K], 0.12);
+      }
       // (not where a station moves the tracks over: rail/draw.ts lays those, see trackSkip)
       const skip = trackSkip(s).map(([a, b]) => [closestOnPath(a, cp).s, closestOnPath(b, cp).s].sort((x, y) => x - y)).sort((x, y) => x[0] - y[0]);
       const runs: [number, number][] = [];
@@ -1177,7 +1202,7 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   add(pave, paveMat); add(asph, asphaltMat); add(lines, lineMat); add(verge, vergeMat); add(median, medianMat); add(yellow, yellowMat);
   add(bus, busMat); add(cyc, cycleMat); add(bays, bayMat); add(hint, hintMat); add(tactileBuff, tactileBuffMat); add(tactileRed, tactileRedMat);
   add(ballast, ballastMat); add(sleepers, sleeperMat); add(railsF, railMat); add(rack, rackMat); add(wires, poleMat);
-  add(island, islandMat); add(kerbs, kerbMat); add(poles, poleMat); add(portal, portalMat);
+  add(island, islandMat); add(kerbs, kerbMat); add(poles, poleMat); add(portal, portalMat); add(lining, liningMat);
   parked.forEach((p, i) => add(p, carCols[i]));
   lift = null;
   add(cut, cutMat); add(body, concreteMat); add(rails, parapetMat); add(barrier, barrierMat);
