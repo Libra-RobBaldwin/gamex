@@ -569,8 +569,8 @@ function door(k: Kit, x: number, zf: number, col: string, w = 1.05, h = 2.2) {
   k.doorX ??= x;
   if (k.opening(x, zf, w + 0.16, h + 0.08, 0.16, plain(TRIM), plain(col))) {
     // (the frame's head and a fanlight over the door, in the top of the opening)
-    k.box(x, h - 0.02, zf - 0.155, w + 0.16, 0.1, 0.02, plain(TRIM));
-    k.box(x, h - 0.34, zf - 0.15, w - 0.24, 0.3, 0.02, plain('#3a4a58'));
+    k.box(x, h - 0.02, zf - 0.13, w + 0.16, 0.1, 0.02, plain(TRIM));
+    k.box(x, h - 0.34, zf - 0.125, w - 0.24, 0.3, 0.02, plain('#3a4a58'));
   } else {
     k.box(x, 0, zf + 0.06, w + 0.3, h + 0.2, 0.1, plain(TRIM));
     k.box(x, 0, zf + 0.1, w, h, 0.1, plain(col));
