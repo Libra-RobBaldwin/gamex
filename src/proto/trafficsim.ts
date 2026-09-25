@@ -60,7 +60,9 @@ export interface RunResult {
 export interface GapStats { n: number; go50: number; go90: number; goMax: number; own50: number; nOwn: number; missed: number; idle: number; idle50: number; all: { n: number; p50: number; p90: number; p99: number; sum: number }; why: Record<string, number> }
 const pct = (a: number[], p: number) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return +s[Math.min(s.length - 1, Math.floor(p * s.length))].toFixed(2); };
 function gapTracker(dt: number) {
-  type W = { ring: boolean; since: number; clearAt?: number; own?: boolean; blockedEver: boolean; why: Record<string, number> };
+  // (moving: when it last pulled away, at 1 m/s; the episode ends once it's through the mouth of
+  // the junction, so one that rolls over its line and waits there is still waiting)
+  type W = { ring: boolean; since: number; clearAt?: number; own?: boolean; blockedEver: boolean; moving?: number; why: Record<string, number> };
   const st = new Map<number, W>();
   const mk = () => ({ go: [] as number[], own: [] as number[], missed: 0, idle: [] as number[], why: {} as Record<string, number> });
   const acc = { priority: mk(), ring: mk() };
@@ -71,8 +73,9 @@ function gapTracker(dt: number) {
         seen.add(w.id);
         let s = st.get(w.id);
         if (!s) { if (w.v >= 0.3) continue; st.set(w.id, (s = { ring: w.ring, since: t, blockedEver: false, why: {} })); }
+        if (w.v > 1) { s.moving ??= t; continue; }
+        if (w.v < 0.3) s.moving = undefined;
         const a = w.ring ? acc.ring : acc.priority;
-        if (w.v > 1) continue;
         if (w.blocked) {
           if (s.clearAt !== undefined && t - s.clearAt >= 3) a.missed++;
           s.clearAt = undefined; s.own = w.own; s.blockedEver = true;
@@ -83,17 +86,17 @@ function gapTracker(dt: number) {
         }
       }
       for (const [id, s] of st) {
-        const c = tr.cars.find((x) => x.id === id);
-        const went = !!c && (c.v > 1 || !!c.turn);
-        if (seen.has(id) && !went) continue;
+        if (seen.has(id)) continue;
         st.delete(id);
-        if (!went) continue;
-        const a = s.ring ? acc.ring : acc.priority;
-        if (!s.blockedEver) a.idle.push(t - s.since);
-        else if (s.own) a.own.push(t - (s.clearAt ?? t));
-        else a.go.push(t - (s.clearAt ?? t));
+        const c = tr.cars.find((x) => x.id === id);
+        // (gone on through the mouth of the junction, not vanished or turned off another way)
+        if (!c || !c.turn || c.gone !== undefined) continue;
+        const go = s.moving ?? t, a = s.ring ? acc.ring : acc.priority;
+        if (!s.blockedEver) a.idle.push(go - s.since);
+        else if (s.own) a.own.push(Math.max(0, go - (s.clearAt ?? go)));
+        else a.go.push(Math.max(0, go - (s.clearAt ?? go)));
         // (what it waited for with nobody in its way)
-        if (s.clearAt !== undefined && t - s.clearAt > 1.5) for (const [k, v] of Object.entries(s.why)) a.why[k] = +((a.why[k] ?? 0) + v).toFixed(1);
+        if (s.clearAt !== undefined && go - s.clearAt > 1.5) for (const [k, v] of Object.entries(s.why)) a.why[k] = +((a.why[k] ?? 0) + v).toFixed(1);
       }
     },
     result(): { priority: GapStats; ring: GapStats } {
@@ -278,7 +281,7 @@ export function gapTrial(form: 'priority' | 'roundabout' | 'mini', me: { from: A
   const lead = opts.lead ?? 1;
   const others = [placeCar(tr, net, node, it.from, it.to, v * lead, v)];
   if (opts.headway) others.push(placeCar(tr, net, node, it.from, it.to, v * (lead + opts.headway), v));
-  let conflict = false, blocked = false, clearAt = 0, idle = 0, went = false, t = 0, overlaps = 0, between: boolean | undefined;
+  let conflict = false, blocked = false, clearAt = 0, idle = 0, went = false, t = 0, overlaps = 0, between: boolean | undefined, movedAt: number | undefined;
   for (let i = 0; i < Math.round(25 / dt) && !went; i++) {
     t = i * dt;
     tr.update(dt, t * 1000);
@@ -287,8 +290,10 @@ export function gapTrial(form: 'priority' | 'roundabout' | 'mini', me: { from: A
     const b = !!w?.blocked;
     if (b) { conflict = true; blocked = true; } else if (blocked) { blocked = false; clearAt = t; }
     if (!b && a.v < 0.3) idle += dt;
-    if (a.v > 1 || a.turn) {
-      went = true;
+    // (gone: through the mouth of the junction, having last pulled away at `movedAt`)
+    if (a.v > 1) movedAt ??= t; else if (a.v < 0.3) movedAt = undefined;
+    if (a.turn && a.turn.t > a.turn.path.ext0 + 3) {
+      went = true; t = movedAt ?? t;
       // (between the two: the second hadn't reached the junction yet)
       if (opts.headway) between = !others[1].turn && others[1].after === undefined && others[1].gone === undefined;
     }
@@ -318,7 +323,8 @@ export function queueTrial(form: 'priority' | 'roundabout' | 'mini', me: { from:
 // Pulling out onto a roundabout past one vehicle already going round: it entered from `it.from` and
 // leaves for `it.to`, and is `ahead` seconds (at its speed) short of the point on its course nearest
 // our line (negative: already that far past it). How long we stand with the way clear (idle), how
-// long after it has gone by we go (delay), and whether we waited for it at all.
+// long after it has gone by we go (delay), and whether we stood waiting for it at all. With `v: 0`
+// it stands on the ring, `ahead` metres short of that point.
 export function ringTrial(form: 'roundabout' | 'mini', me: { from: Arm; to: Arm }, it: { from: Arm; to: Arm }, ahead: number, opts: { v?: number; dt?: number } = {}) {
   const { net, junctions } = town({ name: 'trial', prefer: form, cars: 0, minTrips: 0, build: cross(form === 'mini' ? 'street' : 'rural-40') });
   const tr = new Traffic(net, new THREE.Scene(), rng(1)), t = tr as unknown as Record<string, any>;
@@ -330,18 +336,25 @@ export function ringTrial(form: 'roundabout' | 'mini', me: { from: Arm; to: Arm 
   const pl = t.planOf(b), P = pl.path, line = t.lanePoint(a.seg, a.from, t.planOf(a).path.lineS, 0);
   let tn = P.ext0, dn = Infinity;
   for (let q = P.ext0; q <= P.ext1; q += 0.25) { const p = P.track.point(q), d = Math.hypot(p.x - line.x, p.z - line.z); if (d < dn) { dn = d; tn = q; } }
-  const v = opts.v ?? Math.min(8, P.env[Math.floor(tn)]);
-  b.v = v; b.turn = { path: P, t: Math.max(P.ext0 + 0.5, Math.min(P.ext1 - 0.5, tn - ahead * v)), node, next: pl.next };
+  const v = opts.v ?? Math.min(8, P.env[Math.floor(tn)]), stand = v === 0;
+  // (one standing on the ring: `ahead` metres short of that point)
+  const t0 = Math.max(P.ext0 + 0.5, Math.min(P.ext1 - 0.5, tn - ahead * Math.max(v, 1)));
+  b.v = v; b.turn = { path: P, t: t0, node, next: pl.next };
   b.route.shift(); b.adm = 0; b.admNode = node; b.plan = undefined; b.nextSeg = undefined;
-  let blocked = false, clearAt = 0, idle = 0, went = false, waited = false, time = 0, overlaps = 0;
+  let blocked = false, clearAt = 0, idle = 0, stood = 0, went = false, time = 0, overlaps = 0, movedAt: number | undefined, passed: number | undefined, through = 0;
   for (let i = 0; i < Math.round(20 / dt) && !went; i++) {
     time = i * dt;
+    if (stand && b.turn) b.v = 0; // (held where it stands)
     tr.update(dt, time * 1000);
     overlaps += tr.overlaps().length;
     const w = tr.gapProbe().find((x) => x.id === a.id), bl = !!w?.blocked;
-    if (bl) { blocked = true; waited = true; } else if (blocked) { blocked = false; clearAt = time; }
+    if (bl) { blocked = true; if (a.v < 0.3) stood += dt; } else if (blocked) { blocked = false; clearAt = time; }
     if (!bl && a.v < 0.3) idle += dt;
-    if (a.v > 1 || a.turn) went = true;
+    if (a.v > 1) movedAt ??= time; else if (a.v < 0.3) movedAt = undefined;
+    if (passed === undefined && (!b.turn || b.turn.t >= tn)) passed = time;
+    if (a.turn && a.turn.t > a.turn.path.ext0 + 3) { went = true; through = time; time = movedAt ?? time; }
   }
-  return { waited, went, delay: went && waited ? +(time - clearAt).toFixed(2) : 0, idle: +idle.toFixed(2), overlaps, bOn: +(b.turn ? b.turn.t : -1).toFixed(1) };
+  // waited: stood for it; first: through the mouth of the junction before it had gone by our line
+  const waited = stood > 0.3, first = went && (passed === undefined || through < passed);
+  return { arrive: +((tn - t0) / Math.max(v, 1)).toFixed(1), waited, first, went, delay: went && waited ? +(time - clearAt).toFixed(2) : 0, idle: +idle.toFixed(2), overlaps, bOn: +(b.turn ? b.turn.t : -1).toFixed(1) };
 }

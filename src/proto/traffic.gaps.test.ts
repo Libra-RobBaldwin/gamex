@@ -33,24 +33,40 @@ describe('drivers go when a gap opens', () => {
 
 describe('pulling out onto a roundabout (UK rules)', () => {
   for (const form of ['roundabout', 'mini'] as const) {
-    it(`${form}: gives way to traffic from the right, but not to traffic leaving before its arm or already past`, () => {
+    it(`${form}: gives way to traffic from the right, by when it will get there, and to nobody else`, () => {
       for (const to of [W, N, E]) {
-        // coming round from the right towards our entry, a second off: we wait, then go promptly
-        const near = ringTrial(form, { from: S, to }, { from: N, to: W }, 1);
-        expect(near.waited, `${form} to ${to.x},${to.z}: from the right`).toBe(true);
-        expect(near.delay).toBeLessThanOrEqual(1.5);
+        const name = `${form} to ${to.x},${to.z}`;
+        // coming round from the right, a second or two off: we let it by, then go promptly
+        for (const ah of [1, 2]) {
+          const near = ringTrial(form, { from: S, to }, { from: N, to: W }, ah);
+          expect(near.first, `${name}: ${ah} s off`).toBe(false);
+          expect(near.went, name).toBe(true);
+          expect(near.delay, name).toBeLessThanOrEqual(1.5);
+          expect(near.overlaps, name).toBe(0);
+        }
         // leaving before our arm, or at it: no reason to wait at all
         for (const it of [{ from: N, to: E }, { from: E, to: S }]) {
           const r = ringTrial(form, { from: S, to }, it, 1);
-          expect(r.waited, `${form}: ${JSON.stringify(it)}`).toBe(false);
-          expect(r.idle).toBeLessThan(0.5);
+          expect(r.waited, `${name}: ${JSON.stringify(it)}`).toBe(false);
+          expect(r.idle, name).toBeLessThan(0.5);
         }
         // already past our entry: no wait
         const past = ringTrial(form, { from: S, to }, { from: N, to: W }, -2);
-        expect(past.waited).toBe(false);
-        expect(past.idle).toBeLessThan(0.5);
-        for (const r of [near, past]) expect(r.overlaps).toBe(0);
+        expect(past.waited, name).toBe(false);
+        expect(past.idle, name).toBeLessThan(0.5);
+        // one standing still well round the ring behind us (in a queue for its exit, say) is no reason
+        // to wait (unless we're going right round to where it stands)
+        if (to === E) continue;
+        const still = ringTrial(form, { from: S, to }, { from: N, to: W }, 15, { v: 0 });
+        expect(still.went && still.first, `${name}: standing 15 m back`).toBe(true);
+        expect(still.idle, name).toBeLessThan(0.5);
       }
     });
   }
+  it('pulls out ahead of traffic on the ring that is far enough off in time (not distance)', () => {
+    // on the roundabout, one coming round from the far arm 5 s off: we go first, without it braking
+    const r = ringTrial('roundabout', { from: S, to: N }, { from: N, to: W }, 5);
+    expect(r.first).toBe(true);
+    expect(r.overlaps).toBe(0);
+  });
 });

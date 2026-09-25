@@ -46,6 +46,11 @@ Session https://claude.ai/code/session_018DK8CF7BYZZHj49auA1MyH, production.md Â
   place it couldn't use. Fixes in `traffic.ts`: `follow()` (anticipation, a shorter time gap at a
   crawl), `movesWith()`, re-admission inside the junction, `ringRoom` counting only those near the
   ring, and no committing while someone uncommitted stands in the way.
+- **Roundabout pull-out (done):** `keepsBehind` for traffic already on the ring judges by when it
+  gets there: it may ease off to 0.6 s behind, and one standing further round doesn't count. The
+  harness counts a driver as gone only once it's through the mouth of the junction; before, one that
+  rolled over its line and waited there looked as if it had gone. A driver doesn't commit while
+  someone uncommitted stands in its way, unless each is in the other's way (two lorries).
 - Bench: `src/proto/*.local.test.ts` in this session only; to rebuild it, run `simulate` over the
   scenarios with `{ gaps: true }` on seeds 11â€“13.
 

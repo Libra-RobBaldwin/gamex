@@ -36,9 +36,12 @@ a stream with review and fixes takes 45–90 minutes, and a merge about 5.
   a give-way line now discharges at 2.4–2.7 s a vehicle (was 3.0–3.5 s), each driver moving off
   0.6–0.7 s after the one ahead (was 1.1 s); drivers go 0.6 s after the way clears; no more waits
   on the ring behind someone earlier in the order who is still coming round.
-- [ ] **Pulling out at roundabouts:** give way to the right. Accept a gap from a vehicle's
-  arrival time rather than its distance, count a vehicle leaving before your arm as no conflict,
-  and don't wait for circulating traffic already past.
+- [x] **Pulling out at roundabouts** (work-traffic-2): give way to the right, by arrival time.
+  Traffic on the ring may ease off (1 m/s², never brake) to stay 0.6 s behind someone pulling out,
+  so drivers take gaps of about 4 s on a roundabout and 3 s on a mini (before, 6 s or never). One
+  standing on the ring further round no longer holds an entry for ever. Vehicles leaving before
+  the arm, at it, or already past are no conflict (the conflict tables already had that; `ringTrial`
+  and `traffic.gaps.test.ts` check it).
 - [ ] **Front-wheel steering:** vehicles yaw as if every wheel steers. They should follow a
   bicycle model:
   - the front axle follows the lane;
