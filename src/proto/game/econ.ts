@@ -38,6 +38,7 @@ export interface TownHooks {
   purse?: Purse; // fares and running costs go here as they happen (game/money.ts)
   rail?: RailHooks; // the railway's stations and lines (rail/game.ts), alongside the bus stops and lines
   towns?: PlaceIn[]; // a map with many places: each is a town of its own (else it's all the one town)
+  byEdge?: boolean; // a point belongs to the town whose edge it's nearest, not its middle (a real map: a city's suburbs are the city's)
 }
 // A place on the map as the economy sees it: each zone belongs to the place whose middle it's nearest.
 export interface PlaceIn { id: number; name: string; x: number; z: number; r: number }
@@ -108,7 +109,7 @@ export class TownEconomy {
   townAt(x: number, z: number) {
     if (!this.many) return TOWN_ID;
     let best = this.towns[0].id, bd = Infinity;
-    for (const t of this.towns) { const d = Math.hypot(x - t.x, z - t.z); if (d < bd) { bd = d; best = t.id; } }
+    for (const t of this.towns) { const d = Math.hypot(x - t.x, z - t.z) - (this.h.byEdge ? t.r : 0); if (d < bd) { bd = d; best = t.id; } }
     return best;
   }
   townName(id: number) { return this.towns.find((t) => t.id === id)?.name ?? TOWN_NAME; }

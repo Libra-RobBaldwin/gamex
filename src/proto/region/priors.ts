@@ -1,0 +1,174 @@
+// What real Britain looks like, in numbers, for the seeded generator (docs/real.md, "Priors").
+// Every number here was measured by tools/os/measure.mjs from Ordnance Survey OpenData over the two
+// baked 50 km regions (public/regions): the Exe estuary in Devon (coast, a cathedral city, market
+// towns, villages; 1,783 km² of land) and the Teme valley in Shropshire and Herefordshire (inland
+// hills, market towns, villages and hamlets; 2,500 km²), unless its note says otherwise. Where the
+// two differ, both are given as [exe, teme] and the generator takes a figure between them.
+// Re-measure after baking another region: node tools/os/measure.mjs.
+//
+// Pure: no three.js, no DOM. Contains OS data © Crown copyright and database right (OGL).
+import type { Rand } from './random';
+
+export const PRIORS = {
+  // ---------------- settlements (OS Open Names places; people from footprints, see PEOPLE) ----------------
+  settlements: {
+    // places per 1,000 km² of land
+    perThousandKm2: { cityOrTown: [11.8, 5.2], village: [74, 71.2], hamlet: [65.1, 170] },
+    // distance to the nearest place of the same size or bigger (m): quartiles
+    nearestM: { town: [[4411, 5493, 6419], [10574, 11104, 11504]], village: [[1097, 1775, 2535], [1298, 1855, 2747]], hamlet: [[776, 1240, 1472], [797, 1097, 1386]] },
+    // rank–size (people ∝ rank^−exponent, places of 300 people or more): a coast of resort towns is
+    // steeper than a thinly settled inland valley
+    rankSizeExponent: [1.33, 0.8],
+    // Open Names' extent of a place against its people: r ≈ a · people^b (m)
+    radius: { a: [24.1, 47.3], b: [0.43, 0.37] },
+    // people in a town and a village: quartiles
+    people: { town: [[5720, 11780, 20570], [3690, 4270, 6380]], village: [[400, 610, 1270], [350, 490, 820]] },
+  },
+  // ---------------- roads (OS OpenMap Local classes) ----------------
+  roads: {
+    // km of road per km² of land, by class (a: A roads; primary: A roads on the primary route
+    // network, green signs; minor: classified unnumbered roads, the country lanes; local: streets)
+    kmPerKm2: {
+      motorway: [0.011, 0], primary: [0.102, 0.077], a: [0.147, 0.076], b: [0.129, 0.178], minor: [1.5, 0.877], local: [0.868, 0.162],
+      restricted: [0.741, 0.735], // (private and estate roads, farm tracks)
+    },
+    // where streets meet: dead ends (cul-de-sacs and closes), T-junctions and crossroads, as shares
+    // of every junction and end in a place's built-up area (outside: 0.25, 0.71, 0.04)
+    junctions: { deadEnd: 0.31, tee: 0.65, cross: 0.04 },
+    // length of a street between junctions in a place (m): quartiles
+    streetPieceM: [[44, 71, 122], [47, 79, 146]],
+    // orientation order (Boeing 2019: 1 a perfect grid, 0 every bearing alike), by street length:
+    // British towns are organic, even at their core
+    orientationOrder: { core: [0.01, 0.05], suburb: [0.0, 0.01], country: [0, 0] },
+    // ribbon development: outside places, the share of buildings within 60 m of an A or B road,
+    // against the share of the land that close; lift = how many times likelier a building is there
+    ribbon: { buildings: [0.07, 0.11], land: [0.03, 0.03], lift: [2.46, 3.53] },
+  },
+  // ---------------- the coast (OS OpenMap Local tidal water) ----------------
+  coast: {
+    // box-counting dimension of the high-water line over boxes of 50 m to 3.2 km (Exe only)
+    fractalDimension: 1.15,
+    // the coast inside the 50 km square, and the tidal rivers (estuaries) running inland from it
+    lengthKm: 336, tidalRiverKm: 96,
+    // a tidal river's width at the waterline (m): quartiles (the Exe and Teign estuaries widen to 1–2 km)
+    tidalRiverWidthM: [12, 39, 213],
+  },
+  // ---------------- woods (OS OpenMap Local woodland) ----------------
+  woods: {
+    // share of the land outside places that's woodland
+    cover: [0.156, 0.132],
+    // patches per km² of land, and their sizes: log-normal in m² (median about half a hectare,
+    // one in ten over 4 ha)
+    perKm2: [8.2, 7.3],
+    areaLnM2: { mu: 8.58, sigma: 1.4 },
+    // perimeter over a circle's of the same area: quartiles (a circle is 1; long shaws and
+    // hanging woods along valley sides are 2 and more)
+    shapeIndex: [1.37, 1.72, 2.3],
+    // the share of land that's wooded, by slope (rise over run), pooled: woods keep to the ground
+    // too steep to plough, and much less to the flat
+    bySlope: [[0, 0.081], [0.05, 0.098], [0.1, 0.134], [0.15, 0.195], [0.2, 0.332], [0.3, 0.588]] as [number, number][],
+    // median distance from a stream or river (m): woods sit nearer the water than the land does
+    streamM: { woods: [99, 143], land: [146, 158] },
+  },
+  // ---------------- buildings (OS OpenMap Local footprints) ----------------
+  buildings: {
+    footprintM2: [[76, 132, 214, 581], [60, 122, 204, 692]], // quartiles and the 95th percentile
+    perKm2: [88, 33],
+  },
+  // ---------------- not measured here ----------------
+  // Field boundaries aren't in OS OpenData. OpenStreetMap's landuse=farmland (from
+  // download.geofabrik.de, which this environment can't reach yet) would give them. Until then:
+  // hedged fields in the South West and the Welsh Marches are small, mostly 1–5 ha, and bigger in
+  // the arable east (a rough figure, not a measurement).
+  fields: { haTypical: [1, 5] as [number, number], note: 'estimate: not measured (needs OSM)' },
+} as const;
+
+// People from building footprints (tools/os/bake.mjs): OS draws terraces as one footprint, so a
+// place's people are its footprint area over this. Calibrated on Exeter's 2021 census population
+// (about 130,000) against its 5.1 km² of footprints; Exmouth and Newton Abbot come out within 10%.
+export const PEOPLE = { footprintPerPerson: 42 };
+
+// How often the generator lays a settlement out as a square grid rather than an organic plan. Its
+// grid is a lattice (orientation order about 1); real British cores measure 0.01–0.05 and their
+// suburbs about 0, so a grid is the exception: a planned town, a Georgian new town, a garden city.
+export const GRID_PLAN = { city: 0.2, town: 0.1, village: 0.05 };
+
+// ---------------- helpers ----------------
+// a figure between the regions' two (t: 0 the first, 1 the second)
+export const between = (v: readonly [number, number] | readonly number[], t = 0.5) => v[0] + (v[1] - v[0]) * t;
+const lerpCurve = (c: readonly (readonly [number, number])[], x: number) => {
+  if (x <= c[0][0]) return c[0][1];
+  for (let i = 1; i < c.length; i++) if (x <= c[i][0]) { const [x0, y0] = c[i - 1], [x1, y1] = c[i]; return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0); }
+  return c[c.length - 1][1];
+};
+// How likely a spot is to be wooded, from its slope (rise over run): the real share at that slope.
+export const woodShareAt = (slope: number) => lerpCurve(PRIORS.woods.bySlope, slope);
+// A settlement's radius for its people (m).
+export const radiusFor = (people: number, t = 0.5) => between(PRIORS.settlements.radius.a, t) * people ** between(PRIORS.settlements.radius.b, t);
+// How many places of each kind a map of this much land has (a real mix, before any options).
+export function placesFor(landKm2: number, t = 0.5) {
+  const p = PRIORS.settlements.perThousandKm2, k = landKm2 / 1000;
+  return { towns: Math.round(between(p.cityOrTown, t) * k), villages: Math.round(between(p.village, t) * k), hamlets: Math.round(between(p.hamlet, t) * k) };
+}
+// A standard normal (Box–Muller).
+const gauss = (r: Rand) => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
+// One wood's area (m²), from the real log-normal.
+export const woodArea = (r: Rand) => Math.exp(PRIORS.woods.areaLnM2.mu + PRIORS.woods.areaLnM2.sigma * gauss(r));
+
+export interface XZ { x: number; z: number }
+// Woods as real ones are: patches with the real sizes (log-normal), as many to the km² as the real
+// land has, sited where the real share at that slope says (steep ground and valley sides), and
+// drawn out along the slope's contour into the long shapes real woods have. Returns the trees'
+// spots (one per `perTree` m² of wood), for MapSpec.trees.spots.
+//   box: the land to fill; heightAt: the hills (null on a flat map); keep(p): false where no wood
+//   goes (in a town, on water, off the map). `cover` scales the real cover (a map's style).
+export function woodSpots(r: Rand, box: { x0: number; z0: number; x1: number; z1: number }, heightAt: ((x: number, z: number) => number) | null, keep: (p: XZ) => boolean, o: { cover?: number; perTree?: number; max?: number } = {}): XZ[] {
+  const km2 = ((box.x1 - box.x0) * (box.z1 - box.z0)) / 1e6, perTree = o.perTree ?? 600, max = o.max ?? 20000;
+  const want = Math.round(between(PRIORS.woods.perKm2) * km2 * (o.cover ?? 1));
+  const top = woodShareAt(1);
+  const out: XZ[] = [];
+  let made = 0;
+  for (let tries = 0; made < want && tries < want * 40 && out.length < max; tries++) {
+    const c = { x: box.x0 + r() * (box.x1 - box.x0), z: box.z0 + r() * (box.z1 - box.z0) };
+    if (!keep(c)) continue;
+    // the slope here, and across it (the contour: woods run along it)
+    let s = 0, ang = r() * Math.PI;
+    if (heightAt) {
+      const e = 25, gx = (heightAt(c.x + e, c.z) - heightAt(c.x - e, c.z)) / (2 * e), gz = (heightAt(c.x, c.z + e) - heightAt(c.x, c.z - e)) / (2 * e);
+      s = Math.hypot(gx, gz);
+      if (s > 1e-4) ang = Math.atan2(gz, gx) + Math.PI / 2;
+    }
+    // (sited by the real share at this slope, against the steepest's)
+    if (r() > woodShareAt(s) / top) continue;
+    made++;
+    const A = Math.min(woodArea(r), 400000), k = 1.4 + r() * 2.2; // (long and thin, as real shape indices say)
+    const a = Math.sqrt((A * k) / Math.PI), b = A / (Math.PI * a), ca = Math.cos(ang), sa = Math.sin(ang);
+    const n = Math.max(1, Math.round(A / perTree));
+    for (let i = 0; i < n && out.length < max; i++) {
+      // (a ragged edge: points fill the ellipse more thinly towards it)
+      const t = Math.sqrt(r()) * (0.75 + 0.25 * r()), th = r() * 2 * Math.PI, u = a * t * Math.cos(th), v = b * t * Math.sin(th);
+      const p = { x: c.x + u * ca - v * sa, z: c.z + u * sa + v * ca };
+      if (keep(p)) out.push(p);
+    }
+  }
+  return out;
+}
+
+// A coastline between two points, as rough as the real one: midpoint displacement with the
+// roughness the measured fractal dimension gives (Hurst exponent 2 − D), down to `step` metres.
+// For the terrain and sea work (claude/work-terrain-2): the sea's edge, bays and headlands.
+export function fractalCoast(r: Rand, a: XZ, b: XZ, step = 25, D = PRIORS.coast.fractalDimension, amp = 0.18): XZ[] {
+  const H = 2 - D;
+  let pts: XZ[] = [a, b];
+  let scale = amp * Math.hypot(b.x - a.x, b.z - a.z);
+  while (Math.hypot(pts[1].x - pts[0].x, pts[1].z - pts[0].z) > step) {
+    const next: XZ[] = [pts[0]];
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i - 1], q = pts[i], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, d = gauss(r) * scale;
+      next.push({ x: (p.x + q.x) / 2 - ((q.z - p.z) / L) * d, z: (p.z + q.z) / 2 + ((q.x - p.x) / L) * d }, q);
+    }
+    pts = next;
+    scale *= 0.5 ** H;
+  }
+  return pts;
+}

@@ -358,10 +358,11 @@ const places = [];
       if (!line.includes('populatedPlace')) continue;
       const c = csvSplit(line), kind = KIND[c[7]];
       if (!kind) continue;
+      // (a Welsh place's English name, where it has one)
       const e = Number(c[8]), n = Number(c[9]);
       if (e < E0 || e >= E0 + SIZE || n < N0 || n >= N0 + SIZE) continue;
       const w = Number(c[14]) - Number(c[12]), h = Number(c[15]) - Number(c[13]);
-      places.push({ name: c[2], kind, x: Math.round(gx(e)), z: Math.round(gz(n)), r: Math.round(Math.max(60, Math.sqrt(Math.max(1, w * h)) / 2)), buildings: 0, people: 0 });
+      places.push({ name: c[3] === 'cym' && c[4] ? c[4] : c[2], kind, x: Math.round(gx(e)), z: Math.round(gz(n)), r: Math.round(Math.max(60, Math.sqrt(Math.max(1, w * h)) / 2)), buildings: 0, people: 0 });
     }
   }
   // buildings and people: each building of a house's size or more counts to its nearest place

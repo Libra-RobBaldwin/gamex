@@ -632,7 +632,7 @@ async function seedTown() {
   // stages; the junctions design themselves, and the town grows on plots between its buildings
   if (REAL) {
     await loading.stage('Laying out the roads and the railway', 0.08);
-    const laid = layReal(net, (MAP as RealMap).real.overpass);
+    const laid = layReal(net, (MAP as RealMap).real.overpass, MAP.settlements);
     commitRoads([...net.segs.keys()]);
     const lots = placeLots(net, laid.lots);
     await loading.stage(`Putting up ${lots.length.toLocaleString('en-GB')} buildings`, 0.3);
@@ -747,6 +747,8 @@ const shell = new Shell($('#ui'), {
   onTown: () => showTown(),
   onUnderground: () => toggleUnderground(),
 });
+if (MAP.credit) shell.setCredit(MAP.credit.text, MAP.credit.href); // (a real region's map data: real/)
+
 // the tool in use (a road or rail type, or bus stops), if any
 let tool: ToolHandle | null = null;
 // "Junction here": the road a motorway blueprint crosses, the junction picked for it, and its plan
@@ -2234,6 +2236,7 @@ if (SAVED) purse.load(SAVED.purse);
 const town = new TownEconomy({
   net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, rail: railGame.econ(),
   towns: MAP.settlements.length > 1 ? MAP.settlements : undefined, // (each place a town of its own: docs/region.md R5)
+  byEdge: MAP.placeBy === 'edge',
   standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
   free: () => queue,
   build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); regionView?.groundChanged([{ x0: l.x - 40, z0: l.z - 40, x1: l.x + 40, z1: l.z + 40 }]); },

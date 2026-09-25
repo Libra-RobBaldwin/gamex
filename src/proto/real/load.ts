@@ -5,7 +5,7 @@ import { decodeTile, tileFile, type RegionManifest } from './format';
 import { homeOf, realMap, tilesFor, windowBox, type RealMap } from './map';
 
 // the regions that have been baked (public/regions)
-export const REAL_REGIONS = ['exe'];
+export const REAL_REGIONS = ['exe', 'teme'];
 export const isRealQuery = (q: URLSearchParams) => REAL_REGIONS.includes(q.get('map') ?? '');
 
 export async function loadRealMap(q: URLSearchParams, base = `${import.meta.env.BASE_URL}regions/`): Promise<RealMap> {

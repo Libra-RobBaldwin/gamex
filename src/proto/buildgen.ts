@@ -1204,7 +1204,10 @@ const PUBS = ['The Red Lion', 'The Crown', 'The Railway', 'The Royal Oak', 'The 
 
 function civic(k: Kit, l: Lot, r: () => number) {
   const spec = CIVIC[l.arch ?? 'hall'];
-  const W = spec.w, D = spec.d, zf = D / 2, F = D / 2 + l.front, Bk = -D / 2 - l.back, X0 = -l.pw / 2, X1 = l.pw / 2;
+  // (a real map's cathedral or minster: a church on a lot far bigger than a parish church's is drawn
+  // at the lot's size, taller to match; every other civic building keeps its own size)
+  const big = l.arch === 'church' && l.w > spec.w * 1.6 && l.d > spec.d * 1.6, g = big ? Math.min(2.6, Math.sqrt(l.w / spec.w)) : 1;
+  const W = big ? l.w : spec.w, D = big ? l.d : spec.d, zf = D / 2, F = D / 2 + l.front, Bk = -D / 2 - l.back, X0 = -l.pw / 2, X1 = l.pw / 2;
   k.foot = { w: W, d: D };
   const out: string[] = [];
   let name = spec.label;
@@ -1212,12 +1215,12 @@ function civic(k: Kit, l: Lot, r: () => number) {
     case 'church': {
       const S = look(r, 'stone', 'arched', '#2d3338', pick(r, STONE));
       flat(k, X0, Bk, X1, F, 0.04, lawnM(0.96));
-      k.block(0, 0, W - 6, D - 2, 0, 1, 7, 3.4, fm(S), fm(S), fm(S));
-      k.gable(0, 0, W - 6, D - 2, 7, 5.5, 0.3, roofM(pick(r, SLATE)[0]), fm(S, 'none'));
+      k.block(0, 0, W - 6 * g, D - 2 * g, 0, 1, 7 * g, 3.4, fm(S), fm(S), fm(S));
+      k.gable(0, 0, W - 6 * g, D - 2 * g, 7 * g, 5.5 * g, 0.3, roofM(pick(r, SLATE)[0]), fm(S, 'none'));
       // tower and spire at the west end
-      k.block(W / 2 - 3, 0, 6, 6, 0, 3, 5, 6, fm(S, 'none'), fm(S, 'none'), fm(S, 'none'), plain(GRAVEL));
-      if (r() < 0.6) { k.prismN(W / 2 - 3, 0, 3.1, 8, 15, 0.1, plain('#bdb6a6'), 13, roofM(SLATE[0][0])); out.push('spire'); }
-      else { parapet(k, W / 2 - 3, 0, 6.4, 6.4, 15, 1.2, fm(S, 'none')); out.push('square tower'); }
+      k.block(W / 2 - 3 * g, 0, 6 * g, 6 * g, 0, 3, 5 * g, 6, fm(S, 'none'), fm(S, 'none'), fm(S, 'none'), plain(GRAVEL));
+      if (r() < 0.6) { k.prismN(W / 2 - 3 * g, 0, 3.1 * g, 8 * g, 15 * g, 0.1, plain('#bdb6a6'), 13, roofM(SLATE[0][0])); out.push('spire'); }
+      else { parapet(k, W / 2 - 3 * g, 0, 6.4 * g, 6.4 * g, 15 * g, 1.2, fm(S, 'none')); out.push('square tower'); }
       flat(k, W / 2 - 3.8, zf, W / 2 - 2.2, F, 0.075, gravelM());
       // churchyard
       for (let x = X0 + 2; x < X1 - 1; x += 2.2) for (const z of [Bk + 2, Bk + 4.5, Bk + 7]) if (r() < 0.75) k.box(x, 0, z, 0.7, 0.8 + r() * 0.4, 0.18, plain(pick(r, ['#8f8a80', '#a8a296', '#6f6b64'])));

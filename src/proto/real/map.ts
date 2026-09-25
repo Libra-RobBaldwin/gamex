@@ -18,7 +18,6 @@ export interface RealMap extends MapSpec {
   real: {
     region: string; // the region's id (public/regions/<id>)
     centre: XZ; // where the window's centre is in the region
-    credit: { text: string; href: string };
     heights: HeightGrid; // the ground's real height (m), over the window and its margin
     overpass: ReturnType<typeof toOverpass>; // roads, railways, stations and buildings, for the importer
     green: { c: number; rings: XZ[][]; holes: boolean[] }[]; // OS Open Greenspace in the window: its parks (real/lay.ts greenRegions)
@@ -75,9 +74,10 @@ export function realMap(R: RealRegion, o: { home?: string; half?: number } = {})
     style: 'temperate',
     relief: 'rolling',
     ground,
+    placeBy: 'edge',
+    credit: { text: `Contains OS data © Crown copyright and database right ${year}`, href: 'https://www.ordnancesurvey.co.uk/customers/public-sector/public-sector-licensing/copyright-acknowledgements' },
     real: {
       region: M.id, centre: c,
-      credit: { text: `Contains OS data © Crown copyright ${year}`, href: 'https://www.ordnancesurvey.co.uk/business-government/licensing-agreements/copyright-acknowledgements' },
       heights, overpass, green: greenIn(R, c, half),
     },
   };

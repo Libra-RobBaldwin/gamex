@@ -8,7 +8,7 @@ import { polysOverlap, rectCorners, type Lot, type Network, type P } from '../ro
 import { buildGraph, dropDuplicates, dropSlivers, joinRuns, pairCarriageways, reportOneWays, type Unsupported } from '../osm/graph';
 import { emit } from '../osm/import';
 import { buildingsOf } from '../osm/buildings';
-import { stationsOf } from '../osm/landuse';
+import { stationsOf, type ZoneArea } from '../osm/landuse';
 import { parseOverpass, type OverpassJson } from '../osm/overpass';
 import { local, type XZ } from './osm';
 import { CELL, type Region } from '../infill';
@@ -17,7 +17,24 @@ import { GREEN_CLASSES } from './format';
 
 export interface Laid { lots: Lot[]; stations: { name?: string; x: number; z: number; seg?: number }[]; stats: Record<string, number>; ms: number }
 
-export function layReal(net: Network, json: OverpassJson): Laid {
+// OS OpenMap Local has no land use, so a building's zone comes from where it stands: the core of a
+// city or town (its inner quarter; a village's inner fifth) is commercial, the rest of a place's
+// built-up area residential. Outside them the importer goes by size (big sheds are industry).
+export interface Place { x: number; z: number; r: number; kind: 'city' | 'town' | 'village' }
+export const CORE: Record<Place['kind'], number> = { city: 0.25, town: 0.25, village: 0.2 };
+export function zoneFor(places: Place[]) {
+  return (p: P): ZoneArea | undefined => {
+    let kind: ZoneArea['kind'] | undefined;
+    for (const s of places) {
+      const d = Math.hypot(p.x - s.x, p.z - s.z);
+      if (d < s.r * CORE[s.kind]) return { kind: 'commercial' } as ZoneArea;
+      if (d < s.r) kind = 'residential';
+    }
+    return kind ? ({ kind } as ZoneArea) : undefined;
+  };
+}
+
+export function layReal(net: Network, json: OverpassJson, places: Place[] = []): Laid {
   const t0 = performance.now();
   const data = parseOverpass(json);
   const { g, unsupported, dropped } = buildGraph(data, local);
@@ -34,8 +51,10 @@ export function layReal(net: Network, json: OverpassJson): Laid {
   const segs0 = net.segs.size;
   emit(g, net);
   stats.segs = net.segs.size - segs0;
-  // (no land-use zones in OS OpenMap Local: a building's kind comes from its tags and its size)
-  const { buildings } = buildingsOf(data, net, local, () => undefined);
+  const residential = zoneFor(places);
+  // (a big shed in a town's residential streets is still a shed: an estate's, a depot's)
+  const { buildings } = buildingsOf(data, net, local, (p) => residential(p));
+  for (const b of buildings) if (b.why.startsWith('zone') && b.kind === 'flats' && b.area > 2500) { b.kind = 'industry'; b.lot.kind = 'industry'; }
   const lots = buildings.filter((b) => !b.minor || b.area >= 20).map((b) => b.lot);
   stats.buildings = lots.length;
   const stations = stationsOf(data, local).map((s) => ({ name: s.name, x: s.at.x, z: s.at.z, seg: net.nearestSeg(s.at, 60, (q) => net.def(q).cls === 'rail')?.seg.id }));

@@ -8,4 +8,10 @@ export const REGIONS = {
     e: 265000, n: 50000, size: 50000,
     home: 'Exeter',
   },
+  teme: {
+    name: 'Teme Valley',
+    blurb: 'Ludlow and its castle on the Teme, the Shropshire Hills and the Clee Hills, Leominster, Tenbury Wells and the Marches line',
+    e: 326000, n: 250000, size: 50000,
+    home: 'Ludlow',
+  },
 };

@@ -123,6 +123,7 @@ function about() {
       <h3>Credits</h3>
       <ul class="credits">
         <li><b>Map data</b> © OpenStreetMap contributors, under the Open Database Licence (ODbL). Real Town Plans builds its plans from it: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">openstreetmap.org/copyright</a></li>
+        <li><b>Real regions</b> Contains OS data © Crown copyright and database right ${new Date().getFullYear()}: OS OpenMap - Local, Terrain 50, Open Rivers, Open Names and Open Greenspace, under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noopener">Open Government Licence</a></li>
         <li><b>Icons</b> Tabler Icons, MIT licence</li>
         <li><b>Type</b> League Spartan and Archivo, SIL Open Font Licence</li>
         <li><b>3D</b> three.js, MIT licence</li>
