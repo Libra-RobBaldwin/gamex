@@ -18,9 +18,12 @@ import type { StopSite } from './crowdsites';
 import { FARE, MONTH, RUNNING, type Purse } from './money';
 
 export const TOWN_ID = 1;
+export interface TownSave { econ: EconomySave; carried: [number, number][]; day: number; stats: TownEconomy['stats'] }
 export const TOWN_NAME = 'Ashcombe';
 const CELL = 160;
 const TOWN_KMH = 28; // cars across town, junctions and all
+const OPEN_KMH = 60; // and out of town, between places (a map with more than one: docs/region.md R5)
+const IN_TOWN_M = 2000; // the first this-many metres of a drive go at the town's pace
 const SERVICE_KMH = 0.55; // a bus in town makes this share of its book speed, stops aside
 
 export interface TownHooks {
@@ -34,30 +37,35 @@ export interface TownHooks {
   clock(): number; // game minutes since the start
   purse?: Purse; // fares and running costs go here as they happen (game/money.ts)
   rail?: RailHooks; // the railway's stations and lines (rail/game.ts), alongside the bus stops and lines
+  towns?: PlaceIn[]; // a map with many places: each is a town of its own (else it's all the one town)
 }
+// A place on the map as the economy sees it: each zone belongs to the place whose middle it's nearest.
+export interface PlaceIn { id: number; name: string; x: number; z: number; r: number }
 // The railway as the economy sees it: stations as stops and rail lines as lines (their ids kept
 // clear of the buses'), how long a train takes between two stations (minutes), and what a train
 // costs to run for a game day.
 export interface RailHooks { stops(): StopIn[]; lines(): LineIn[]; time(a: number, b: number, v: VehicleKind): number | undefined; running(v: VehicleKind): number }
 
-// The library's tuning, set for this town (measured with the town as it starts, its starter line,
-// and a second line added or the first withdrawn):
+// The library's tuning, set for this town (measured with Playwright: the town as it starts with
+// no service of yours, a line through the housing added, then withdrawn):
 //  - a review each game day, so the town's month passes while you watch;
 //  - it's taken to be in balance as it starts even though it has more jobs than workers (so it's
 //    propped up further than the library's default allows), and plenty of jobs in reach keeps
 //    counting towards where people want to live, so homes follow the jobs your service brings;
 //  - the town finds its own goods and materials until freight is in the game;
-//  - its offices live on visitors, and most of them come by your buses: the starter line about
-//    holds the town steady, a second line through the housing makes it grow within a few days,
-//    and withdrawing the starter line makes it decline;
+//  - it stands on its own as the map made it: you start with no transport at all, and the
+//    visitors your buses bring its offices are what make it grow (and withdrawing the service
+//    lets it fall back);
 //  - taking the bus carries no penalty beyond its walk, wait and ride (the town is small enough
-//    to walk across, so otherwise hardly anyone would).
+//    to walk across, so otherwise hardly anyone would), and only stops facing each other across
+//    the road count as one interchange (the library's 250 m would join every stop in this town
+//    by a walk, and no one would ever ride);
 //  - and it answers sooner than a real town would: a day of demand a little above what stands is
 //    enough to build, two days well below it to start emptying.
 const GAME_TUNE = {
-  monthDays: 1, calibrateMax: 3, reachCap: 4, visitsPerOfficeJobDay: 0.1, ptBiasMin: 0,
+  monthDays: 1, calibrateMax: 3, reachCap: 4, visitsPerOfficeJobDay: 0.1, ptBiasMin: 0, transferWalkM: 60,
   growAt: 1.02, growAfter: 1, declineAt: 0.95, declineAfter: 2, recoverAt: 0.98,
-  local: { homes: 0.5, goods: 1, materials: 1, visitors: 0.3 },
+  local: { homes: 0.5, goods: 1, materials: 1, visitors: 1 },
 };
 const zoneKey = (x: number, z: number) => (Math.floor(x / CELL) + 500) * 1000 + (Math.floor(z / CELL) + 500);
 const kindOf = (k: LotKind): BuildingKind => k;
@@ -74,21 +82,42 @@ export class TownEconomy {
   private carried = new Map<number, number>(); // each line's passengers this month, as last seen
   private day = -1;
   stats = { builds: 0, densified: 0, cleared: 0, declined: 0, ms: 0 };
+  readonly towns: PlaceIn[]; // the economy's towns (ids as the economy has them)
+  readonly home: number; // the one the game starts in (nearest the middle of the map)
+  private many: boolean;
 
-  constructor(private h: TownHooks, seed = 1) {
-    const zones = this.zoneList();
-    const buildings = h.standing().map((l) => { this.lotById.set(l.id, l); return { id: l.id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) }; });
-    this.econ = new Economy(
-      { towns: [{ id: TOWN_ID, name: TOWN_NAME, x: 0, z: 0, carShare: 0.45 }], zones, buildings, stops: this.stopList(), lines: this.lineList() },
-      this.oracles(),
+  // `from`: a saved game's town (save() below), which carries on exactly where it was
+  constructor(private h: TownHooks, private seed = 1, from?: TownSave) {
+    this.many = (h.towns?.length ?? 0) > 1;
+    // (ids from 1: a settlement's id + 1)
+    this.towns = this.many ? h.towns!.map((t) => ({ ...t, id: t.id + 1 })) : [{ id: TOWN_ID, name: TOWN_NAME, x: 0, z: 0, r: 0 }];
+    this.home = this.townAt(0, 0);
+    if (from) this.econ = this.resume(from);
+    else {
+      const zones = this.zoneList();
+      const buildings = h.standing().map((l) => { this.lotById.set(l.id, l); return { id: l.id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) }; });
       // Until freight is in the game the town finds its own goods and building materials; and it
       // finds most of its visitors itself, so the starter line about holds it steady and more
       // service is what tips it into growth.
-      { seed, calibrate: true, clock: h.clock() % 1440, tune: GAME_TUNE },
-    );
+      this.econ = new Economy({ ...this.world(zones), buildings }, this.oracles(), this.opts());
+    }
     this.serviceSig = this.sig();
-    this.report = this.econ.town(TOWN_ID);
+    this.report = this.econ.town(this.home);
   }
+  // the town a point belongs to: the one whose middle it's nearest (as the map's settlementAt)
+  townAt(x: number, z: number) {
+    if (!this.many) return TOWN_ID;
+    let best = this.towns[0].id, bd = Infinity;
+    for (const t of this.towns) { const d = Math.hypot(x - t.x, z - t.z); if (d < bd) { bd = d; best = t.id; } }
+    return best;
+  }
+  townName(id: number) { return this.towns.find((t) => t.id === id)?.name ?? TOWN_NAME; }
+  reportFor(id: number) { return id === this.home ? this.report : this.econ.town(id); }
+  // where a town's people go a day, busiest first (only with more than one town)
+  trips(id: number) { return this.econ.townTrips(id); }
+
+  private world(zones: ZoneIn[]) { return { towns: this.towns.map((t) => ({ id: t.id, name: t.name, x: t.x, z: t.z, carShare: 0.45 })), zones, stops: this.stopList(), lines: this.lineList() }; }
+  private opts() { return { seed: this.seed, calibrate: true, clock: this.h.clock() % 1440, tune: GAME_TUNE }; }
 
   // ---------- what the game tells the economy ----------
   // zones: the grid cells with a building or a free plot in them
@@ -100,7 +129,7 @@ export class TownEconomy {
     const out: ZoneIn[] = [];
     for (const [id, n] of plots) {
       const p = at.get(id)!;
-      const z: ZoneIn = { id, town: TOWN_ID, x: p.x, z: p.z, r: CELL / 2, plots: n, allow: this.h.industrial(p) ? ['industry'] : undefined };
+      const z: ZoneIn = { id, town: this.townAt(p.x, p.z), x: p.x, z: p.z, r: CELL / 2, plots: n, allow: this.h.industrial(p) ? ['industry'] : undefined };
       out.push(z);
       this.zones.set(id, z);
     }
@@ -146,7 +175,10 @@ export class TownEconomy {
       carTime: (a, b) => {
         const p = this.zones.get(a), q = this.zones.get(b);
         if (!p || !q) return Infinity;
-        return (Math.hypot(p.x - q.x, p.z - q.z) * 1.3) / ((TOWN_KMH * 1000) / 60) + 1;
+        const road = Math.hypot(p.x - q.x, p.z - q.z) * 1.3;
+        if (!this.many) return road / ((TOWN_KMH * 1000) / 60) + 1;
+        const near = Math.min(road, IN_TOWN_M);
+        return near / ((TOWN_KMH * 1000) / 60) + (road - near) / ((OPEN_KMH * 1000) / 60) + 1;
       },
     };
   }
@@ -178,7 +210,7 @@ export class TownEconomy {
     for (const a of this.econ.takeActions()) this.apply(a);
     this.events.push(...this.econ.takeEvents());
     if (this.events.length > 500) this.events.splice(0, this.events.length - 500);
-    this.report = this.econ.town(TOWN_ID);
+    this.report = this.econ.town(this.home);
     this.stats.ms += (performance.now() - t0 - this.stats.ms) * 0.05;
   }
   // Fares for the passengers each line has carried since last time (a month's worth for each
@@ -243,7 +275,33 @@ export class TownEconomy {
   building(id: number) { return this.econ.buildingState(id); }
   stop(stopId: number) { return this.econ.stop(this.key(stopId)); }
   line(id: number) { return this.econ.line(id); }
-  save(): EconomySave { return this.econ.save(); }
+  // Everything to carry on from later: the library's own save, and what this glue remembers.
+  // A save is a round trip for the game that was saved too: its economy is made again from the
+  // save, as a loaded game's is. The library keeps some working figures it doesn't save (trip
+  // tables, catchments), rebuilt on load in a slightly different order, so otherwise the two
+  // would drift apart in the last digits; this way they carry on alike (game/save.test.ts).
+  save(): TownSave {
+    const s: TownSave = { econ: this.econ.save(), carried: [...this.carried], day: this.day, stats: { ...this.stats } };
+    this.econ = this.resume(s);
+    this.report = this.econ.town(this.home);
+    return s;
+  }
+  // the economy made from a save, onto the town as it stands (the same lots, plots, stops and lines)
+  private resume(from: TownSave) {
+    const zones = this.zoneList();
+    // (its zones are met in the order it first met them, so its sums add up in the same order)
+    const order = new Map(from.econ.towns.flatMap((t) => t.zoneOrder ?? []).map((id, i) => [id, i])); // (town by town, on a map of several)
+    zones.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+    const econ = Economy.load({ ...this.world(zones), buildings: [] }, this.oracles(), structuredClone(from.econ), this.opts());
+    // (the economy's buildings come from the save: the lots standing are the same ones)
+    const known = new Set(econ.buildingIds());
+    this.lotById = new Map(this.h.standing().filter((l) => known.has(l.id)).map((l) => [l.id, l]));
+    this.carried = new Map(from.carried);
+    this.day = from.day;
+    this.stats = { ...from.stats };
+    this.travel.clear();
+    return econ;
+  }
 
   // The crowds' numbers: people waiting at a stop come from the economy; the rest of the street
   // life (footways, parks, pubs) stays the town's own curve for now.

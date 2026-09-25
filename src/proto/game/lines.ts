@@ -18,6 +18,11 @@ export interface Line {
   bus: BusLine; // what the traffic follows (the same object, so edits reach the buses at once)
 }
 
+export interface LinesSave {
+  nextId: number; used: number; names: [number, string][];
+  list: { id: number; num: number; stops: number[]; loop: boolean; offer?: string; mode?: 'bus' | 'rail'; vehicles: number }[]; // (mode: in saves from before the interim stations went)
+}
+
 const NAMES = [
   'Market Place', 'Church Street', 'Mill Lane', 'Station Road', 'The Green', 'Victoria Road', 'Park Road', 'Bridge Street',
   'School Lane', 'The Parade', 'Chapel Row', 'Elm Grove', 'Oak Avenue', 'Hill Rise', 'Brook Lane', 'Castle Street',
@@ -81,6 +86,28 @@ export class Lines {
     }
   }
   buses(l: Line) { return this.traffic.busesOn(l.id); }
+
+  // ---------- saving (game/save.ts) ----------
+  // The lines, how many vehicles each runs, and the stops' names. The vehicles themselves start
+  // again spread along their lines, as a new line's do. (Rail lines are the railway's: rail/.)
+  save(): LinesSave {
+    return {
+      nextId: this.nextId, used: this.used, names: [...this.names],
+      list: this.list.map((l) => ({ id: l.id, num: l.num, stops: [...l.stops], loop: l.loop, offer: l.offer, vehicles: this.buses(l).length })),
+    };
+  }
+  // (after the stops are back, into an empty list; false for a vehicle with no room)
+  restore(s: LinesSave) {
+    this.nextId = s.nextId; this.used = s.used; this.names = new Map(s.names);
+    let all = true;
+    // (a save from before the loop's interim stations went may have rail lines on them: they're gone)
+    for (const x of s.list.filter((x) => x.mode !== 'rail')) {
+      const l: Line = { id: x.id, num: x.num, stops: [...x.stops], loop: x.loop, offer: x.offer, bus: { id: x.id, seq: callOrder(x.stops, x.loop) } };
+      this.list.push(l);
+      for (let i = 0; i < x.vehicles; i++) if (!this.addBus(l)) all = false;
+    }
+    return all;
+  }
   of(bus: number) { const id = this.traffic.bus(bus)?.line; return this.list.find((l) => l.id === id) ?? null; }
 }
 

@@ -1,4 +1,4 @@
-// Railway stations and lines (docs/rail.md), played by touch on a phone-sized page: the starter
+// Railway stations and lines (docs/rail.md), played by touch on a phone-sized page: the empty
 // town's trains call at their two stations; a branch line across the north road gets a level
 // crossing; two stations are built on it from Build > Stops and a line drawn between them by
 // tapping them; its trains call at both with their doors open, the barriers hold the road, and
@@ -7,7 +7,7 @@
 import { chromium } from 'playwright-core';
 const url = process.argv[2] ?? 'http://localhost:5173/proto.html?map=town'; // (straight into the starter town, past the start menu)
 const out = process.argv[3] ?? '.';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
@@ -19,10 +19,10 @@ await page.waitForFunction(() => window.proto?.railway, null, { timeout: 90000 }
 await wait(2500);
 await page.evaluate(() => { window.proto.setSpeed(4); window.proto.purse.balance = 3_000_000; }); // (enough for two stations and their trains)
 
-// the starter line: two stations, trains calling at both
+// the town starts with no stations, lines or trains: they're the player's to build
 const starter = await page.evaluate(() => { const R = window.proto.railway; return { stations: R.stations.map((s) => s.name), lines: R.lines.length, trains: R.trains.length }; });
-console.log('starter', JSON.stringify(starter));
-if (starter.stations.length !== 2 || starter.lines !== 1) fail('the starter town should have two stations and a line');
+console.log('at the start', JSON.stringify(starter));
+if (starter.stations.length || starter.lines || starter.trains) fail('the town starts with railway stations or lines already built');
 await page.evaluate(() => window.proto.focusOn({ x: -420, z: 185 }, 220));
 await wait(2500);
 await page.screenshot({ path: `${out}/rail-0-starter.png` });
@@ -63,7 +63,7 @@ await wait(300);
 await buildStation(300);
 const built = await page.evaluate(() => window.proto.railway.stations.map((s) => ({ id: s.id, name: s.name, x: Math.round(s.x) })));
 console.log('stations', JSON.stringify(built));
-if (built.length !== 4) fail('two stations were not built on the branch');
+if (built.length !== 2) fail('two stations were not built on the branch');
 
 // the second station's sheet is open: New line from here, then tap the first station, Create
 const newLine = await page.$$('#sheet button');
@@ -112,12 +112,12 @@ if (onTrack) fail(`a car was on the level crossing while a train held its block 
 await page.evaluate(() => window.proto.focusOn({ x: 300, z: 340 }, 120));
 await wait(2500);
 await page.screenshot({ path: `${out}/rail-5-station.png` });
-// Transport > Railway lists both lines
+// Transport > Railway lists the line
 await page.tap('[data-bar="transport"]'); await wait(400);
 await page.tap('[data-tab="rail"]').catch(() => {});
 await wait(500);
 const rows = await page.$$('[data-rline]');
-if (rows.length < 2) fail(`Transport > Railway lists ${rows.length} lines`);
+if (rows.length < 1) fail(`Transport > Railway lists ${rows.length} lines`);
 await page.screenshot({ path: `${out}/rail-6-transport.png` });
 const perf = await page.evaluate(() => window.__perf);
 console.log('perf', JSON.stringify({ frameMs: perf && perf.frameMs / Math.max(1, perf.frames), calls: perf?.calls }));

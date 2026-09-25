@@ -13,7 +13,7 @@ import {
   type Tune, type Use, type VehiclePos, type WorldIn, type ZoneIn,
 } from './econdefs';
 import { LineState, NC, type LineCtx, type StopPos } from './econlines';
-import { Pairs, Skim, assignTrips, installTrips, reach, type PairCache, type Reach, type ZoneAccess } from './econaccess';
+import { Pairs, Skim, assignTrips, installTrips, reach, townFlows, type PairCache, type TownFlow, type Reach, type ZoneAccess } from './econaccess';
 import { newTown, perUse, reviewTown, type BState, type Crowding, type TState, type TownCtx, type ZState } from './econtowns';
 
 export { LineState } from './econlines';
@@ -94,6 +94,7 @@ export class Economy {
   private nextReview: number;
   private rand: Rand;
   private townMap = new Map<number, TState>();
+  private flows: Map<number, Map<number, TownFlow>> | null = null;
   private zoneMap = new Map<number, ZState>();
   private zoneList: ZState[] = [];
   private buildingMap = new Map<number, BState>();
@@ -833,6 +834,8 @@ export class Economy {
     const t = assignTrips(this.pairs, this.skim, a.residents, a.attraction, a.visit, a.car, a.cover, a.homeCover, this.tune);
     installTrips(this.lineList, t);
     this.reviewWork += t.work;
+    // with more than one town, where each town's people go (for the panels)
+    this.flows = this.townMap.size > 1 ? townFlows(this.pairs, a.residents, a.attraction, a.car, a.cover, a.homeCover, Int32Array.from(this.zoneList, (z) => z.town.id), this.tune) : null;
   }
 
   // ---------------- the monthly review ----------------
@@ -953,6 +956,14 @@ export class Economy {
   takeEvents(): EconEvent[] { const e = this.events; this.events = []; return e; }
 
   town(id: number): TownReport | null { return this.townMap.get(id)?.report ?? null; }
+  // Where a town's people go a day, the other towns busiest first: by any means, and by your lines.
+  townTrips(id: number): { town: number; name: string; all: number; lines: number }[] {
+    const row = this.flows?.get(id);
+    if (!row) return [];
+    return [...row.entries()].filter(([to]) => to !== id && this.townMap.has(to))
+      .map(([to, f]) => ({ town: to, name: this.townMap.get(to)!.name, all: f.all, lines: f.lines }))
+      .sort((a, b) => b.all - a.all || a.town - b.town);
+  }
   townReports(): TownReport[] { return [...this.townMap.values()].sort((a, b) => a.id - b.id).map((t) => t.report!).filter(Boolean); }
 
   line(id: number): LineStats | null {
@@ -1036,9 +1047,11 @@ export class Economy {
         id: t.id, base: { ...t.base }, cal: { ...t.cal }, at: { ...t.at }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, assessed: t.assessed, labour: t.labour, customers: t.customers,
         supply: { ...t.supply }, month: { ...t.month }, got: { ...t.got }, offmap: { ...t.offmap }, delivered: { ...t.delivered }, accept: { ...t.accept }, held: { ...t.held }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
         recent: structuredClone(t.recent), done: { ...t.done }, report: t.report ? structuredClone(t.report) : null,
+        zoneOrder: t.zones.map((z) => z.id), // (the order its zones are summed in)
       })),
-      zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared } })),
-      buildings: [...this.buildingMap.values()].map((b) => ({ id: b.id, zone: b.zone.id, x: b.x, z: b.z, kind: b.kind, cap: b.cap, occ: b.occ, abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest })),
+      // (with the last review's tallies, which steer the trips until the next review)
+      zones: this.zoneList.map((z) => ({ id: z.id, plots: z.plots, reserved: z.reserved, blocked: z.blocked, cleared: { ...z.cleared }, cap: { ...z.cap }, occCap: { ...z.occCap }, pHome: z.pHome, labour: z.labour, customers: z.customers })),
+      buildings: [...this.buildingMap.values()].map((b) => ({ id: b.id, zone: b.zone.id, x: b.x, z: b.z, kind: b.kind, cap: b.cap, occ: b.occ, abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest, site: b.site })),
       industries: [...this.indMap.values()].map((i) => ({ id: i.id, rate: i.rate, stock: arr(i.stock), input: arr(i.input), produced: i.produced, moved: i.moved, received: i.received, converted: i.converted, last: { ...i.last } })),
       stops: [...this.stopMap.values()].map((s) => ({ id: s.id, pool: arr(s.pool), relayed: arr(s.relayed), fare: s.fare, month: { ...s.month }, last: { ...s.last } })),
       lines: this.lineList.map((L) => ({ id: L.id, ...L.save() })),
@@ -1060,11 +1073,14 @@ export class Economy {
     for (const b of s.buildings) {
       e.addBuilding({ id: b.id, zone: b.zone, x: b.x, z: b.z, kind: b.kind, capacity: b.cap, occupancy: b.occ });
       const q = e.buildingMap.get(b.id);
-      if (q) Object.assign(q, { abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest });
+      if (q) Object.assign(q, { abandoned: b.abandoned, since: b.since, shown: b.shown, densify: b.densify, rest: b.rest, site: b.site ?? q.site });
     }
-    for (const t of s.towns) {
+    for (const { zoneOrder, ...t } of s.towns) {
       const q = e.townMap.get(t.id);
-      if (q) Object.assign(q, structuredClone({ ...t, id: q.id, assessed: t.assessed ?? t.primed }));
+      if (!q) continue;
+      Object.assign(q, structuredClone({ ...t, id: q.id, assessed: t.assessed ?? t.primed }));
+      // (its zones in the order the saved game had them, so its sums come out the same to the last digit)
+      if (zoneOrder) { const at = new Map(zoneOrder.map((id, i) => [id, i])); q.zones.sort((a, b) => (at.get(a.id) ?? Infinity) - (at.get(b.id) ?? Infinity)); }
     }
     for (const i of s.industries) {
       const q = e.indMap.get(i.id);

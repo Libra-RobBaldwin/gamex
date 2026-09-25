@@ -114,6 +114,9 @@
 #app .map .go { grid-column: 2; display: flex; }
 #app .map .go:empty { display: none; }
 #app .map .go .act { flex: 1; }
+#app .saves .go { gap: 8px; }
+#app .saves .go [data-del] { flex: none; min-width: 48px; padding: 0 12px; }
+#app .saves .t small + small { margin-top: 2px; }
 
 /* how to play */
 #app .how { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 4px; }

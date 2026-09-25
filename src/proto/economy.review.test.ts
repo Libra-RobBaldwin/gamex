@@ -1,6 +1,7 @@
 // Adversarial review of the economy model. Each test states what the model should do and fails
 // where it doesn't; the comment above each says what goes wrong and why.
 import { describe, expect, it } from 'vitest';
+import { budget, cpuMs } from './test/speed';
 import { Economy, type EconomyOptions } from './economy';
 import { BALANCED, Kit } from './econkit';
 import { VEHICLES, type Action, type LineIn, type TownStatus } from './econdefs';
@@ -295,10 +296,8 @@ describe('cost', () => {
     for (let t = 0; t < 144; t++) k.town({ id: t + 1, x: (t % 12) * 2000, z: Math.floor(t / 12) * 2000, grid: 4, mix: { house: 16, terrace: 6 }, centre: { office: 2, shop: 5, civic: 2 } });
     for (let a = 1; a <= 144; a++) for (let b = a + 1; b <= 144; b++) k.road(a, b);
     const e = new Economy(k.world(), k.oracles(), opts);
-    const t0 = performance.now();
-    e.advance(MONTH);
-    const ms = performance.now() - t0;
+    const ms = cpuMs(() => e.advance(MONTH));
     console.log(`conurbation: ${k.zones.length} zones, a month ${ms.toFixed(0)} ms`);
-    expect(ms).toBeLessThan(1000);
+    expect(ms).toBeLessThan(budget(1000)); // (on the reference machine, scaled to this one's speed: test/speed.ts)
   }, 120_000);
 });

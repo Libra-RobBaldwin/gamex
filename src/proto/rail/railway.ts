@@ -18,6 +18,7 @@ import { DEPOT_LEN, planStation, type StationOptions, stationShape, worksFor, ty
 import { pointInPoly } from '../land';
 
 const NAMES = ['Central', 'Parkway', 'Town', 'Riverside', 'North Road', 'Market Street', 'Junction', 'Halt', 'West', 'East', 'Bridge Street', 'Mill Lane'];
+export interface RailwaySave { nextId: number; nextLine: number; stations: Station[]; lines: RailLine[]; trains: { line: number; def: TrainDef }[] }
 export interface Road { onStretch(seg: number, z0: number, z1: number): boolean; barriers: Map<number, [number, number][]> }
 
 export class Railway {
@@ -163,6 +164,24 @@ export class Railway {
     if (!w) return false;
     const [a, b] = worksSpan(w, this.net.def(this.net.segs.get(seg)!).tracks);
     return !this.crossings.some((c) => c.rail === seg && c.railS > a - 10 && c.railS < b + 10) && a >= 0 && b <= L;
+  }
+
+  // ---------- saving (game/save.ts) ----------
+  // The stations and lines as built, and each line's trains (which start again from its depot or
+  // first station, as a new line's do). The track itself is the network's.
+  save(): RailwaySave {
+    return {
+      nextId: this.nextId, nextLine: this.nextLine, stations: structuredClone(this.stations), lines: this.lines.map((l) => ({ ...l, stops: [...l.stops] })),
+      trains: this.trains.filter((t) => t.line).map((t) => ({ line: t.line!.id, def: structuredClone(t.def) })),
+    };
+  }
+  // (onto the restored network, with no stations or lines of its own yet)
+  restore(s: RailwaySave) {
+    this.nextId = s.nextId; this.nextLine = s.nextLine;
+    this.stations = structuredClone(s.stations);
+    this.rebuild();
+    for (const l of s.lines) this.sim.lines.push({ ...l, stops: [...l.stops] });
+    for (const t of s.trains) { const l = this.lines.find((x) => x.id === t.line); if (l) this.sim.addTrain(t.def, l); }
   }
 
   // ---------- running ----------
