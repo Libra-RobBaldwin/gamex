@@ -53,6 +53,7 @@ import trendUp from './icons/trending-up.svg?raw';
 import trendDown from './icons/trending-down.svg?raw';
 import tunnel from './icons/building-tunnel.svg?raw';
 import users from './icons/users.svg?raw';
+import bell from './icons/bell.svg?raw';
 import wheat from './icons/wheat.svg?raw';
 import x from './icons/x.svg?raw';
 import arrowLeft from './icons/arrow-left.svg?raw';
@@ -71,7 +72,7 @@ import undo from './icons/arrow-back-up.svg?raw';
 import warehouse from './icons/building-warehouse.svg?raw';
 
 const RAW = {
-  activity, adjustments, alert, angle, arrowsCross, arrowsDownUp, bike, bolt, branch, bridge, bulldozer, bus, busStop, car, check, clock, cog, curve,
+  activity, adjustments, alert, bell, angle, arrowsCross, arrowsDownUp, bike, bolt, branch, bridge, bulldozer, bus, busStop, car, check, clock, cog, curve,
   finger, giveWay, handStop, heightAuto, home, line, map, minus, motorway, mountain, parking, pause, play, plus, ramp, refresh, restore, road, rotL, rotR,
   roundabout, route, ruler, smooth, sparkles, tree, trees, lights, train, trendUp, trendDown, tunnel, users, wheat, x,
   arrowLeft, building, chevronDown, droplet, floppy, hammer, info, layers, menu, pin, transport, trash, undo, warehouse,

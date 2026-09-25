@@ -95,6 +95,8 @@ export interface ToolHandle {
 export interface Layer { id: string; label: string; icon: Icon; disabled?: string; on?: boolean; onToggle?: (on: boolean) => void }
 export interface ViewPicker { options: { id: string; label: string }[]; current: () => string; pick: (id: string) => void }
 export interface MenuItem { id: string; label: string; sub?: string | (() => string); icon: Icon; disabled?: string; onClick: () => void }
+/** Something the player should know about, with where to go to deal with it. */
+export interface Alert { id: string; icon: Icon; text: string; sub?: string; tone?: Tone; onClick?: () => void }
 export interface TransportTab { id: string; label: string; icon: Icon; sub?: string; render: (el: HTMLElement) => void }
 export interface Info {
   key?: string;
@@ -166,6 +168,7 @@ export class Shell {
             <span class="sp"><span id="popc">${icon('users')}<b id="st-popc">0</b><i id="popdir"></i></span><span class="clk"><b id="st-clock">07:00</b><em id="st-rush"></em></span></span>
           </button>
           <span class="spd">
+            <button id="alertbtn" hidden aria-label="Alerts" title="Alerts">${icon('bell')}<b id="alertn"></b></button>
             <button id="sp-pause" aria-pressed="false" aria-label="Pause" title="Pause">${icon('pause')}</button>
             <button id="sp-rate" aria-label="Game speed 1×, tap for faster" title="Game speed">1×</button>
           </span>
@@ -204,6 +207,7 @@ export class Shell {
     this.$('#sp-pause').addEventListener('click', () => opts.onPause());
     this.$('#sp-rate').addEventListener('click', () => opts.onRate());
     this.$('#perfbtn').addEventListener('click', () => opts.onPerf());
+    this.$('#alertbtn').addEventListener('click', () => (this.sheet?.key === 'alerts' ? this.closeSheet() : this.openAlerts()));
     this.$('#townbtn').addEventListener('click', () => { this.toggleDrawer(false); opts.onTown?.(); });
     this.$('#ugbtn').addEventListener('click', () => opts.onUnderground?.());
     this.$('#clockbtn').addEventListener('click', () => this.toggleDrawer());
@@ -449,6 +453,30 @@ export class Shell {
   }
   /** Re-render whichever transport tab is showing (e.g. after a vehicle is added). */
   refreshTransport() { if (this.sheet?.key.startsWith('transport:')) this.openTransport(this.ttab); }
+
+  // ---------------- alerts: what wants attention, one tap from dealing with it ----------------
+  private alerts: Alert[] = [];
+  private alertSig = '';
+  setAlerts(list: Alert[]) {
+    const sig = list.map((a) => `${a.id}|${a.text}|${a.sub ?? ''}`).join('\n');
+    if (sig === this.alertSig) return;
+    const grew = list.some((a) => !this.alerts.some((b) => b.id === a.id));
+    this.alertSig = sig;
+    this.alerts = list;
+    const b = this.$('#alertbtn');
+    b.hidden = !list.length;
+    this.$('#alertn').textContent = list.length ? String(list.length) : '';
+    b.setAttribute('aria-label', `${list.length} alert${list.length === 1 ? '' : 's'}`);
+    if (grew) { b.classList.remove('ping'); void b.offsetWidth; b.classList.add('ping'); }
+    if (this.sheet?.key === 'alerts') { if (list.length) this.openAlerts(); else this.closeSheet(); }
+  }
+  openAlerts() {
+    const body = this.openSheet({
+      key: 'alerts', title: 'Alerts', sub: this.alerts.length ? 'Tap one to go and deal with it' : 'All running smoothly', icon: 'bell',
+      body: this.alerts.length ? this.alerts.map((a, i) => `<button class="lrow alrow tone-${a.tone ?? 'look'}" data-al="${i}"><span class="num">${icon(a.icon)}</span><b>${esc(a.text)}</b>${a.sub ? `<span>${esc(a.sub)}</span>` : '<span></span>'}</button>`).join('') : '<p class="note">Nothing needs you just now.</p>',
+    });
+    body.querySelectorAll<HTMLButtonElement>('[data-al]').forEach((b) => b.addEventListener('click', () => { const a = this.alerts[+b.dataset.al!]; this.closeSheet(); a?.onClick?.(); }));
+  }
 
   // ---------------- stats: money, lines, the town ----------------
   addStatsTab(t: TransportTab) {
