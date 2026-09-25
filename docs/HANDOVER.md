@@ -8,10 +8,12 @@
    `trig_01Ek1SW3wQooCqKrBfHwT3j9` (#44), `trig_013GtCHP7rnmTLWuPbJjyB2r` (#43) and
    `trig_01LkUZuKGwCSYrq9QoDTE41o` (#45). The coordinator's check-in is
    `trig_01UboPgMjMc2T4TShqSC9vTi`. Re-enable them, or message each session to carry on.
-2. Merge order: world50 (PR #42) first. It merged cleanly onto `a024fca` in a trial and passed tsc.
-   Then #41 (countryside), #44 (edge), #43 (OS), #45 (vernacular) and terrain. Run tsc, vitest,
-   the six phone e2es and `?map=region` by eye after each, then push and archive the session.
-   The loop, lines, save, stations and rail suites take the address as their first argument
+2. **Merged and live at the pause:** world50 (#42), vernacular (#45) and OS (#43, adds Exeter and
+   Ludlow). All tests were green. Exeter took 142 s to load under SwiftShader; check it on a phone.
+   **Still to merge:** countryside (#41) and edge (#44). Both were built on the old 6 km region's
+   `BIG` path, which world50's `WORLD` path has replaced for the region, so they conflict in
+   `main.ts` and `ground/game.ts`. Port them onto `WORLD`, not a text merge. Terrain has no branch
+   yet. The loop, lines, save, stations and rail suites take the address as their first argument
    (`node e2e/loop.e2e.mjs http://localhost:5180/?map=town`). The menu suite takes it from `BASE=`.
 3. Then wire terrain's landform presets and islands into the region setup's first step, and do
    HUD phase 3 (small tap cards for a bus, stop or building).
