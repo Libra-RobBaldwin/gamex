@@ -193,6 +193,7 @@ export class Shell {
         <div id="firstrun" role="status" hidden></div>
         <button id="goal" hidden></button>
       </div>
+      <a id="credit" target="_blank" rel="noopener" hidden></a>
       <section id="sheet" class="sheet facet" role="dialog" hidden></section>
       <div id="layers" class="facet" role="dialog" aria-label="Map layers" hidden></div>
       <div id="tpanel" class="facet" hidden></div>
@@ -284,6 +285,13 @@ export class Shell {
     const d = this.$('#popdir');
     d.className = dir > 0 ? 'up' : dir < 0 ? 'down' : '';
     d.textContent = dir > 0 ? '▲' : dir < 0 ? '▼' : '';
+  }
+  /** A faint credit on the map (map data needs one wherever it's shown: a real region's OS data). */
+  setCredit(text: string | null, href: string | null = null) {
+    const a = this.$<HTMLAnchorElement>('#credit');
+    a.hidden = !text;
+    a.textContent = text ?? '';
+    if (href) a.href = href; else a.removeAttribute('href');
   }
 
   /** Call when a map tap is about to open or change a sheet: swallows that tap's click. */

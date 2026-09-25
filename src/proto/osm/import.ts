@@ -114,8 +114,9 @@ export function importOsm(json: OverpassJson, opts: ImportOpts = {}): OsmImport 
   };
 }
 
-// The graph into the game's network, one node per graph node that still has roads.
-function emit(g: Graph, net: Network) {
+// The graph into the game's network, one node per graph node that still has roads (real/lay.ts
+// uses it to build a real region into the game's own network).
+export function emit(g: Graph, net: Network) {
   const nodeOf = new Map<number, number>();
   const roads = new Map<number, ImportedRoad>();
   const nid = (n: number) => {

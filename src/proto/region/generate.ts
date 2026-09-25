@@ -14,6 +14,7 @@ import { rng, mix, range, pick, type Rand } from './random';
 import { placeName } from './names';
 import { regionOptions, type RegionOptions } from './options';
 import { MapWater, type LakeSpec, type RiverSpec, type WaterSpec, type XZ } from './water';
+import { GRID_PLAN, PRIORS } from './priors';
 
 export type Kind = 'city' | 'town' | 'village';
 export type Plan = 'grid' | 'organic';
@@ -51,9 +52,9 @@ export const REGION_BOUND = 3000;
 // centre to its edge with an industrial estate beyond: a market town is that, the city twice it.
 interface KindSpec { r: [number, number]; spacing: number; high: string[]; main: string; street: string[]; industrial: { width: number; rows: number } | null; grid: number }
 export const KINDS: Record<Kind, KindSpec> = {
-  city: { r: [440, 480], spacing: 90, high: ['boulevard-30-0-0', 'avenue'], main: 'arterial-1-30-0-0-2.2', street: ['street', 'street-30-2.4-2.2-0'], industrial: { width: 380, rows: 3 }, grid: 0.8 },
-  town: { r: [230, 270], spacing: 85, high: ['avenue', 'avenue'], main: 'street-30-2.4-2.2-0', street: ['street', 'street-20-2.4-0-0'], industrial: { width: 200, rows: 2 }, grid: 0.5 },
-  village: { r: [110, 160], spacing: 80, high: ['street-30-4-0-0', 'street-30-4-0-0'], main: 'street', street: ['street-20-2.4-0-0', 'street'], industrial: null, grid: 0.15 },
+  city: { r: [440, 480], spacing: 90, high: ['boulevard-30-0-0', 'avenue'], main: 'arterial-1-30-0-0-2.2', street: ['street', 'street-30-2.4-2.2-0'], industrial: { width: 380, rows: 3 }, grid: GRID_PLAN.city },
+  town: { r: [230, 270], spacing: 85, high: ['avenue', 'avenue'], main: 'street-30-2.4-2.2-0', street: ['street', 'street-20-2.4-0-0'], industrial: { width: 200, rows: 2 }, grid: GRID_PLAN.town },
+  village: { r: [110, 160], spacing: 80, high: ['street-30-4-0-0', 'street-30-4-0-0'], main: 'street', street: ['street-20-2.4-0-0', 'street'], industrial: null, grid: GRID_PLAN.village },
 };
 const INDUSTRIAL_ROAD = 'arterial-1-40-0-0-0';
 
@@ -222,7 +223,7 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
   // tree from the centre (along the high street and the cross street first) always stays.
   if (organic) {
     const tree = spanningTree(kept, nodes.get(id(0, 0))!);
-    kept = kept.filter((e) => tree.has(e) || e.role !== 'street' || r() > 0.3);
+    kept = kept.filter((e) => tree.has(e) || e.role !== 'street' || r() > PRIORS.roads.junctions.deadEnd); // (about as many dead ends as real towns have: priors.ts)
   }
   // then only what's joined to the centre, in the order it's reached from there
   const order = reachOrder(kept, nodes.get(id(0, 0))!);

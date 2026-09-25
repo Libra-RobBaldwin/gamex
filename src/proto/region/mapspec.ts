@@ -31,7 +31,10 @@ export interface MapSpec {
   stops: XZ[]; // a few bus stops to start with, near these points
   line: XZ[]; // the starter bus line: the stops nearest these, in order
   industries: boolean; // library industrial sites on the town's estate (game/industry.ts townWishes)
-  trees: { count: number; clear?: number }; // woodland trees scattered, and the radius mostly kept clear round each centre (else 55% of its radius)
+  trees: { count: number; clear?: number; spots?: XZ[] }; // woodland trees scattered, and the radius mostly kept clear round each centre (else 55% of its radius); a real map's trees stand at `spots`
+  ground?: { x0: number; z0: number; step: number; n: number; h: Float32Array; max: number }; // a real map's hills (real/map.ts): the relief grid itself, for region/terrain.ts
+  credit?: { text: string; href: string }; // a real map's data credit, shown on the map
+  placeBy?: 'edge'; // a spot belongs to the settlement whose edge is nearest, not its centre (a real map: a city's suburbs are the city's, not the next village's)
   style: Style; // how it looks (region/styles.ts): temperate, desert, arctic
   relief: Relief; // how hilly (not drawn yet: docs/regiongen.md, "Hills")
   options?: RegionOptions; // a generated map's options: they make it again
@@ -53,7 +56,7 @@ export const zoneOf = (m: MapSpec, p: XZ): 'industrial' | 'town' => (m.zones.som
 // the settlement whose centre is nearest (a map always has at least one)
 export function settlementAt(m: MapSpec, p: XZ): SettlementInfo {
   let best = m.settlements[0], bd = Infinity;
-  for (const s of m.settlements) { const d = Math.hypot(p.x - s.x, p.z - s.z); if (d < bd) { bd = d; best = s; } }
+  for (const s of m.settlements) { const d = Math.hypot(p.x - s.x, p.z - s.z) - (m.placeBy === 'edge' ? s.r : 0); if (d < bd) { bd = d; best = s; } }
   return best;
 }
 // how far a plot is from the nearest centre: the order plots are built in
