@@ -72,10 +72,13 @@ const SWIRL = 900, SWIRL_R = 600, SWIRL_MAX = 0.9;
 export interface ParcelStyle { bend: number; jitter: number; swirl: number; swirlR: number; swirlMax: number }
 const STYLES = new Map<number, ParcelStyle>();
 const DEFAULT_STYLE: ParcelStyle = { bend: BEND, jitter: JIT, swirl: SWIRL, swirlR: SWIRL_R, swirlMax: SWIRL_MAX };
-export function setParcelStyle(seed: number, s: Partial<ParcelStyle>) { STYLES.set(seed, { ...DEFAULT_STYLE, ...s }); }
+export function setParcelStyle(seed: number, s: Partial<ParcelStyle>) { STYLES.set(seed, { ...DEFAULT_STYLE, ...s }); lastSeed = NaN; }
+// (the hot path: every corner of every field a paint looks at; the last seed's style is kept)
+let lastSeed = NaN, lastStyle = DEFAULT_STYLE;
+const styleOf = (seed: number) => { if (seed !== lastSeed) { lastSeed = seed; lastStyle = STYLES.size ? STYLES.get(seed) ?? DEFAULT_STYLE : DEFAULT_STYLE; } return lastStyle; };
 export const STRAIGHT_FIELDS: Partial<ParcelStyle> = { bend: 25, jitter: 0.09, swirl: 6000, swirlR: 3500, swirlMax: 0.6 };
 export function bend(x: number, z: number, seed: number): XZ {
-  const st = STYLES.get(seed) ?? DEFAULT_STYLE, SWIRL = st.swirl, SWIRL_R = st.swirlR, SWIRL_MAX = st.swirlMax;
+  const st = styleOf(seed), SWIRL = st.swirl, SWIRL_R = st.swirlR, SWIRL_MAX = st.swirlMax;
   let dx = (worldNoise(x, z, BEND_L, seed + 111) - 0.5) * 2 * st.bend, dz = (worldNoise(x, z, BEND_L, seed + 112) - 0.5) * 2 * st.bend;
   const ci = Math.floor(x / SWIRL), cj = Math.floor(z / SWIRL);
   for (let i = ci - 1; i <= ci + 1; i++) for (let j = cj - 1; j <= cj + 1; j++) {
@@ -89,7 +92,7 @@ export function bend(x: number, z: number, seed: number): XZ {
 }
 // the world position of grid corner (i, j)
 function corner(i: number, j: number, seed: number): XZ {
-  const J = (STYLES.get(seed) ?? DEFAULT_STYLE).jitter;
+  const J = styleOf(seed).jitter;
   const b = fromGrid(i + (hash2(i, j, seed + 101) - 0.5) * 2 * J, j + (hash2(i, j, seed + 102) - 0.5) * 2 * J), d = bend(b.x, b.z, seed);
   return { x: b.x + d.x, z: b.z + d.z };
 }
