@@ -8,10 +8,10 @@
 // (#st-clock and friends) a few times a second, and layout is only measured when something changes
 // size (a ResizeObserver) or when the game asks where the clear map is.
 import { icon, type Icon } from './icons';
-import { NAME, markSvg, needleSvg } from './brand';
+import { NAME, needleSvg } from './brand';
 
 export type Tone = 'road' | 'rail' | 'stop' | 'look' | 'bulldoze';
-export type BarKey = 'build' | 'transport' | 'layers' | 'menu';
+export type BarKey = 'build' | 'transport' | 'layers' | 'stats' | 'menu';
 
 /** A button in a sheet's action row or the tool strip. */
 export interface Action { label: string; icon?: Icon; kind?: 'primary' | 'danger'; disabled?: boolean; title?: string; onClick: () => void }
@@ -95,6 +95,8 @@ export interface ToolHandle {
 export interface Layer { id: string; label: string; icon: Icon; disabled?: string; on?: boolean; onToggle?: (on: boolean) => void }
 export interface ViewPicker { options: { id: string; label: string }[]; current: () => string; pick: (id: string) => void }
 export interface MenuItem { id: string; label: string; sub?: string | (() => string); icon: Icon; disabled?: string; onClick: () => void }
+/** Something the player should know about, with where to go to deal with it. */
+export interface Alert { id: string; icon: Icon; text: string; sub?: string; tone?: Tone; onClick?: () => void }
 export interface TransportTab { id: string; label: string; icon: Icon; sub?: string; render: (el: HTMLElement) => void }
 export interface Info {
   key?: string;
@@ -141,6 +143,8 @@ export class Shell {
   private buildCat = '';
   private ttabs: TransportTab[] = [];
   private ttab = '';
+  private stabs2: TransportTab[] = [];
+  private stab = '';
   private layers: Layer[] = [];
   private views: ViewPicker | null = null;
   private menu: MenuItem[] = [];
@@ -157,13 +161,17 @@ export class Shell {
     this.root = root;
     html(root, `
       <div id="hud-top">
-        <header id="status" class="facet">
-          <span class="mk">${markSvg()}<span class="vh">${NAME}</span></span>
+        <header id="status">
+          <span class="vh">${NAME}</span>
           <button id="clockbtn" aria-expanded="false" aria-controls="drawer" title="Town at a glance">
-            <b id="st-clock">07:00</b><em id="st-rush"></em><span id="money" class="money"></span><span class="chev">${icon('chevronDown')}</span>
+            <span class="sm"><span id="money" class="money"></span><em id="trend"></em></span>
+            <span class="sp"><span id="popc">${icon('users')}<b id="st-popc">0</b><i id="popdir"></i></span><span class="clk"><b id="st-clock">07:00</b><em id="st-rush"></em></span></span>
           </button>
-          <button id="sp-pause" aria-pressed="false" aria-label="Pause" title="Pause">${icon('pause')}</button>
-          <button id="sp-rate" aria-label="Game speed 1×, tap for faster" title="Game speed">1×</button>
+          <span class="spd">
+            <button id="alertbtn" hidden aria-label="Alerts" title="Alerts">${icon('bell')}<b id="alertn"></b></button>
+            <button id="sp-pause" aria-pressed="false" aria-label="Pause" title="Pause">${icon('pause')}</button>
+            <button id="sp-rate" aria-label="Game speed 1×, tap for faster" title="Game speed">1×</button>
+          </span>
         </header>
         <div id="drawer" class="facet" hidden>
           <div class="sts">
@@ -188,9 +196,10 @@ export class Shell {
       <div id="tpanel" class="facet" hidden></div>
       <div id="tool" hidden></div>
       <nav id="bar" aria-label="Main">
-        <button data-bar="build" aria-expanded="false">${icon('hammer')}<span>Build</span></button>
         <button data-bar="transport" aria-expanded="false">${icon('transport')}<span>Transport</span></button>
-        <button data-bar="layers" aria-expanded="false">${icon('layers')}<span>Layers</span></button>
+        <button data-bar="layers" aria-expanded="false">${icon('layers')}<span>Overlays</span></button>
+        <button data-bar="build" class="fab" aria-expanded="false">${icon('hammer')}<span>Build</span></button>
+        <button data-bar="stats" aria-expanded="false">${icon('activity')}<span>Stats</span></button>
         <button data-bar="menu" aria-expanded="false">${icon('menu')}<span>Menu</span></button>
       </nav>
       <div id="hint" role="status" aria-live="polite" hidden></div>
@@ -199,6 +208,7 @@ export class Shell {
     this.$('#sp-pause').addEventListener('click', () => opts.onPause());
     this.$('#sp-rate').addEventListener('click', () => opts.onRate());
     this.$('#perfbtn').addEventListener('click', () => opts.onPerf());
+    this.$('#alertbtn').addEventListener('click', () => (this.sheet?.key === 'alerts' ? this.closeSheet() : this.openAlerts()));
     this.$('#townbtn').addEventListener('click', () => { this.toggleDrawer(false); opts.onTown?.(); });
     this.$('#ugbtn').addEventListener('click', () => opts.onUnderground?.());
     this.$('#clockbtn').addEventListener('click', () => this.toggleDrawer());
@@ -216,6 +226,7 @@ export class Shell {
       if (k === 'build') this.openBuild();
       else if (k === 'transport') this.openTransport();
       else if (k === 'layers') this.openLayers();
+      else if (k === 'stats') this.openStats();
       else this.openMenu();
     }));
     // A tap on the map opens a sheet on pointerup; the click from that same tap must not then
@@ -257,8 +268,20 @@ export class Shell {
     this.$('#perfbtn').classList.toggle('on', on);
     if (on) this.toggleDrawer(true);
   }
-  /** Money, once the economy is wired; empty hides it. */
-  setMoney(text: string) { this.$('#money').textContent = text; }
+  /** Money, once the economy is wired; empty hides it. `trend`: what the day's running made or lost. */
+  setMoney(text: string, trend?: { text: string; dir: 1 | 0 | -1 }) {
+    this.$('#money').textContent = text;
+    const t = this.$('#trend');
+    t.textContent = trend?.text ?? '';
+    t.className = trend ? (trend.dir > 0 ? 'up' : trend.dir < 0 ? 'down' : '') : '';
+  }
+  /** Population in the status pill, with which way it's heading. */
+  setPop(text: string, dir: 1 | 0 | -1) {
+    this.$('#st-popc').textContent = text;
+    const d = this.$('#popdir');
+    d.className = dir > 0 ? 'up' : dir < 0 ? 'down' : '';
+    d.textContent = dir > 0 ? '▲' : dir < 0 ? '▼' : '';
+  }
   /** A faint credit on the map (map data needs one wherever it's shown: a real region's OS data). */
   setCredit(text: string | null, href: string | null = null) {
     const a = this.$<HTMLAnchorElement>('#credit');
@@ -438,6 +461,47 @@ export class Shell {
   }
   /** Re-render whichever transport tab is showing (e.g. after a vehicle is added). */
   refreshTransport() { if (this.sheet?.key.startsWith('transport:')) this.openTransport(this.ttab); }
+
+  // ---------------- alerts: what wants attention, one tap from dealing with it ----------------
+  private alerts: Alert[] = [];
+  private alertSig = '';
+  setAlerts(list: Alert[]) {
+    const sig = list.map((a) => `${a.id}|${a.text}|${a.sub ?? ''}`).join('\n');
+    if (sig === this.alertSig) return;
+    const grew = list.some((a) => !this.alerts.some((b) => b.id === a.id));
+    this.alertSig = sig;
+    this.alerts = list;
+    const b = this.$('#alertbtn');
+    b.hidden = !list.length;
+    this.$('#alertn').textContent = list.length ? String(list.length) : '';
+    b.setAttribute('aria-label', `${list.length} alert${list.length === 1 ? '' : 's'}`);
+    if (grew) { b.classList.remove('ping'); void b.offsetWidth; b.classList.add('ping'); }
+    if (this.sheet?.key === 'alerts') { if (list.length) this.openAlerts(); else this.closeSheet(); }
+  }
+  openAlerts() {
+    const body = this.openSheet({
+      key: 'alerts', title: 'Alerts', sub: this.alerts.length ? 'Tap one to go and deal with it' : 'All running smoothly', icon: 'bell',
+      body: this.alerts.length ? this.alerts.map((a, i) => `<button class="lrow alrow tone-${a.tone ?? 'look'}" data-al="${i}"><span class="num">${icon(a.icon)}</span><b>${esc(a.text)}</b>${a.sub ? `<span>${esc(a.sub)}</span>` : '<span></span>'}</button>`).join('') : '<p class="note">Nothing needs you just now.</p>',
+    });
+    body.querySelectorAll<HTMLButtonElement>('[data-al]').forEach((b) => b.addEventListener('click', () => { const a = this.alerts[+b.dataset.al!]; this.closeSheet(); a?.onClick?.(); }));
+  }
+
+  // ---------------- stats: money, lines, the town ----------------
+  addStatsTab(t: TransportTab) {
+    const at = this.stabs2.findIndex((x) => x.id === t.id);
+    if (at >= 0) this.stabs2[at] = t; else this.stabs2.push(t);
+  }
+  openStats(tab?: string) {
+    this.stab = tab ?? (this.stabs2.some((t) => t.id === this.stab) ? this.stab : this.stabs2[0]?.id ?? '');
+    const t = this.stabs2.find((x) => x.id === this.stab);
+    const body = this.openSheet({
+      key: `stats:${this.stab}`, title: 'Stats', sub: t?.sub ?? 'How your company and towns are doing', from: 'stats', fixed: true,
+      tabs: this.stabs2.map((x) => ({ id: x.id, label: x.label, icon: x.icon })), tab: this.stab,
+      onTab: (id) => this.openStats(id), body: '',
+    });
+    t?.render(body);
+  }
+  refreshStats() { if (this.sheet?.key.startsWith('stats:')) this.openStats(this.stab); }
 
   // ---------------- layers ----------------
   addLayer(l: Layer) {
@@ -641,7 +705,8 @@ export class Shell {
   }
   private layout() {
     const bar = this.$('#bar'), tool = this.$('#tool');
-    const b = !tool.hidden ? tool.offsetHeight : bar.offsetHeight;
+    const el = !tool.hidden ? tool : bar;
+    const b = el.offsetHeight ? Math.round(window.innerHeight - el.getBoundingClientRect().top) : 0;
     this.root.style.setProperty('--chrome-b', `${b}px`);
     const h = this.$('#hint');
     if (h.hidden) return;
