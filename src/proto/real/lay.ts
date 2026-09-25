@@ -64,7 +64,7 @@ export function layReal(net: Network, json: OverpassJson, places: Place[] = []):
 // The real buildings onto the land: each where it stands, unless the water, the map's edge or a
 // road's land (a catalogue road is often wider than the real street) is in the way; then moved
 // back from its road up to 4 m, and made up to 30% smaller. Buildings that would overlap one already placed
-// are left out. A grid keeps it quick (a city has tens of thousands).
+// are left out (landmarks are placed first). A grid keeps it quick (a city has tens of thousands).
 export function placeLots(net: Network, lots: Lot[], why: Record<string, number> = {}): Lot[] {
   const C = 40, grid = new Map<string, P[][]>(), out: Lot[] = [];
   const key = (x: number, z: number) => `${Math.floor(x / C)},${Math.floor(z / C)}`;
@@ -76,7 +76,9 @@ export function placeLots(net: Network, lots: Lot[], why: Record<string, number>
     for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (const o of grid.get(`${Math.floor(l.x / C) + di},${Math.floor(l.z / C) + dj}`) ?? []) if (polysOverlap(foot, o)) { why.overlap = (why.overlap ?? 0) + 1; return null; }
     return foot;
   };
-  for (const l of lots) {
+  // (landmarks first: a church, a school, a hospital takes its land before the houses round it)
+  const order = [...lots.filter((l) => l.kind === 'civic'), ...lots.filter((l) => l.kind !== 'civic')];
+  for (const l of order) {
     // (local +z looks at the road: back away from it, and failing that, shrink a little)
     const bx = Math.sin(l.rot), bz = -Math.cos(l.rot), x = l.x, z = l.z, w = l.w, d = l.d;
     let foot: P[] | null = null;

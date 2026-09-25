@@ -104,7 +104,10 @@ export function toOverpass(tiles: Tile[], o: Options): OverpassJson & { counts: 
       if (!ring.every((p) => inBox(p, 2))) continue;
       const cls = BUILDING_CLASSES[f.c], tags: Tags = { ...(BUILDING_TAGS[cls] ?? { building: 'yes' }) };
       if (f.name) tags.name = f.name;
-      for (const piece of o.splitBuildings === false ? [ring] : splitFootprint(ring, !!f.name)) { way(piece, tags, true); count('building'); }
+      // (a named building cut into pieces is itself only once: its biggest piece; the rest are its wings)
+      const pieces = o.splitBuildings === false ? [ring] : splitFootprint(ring, !!f.name);
+      const main = pieces.reduce((b, q) => (Math.abs(ringArea(q)) > Math.abs(ringArea(b)) ? q : b), pieces[0]);
+      for (const piece of pieces) { way(piece, piece === main ? tags : { building: 'yes' }, true); count('building'); }
     }
   }
   for (const r of joinRails(rails)) { way(r.run, r.tags); count('rail'); }
