@@ -23,6 +23,7 @@ const FRAMES = ['#f4f4f0', '#f4f4f0', '#2d3338', '#2e5a45'];
 const DOORS = ['#2e4a6b', '#7a2d2d', '#2e5a45', '#222222', '#d9b43c', '#6b4b8a', '#f4f4f0', '#c9573a'];
 const FASCIA = ['#2e7d5b', '#b23a3a', '#2f5d9e', '#c98a1f', '#3a3a3a', '#7a3f7a', '#1f6f78', '#8c2f4f'];
 const TRIM = '#ece6d8';
+const EDGE = '#e9e5dc'; // (fascias and bargeboards)
 const GRAVEL = '#8e8b86';
 
 type Win = 'none' | 'sash' | 'grid' | 'arched' | 'casement' | 'picture' | 'ribbon' | 'curtain' | 'punched' | 'door' | 'warehouse' | 'shop' | 'lobby'
@@ -137,6 +138,11 @@ function glassCell(x: CanvasRenderingContext2D, r: () => number, gx: number, gy:
   if (k < 0.25) { x.fillStyle = pick(r, ['#e8e2cf', '#d9cdb0', '#f1ede4']); x.fillRect(gx, gy, gw, gh * (0.2 + r() * 0.5)); }
   else if (k < 0.4) { x.fillStyle = pick(r, ['#9c5a4a', '#5a6f8c', '#c9b48a', '#7c8a5a']); x.fillRect(gx, gy, gw * 0.22, gh); x.fillRect(gx + gw * 0.78, gy, gw * 0.22, gh); }
   else if (k < 0.46) { x.fillStyle = 'rgba(255,214,140,0.55)'; x.fillRect(gx, gy + gh * 0.3, gw, gh * 0.7); }
+  // the reveal's shadow along the top and one side, and a glint of sky across the glass, so the
+  // window sits back in the wall
+  x.fillStyle = 'rgba(0,0,0,0.3)'; x.fillRect(gx, gy, gw, Math.max(1, gh * 0.12)); x.fillRect(gx, gy, Math.max(1, gw * 0.09), gh);
+  x.fillStyle = 'rgba(255,255,255,0.13)';
+  x.beginPath(); x.moveTo(gx + gw * 0.35, gy + gh); x.lineTo(gx + gw * 0.62, gy + gh); x.lineTo(gx + gw, gy + gh * 0.45); x.lineTo(gx + gw, gy + gh * 0.15); x.fill();
 }
 
 function drawWindow(x: CanvasRenderingContext2D, r: () => number, win: Win, cx: number, cy: number, wall: string, frame: string, fascia: string) {
@@ -150,7 +156,7 @@ function drawWindow(x: CanvasRenderingContext2D, r: () => number, win: Win, cx: 
     R(0.3, 0.47, 0.4, 0.025, frame);
     if (win === 'grid') { for (const v of [0.43, 0.56]) R(v, 0.2, 0.015, 0.58, frame); for (const v of [0.33, 0.62]) R(0.3, v, 0.4, 0.015, frame); }
     else R(0.49, 0.2, 0.02, 0.58, frame);
-    R(0.27, 0.79, 0.46, 0.04, lintel);
+    R(0.27, 0.79, 0.46, 0.04, lintel); R(0.28, 0.83, 0.44, 0.03, 'rgba(0,0,0,0.2)');
   } else if (win === 'arched') {
     x.fillStyle = lintel;
     x.beginPath(); x.arc(cx + 0.5 * S, cy + 0.34 * S, 0.24 * S, Math.PI, 0); x.fill();
@@ -165,7 +171,7 @@ function drawWindow(x: CanvasRenderingContext2D, r: () => number, win: Win, cx: 
     R(0.22, 0.3, 0.56, 0.44, frame);
     glassCell(x, r, cx + 0.245 * S, cy + 0.325 * S, 0.51 * S, 0.39 * S);
     R(0.49, 0.3, 0.02, 0.44, frame); R(0.22, 0.42, 0.56, 0.02, frame);
-    R(0.2, 0.74, 0.6, 0.04, shade(wall, 0.8));
+    R(0.2, 0.74, 0.6, 0.04, '#e6e1d6'); R(0.21, 0.78, 0.58, 0.03, 'rgba(0,0,0,0.2)');
   } else if (win === 'picture') {
     R(0.1, 0.22, 0.8, 0.58, frame);
     glassCell(x, r, cx + 0.12 * S, cy + 0.24 * S, 0.76 * S, 0.54 * S);
@@ -298,9 +304,9 @@ const M = (key: string, make: () => THREE.Material) => { let m = mats.get(key); 
 const PLAIN = new THREE.MeshLambertMaterial({ vertexColors: true });
 export const PLAIN_MAT = PLAIN; // (industrial sites bake into the chunks with it: game/industry.ts)
 const plain = (c: string) => M(`p|${c}`, () => { const m = new THREE.MeshLambertMaterial({ color: c }); m.userData.tint = new THREE.Color(c); return m; });
-const facade = (win: Win, skin: Skin, wall: string, frame: string, fascia?: string) => M(`f|${win}|${skin}|${wall}|${frame}|${fascia}`, () => new THREE.MeshLambertMaterial({ map: facadeTex(win, skin, wall, frame, fascia) }));
-const roofM = (c: string) => M(`r|${c}`, () => new THREE.MeshLambertMaterial({ map: roofTex(c) }));
-const roofV = (kind: RoofKind, c: string) => (kind === 'tile' || kind === 'slate' ? roofM(c) : M(`rv|${kind}|${c}`, () => new THREE.MeshLambertMaterial({ map: roofTexV(kind, c) })));
+const facade = (win: Win, skin: Skin, wall: string, frame: string, fascia?: string) => M(`f|${win}|${skin}|${wall}|${frame}|${fascia}`, () => new THREE.MeshLambertMaterial({ map: facadeTex(win, skin, wall, frame, fascia), vertexColors: true }));
+const roofM = (c: string) => M(`r|${c}`, () => { const m = new THREE.MeshLambertMaterial({ map: roofTex(c), vertexColors: true }); m.userData.col = c; return m; });
+const roofV = (kind: RoofKind, c: string) => (kind === 'tile' || kind === 'slate' ? roofM(c) : M(`rv|${kind}|${c}`, () => { const m = new THREE.MeshLambertMaterial({ map: roofTexV(kind, c), vertexColors: true }); m.userData.col = c; return m; }));
 const stripes = (c: string) => M(`s|${c}`, () => new THREE.MeshLambertMaterial({ map: stripeTex(c), side: THREE.DoubleSide }));
 const railM = () => M('rail', () => new THREE.MeshLambertMaterial({ color: '#a9cddd', transparent: true, opacity: 0.5, depthWrite: false }));
 
@@ -327,6 +333,15 @@ class Geo {
     this.tri(a, b, c, [u0, v0], [u1, v0], [u1, v1]);
     this.tri(a, c, d, [u0, v0], [u1, v1], [u0, v1]);
   }
+  // a quad shaded darker along its bottom edge (a, b) by fb, its top (c, d) by ft: ambient occlusion
+  quadAO(a: V, b: V, c: V, d: V, u0: number, v0: number, u1: number, v1: number, fb: number, ft: number) {
+    const n = this.c.length, col = this.col;
+    this.quad(a, b, c, d, u0, v0, u1, v1);
+    if (this.c.length === n) return;
+    // (vertex order: a b c, a c d)
+    const f = [fb, fb, ft, fb, ft, ft];
+    for (let i = 0; i < 6; i++) { this.c[n + i * 3] = col.r * f[i]; this.c[n + i * 3 + 1] = col.g * f[i]; this.c[n + i * 3 + 2] = col.b * f[i]; }
+  }
 }
 
 // A footprint rectangle, ordered front-left, front-right, back-right, back-left (+z is the front).
@@ -338,6 +353,7 @@ class Kit {
   top = 0;
   foot = { w: 0, d: 0 };
   doorX: number | undefined;
+  bays: { x: number; z: number; via: XZ[]; out?: boolean; heavy?: boolean }[] = []; // parking spaces, nose to -z (out: to +z; heavy: a lorry's) (see parkingRow)
   g(m: THREE.Material) {
     const tint = m.userData.tint as THREE.Color | undefined;
     const key = tint ? PLAIN : m;
@@ -369,12 +385,20 @@ class Kit {
       const p = pts[i], q = pts[(i + 1) % pts.length];
       const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
       const u = cellW ? Math.max(1, Math.round(len / cellW)) / 2 : len / 6, v = cellW ? floors / 2 : (y1 - y0) / 6;
-      g.quad(this.T(p[0], y0, p[1]), this.T(q[0], y0, q[1]), this.T(q[0], y1, q[1]), this.T(p[0], y1, p[1]), 0, 0, u, v);
+      if (y0 > 0.01 || y1 - y0 < 0.6) g.quad(this.T(p[0], y0, p[1]), this.T(q[0], y0, q[1]), this.T(q[0], y1, q[1]), this.T(p[0], y1, p[1]), 0, 0, u, v);
+      else {
+        // (darker where the wall meets the ground, over its first couple of metres)
+        const ym = Math.min(y1, y0 + 2.4), vm = (v * (ym - y0)) / (y1 - y0);
+        g.quadAO(this.T(p[0], y0, p[1]), this.T(q[0], y0, q[1]), this.T(q[0], ym, q[1]), this.T(p[0], ym, p[1]), 0, 0, u, vm, 0.72, 1);
+        if (y1 > ym + 0.01) g.quad(this.T(p[0], ym, p[1]), this.T(q[0], ym, q[1]), this.T(q[0], y1, q[1]), this.T(p[0], y1, p[1]), 0, vm, u, v);
+      }
     }
   }
   // A block: front face, sides and back can each have their own facade.
   block(cx: number, cz: number, w: number, d: number, y0: number, floors: number, fh: number, cellW: number, front: THREE.Material, side = front, back = side, cap?: THREE.Material) {
     const r = rect(cx, cz, w, d);
+    // a plinth where the walls meet the ground
+    if (y0 === 0 && floors * fh < 20) this.walls(rect(cx, cz, w + 0.06, d + 0.06), true, 0, 1, 0.42, 0, plain('#6d6862'));
     this.walls([r[0], r[1]], false, y0, floors, fh, cellW, front);
     this.walls([r[1], r[2]], false, y0, floors, fh, cellW, side);
     this.walls([r[2], r[3]], false, y0, floors, fh, cellW, back);
@@ -401,7 +425,7 @@ class Kit {
       const j = (i + 1) % 4;
       const len = Math.hypot(B[j][0] - B[i][0], B[j][1] - B[i][1]);
       const slant = Math.hypot(h, (Math.abs(w - tw) + Math.abs(d - td)) / 4);
-      g.quad(this.T(B[i][0], y0, B[i][1]), this.T(B[j][0], y0, B[j][1]), this.T(U[j][0], y0 + h, U[j][1]), this.T(U[i][0], y0 + h, U[i][1]), 0, 0, len / 2, slant / 2);
+      g.quadAO(this.T(B[i][0], y0, B[i][1]), this.T(B[j][0], y0, B[j][1]), this.T(U[j][0], y0 + h, U[j][1]), this.T(U[i][0], y0 + h, U[i][1]), 0, 0, len / 2, slant / 2, h > 1.5 ? 0.86 : 1, 1);
     }
     if (capM && tw > 0.05 && td > 0.05) this.cap(U, y0 + h, capM);
   }
@@ -411,11 +435,38 @@ class Kit {
     const g = this.g(roof), x0 = cx - w / 2 - overX, x1 = cx + w / 2 + overX, zf = cz + d / 2 + over, zb = cz - d / 2 - over, top = y0 + rise;
     const eave = over * (rise / (d / 2)); // eaves dip a little below the wall top
     const slant = Math.hypot(rise, d / 2 + over) / 2, W = (x1 - x0) / 2;
-    g.quad(this.T(x0, y0 - eave, zf), this.T(x1, y0 - eave, zf), this.T(x1, top, cz), this.T(x0, top, cz), 0, 0, W, slant);
-    g.quad(this.T(x1, y0 - eave, zb), this.T(x0, y0 - eave, zb), this.T(x0, top, cz), this.T(x1, top, cz), 0, 0, W, slant);
+    g.quadAO(this.T(x0, y0 - eave, zf), this.T(x1, y0 - eave, zf), this.T(x1, top, cz), this.T(x0, top, cz), 0, 0, W, slant, 0.84, 1);
+    g.quadAO(this.T(x1, y0 - eave, zb), this.T(x0, y0 - eave, zb), this.T(x0, top, cz), this.T(x1, top, cz), 0, 0, W, slant, 0.84, 1);
     const e = this.g(end), h = d / 2, xl = cx - w / 2, xr = cx + w / 2;
     e.tri(this.T(xl, y0, cz + h), this.T(xl, top, cz), this.T(xl, y0, cz - h), [0, 0], [h / 6, rise / 6], [d / 6, 0]);
     e.tri(this.T(xr, y0, cz - h), this.T(xr, top, cz), this.T(xr, y0, cz + h), [0, 0], [h / 6, rise / 6], [d / 6, 0]);
+    // the roof's edges, so it has some thickness: fascia boards and gutters along the eaves, verge
+    // boards up the gables, ridge tiles along the top
+    const yl = y0 - eave, t = Math.min(0.22, 0.05 + over * 0.4);
+    if (over > 0.08) {
+      const f = this.g(plain(EDGE)), gt = this.g(plain('#3b3e42'));
+      for (const [z, sgn] of [[zf, 1], [zb, -1]] as const) {
+        this.face(f, [x0, yl - t, z], [x1, yl - t, z], [x1, yl, z], [x0, yl, z], [0, 0, sgn]);
+        this.face(gt, [x0, yl - t - 0.1, z + sgn * 0.05], [x1, yl - t - 0.1, z + sgn * 0.05], [x1, yl - t + 0.02, z + sgn * 0.05], [x0, yl - t + 0.02, z + sgn * 0.05], [0, 0, sgn]);
+      }
+    }
+    if (overX > 0.08) {
+      const f = this.g(plain(EDGE));
+      for (const [x, sgn] of [[x0, -1], [x1, 1]] as const) for (const z of [zf, zb])
+        this.face(f, [x, yl - t, z], [x, top - t, cz], [x, top + 0.02, cz], [x, yl, z], [sgn, 0, 0]);
+    }
+    const col = (roof.userData.col as string | undefined) ?? (roof.userData.tint ? '#' + (roof.userData.tint as THREE.Color).getHexString() : undefined);
+    if (col && w > 1.2) {
+      const rg = this.g(plain(shade(col, 0.78))), rw = Math.min(0.24, d * 0.05);
+      for (const sgn of [1, -1]) this.face(rg, [x0, top - rw * (rise / (d / 2)), cz + sgn * rw], [x1, top - rw * (rise / (d / 2)), cz + sgn * rw], [x1, top + 0.07, cz], [x0, top + 0.07, cz], [0, 1, sgn * 0.3]);
+    }
+  }
+  // a quad wound to face roughly along n
+  face(g: Geo, a: V, b: V, c: V, d: V, n: V) {
+    const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const nx = e1[1] * e2[2] - e1[2] * e2[1], ny = e1[2] * e2[0] - e1[0] * e2[2], nz = e1[0] * e2[1] - e1[1] * e2[0];
+    if (nx * n[0] + ny * n[1] + nz * n[2] < 0) g.quad(this.T(...d), this.T(...c), this.T(...b), this.T(...a));
+    else g.quad(this.T(...a), this.T(...b), this.T(...c), this.T(...d));
   }
   // Regular n-sided prism, optionally with a cone on top (water tanks, turrets, spires).
   prismN(x: number, z: number, r: number, n: number, y0: number, h: number, m: THREE.Material, cone = 0, coneM = m) {
@@ -483,7 +534,13 @@ function dormer(k: Kit, x: number, zf: number, y: number, wall: THREE.Material, 
   k.at(x, zf - 0.8, Math.PI / 2, () => k.gable(0, 0, 1.6, 1.7, y + 1.7, 0.8, 0.12, roof, plain(TRIM)));
 }
 // Hipped roof: the ridge runs along the longer side.
-const hip = (k: Kit, cx: number, cz: number, w: number, d: number, y: number, rise: number, m: THREE.Material) => k.frustum(cx, cz, w, d, Math.max(0.01, w - d), Math.max(0.01, d - w), y, rise, m);
+function hip(k: Kit, cx: number, cz: number, w: number, d: number, y: number, rise: number, m: THREE.Material) {
+  k.frustum(cx, cz, w, d, Math.max(0.01, w - d), Math.max(0.01, d - w), y, rise, m);
+  // a fascia board round the eaves, and ridge tiles along the top
+  k.walls(rect(cx, cz, w, d), true, y - 0.2, 1, 0.2, 0, plain(EDGE));
+  const col = m.userData.col as string | undefined;
+  if (col && Math.abs(w - d) > 0.2) beam(k, [cx - Math.max(0, w - d) / 2, y + rise + 0.02, cz - Math.max(0, d - w) / 2], [cx + Math.max(0, w - d) / 2, y + rise + 0.02, cz + Math.max(0, d - w) / 2], 0.3, 0.12, plain(shade(col, 0.78)));
+}
 function parapet(k: Kit, cx: number, cz: number, w: number, d: number, y: number, h: number, m: THREE.Material) {
   const t = 0.3;
   k.box(cx, y, cz + d / 2 - t / 2, w, h, t, m);
@@ -533,7 +590,10 @@ function awning(k: Kit, x: number, zf: number, w: number, y: number, col: string
 }
 
 // ---------------- recipes ----------------
-export interface BuiltShape { group: THREE.Group; height: number; name: string; detail: string }
+// a parking space in world coordinates: where the car stands, which way its nose points, and the
+// way in from the road (the lot's gate first)
+export interface Bay { x: number; z: number; hx: number; hz: number; via: { x: number; z: number }[]; heavy?: boolean }
+export interface BuiltShape { group: THREE.Group; height: number; name: string; detail: string; bays?: Bay[] }
 
 interface Look { skin: Skin; wall: Sw; win: Win; frame: string }
 const skinPalette = (s: Skin): Sw[] => (({ brick: BRICK, render: RENDER, stone: STONE, concrete: CONC, timber: TIMBER, glass: GLASS, metal: METALS } as Partial<Record<Skin, Sw[]>>)[s] ?? RENDER);
@@ -1048,7 +1108,7 @@ function industry(k: Kit, l: Lot, r: () => number) {
     k.block(0, -D / 4, W, D / 2, 0, 1, 7, 0, blank(L), blank(L), blank(L), plain('#9aa0a4'));
     k.box(0, 7, D / 4, W, 0.5, D / 2, plain('#c9cdd0'));
     for (let x = -W / 2 + 0.3; x <= W / 2; x += Math.max(6, W / 5)) k.box(x, 0, zf - 0.3, 0.4, 7, 0.4, plain('#3a3a3a'));
-    for (let i = 0; i < Math.floor(W / 8); i++) if (r() < 0.7) lorry(k, -W / 2 + 4 + i * 8, D / 4 - 3, pick(r, CONTAINERS));
+    for (let i = 0; i < Math.floor(W / 8); i++) { if (r() < 0.7) { const col = pick(r, CONTAINERS); if (drawParked) lorry(k, -W / 2 + 4 + i * 8, D / 4 - 3, col); } k.bays.push({ x: -W / 2 + 4 + i * 8, z: D / 4 - 2.6, via: [], out: true, heavy: true }); }
     extras.push('lorry canopy');
     name = 'Haulage depot';
   }
@@ -1175,10 +1235,19 @@ function fountain(k: Kit, x: number, z: number) {
   k.prismN(x, z, 0.35, 8, 0.5, 1.3, plain('#c9c2b4'));
   sphere(k, x, 2.3, z, 0.55, plain('#dcecf5'), 6, 3, 1.3);
 }
-function parkingRow(k: Kit, x0: number, x1: number, zBack: number, r: () => number, fill = 0.7) {
+// A row of parking spaces from zBack to zBack + 5, nose in towards zBack. With the game's parking
+// (setParkedCars(false): game/parking.ts) the spaces are handed over empty and real cars come and
+// go; otherwise a share of them have a car drawn in.
+let drawParked = true;
+export function setParkedCars(on: boolean) { drawParked = on; }
+function parkingRow(k: Kit, x0: number, x1: number, zBack: number, r: () => number, fill = 0.7, gate?: XZ, aisle = zBack + 6.5) {
   const n = Math.floor((x1 - x0) / 2.6);
   for (let i = 0; i <= n; i++) flat(k, x0 + i * 2.6 - 0.06, zBack, x0 + i * 2.6 + 0.06, zBack + 5, 0.1, plain(PAINT));
-  for (let i = 0; i < n; i++) if (r() < fill) car(k, x0 + i * 2.6 + 1.3, zBack + 2.6, true, pick(r, CAR_COLS));
+  for (let i = 0; i < n; i++) {
+    const x = x0 + i * 2.6 + 1.3;
+    if (r() < fill) { const col = pick(r, CAR_COLS); if (drawParked) car(k, x, zBack + 2.6, true, col); }
+    if (gate) k.bays.push({ x, z: zBack + 2.6, via: [gate, [gate[0], aisle], [x, aisle]] });
+  }
   return n;
 }
 
@@ -1197,13 +1266,15 @@ function yard(k: Kit, l: Lot, r: () => number, rr: () => number, P: Place | null
       const right = freeR >= freeL;
       drive = right ? [W / 2 + 0.3, X1 - 0.3] : [X0 + 0.3, -W / 2 - 0.3];
       flat(k, drive[0], bb + 1, drive[1], F, 0.07, driveMat);
-      if (r() < 0.75) car(k, (drive[0] + drive[1]) / 2, F - 3.3, true, pick(r, CAR_COLS));
+      if (r() < 0.75) { const col = pick(r, CAR_COLS); if (drawParked) car(k, (drive[0] + drive[1]) / 2, F - 3.3, true, col); }
+      k.bays.push({ x: (drive[0] + drive[1]) / 2, z: F - 3.3, via: [[(drive[0] + drive[1]) / 2, F]] });
       out.push('driveway');
     } else if (l.front > 5) {
       const px = door > 0 ? -W / 4 : W / 4;
       drive = [px - 1.7, px + 1.7];
       flat(k, drive[0], bf + 0.3, drive[1], F, 0.07, driveMat);
-      if (r() < 0.75) car(k, px, (bf + F) / 2, true, pick(r, CAR_COLS));
+      if (r() < 0.75) { const col = pick(r, CAR_COLS); if (drawParked) car(k, px, (bf + F) / 2, true, col); }
+      k.bays.push({ x: px, z: (bf + F) / 2, via: [[px, F]] });
       out.push('parking pad');
     }
     flat(k, door - 0.6, bf, door + 0.6, F, 0.075, slabsM());
@@ -1261,7 +1332,7 @@ function yard(k: Kit, l: Lot, r: () => number, rr: () => number, P: Place | null
     if (l.back > 2) {
       flat(k, X0, Bk, X1, bb, 0.05, tarmacM());
       for (const i of [0, 1]) k.box(X0 + 1.5 + i * 2, 0, Bk + 1.2, 1.6, 1.3, 1.1, plain('#3d5a3a'));
-      if (l.back > 6 && r() < 0.4) k.box(X1 - 3, 0.3, (bb + Bk) / 2, 2, 2.2, 5, plain('#f2f2f2'));
+      if (l.back > 6 && r() < 0.4 && drawParked) k.box(X1 - 3, 0.3, (bb + Bk) / 2, 2, 2.2, 5, plain('#f2f2f2'));
       out.push('service yard');
     }
   } else if (l.kind === 'flats' || l.kind === 'office') {
@@ -1274,9 +1345,9 @@ function yard(k: Kit, l: Lot, r: () => number, rr: () => number, P: Place | null
     let spaces = 0;
     if (l.back >= 10) {
       flat(k, X0 + 0.4, Bk + 0.4, X1 - 0.4, bb - 0.8, 0.06, tarmacM());
-      spaces = parkingRow(k, X0 + 0.6, X1 - 0.6, Bk + 0.5, r, office ? 0.85 : 0.65);
+      const d: [number, number] = freeR >= freeL ? [W / 2 + 0.2, X1 - 0.2] : [X0 + 0.2, -W / 2 - 0.2];
+      spaces = parkingRow(k, X0 + 0.6, X1 - 0.6, Bk + 0.5, r, office ? 0.85 : 0.65, [(d[0] + d[1]) / 2, F], (Bk + 5.5 + bb - 0.8) / 2);
       if (Math.max(freeR, freeL) >= 3.2) {
-        const d: [number, number] = freeR >= freeL ? [W / 2 + 0.2, X1 - 0.2] : [X0 + 0.2, -W / 2 - 0.2];
         flat(k, d[0], bb - 0.8, d[1], F, 0.06, tarmacM());
         gaps.push(d);
       }
@@ -1311,7 +1382,7 @@ function yard(k: Kit, l: Lot, r: () => number, rr: () => number, P: Place | null
     if (l.front >= 12) {
       const n = Math.floor(W / 4.5);
       for (let i = 0; i <= n; i++) flat(k, -W / 2 + i * 4.5 - 0.07, bf + 0.8, -W / 2 + i * 4.5 + 0.07, Math.min(F - 1.5, bf + 14), 0.1, plain('#e0c14a'));
-      for (let i = 0; i < n; i++) if (r() < 0.45) lorry(k, -W / 2 + 2.25 + i * 4.5, bf + 7.2, pick(r, CONTAINERS));
+      for (let i = 0; i < n; i++) { if (r() < 0.45) { const col = pick(r, CONTAINERS); if (drawParked) lorry(k, -W / 2 + 2.25 + i * 4.5, bf + 7.2, col); } k.bays.push({ x: -W / 2 + 2.25 + i * 4.5, z: bf + 7.6, via: [], out: true, heavy: true }); }
       out.push('lorry yard');
     }
     if (l.back > 5) {
@@ -1319,7 +1390,7 @@ function yard(k: Kit, l: Lot, r: () => number, rr: () => number, P: Place | null
       for (let i = 0; i < m; i++) { const lv = r() < 0.5 ? 2 : 1; for (let j = 0; j < lv; j++) k.box(X0 + 4.2 + i * 6.6, j * 2.6, Bk + 1.8, 6.1, 2.55, 2.44, plain(pick(r, CONTAINERS))); }
       if (m) out.push('container stacks');
     }
-    if (freeR > 4) parkingRow(k, W / 2 + 0.5, X1 - 0.5, bb, r, 0.6);
+    if (freeR > 4) parkingRow(k, W / 2 + 0.5, X1 - 0.5, bb, r, 0.6, [(W / 2 + X1) / 2, F]);
     // security fence round the plot, gate onto the road
     const post = plain('#6b7176'), mesh = M('fence', () => new THREE.MeshLambertMaterial({ color: '#9aa3a8', transparent: true, opacity: 0.4, depthWrite: false }));
     const side = (x0: number, z0: number, x1: number, z1: number) => { k.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.abs(x1 - x0) || 0.04, 2.2, Math.abs(z1 - z0) || 0.04, mesh); k.box((x0 + x1) / 2, 2.2, (z0 + z1) / 2, Math.abs(x1 - x0) || 0.08, 0.08, Math.abs(z1 - z0) || 0.08, post); };
@@ -1483,7 +1554,7 @@ function civic(k: Kit, l: Lot, r: () => number) {
         k.block(0, 0, W, D, 0, 1, 4, 4, fm(L), fm(L), fm(L));
         if (l.arch === 'hall') k.gable(0, 0, W, D, 4, 3.2, 0.4, roofM(pick(r, TILE)[0]), blank(L));
         else flatRoof(k, 0, 0, W, D, 4, blank(L), r, false);
-        if (l.front >= 6) parkingRow(k, X0 + 0.5, X1 - 0.5, zf + 0.5, r, 0.6);
+        if (l.front >= 6) parkingRow(k, X0 + 0.5, X1 - 0.5, zf + 0.5, r, 0.6, [0, F], Math.min(F - 1.2, zf + 6.8));
         out.push(L.wall[1], 'car park');
       }
     }
@@ -2270,7 +2341,7 @@ function vCivic(k: Kit, l: Lot, r: () => number, P: Place): { name: string; deta
     if (a === 'hall') pitched(L, pick(r, V.roofOld.filter((x) => x.kind !== 'thatch')), 4, { pitch: V.climate === 'med' ? V.pitch : 0.75 });
     else if (desert) desertTop(k, 0, 0, W, D, 4, L, r, false);
     else flatRoof(k, 0, 0, W, D, 4, wb(L), r, false);
-    if (l.front >= 6) parkingRow(k, X0 + 0.5, X1 - 0.5, zf + 0.5, r, 0.6);
+    if (l.front >= 6) parkingRow(k, X0 + 0.5, X1 - 0.5, zf + 0.5, r, 0.6, [0, F], Math.min(F - 1.2, zf + 6.8));
     out.push(L.wall[1], 'car park');
   }
   return { name: spec.label, detail: out.join(' · ') };
@@ -2344,5 +2415,7 @@ export function makeBuilding(l: Lot): BuiltShape {
   // local +x runs along the road; local +z faces the road
   group.rotation.y = -l.rot;
   group.userData.lot = l;
-  return { group, height, name: d.name, detail: [d.detail, ...y].filter(Boolean).join(' · ') };
+  const c = Math.cos(l.rot), sn = Math.sin(l.rot), W = (p: XZ) => ({ x: l.x + p[0] * c - p[1] * sn, z: l.z + p[0] * sn + p[1] * c });
+  const bays = k.bays.map((b): Bay => ({ ...W([b.x, b.z]), hx: b.out ? -sn : sn, hz: b.out ? c : -c, via: b.via.map(W), heavy: b.heavy }));
+  return { group, height, name: d.name, detail: [d.detail, ...y].filter(Boolean).join(' · '), bays };
 }

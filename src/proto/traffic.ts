@@ -19,6 +19,7 @@ import { courseOf, laneSpan, sectionAt, taperOf, type Course, type Ends2 } from 
 import { BODIES, DIMS, overlapping, steered, type Axles, type Kind, type Pose } from './footprint';
 import { STEP, Track, View, table, tableStats, type Cls } from './conflicts';
 import { Fleet, type Dress, type Dressed } from './game/fleet';
+import type { Parking } from './game/parking';
 
 export interface Places { homes: Lot[]; jobs: Lot[]; shops: Lot[]; works: Lot[]; weight: (l: Lot) => number }
 
@@ -59,6 +60,7 @@ interface Car {
   lorry: boolean; bus?: boolean; heading: number;
   cls?: Cls; hw?: number; dress?: Dress; // the real vehicle (game/fleet.ts): its body for the conflict tables, half its width, its look
   born: number; gone?: number; wait: number;
+  held?: boolean; // pulling out of a parking space: stands, unseen, where it'll join the road until the parked car reaches it (game/parking.ts)
   lane: number; off: number; // lane (0 = nearside) and current sideways position
   dwell?: number; served?: number; inBay?: boolean; bay?: Stop;
   nextSeg?: number;
@@ -80,7 +82,7 @@ interface Car {
   pose?: Pose; axles?: Axles; // where it was last drawn, and where its axles are (footprint.steered)
 }
 interface Train { def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; dress: Dress; gone?: boolean }
-interface Access { seg: RSeg; s: number }
+interface Access { seg: RSeg; s: number; lot?: Lot } // (lot: the building it's the way in to)
 // A bus line: the stops its buses call at, in order, over and over (A, B, C, B for A-B-C and
 // back). Each call is at the stop or at any stop facing it across the road, whichever side the
 // bus arrives on.
@@ -171,7 +173,11 @@ export class Traffic {
   barriers = new Map<number, [number, number][]>();
   // drawn along with the traffic, inside the fleet's frame (the railway's trains: rail/draw.ts)
   onDraw?: (dt: number) => void;
-  stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0 };
+  // the town's drives and car parks (game/parking.ts): trips end in them and start from them
+  parking?: Parking;
+  private failed: 'guard' | 'room' = 'room'; // (why the last spawn couldn't place its vehicle)
+  private pulling: { o: Access; d: Access; dressed: Dressed; car?: Car; since: number; tries: number; atGate?: number }[] = [];
+  stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0, pulledOut: 0, noRoom: 0, noPlan: 0 };
   // how many junction conflict tables have been worked out, and how long they took (ms)
   readonly conflictStats = tableStats;
   private sig = new Map<number, { j: Junction; phases: number[][]; greens: number[]; t0: number }>();
@@ -320,7 +326,7 @@ export class Traffic {
     // traffic joins ordinary roads, never straight onto a motorway
     // (an industrial site out of town has its gate on a fast rural road: game/industry.ts lots, id <= -1000)
     const n = this.net.nearestSeg(p, 24, (s) => this.net.def(s).frontage || (l.id <= -1000 && this.net.def(s).cls === 'road' && this.net.def(s).family !== 'Motorway'));
-    const a = n ? { seg: n.seg, s: n.s } : null;
+    const a = n ? { seg: n.seg, s: n.s, lot: l } : null;
     this.access.set(l.id, a);
     return a;
   }
@@ -407,24 +413,30 @@ export class Traffic {
     return g;
   }
 
-  private spawn(o: Access, d: Access, lorry: boolean, now: number) {
+  private spawn(o: Access, d: Access, lorry: boolean, now: number, given?: Dressed): Car | null {
     const p = this.plan(o, d);
-    if (!p) return false;
+    if (!p) return null;
     // the real vehicle, at its true size: a mix for where the trip starts, a lorry or van from a
-    // works (game/fleet.ts, drawing its own random numbers, so the trips are the same as ever)
-    const dm = this.fleet.dress(o.seg, lorry), kind = dm.kind, heavy = dm.heavy;
+    // works (game/fleet.ts, drawing its own random numbers, so the trips are the same as ever);
+    // or the one pulling out of a parking space
+    const dm = given ?? this.fleet.dress(o.seg, lorry), kind = dm.kind, heavy = dm.heavy;
     const lo = this.startGuard(o.seg, p.from) + dm.back, hi = this.endGuard(o.seg, p.from) - dm.front;
-    if (hi < lo) return false;
+    this.failed = 'guard';
+    if (hi < lo) return null;
     const s = Math.max(lo, Math.min(hi, p.s));
     // the destination, likewise clear of junctions
     const glo = this.startGuard(d.seg, p.entry), ghi = this.endGuard(d.seg, p.entry);
     let goal = ghi > glo ? Math.max(glo, Math.min(ghi, p.goal)) : (glo + ghi) / 2;
-    if (!p.route.length && goal < s + 8) { if (s + 8 > hi) return false; goal = s + 8; }
+    if (!p.route.length && goal < s + 8) { if (s + 8 > hi) return null; goal = s + 8; }
+    this.failed = 'room';
     const n = this.net.def(o.seg).lanes;
     const lanes = lorry || n === 1 ? [0] : [...Array(n).keys()].sort(() => this.rand() - 0.5);
-    for (const lane of heavy ? [0] : lanes) {
+    let spanned = 0;
+    const tried = heavy ? [0] : lanes;
+    for (const lane of tried) {
       const sp = this.span(o.seg, p.from, lane);
-      if (s - dm.back < sp[0] || s + dm.front + 10 > sp[1] || !this.canPlace(o.seg, p.from, s, lane, dm)) continue;
+      if (s - dm.back < sp[0] || s + dm.front + 10 > sp[1]) { spanned++; continue; }
+      if (!this.canPlace(o.seg, p.from, s, lane, dm)) continue;
       dm.dress.lampAt = (this.rand() - 0.5) * 0.7; // (this number once chose the box's paint: now when the driver's lamps go on)
       const cruise = lorry ? 25 : 28 + this.rand() * 5;
       const c: Car = {
@@ -435,9 +447,29 @@ export class Traffic {
       this.cars.push(c);
       c.entry = this.put(keyOf(o.seg, p.from, lane), c, s, 0, true);
       this.stats.spawned++;
-      return true;
+      return c;
     }
-    return false;
+    if (spanned === tried.length) this.failed = 'guard';
+    return null;
+  }
+  // A car pulling out of a parking space has reached the gate: find it room on the road. Once the
+  // traffic has one, it stands there (held, unseen) until the parked car has driven onto it.
+  private pullTarget(pu: Traffic['pulling'][number], now: number) {
+    if (!pu.car) {
+      pu.atGate ??= now;
+      if (now - pu.atGate > 45000) { this.stats.noRoom++; return { x: NaN, z: NaN, hx: 1, hz: 0 }; } // (no room on the road for a minute: it parks again)
+      if (now - pu.atGate < pu.tries * 400) return null;
+      pu.tries++;
+      if (!this.plan(pu.o, pu.d)) { this.stats.noPlan++; return { x: NaN, z: NaN, hx: 1, hz: 0 }; }
+      const c = this.spawn(pu.o, pu.d, false, now, pu.dressed);
+      if (!c && this.failed === 'guard') { this.stats.noPlan++; return { x: NaN, z: NaN, hx: 1, hz: 0 }; } // (never room there: it parks again)
+      if (!c) return null;
+      c.held = true; c.born = now - 500; // (full size at once: it's been there all along)
+      this.stats.pulledOut++;
+      pu.car = c;
+    }
+    const c = pu.car, q = c.pose?.parts[0];
+    return q ? { x: q.x, z: q.z, hx: Math.cos(c.heading), hz: Math.sin(c.heading) } : null;
   }
   // does a trip ending here leave the map (at the far end of a road out of town)?
   private offMap(seg: RSeg, from: number, goal: number) {
@@ -496,7 +528,16 @@ export class Traffic {
     else if (morning) { o = home(); d = this.rand() < 0.85 ? job() : shopA(); }
     else if (evening) { o = this.rand() < 0.85 ? job() : shopA(); d = home(); }
     else { const out = this.rand() < 0.5; o = out ? home() : shopA() ?? job(); d = out ? shopA() ?? job() : home(); }
-    if (o && d && !(o.seg.id === d.seg.id && Math.abs(o.s - d.s) < 8)) this.spawn(o, d, lorry, now);
+    if (!o || !d || (o.seg.id === d.seg.id && Math.abs(o.s - d.s) < 8)) return;
+    // (from a plot with a car parked there, that car pulls out first)
+    const po = !lorry && o.lot && this.pulling.length < 40 ? this.parking?.pullOut(o.lot) : null;
+    if (po && d) {
+      const pu: Traffic['pulling'][number] = { o, d, dressed: po.dressed, since: now, tries: 0 };
+      this.pulling.push(pu);
+      po.start(() => this.pullTarget(pu, this.clock), () => { if (pu.car) pu.car.held = false; this.pulling = this.pulling.filter((x) => x !== pu); });
+      return;
+    }
+    this.spawn(o, d, lorry, now);
   }
 
   // A bus that tours the network, calling at every stop on its side of the road: one of the
@@ -1625,7 +1666,7 @@ export class Traffic {
     // everything in the way, as the gentlest acceleration that respects all of it
     let acc = idmFree(c.v, v0, dr), gmin = Infinity;
     const ob: Obstacle = (g, vl, s0 = dr.s0) => { acc = Math.min(acc, follow(c.v, v0, g, vl, dr, s0)); gmin = Math.min(gmin, g); };
-    const still = c.bus ? this.busStops(c, dt, ob) : false;
+    const still = c.bus ? this.busStops(c, dt, ob) : !!c.held;
     if (c.inBay) {
       const e = this.leader(keyOf(c.seg, c.from, BAYLANE), c.s, c);
       if (e) ob(e.pos - e.c.back - c.s - c.front, e.c.v);
@@ -1670,7 +1711,14 @@ export class Traffic {
     c.s += ds;
     c.wait = v < 0.3 && c.dwell === undefined ? c.wait + dt : 0;
     if (c.wait > GIVE_UP && !c.bus) { c.gone = now; this.stats.gaveUp++; return; } // gives up and finds another way
-    if (last && c.s >= c.goal - 1) { c.gone = now; this.stats.arrived++; return; }
+    if (last && c.s >= c.goal - 1) {
+      this.stats.arrived++;
+      // into a free space at the plot, if it has one (the parking draws it from here: it's gone from the road at once)
+      const q = c.pose?.parts[0];
+      if (!c.away && !c.bus && !c.lorry && c.dress && c.dest?.lot && q && this.parking?.arrive(c.dest.lot, { kind: c.kind, heavy: c.lorry, cls: c.cls ?? 0, front: c.front, back: c.back, hw: c.hw ?? 0.9, top: c.vmax / 0.95, dress: c.dress }, { x: q.x, z: q.z, hx: Math.cos(c.heading), hz: Math.sin(c.heading) }, c.v)) c.gone = now - 600;
+      else c.gone = now;
+      return;
+    }
     if (pl) { if (admitted && c.s >= pl.path.lineS) this.enter(c, pl); return; }
     // (a lane change never leaves us past where our new way through the junction starts: see roomIn)
     if (c.bus && this.nextOf(c, at) === c.seg) { if (c.s >= L - 1.5 - c.front) this.uTurn(c, at); return; }
@@ -2016,7 +2064,7 @@ export class Traffic {
       const parts = steered(c.cls ?? c.kind, at, ax, k, pose.parts, settle);
       pose.x = x; pose.z = z; pose.y = y; pose.k = k;
       c.heading = Math.atan2(parts[0].hz, parts[0].hx);
-      this.fleet.drawCar(c, parts, y, Math.atan(grade), k, dt);
+      if (!c.held) this.fleet.drawCar(c, parts, y, Math.atan(grade), k, dt);
     }
     // trains: each car on its bogies, spaced along the track behind the front
     for (const tr of this.trains) {
@@ -2028,6 +2076,7 @@ export class Traffic {
         this.fleet.drawRail(d, i, (fx + bx) / 2, (f.q.y + b.q.y) / 2, (fz + bz) / 2, Math.atan2(fz - bz, fx - bx), Math.atan((f.q.grade + b.q.grade) / 2), tr.v, dt);
       }
     }
+    this.parking?.draw(dt);
     this.onDraw?.(dt);
     this.fleet.end(now);
   }

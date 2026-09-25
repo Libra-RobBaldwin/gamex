@@ -54,6 +54,14 @@ distinct walls than the old mix, so chunks merge into fewer draw calls. Region s
 views (412 x 915): temperate 487 → 427 and 643 → 512 calls, triangles +1%; arctic 323 → 270,
 395 → 372, 475 → 408 calls. Load time unchanged within noise.
 
+## Finish
+
+Every building (not only the regional ones) has a little more depth: fascia boards, gutters and
+verge boards on pitched roofs, ridge tiles, a plinth where the walls meet the ground, glass with a
+reveal's shadow and a glint of sky, sills with shadows under them, and ambient occlusion from
+vertex colours (walls darker over their first couple of metres, roofs towards the eaves). None of
+it adds a material; it adds a few dozen triangles a house.
+
 ## Seeing it
 
 - `/buildings-demo.html?vern=cotswold`: one tradition, a street per era plus the civic buildings;

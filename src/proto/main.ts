@@ -11,7 +11,8 @@ import { Traffic, rushLabel, type Places } from './traffic';
 import { MODEL, purchaseList, type Offer } from './vehicles';
 import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setPlaces, USE } from './buildgen';
+import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
+import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
 import { placeResolver, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
@@ -72,6 +73,7 @@ const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(PAR
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
 // (a generated map builds in its places' traditions; ?vern=cotswold, nordic, … sets one on any map)
 const VERN = new URLSearchParams(MAP_QUERY).get('vern') as Vern | null, vernForced = VERN && VERNS.includes(VERN) ? VERN : undefined;
+setParkedCars(false); // (parked cars are real ones: game/parking.ts)
 if (MAP.generated || vernForced) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.settlements }, vernForced));
 // the loading screen, while the map is built (it goes once the first frame is drawn)
 const loading = new Loading(MAP.name, mapLine());
@@ -414,7 +416,7 @@ const rebuildRoads = () => commitRoads();
 // 120 m chunks (one mesh per material per chunk) so a detailed town stays cheap to draw; only
 // buildings rising or being demolished are drawn on their own.
 interface Part { m: THREE.Material; g: THREE.BufferGeometry }
-interface Built { lot: Lot; born: number; height: number; name: string; detail: string; parts: Part[]; solo: THREE.Group | null; chunk: string | null; dying?: number; region?: Region }
+interface Built { lot: Lot; born: number; height: number; name: string; detail: string; bays?: Bay[]; parts: Part[]; solo: THREE.Group | null; chunk: string | null; dying?: number; region?: Region }
 const buildings: Built[] = [];
 const cityGroup = new THREE.Group();
 scene.add(cityGroup);
@@ -445,7 +447,7 @@ function bakeGroup(group: THREE.Group) {
 }
 function bake(l: Lot) {
   const b = generate(l);
-  return { height: b.height, name: b.name, detail: b.detail, parts: bakeGroup(b.group) };
+  return { height: b.height, name: b.name, detail: b.detail, bays: b.bays, parts: bakeGroup(b.group) };
 }
 function soloGroup(b: Built) {
   const g = new THREE.Group();
@@ -504,6 +506,7 @@ function siteUnder(sx: number, sy: number, g: P) {
 let queue: Lot[] = [];
 let keepQueue = false; // (loading a save: the plots stay as saved, whatever the roads' first redraws make of them)
 let placesDirty = true;
+let parking: Parking | undefined; // (made with the traffic, below)
 let onRoadsChanged = () => {};
 let townRef: TownEconomy | null = null; // (made once the town is laid out, below)
 const LEVELS = [['Traffic', 1], ['Busy', 2], ['Quiet', 0.4]] as const;
@@ -513,6 +516,7 @@ function spawnLot(l: Lot, animate = true, standing = false) {
   if (!standing) { net.fitParcel(l); net.lots.push(l); }
   const b: Built = { lot: l, born: performance.now(), solo: null, chunk: null, ...bake(l) };
   buildings.push(b);
+  parking?.set(l, b.bays);
   if (animate) { b.solo = soloGroup(b); b.solo.scale.y = 0.01; cityGroup.add(b.solo); }
   else toChunk(b);
   placesDirty = true;
@@ -522,6 +526,7 @@ function regenerate(b: Built) {
   fromChunk(b);
   for (const p of b.parts) p.g.dispose();
   Object.assign(b, bake(b.lot));
+  parking?.set(b.lot, b.bays);
   if (b.solo) { cityGroup.remove(b.solo); b.solo = null; }
   toChunk(b);
 }
@@ -529,6 +534,7 @@ function demolish(b: Built) {
   fromChunk(b);
   if (!b.solo) { b.solo = soloGroup(b); cityGroup.add(b.solo); }
   b.dying = performance.now();
+  parking?.drop(b.lot.id);
   placesDirty = true;
 }
 const shortName = (b: Built) => b.name.split(' · ')[0];
@@ -2113,6 +2119,19 @@ await loading.stage('Starting the traffic and the town', 0.15);
 
 // ---------------- clock and traffic ----------------
 const traffic = new Traffic(net, scene, rng(5));
+// the drives and car parks, filled with cars of the traffic's own sorts for where they are
+const PRIVATE = (style: string) => !['taxi', 'police', 'ambulance', 'ice-cream', 'refuse', 'gritter', 'recovery'].includes(style);
+parking = new Parking(traffic.fleet, rng(11), (lot, heavy) => {
+  const a = traffic.accessOf(lot);
+  if (!a) return null;
+  for (let i = 0; i < 10; i++) {
+    const d = traffic.fleet.dress(a.seg, heavy), m = d.dress.chain[0];
+    if (d.dress.chain.length !== 1 || !PRIVATE(m.style)) continue;
+    if (heavy ? m.category === 'lorry' && m.dims.length < 12.5 : m.category === 'car' || (m.category === 'van' && m.dims.length < 5.6)) return d;
+  }
+  return null;
+}, RELIEF?.heightAt);
+traffic.parking = parking;
 traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
@@ -2126,6 +2145,8 @@ if (SAVED) {
 }
 const dbSize = new THREE.Vector2();
 let clock = SAVED?.clock ?? 7 * 60; // minutes since midnight: a day passes in six minutes
+parking.hour = (clock / 60) % 24; // (the drives and car parks filled for the hour the game starts at)
+for (const b of buildings) if (!b.dying) parking.set(b.lot, b.bays);
 let places: Places | null = null;
 function getPlaces(): Places {
   if (places && !placesDirty) return places;
@@ -2433,6 +2454,7 @@ function frame(now: number) {
   // 1/30 s so cars don't jump through each other or past their stop lines. Paused, it holds still.
   // the vehicles' levels of detail, culling and lamps (game/fleet.ts): how many device pixels a metre is, and the hour
   traffic.fleet.frame(cam, renderer.getDrawingBufferSize(dbSize).y / view.h, hour);
+  if (parking) { parking.hour = hour; parking.view.x = view.x; parking.view.z = view.z; parking.view.r = Math.min(700, view.h * 2.4); }
   cullTraffic(now);
   if (speed > 0) {
     const n = speed > 1 ? Math.ceil(gdt * 30 - 1e-9) : 1, step = gdt / n;
