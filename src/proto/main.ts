@@ -26,7 +26,8 @@ import { PLAIN_MAT } from './buildgen';
 import { BridgeLayer, type BuiltBridge } from './game/bridges';
 import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
-import { TownEconomy, TOWN_NAME } from './game/econ';
+import { STOP_WALK_M, TownEconomy, TOWN_NAME } from './game/econ';
+import { STOPS } from './econdefs';
 import { Purse, PRICE_SHARE } from './game/money';
 import { IX_BLURB, IX_FORMS, IX_NAME, IX_SIZES, IX_SIZE_BLURB, IX_SIZE_NAME, buildPair, motorwayCloverleaf, motorwayWithJunction, pairCrossed, pairToNode, pairUpMotorways, scratch, type Interchange, type IxForm, type IxSize, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
 import { buildSlip, planCloverleaf, planJunction, planSlip, roadCrossed, type IxPlan, type SlipPlan } from './interchange/plan';
@@ -1037,7 +1038,7 @@ shell.addBuildCategory({ id: 'bulldoze', label: 'Bulldoze', icon: 'bulldozer' })
 shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Take away a road or a bus stop; half a road’s price comes back', short: 'Roads and stops', icon: 'bulldozer', tone: 'bulldoze', onPick: () => startBulldozeTool() });
 
 // ---- the Layers pop-over: overlays (none are in the game yet) and the view ----
-shell.addLayer({ id: 'catchment', label: 'Stop coverage', icon: 'busStop', on: false, onToggle: (on) => { coverOn = on; coverSig = '-'; if (on) hint('Stop coverage: blue is within a five-minute walk (400 m) of a stop or station · build stops where it isn’t', 'busStop'); } });
+shell.addLayer({ id: 'catchment', label: 'Stop coverage', icon: 'busStop', on: false, onToggle: (on) => { coverOn = on; coverSig = '-'; if (on) hint('Stop coverage: blue is within a three-minute walk of a bus stop (a longer one to a station) · build stops where it isn’t', 'busStop'); } });
 shell.addLayer({ id: 'flow', label: 'Traffic', icon: 'lights', on: false, onToggle: (on) => { flowOn = on; flowAt = 0; if (on) hint('Traffic: green is flowing, amber busy, red jammed', 'lights'); } });
 shell.addLayer({ id: 'industry', label: 'Industry catchments', icon: 'warehouse', on: false, onToggle: (on) => { siteRings = on; } });
 const viewNow = () => { const el = nav.goal.el; return el > 1.2 ? 'plan' : el < 0.45 ? 'low' : '3d'; };
@@ -2345,7 +2346,7 @@ async function openLoad() {
 if (saveProblem) setTimeout(() => hint(saveProblem, 'alert'), 1500);
 
 // ---------------- overlays (Overlays in the dock): stop coverage and traffic ----------------
-// Stop coverage: a five-minute walk (400 m, the economy's walking pace) round every stop and
+// Stop coverage: the walk the economy counts (STOP_WALK_M to a bus stop, 800 m to a station) round every stop and
 // station, as rings of small cells so the hills' drape bends it over the ground. Traffic: each
 // road coloured by how many vehicles there are on each 100 m of its lanes, redrawn once a second.
 let coverOn = false, coverSig = '', coverMesh: THREE.Mesh | null = null;
@@ -2363,17 +2364,18 @@ function coverDisc(f: Flat, c: P, r: number) {
   }
 }
 function drawCoverage() {
-  const pts: P[] = coverOn ? [...markers.places().map((m) => m.p), ...railway.stations.map((st) => ({ x: st.x, z: st.z }))] : [];
-  const sig = pts.map((q) => `${Math.round(q.x)},${Math.round(q.z)}`).join(';');
+  // (the same walks the economy counts: STOP_WALK_M to a bus stop, a station's own 800 m)
+  const pts: (P & { r: number })[] = coverOn ? [...markers.places().map((m) => ({ ...m.p, r: STOP_WALK_M })), ...railway.stations.map((st) => ({ x: st.x, z: st.z, r: STOPS.rail_station.radius }))] : [];
+  const sig = pts.map((q) => `${Math.round(q.x)},${Math.round(q.z)},${q.r}`).join(';');
   if (sig === coverSig) return;
   coverSig = sig;
   if (coverMesh) { scene.remove(coverMesh); coverMesh.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); coverMesh = null; }
   if (!pts.length) return;
   const f = new Flat(), rim = new Flat();
   for (const q of pts) {
-    coverDisc(f, q, 400);
+    coverDisc(f, q, q.r);
     const ring: P[] = [];
-    for (let j = 0; j <= 72; j++) { const a = (j / 72) * Math.PI * 2; ring.push({ x: q.x + Math.cos(a) * 400, z: q.z + Math.sin(a) * 400 }); }
+    for (let j = 0; j <= 72; j++) { const a = (j / 72) * Math.PI * 2; ring.push({ x: q.x + Math.cos(a) * q.r, z: q.z + Math.sin(a) * q.r }); }
     rim.ribbon(ring, 1.6, 1.0);
   }
   coverMesh = f.mesh(coverMat); coverMesh.renderOrder = 4;
