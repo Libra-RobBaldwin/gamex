@@ -77,7 +77,9 @@ export function optionsQuery(o: RegionOptions): string {
   const q = new URLSearchParams({ map: 'region' });
   const base = { ...DEFAULT_OPTIONS, ...(o.size > 6 ? WORLD_DEFAULTS : {}) };
   for (const k of Object.keys(DEFAULT_OPTIONS) as (keyof RegionOptions)[]) {
-    if (k === 'seed' || k === 'size' || o[k] !== base[k]) q.set(k, k === 'city' || k === 'sea' ? (o[k] ? '1' : '0') : String(o[k]));
+    // (a 50 km map spells out every option: its address is shared and saved, and should make the same
+    // map whatever the defaults become)
+    if (k === 'seed' || k === 'size' || o.size > 6 || o[k] !== base[k]) q.set(k, k === 'city' || k === 'sea' ? (o[k] ? '1' : '0') : String(o[k]));
   }
   return q.toString();
 }
