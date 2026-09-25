@@ -20,7 +20,7 @@ import { Occupancy, planHedges, type HedgeTree, type Piece } from './ground/hedg
 import { GameWater, LAKE, WATER_LEVEL } from './game/water';
 import './ui/fonts';
 import { formIcon, icon, roadIcon, trainIcon, type Icon } from './ui/icons';
-import { Shell, type SheetSpec, type ToolHandle } from './ui/shell';
+import { Shell, type SheetSpec, type ToolHandle, type Alert } from './ui/shell';
 import { Industries, townWishes, type IndustrySite } from './game/industry'; // industrial sites (docs/industries.md)
 import { PLAIN_MAT } from './buildgen';
 import { BridgeLayer, type BuiltBridge } from './game/bridges';
@@ -1111,10 +1111,8 @@ shell.addBuildCategory({ id: 'bulldoze', label: 'Bulldoze', icon: 'bulldozer' })
 shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Take away a road or a bus stop; half a road’s price comes back', short: 'Roads and stops', icon: 'bulldozer', tone: 'bulldoze', onPick: () => startBulldozeTool() });
 
 // ---- the Layers pop-over: overlays (none are in the game yet) and the view ----
-shell.addLayer({ id: 'flow', label: 'Traffic flow', icon: 'lights', disabled: 'Not in the game yet' });
-shell.addLayer({ id: 'catchment', label: 'Stop catchments', icon: 'busStop', disabled: 'Not in the game yet' });
-shell.addLayer({ id: 'demand', label: 'Where people want to go', icon: 'users', disabled: 'Not in the game yet' });
-shell.addLayer({ id: 'landuse', label: 'Land use', icon: 'building', disabled: 'Not in the game yet' });
+shell.addLayer({ id: 'catchment', label: 'Stop coverage', icon: 'busStop', on: false, onToggle: (on) => { coverOn = on; coverSig = '-'; if (on) hint('Stop coverage: blue is within a five-minute walk (400 m) of a stop or station · build stops where it isn’t', 'busStop'); } });
+shell.addLayer({ id: 'flow', label: 'Traffic', icon: 'lights', on: false, onToggle: (on) => { flowOn = on; flowAt = 0; if (on) hint('Traffic: green is flowing, amber busy, red jammed', 'lights'); } });
 shell.addLayer({ id: 'industry', label: 'Industry catchments', icon: 'warehouse', on: false, onToggle: (on) => { siteRings = on; } });
 const viewNow = () => { const el = nav.goal.el; return el > 1.2 ? 'plan' : el < 0.45 ? 'low' : '3d'; };
 shell.setViews({
@@ -2286,6 +2284,43 @@ const railGame = new RailGame({
 });
 rebuildRoads();
 shell.addTransportTab({ id: 'rail', label: 'Railway', icon: 'train', sub: 'Your rail lines and stations', render: (el) => railGame.renderTab(el) });
+// ---- Stats: money over time, every line's takings, and the towns (ui/shell.ts openStats) ----
+function sparkSvg(vals: number[]) {
+  if (vals.length < 2) return '';
+  const lo = Math.min(...vals), hi = Math.max(...vals), span = Math.max(1, hi - lo);
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * 100},${40 - ((v - lo) / span) * 34}`);
+  return `<svg class="spark" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true"><path class="area" d="M0,44 L${pts.join(' L')} L100,44 Z"/><path d="M${pts.join(' L')}"/></svg>`;
+}
+shell.addStatsTab({
+  id: 'money', label: 'Money', icon: 'activity', sub: 'Your balance, and what comes in and goes out each day',
+  render: (el) => {
+    const y = purse.yesterday, t = purse.today, net = y.fares - y.running;
+    const hist = [...purse.history, Math.round(purse.balance)];
+    el.innerHTML = `<div class="tiles"><div><b>${money(purse.balance)}</b><span>In the bank</span></div><div><b class="${net >= 0 ? 'good' : 'badv'}">${net >= 0 ? '+' : '−'}${money(Math.abs(net))}</b><span>Lines made yesterday</span></div></div>
+      ${sparkSvg(hist)}${hist.length > 1 ? `<div class="spark-cap"><span>${hist.length - 1} day${hist.length === 2 ? '' : 's'} ago</span><span>now</span></div>` : '<p class="note">A chart of your balance builds up here, day by day.</p>'}
+      <dl class="facts" style="margin-top:6px">
+        <dt></dt><dd class="colh">Yesterday · today</dd>
+        <dt>Fares</dt><dd>${money(y.fares)} · ${money(t.fares)}</dd>
+        <dt>Running costs</dt><dd>${money(-y.running)} · ${money(-t.running)}</dd>
+        <dt>Building</dt><dd>${money(-y.building)} · ${money(-t.building)}</dd>
+        <dt>Vehicles bought</dt><dd>${money(-y.vehicles)} · ${money(-t.vehicles)}</dd>
+        <dt>Sold</dt><dd>${money(y.sold)} · ${money(t.sold)}</dd>
+      </dl>`;
+  },
+});
+shell.addStatsTab({
+  id: 'lines', label: 'Lines', icon: 'transport', sub: 'What each line carries and makes',
+  render: (el) => {
+    if (!lines.list.length) { el.innerHTML = '<p class="note">No lines yet. Build two stops and draw a line through them, and its numbers show here.</p>'; return; }
+    const rows = lines.list.map((l) => {
+      const b = purse.line(l.id), st = townRef?.line(l.id), p = b.lastFares - b.lastRunning, n = lines.buses(l).length;
+      return { l, p, html: `<button class="lrow tone-stop" data-sl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${st ? `${Math.round((st.carriedLastMonth || st.carried) * 30).toLocaleString('en-GB')} riders a day · ` : ''}${n} ${n === 1 ? 'bus' : 'buses'} · <b class="${p >= 0 ? 'good' : 'badv'}">${p >= 0 ? '+' : '−'}${money(Math.abs(p))}/day</b></span></button>` };
+    }).sort((a, b) => a.p - b.p);
+    el.innerHTML = `<p class="note">Worst first: a line losing money wants more stops where people are, or fewer buses.</p>${rows.map((r) => r.html).join('')}`;
+    el.querySelectorAll<HTMLButtonElement>('[data-sl]').forEach((b) => b.addEventListener('click', () => { const l = lines.list.find((x) => x.id === +b.dataset.sl!); if (l) showLineInfo(l); }));
+  },
+});
+shell.addStatsTab({ id: 'town', label: 'Towns', icon: 'building', sub: 'How the town is doing, and why', render: () => { showTown(); } });
 // the economy runs the town from here on (game/econ.ts): it decides what gets built, and how
 // many wait at the stops
 if (SAVED) purse.load(SAVED.purse);
@@ -2393,6 +2428,89 @@ async function openLoad() {
 }
 if (saveProblem) setTimeout(() => hint(saveProblem, 'alert'), 1500);
 
+// ---------------- overlays (Overlays in the dock): stop coverage and traffic ----------------
+// Stop coverage: a five-minute walk (400 m, the economy's walking pace) round every stop and
+// station, as rings of small cells so the hills' drape bends it over the ground. Traffic: each
+// road coloured by how many vehicles there are on each 100 m of its lanes, redrawn once a second.
+let coverOn = false, coverSig = '', coverMesh: THREE.Mesh | null = null;
+// (a light blue that reads over grass, fields and roads alike, with a firmer ring at the edge)
+const coverMat = new THREE.MeshBasicMaterial({ color: '#7fd4ff', transparent: true, opacity: 0.28, depthWrite: false });
+const coverRim = new THREE.MeshBasicMaterial({ color: '#bfeaff', transparent: true, opacity: 0.85, depthWrite: false });
+function coverDisc(f: Flat, c: P, r: number) {
+  const RINGS = 8, SEG = 36;
+  for (let i = 0; i < RINGS; i++) for (let j = 0; j < SEG; j++) {
+    const r0 = (i / RINGS) * r, r1 = ((i + 1) / RINGS) * r, a0 = (j / SEG) * Math.PI * 2, a1 = ((j + 1) / SEG) * Math.PI * 2;
+    const P0 = [c.x + Math.cos(a0) * r0, c.z + Math.sin(a0) * r0], P1 = [c.x + Math.cos(a1) * r0, c.z + Math.sin(a1) * r0];
+    const Q0 = [c.x + Math.cos(a0) * r1, c.z + Math.sin(a0) * r1], Q1 = [c.x + Math.cos(a1) * r1, c.z + Math.sin(a1) * r1];
+    f.tri(P0[0], P0[1], Q1[0], Q1[1], Q0[0], Q0[1], 0.9);
+    if (i) f.tri(P0[0], P0[1], P1[0], P1[1], Q1[0], Q1[1], 0.9);
+  }
+}
+function drawCoverage() {
+  const pts: P[] = coverOn ? [...markers.places().map((m) => m.p), ...railway.stations.map((st) => ({ x: st.x, z: st.z }))] : [];
+  const sig = pts.map((q) => `${Math.round(q.x)},${Math.round(q.z)}`).join(';');
+  if (sig === coverSig) return;
+  coverSig = sig;
+  if (coverMesh) { scene.remove(coverMesh); coverMesh.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); coverMesh = null; }
+  if (!pts.length) return;
+  const f = new Flat(), rim = new Flat();
+  for (const q of pts) {
+    coverDisc(f, q, 400);
+    const ring: P[] = [];
+    for (let j = 0; j <= 72; j++) { const a = (j / 72) * Math.PI * 2; ring.push({ x: q.x + Math.cos(a) * 400, z: q.z + Math.sin(a) * 400 }); }
+    rim.ribbon(ring, 1.6, 1.0);
+  }
+  coverMesh = f.mesh(coverMat); coverMesh.renderOrder = 4;
+  const rm = rim.mesh(coverRim); rm.renderOrder = 5; coverMesh.add(rm);
+  scene.add(coverMesh);
+}
+let flowOn = false, flowAt = 0;
+const flowGroup = new THREE.Group();
+flowGroup.renderOrder = 4;
+scene.add(flowGroup);
+const flowMats = ['#5cb83a', '#f3c14b', '#e2563f'].map((c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.75, depthWrite: false }));
+function drawFlow(now: number) {
+  if (!flowOn) { if (flowGroup.children.length) { for (const m of [...flowGroup.children]) { flowGroup.remove(m); (m as THREE.Mesh).geometry.dispose(); } } return; }
+  if (now - flowAt < 1000) return;
+  flowAt = now;
+  const n = new Map<number, number>();
+  for (const c of traffic.cars) if (c.gone === undefined) n.set(c.seg.id, (n.get(c.seg.id) ?? 0) + 1);
+  const fs = [new Flat(), new Flat(), new Flat()];
+  for (const sg of net.segs.values()) {
+    if (net.def(sg).cls !== 'road') continue;
+    const path = net.path(sg), len = Math.max(1, pathLength(path)), lanes = Math.max(1, net.def(sg).lanes * (sg.oneway ? 1 : 2));
+    const per100 = ((n.get(sg.id) ?? 0) / lanes) * (100 / len);
+    fs[per100 < 1.2 ? 0 : per100 < 3.5 ? 1 : 2].ribbon(path, Math.min(3, net.half(sg) * 0.55), 1.3); // (over the road's crown)
+  }
+  for (const m of [...flowGroup.children]) { flowGroup.remove(m); (m as THREE.Mesh).geometry.dispose(); }
+  fs.forEach((f, i) => { if (f.pos.length) { const m = f.mesh(flowMats[i]); m.renderOrder = 4; flowGroup.add(m); } });
+}
+
+// ---------------- alerts (the bell by the speed buttons) ----------------
+// What wants the player's attention, each one tap from dealing with it: lines losing money or with
+// no buses, crowded stops, a town shrinking, money running out.
+function updateAlerts() {
+  const out: Alert[] = [];
+  const days = purse.history.length;
+  for (const l of lines.list) {
+    const k = lines.buses(l).length, b = purse.line(l.id), p = b.lastFares - b.lastRunning;
+    if (!k) out.push({ id: `nobus${l.id}`, icon: 'bus', tone: 'stop', text: `Line ${l.num} has no buses`, sub: 'Nobody can ride it · add a bus from its sheet', onClick: () => showLineInfo(l) });
+    else if (days && p < 0) out.push({ id: `loss${l.id}`, icon: 'trendDown', tone: 'stop', text: `Line ${l.num} lost ${money(-p)} yesterday`, sub: 'Stops where more people live and work, or fewer buses', onClick: () => showLineInfo(l) });
+  }
+  if (townRef) {
+    for (const { id, p } of markers.places()) {
+      const st = townRef.stop(id);
+      if (st && st.waiting > 60) out.push({ id: `crowd${id}`, icon: 'users', tone: 'stop', text: `${lines.name(id)} is crowded`, sub: `${Math.round(st.waiting)} waiting · more buses on its lines`, onClick: () => focusOn(p, 160) });
+    }
+    for (const t of townRef.towns) {
+      const r = townRef.reportFor(t.id);
+      if (r?.status === 'declining') out.push({ id: `town${t.id}`, icon: 'building', text: `${t.name} is shrinking`, sub: r.headline.replace(/^\w+: /, ''), onClick: () => showTown(t.id) });
+    }
+  }
+  if (purse.balance < 25_000) out.push({ id: 'money', icon: 'alert', text: purse.balance < 0 ? 'You’re in debt' : 'Money is running low', sub: 'Fix the lines that lose money first', onClick: () => shell.openStats('lines') });
+  shell.setAlerts(out);
+}
+
 // ---------------- smoothness: adaptive quality and a performance readout ----------------
 // Phones differ enormously, so rather than guess, the game watches its own frame times: if
 // frames run slow it steps down (fewer pixels, then cheaper shadows, then none), and when
@@ -2493,6 +2611,7 @@ function frame(now: number) {
   railGame.frame(dt, cam, canvas.clientHeight);
   people.update(cam, canvas.clientHeight, gdt, dt, clock); // (they stand still while paused; their fades don't)
   markers.frame(cam, canvas.clientHeight);
+  drawFlow(now);
   placeLabels?.update(view.h);
   if (routeShown) routeShown.material.resolution.set(canvas.width, canvas.height);
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
@@ -2508,8 +2627,14 @@ function frame(now: number) {
     $('#st-buses').textContent = String(traffic.buses);
     $('#st-trains').textContent = String(railway.trains.length);
     $('#st-pop').textContent = count(pop);
-    shell.setMoney(money(purse.balance));
-    if (++goalTick % 4 === 0) updateGoal();
+    // the status pill: money and what yesterday's running made (today's so far on the first day),
+    // and the people with which way the town is heading
+    const y = purse.history.length ? purse.yesterday : purse.today, net = Math.round(y.fares - y.running);
+    const k = (v: number) => (Math.abs(v) >= 1e4 ? `£${(Math.abs(v) / 1e3).toFixed(Math.abs(v) >= 1e5 ? 0 : 1)}k` : money(Math.abs(v)));
+    shell.setMoney(money(purse.balance), lines.list.length ? { text: `${net >= 0 ? '+' : '−'}${k(net)}/day`, dir: net > 0 ? 1 : net < 0 ? -1 : 0 } : undefined);
+    const st = town.report?.status;
+    shell.setPop(count(pop), st === 'growing' ? 1 : st === 'declining' ? -1 : 0);
+    if (++goalTick % 4 === 0) { updateGoal(); updateAlerts(); drawCoverage(); }
   }
   regionView?.update(view, canvas.clientWidth / Math.max(1, canvas.clientHeight)); // (the tiles' levels, for where the camera is now)
   if (worldGame) {
@@ -2547,7 +2672,7 @@ loading.finish();
 let loaded = false;
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, overlays: { flowGroup, cover: () => coverMesh }, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { underView, toggleUnderground }); // (the underground view: game/underview.ts)
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
