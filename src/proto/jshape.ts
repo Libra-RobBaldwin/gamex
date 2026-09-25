@@ -426,15 +426,19 @@ export function shapeJunction(n: XZ, legs: ShapeLeg[], form: ShapeForm, major: n
     aprons.push(...ghost.polys);
     const claims = paves;
     // splitter islands at single-lane entries: only where one fits on its own road, clear of the
-    // next road's carriageway (where mapped roads meet the ring close together, say)
+    // next road's carriageway (where mapped roads meet the ring close together, say). Painted on
+    // the carriageway as chevrons (TSRGD diagram 1042) inside a solid outline, not a green
+    // triangle: wide at the ring, tapering to a point out along the road, the bars pointing out
     const splitter: Record<number, number> = {};
     if (form === 'roundabout') for (const l of legs) if (l.def.lanes === 1 && l.def.median === 0 && !l.def.oneway) {
-      const { length: sl, width: sw } = STD.splitter, a0 = ringA(n, l, 0, R) + 0.8;
-      const isl = [legAt(n, l, a0, -sw / 2), legAt(n, l, a0, sw / 2), legAt(n, l, a0 + sl - 0.8, 0)];
+      const { length: sl, width: sw } = STD.splitter, a0 = ringA(n, l, 0, R) + 0.8, tip = a0 + sl - 0.8;
+      const isl = [legAt(n, l, a0, -sw / 2), legAt(n, l, a0, sw / 2), legAt(n, l, tip, 0)];
       const clear = legs.every((o) => o === l || isl.every((p) => { const f = legFrameOf(n, o, p); return f.a < 0 || Math.abs(f.b) > K(o) + 0.3; }));
-      if (a0 + sl - 0.8 > l.len - 6 || !clear) continue;
-      islands.push(isl);
-      splitter[l.id] = a0 + sl - 0.8;
+      if (tip > l.len - 6 || !clear) continue;
+      const half = (a: number) => (sw / 2) * Math.max(0, Math.min(1, (tip - a) / (tip - a0)));
+      const ch = chevronsIn((a) => legAt(n, l, a, -half(a)), (a) => legAt(n, l, a, half(a)), tip, a0, l.def.mph);
+      ghost.chevrons.push(...ch.lines, ...ch.bars);
+      splitter[l.id] = tip;
     }
     return { form, mouth, line, paveTrim, medianTrim, apron, pave, aprons, paves, islands, splitter, slip: null, R, island: std.island, claims, paveLeg, ghost };
   }
