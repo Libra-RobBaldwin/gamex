@@ -469,3 +469,37 @@ body.tooling #credit { opacity: 0.6; }
 @keyframes ping { 0% { box-shadow: var(--lift), 0 0 0 0 rgba(243, 193, 75, 0.7); } 100% { box-shadow: var(--lift), 0 0 0 14px rgba(243, 193, 75, 0); } }
 @media (prefers-reduced-motion: reduce) { #alertbtn.ping { animation: none; } }
 .alrow .num { border-radius: 12px; background: rgba(243, 193, 75, 0.18); color: var(--warn); }
+
+/* a tap on a bus, a stop, a building, a junction: a small card over the map, not a sheet */
+.sheet.peek { left: calc(12px + var(--safe-l)); right: calc(12px + var(--safe-r)); max-height: min(46dvh, calc(100dvh - var(--chrome-b) - var(--safe-t) - 90px)); border-radius: 20px; }
+.sheet.peek::before { display: none; }
+.sheet.peek header { padding: 10px 4px 4px 12px; }
+.sheet.peek h2 { font-size: 16px; }
+.sheet.peek .sub { font-size: 12px; }
+.sheet.peek .sb { padding: 2px 12px 12px; gap: 8px; }
+.chips { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.chips > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; border-radius: 12px; background: rgba(0, 0, 0, 0.22); }
+.chips > div.wide { grid-column: span 2; }
+.chips span { color: var(--muted); font-size: 11px; letter-spacing: 0.02em; }
+.chips b { font-weight: 600; font-size: 13.5px; line-height: 1.25; overflow-wrap: anywhere; }
+.sheet.peek .note { font-size: 11.5px; }
+.sheet.peek .sb .acts { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.sheet.peek .sb .acts .act { flex: 1 0 auto; min-height: 40px; }
+
+/* the milestone ring: fills clockwise towards the next milestone; its number in the middle */
+#msbtn { position: relative; width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--panel); box-shadow: var(--lift); }
+#msbtn svg { position: absolute; inset: 0; width: 44px; height: 44px; transform: rotate(-90deg); }
+#msbtn circle { fill: none; stroke-width: 4; }
+#msbtn .trk { stroke: rgba(242, 245, 239, 0.14); }
+#msbtn .val { stroke: var(--gold); stroke-linecap: round; transition: stroke-dasharray 0.6s ease; }
+#msn { position: relative; font: 700 15px/1 var(--font-display); color: var(--gold-text); padding-top: 2px; }
+.msrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: rgba(0, 0, 0, 0.2); }
+.msrow.done { opacity: 0.6; }
+.msrow .n { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--panel-2); color: var(--gold-text); font: 700 13px/1 var(--font-display); }
+.msrow.now .n { background: var(--gold); color: var(--ink); }
+.msrow.done .n { background: rgba(92, 184, 58, 0.3); color: #bfe8a8; }
+.msrow span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.msrow small { color: var(--muted); font-size: 11.5px; }
+.msrow .cost { font-size: 12.5px; }
+.msmeter { height: 10px; border-radius: 5px; overflow: hidden; margin-top: 4px; }
+.msmeter i { background: var(--gold); border-radius: 5px; }

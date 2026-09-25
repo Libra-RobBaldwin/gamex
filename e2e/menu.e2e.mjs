@@ -254,8 +254,18 @@ for (const id of ['town', 'sandbox']) {
   await atMenu(page);
   await page.tap('[data-go="region"]');
   await page.waitForSelector('.scr-region');
+  // simple steps, one question each: a tap on a card answers it and moves on
+  check(await page.$$eval('.steps span', (d) => d.length) === 4 && await page.$('[data-place]') !== null, 'region setup: step 1 asks what kind of place');
+  await page.tap('[data-place="rolling"]');
+  await page.waitForSelector('[data-climate]');
+  await page.tap('[data-climate="arctic"]');
+  await page.waitForSelector('[data-size]');
+  await page.tap('[data-size="city"]');
+  await page.waitForSelector('.summary');
+  check(/Rolling country/.test(await page.textContent('.summary')) && /Cold/.test(await page.textContent('.summary')), 'region setup: the summary shows what was picked');
+  // the finer settings are folded away under More options
+  await page.tap('details.more summary');
   await page.tap('[data-count="rivers"] [data-step="1"]');
-  await page.tap('input[name="rg-style"][value="arctic"]');
   await page.fill('#rg-seed', '42');
   await page.dispatchEvent('#rg-seed', 'change');
   check(await page.textContent('[data-count="rivers"] output') === '2', 'region setup: the steppers change the counts');

@@ -63,6 +63,11 @@ export interface RailHooks { stops(): StopIn[]; lines(): LineIn[]; time(a: numbe
 //    by a walk, and no one would ever ride);
 //  - and it answers sooner than a real town would: a day of demand a little above what stands is
 //    enough to build, two days well below it to start emptying.
+// How far people walk to a bus stop, straight line: 250 m, about a three-minute walk. Towns here
+// are half a kilometre or so across and stops a few minutes apart, so the planners' 400 m (six
+// or seven minutes on foot, with the detour) covered nearly a whole town from one stop. Stations
+// keep their 800 m: people walk further for a train. The coverage overlay draws this too.
+export const STOP_WALK_M = 250;
 const GAME_TUNE = {
   monthDays: 1, calibrateMax: 3, reachCap: 4, visitsPerOfficeJobDay: 0.1, ptBiasMin: 0, transferWalkM: 60,
   growAt: 1.02, growAfter: 1, declineAt: 0.95, declineAfter: 2, recoverAt: 0.98,
@@ -145,7 +150,7 @@ export class TownEconomy {
       if (seen.has(k)) continue;
       seen.add(k);
       const p = this.h.net.path(seg), q = p[Math.min(p.length - 1, Math.max(0, Math.round((st.s / Math.max(1, this.h.net.length(seg))) * (p.length - 1))))];
-      out.push({ id: k, kind: 'bus_stop', x: q.x, z: q.z, name: this.h.lines.name(k) });
+      out.push({ id: k, kind: 'bus_stop', x: q.x, z: q.z, name: this.h.lines.name(k), radius: STOP_WALK_M });
     }
     if (this.h.rail) out.push(...this.h.rail.stops());
     return out;
