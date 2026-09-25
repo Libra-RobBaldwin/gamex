@@ -21,6 +21,11 @@ traffic". **Read `docs/edge.md`.**
 - **The economy:** a town per place off the map, so trips to and from it are counted and good links
   out to the edge carry them. A rail line can end at the station off the map. Another company's
   trains run through between two railway portals.
+- **For 50 km maps** (the world50 session): the face is built a 1 km stretch at a time where
+  the camera can see it (`EdgeFace`), with one coarse face zoomed out. The far country and the
+  places' sizes scale with the half-width. The backdrop is a hazy lowland: an extended world at
+  the map's height was tried (`?far=level`), but it hid the cut (see edge.md).
+- **The portal card** is small: its name, three numbers, and at most one action.
 - **For the terrain session:**
   - the face reads the ground through `surfaceAt` in `main.ts`
     (`gameWater.shapes.ground + RELIEF.heightAt`), and `level` can be a function for a sea;

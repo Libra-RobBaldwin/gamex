@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { beyondEdge, edgeDepth, edgeMesh, farCountry } from './edge';
+import { EdgeFace, beyondEdge, edgeDepth, edgeMesh, farCountry } from './edge';
 
 // the face's triangles, by side (0: +x ... 3: -z), each as its three points' (u along the side, y)
 function faces(m: THREE.Mesh, edge: number) {
@@ -82,6 +82,28 @@ describe('the map edge: a cut face through the ground', () => {
     let foot = Infinity;
     for (let i = 0; i < p.count; i++) if (Math.abs(Math.max(Math.abs(p.getX(i)), Math.abs(p.getZ(i))) - E) < 1e-6) foot = Math.min(foot, Math.abs(p.getY(i) + 60));
     expect(foot).toBeLessThan(1e-6);
+  });
+
+  test('a big map’s face is built a stretch at a time where it can be seen, and the stretches are the whole face exactly', () => {
+    const E2 = 5000, f = new EdgeFace(E2, hills, { base: -80, step: 25, level: -100 });
+    const area = (g: THREE.BufferGeometry) => { const p = g.getAttribute('position'); let a = 0; const v = new THREE.Vector3(), w = new THREE.Vector3(), c = new THREE.Vector3(); for (let i = 0; i < p.count; i += 3) { v.fromBufferAttribute(p, i); w.fromBufferAttribute(p, i + 1).sub(v); c.fromBufferAttribute(p, i + 2).sub(v); a += w.cross(c).length() / 2; } return a; };
+    // near the east edge, zoomed in: only a stretch or two, and nothing of the other sides
+    f.update({ x: E2 - 200, z: 1200, h: 300, el: 0.6 }, 0.45);
+    expect(f.shown).toBeGreaterThanOrEqual(1);
+    expect(f.shown).toBeLessThanOrEqual(3);
+    for (const c of f.group.children) if (c.visible) { const p = (c as THREE.Mesh).geometry.getAttribute('position'); for (let i = 0; i < p.count; i++) expect(p.getX(i)).toBeCloseTo(E2, 3); }
+    // zoomed right out: the coarse face alone
+    f.update({ x: 0, z: 0, h: 20000, el: 0.7 }, 0.45);
+    expect(f.shown).toBe(1);
+    // the stretches together are the whole face, exactly
+    const whole = edgeMesh(E2, [], hills, { base: -80, step: 25, level: -100 });
+    let got = 0;
+    for (let side = 0; side < 4; side++) for (let u0 = -E2; u0 < E2; u0 += 1000) got += area(edgeMesh(E2, [], hills, { base: -80, step: 25, level: -100, span: { side, u0, u1: u0 + 1000 } }).geometry);
+    expect(Math.abs(got - area(whole.geometry)) / area(whole.geometry)).toBeLessThan(1e-6);
+    // and one that's gone out of sight is let go once it's far off
+    f.update({ x: -E2 + 200, z: -1200, h: 300, el: 0.6 }, 0.45);
+    expect(f.stats.dropped).toBeGreaterThan(0);
+    f.dispose();
   });
 
   test('beyond the edge means wholly past it', () => {

@@ -40,10 +40,33 @@ Code:
   verges beside, a railway its ballast, and an embankment's fill under a road above the ground. They
   are cut into the face, not laid over it (`edgeCrossings`: roads that end at the edge heading out,
   or a railway passing through it).
-- **Cost:** one mesh of vertex colours, cut into 1 km tiles (`splitByTile`), so only the stretch
-  in view is drawn: one or two draw calls. On the 6 km region it's about 30k triangles in all.
+- **Built where it can be seen** (`EdgeFace`, ready for 50 km maps):
+  - Each side is cut into 1 km stretches. A stretch is built exactly (as `edgeMesh` with `span`)
+    when it comes into sight, so the height field is only asked for there. It's kept while near,
+    and let go once it's four sight-radii off.
+  - A stretch that's in sight but not built yet is built that frame, so the rim never has a hole.
+    The next ring out is built ahead, within 2 ms a frame.
+  - Zoomed right out (views over 2,600 m tall), one coarse face all round stands in, with columns on
+    the ground's grid only, at most 400 a side. The coarse face and the stretches are never shown
+    together.
+  - When a road off the map changes, only the stretches it touches are rebuilt, and they're
+    swapped in the same frame.
+  - Cost: one shared material, so one program. Draw calls are the stretches in sight (one to
+    four), or one zoomed out, with 100 to 400 triangles a column-metre of rim in view.
+  - The town keeps its single eager mesh.
 
 ## The far country (`farCountry`)
+
+Two looks were tried, at the same views at low and high tilt:
+- **A hazy lowland** below the cut (the default).
+- **An extended world** in the manner of Cities: Skylines 2 (`?far=level`): the country carried on
+  at the map's own height past a narrow gap, the height field continued out from the edge and
+  fading into low hills.
+
+The lowland reads better on a phone. The map stays a slab of crust at every zoom and the cut is
+clear from any side. With the extended world, the far bank hides most of the cut at low tilt, and
+zoomed out the rim thins to a line, so the playable edge stops reading. `?far=level` stays, to
+compare.
 
 A backdrop round the map, so the sky doesn't just start at the rim:
 - It's a soft lowland of blurred fields and woods, meeting the foot of the cut and falling away
@@ -75,6 +98,8 @@ A backdrop round the map, so the sky doesn't just start at the rim:
   - Every dead end on the ground's edge (or track through it) is found, and grouped where they run
     out together. A motorway's two carriageways are one portal.
   - Each gets a road number (M, A or B; none for the railway) and the name of a place off the map.
+    The place's size grows with the map (by √(half-width / 4.5 km), up to 3×), since a bigger
+    map's neighbours are bigger places.
     The name comes from the region's own name generator: never a real place, never one on the map.
   - Each also gets a distance: motorway 16–28 miles, A road 9–17, B road 5–9, railway 22–40.
   - Portals within 3 km of each other lead to the same place, for example the railway and the
@@ -134,19 +159,18 @@ in and go out at its rate:
     tab's list (the tab says they run), and not in the goal or save counts.
   - They share the track and signals with the player's trains.
 
-## Signs and the sheet
+## Signs and the card
 
 - **Signs:** a DOM sign stands beside each road 80 m in from the edge, in the style of a UK
   direction sign. Motorways are blue, primary routes green with a yellow number, B roads white,
   and the railway white with a red train. It gives the number, the place, the direction and the
   miles, for example "M56 Willowham, West · 19 mi". The sign shows while the view is under 7 km
   tall and on screen, sliding in from the side of the screen with its post still under the spot.
-- **Tapping one** goes there and opens its sheet:
-  - vehicles an hour in and out now;
-  - trips a day to and from the place, and how many of them ride your lines;
-  - where it leads, how big the place is, and the share of lorries;
-  - a line on how to link it;
-  - Go there.
+- **Tapping one** goes there and opens a small card, following the rule of simple steps:
+  - the place's name, the road number, the direction and the miles;
+  - three numbers: vehicles in a day, out a day, and trips a day to and from the place (for the
+    railway: the trains running there, the trips, and how many ride your lines);
+  - one action at most: for the railway, "New rail line from here".
 
 ## Measured
 

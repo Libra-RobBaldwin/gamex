@@ -36,8 +36,8 @@ import { RailDraw } from './rail/draw';
 import { RAIL_ID, RailGame } from './rail/game';
 import { layRegionRail, planRegionRail } from './rail/region';
 import { layRegionRoads } from './interchange/region';
-import { edgeCrossings, edgeDepth, edgeMesh, farCountry, type EdgeCrossing } from './game/edge';
-import { PortalSigns, PortalTraffic, edgePlanes, findPortals, openPortal, outsidePlaces, portalStation, type Portal } from './game/portals';
+import { EdgeFace, edgeCrossings, edgeDepth, edgeMesh, farCountry } from './game/edge';
+import { PortalSigns, PortalTraffic, edgePlanes, findPortals, openPortal, outsidePlaces, perDay, portalStation, type Portal } from './game/portals';
 import { STD } from './standards';
 import { Loading } from './loading';
 import { Drape } from './drape';
@@ -161,19 +161,17 @@ scene.add(gameGround.ground.hedges);
 scene.add(ground);
 // the cut face round the edge of the map (the roads running off it are added once they're built)
 // (a big map's is cut into tiles, so only the stretch in view is drawn)
-// (a big map's follows its hills, goes deeper, and has the far country round it: game/edge.ts)
-const edgeOf = (m: THREE.Mesh): THREE.Object3D => { if (!BIG) return m; const g = splitByTile(m); g.traverse((o) => { o.userData.noDrape = true; }); return g; };
+// (a big map's follows its hills, goes deeper, is built a stretch at a time where the camera can
+// see it, and has the far country round it: game/edge.ts)
 const surfaceAt = (x: number, z: number) => gameWater.shapes.ground(x, z) + (RELIEF?.heightAt(x, z) ?? 0);
-const edgeOpts = BIG ? { base: -edgeDepth(EDGE), step: RELIEF?.step ?? 25, level: WATER_LEVEL } : { level: WATER_LEVEL };
-const makeEdge = (crossings: EdgeCrossing[]) => edgeOf(edgeMesh(EDGE, crossings, BIG ? surfaceAt : gameWater.shapes.ground, edgeOpts));
-let mapEdge = makeEdge([]);
+const edgeFace = BIG ? new EdgeFace(EDGE, surfaceAt, { base: -edgeDepth(EDGE), step: RELIEF?.step ?? 25, level: WATER_LEVEL }) : null;
+let mapEdge: THREE.Object3D = edgeFace ? edgeFace.group : edgeMesh(EDGE, [], gameWater.shapes.ground, WATER_LEVEL);
 scene.add(mapEdge);
-const far = BIG ? farCountry(EDGE, -edgeDepth(EDGE), [LOOK.palette.pasture ?? '#6f9150', LOOK.palette.wood ?? '#4f7338', LOOK.crops.wheat?.a ?? '#a3a064', LOOK.palette.rough ?? '#7d9657', LOOK.palette.pastureCool ?? '#5f8448'], MAP.seed) : null;
+const far = BIG ? farCountry(EDGE, -edgeDepth(EDGE), [LOOK.palette.pasture ?? '#6f9150', LOOK.palette.wood ?? '#4f7338', LOOK.crops.wheat?.a ?? '#a3a064', LOOK.palette.rough ?? '#7d9657', LOOK.palette.pastureCool ?? '#5f8448'], MAP.seed, { mode: PARAMS.get('far') === 'level' ? 'level' : 'lowland', ground: surfaceAt }) : null; // (?far=level: the country carried on at the map's height)
 if (far) scene.add(far.mesh);
-let edgeSig = '';
 function refreshEdge() {
-  if (BIG) { const sig = JSON.stringify(edgeCrossings(net, EDGE)); if (sig === edgeSig) return; edgeSig = sig; } // (a big map's only when the roads off it changed)
-  scene.remove(mapEdge); mapEdge.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); mapEdge = makeEdge(edgeCrossings(net, EDGE)); scene.add(mapEdge); }
+  if (edgeFace) { edgeFace.setCrossings(edgeCrossings(net, EDGE)); return; } // (a big map's stretches the roads off it changed, as they come into sight)
+  scene.remove(mapEdge); (mapEdge as THREE.Mesh).geometry.dispose(); mapEdge = edgeMesh(EDGE, edgeCrossings(net, EDGE), gameWater.shapes.ground, WATER_LEVEL); scene.add(mapEdge); }
 // the lake (src/proto/game/water.ts): beaches and the bed laid over the ground (chained after the
 // ground's own patch), and the water and reeds on top: two draw calls
 gameWater.patch(gameGround.ground.material);
@@ -2278,7 +2276,12 @@ townRef = town;
 if (portals.length) {
   // (trips a day between the map's places and the one a way off the map reaches, both ways)
   const tripsWith = (id: number) => { let all = 0, byLines = 0; for (const t of [...town.towns, { id }]) for (const x of town.trips(t.id)) if (x.town === id || t.id === id) { all += x.all; byLines += x.lines; } return { all, lines: byLines }; };
-  const showPortal = (p: Portal) => openPortal(shell, p, { perHour: (portalFlows?.rate(p, (clock / 60) % 24, LEVELS[level][1]) ?? 0) * 3600, lorries: p.kind === 'motorway' ? 0.22 : 0.1, trips: tripsWith(p.town), onGo: () => { closeSheet(); focusOn(p.sign, 320); } });
+  const showPortal = (p: Portal) => openPortal(shell, p, {
+    perDay: perDay(p, LEVELS[level][1]), trips: tripsWith(p.town),
+    trains: p.station !== undefined ? railway.trains.filter((t) => t.line?.stops.includes(p.station!)).length : undefined,
+    // (the railway's one thing to do: a line out to it)
+    action: p.station !== undefined ? { label: 'New rail line from here', onClick: () => { closeSheet(); railGame.startLineTool(p.station); } } : undefined,
+  });
   portalSigns = new PortalSigns($('#ui'), portals, { toScreen, onPick: (p) => { focusOn(p.sign, Math.min(view.h, 700)); showPortal(p); } });
   showPortalRef = showPortal;
 }
@@ -2533,6 +2536,7 @@ function frame(now: number) {
   const hour = (clock / 60) % 24;
   gameWater.update(now / 1000, hour); // ripples and reeds, and the water's light from the clock
   if (far && scene.background instanceof THREE.Color) far.update(scene.background); // (the far country's haze is the sky's colour)
+  edgeFace?.update(view, canvas.clientWidth / Math.max(1, canvas.clientHeight)); // (the stretches of the map's edge in sight)
   // industrial sites: state once a game minute, moving parts at their own low rate, lamps at night;
   // catchment rings for the selected site, or for every site while a stop is placed
   siteT += gdt;
@@ -2623,7 +2627,7 @@ Object.assign((window as unknown as { proto: object }).proto, { interchanges, bl
 Object.assign((window as unknown as { proto: object }).proto, { railway, railDraw, railGame }); // (rail/)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
-Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, portals, portalFlows, rail: railway }); // (the map being played, and how long its loading took, stage by stage)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, portals, portalFlows, rail: railway, edgeFace }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

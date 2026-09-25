@@ -80,7 +80,7 @@ export function findPortals(net: Network, edge: number, o: { seed: number; names
   const rand = rng(o.seed * 7919 + 31), taken = new Set(o.names.map((n) => n.toLowerCase()));
   const used = new Set<string>();
   const out = groups.map((g, i) => {
-    const K = KINDS[g.kind], x = g.list.reduce((t, e) => t + e.p.x, 0) / g.list.length, z = g.list.reduce((t, e) => t + e.p.z, 0) / g.list.length;
+    const K = KINDS[g.kind], grow = Math.min(3, Math.max(1, Math.sqrt(edge / 4500))), x = g.list.reduce((t, e) => t + e.p.x, 0) / g.list.length, z = g.list.reduce((t, e) => t + e.p.z, 0) / g.list.length;
     const at = { x: g.side === 0 ? edge : g.side === 2 ? -edge : x, z: g.side === 1 ? edge : g.side === 3 ? -edge : z };
     const miles = Math.round(K.miles[0] + rand() * (K.miles[1] - K.miles[0]));
     let route = '';
@@ -95,7 +95,7 @@ export function findPortals(net: Network, edge: number, o: { seed: number; names
     return {
       sign,
       id, kind: g.kind, side: g.side, at, look: { x: at.x + inward(g.side).x * 220, z: at.z + inward(g.side).z * 220 }, segs: [...new Set(g.list.map((e) => e.seg.id))],
-      place: placeName(rand, false, taken), route, miles, people: K.people, jobs: K.jobs,
+      place: placeName(rand, false, taken), route, miles, people: Math.round(K.people * grow), jobs: Math.round(K.jobs * grow), // (a bigger map's neighbours are bigger places)
       offMin: (miles * 1.609 * 60) / K.kmh, town: OUTSIDE_ID + id,
     };
   });
@@ -323,26 +323,22 @@ export class PortalSigns {
   }
 }
 
-// ---------------- the sheet ----------------
-export interface PortalFacts { perHour: number; lorries: number; trips: { all: number; lines: number }; onGo: () => void }
-// Tapped: where it goes, the traffic through it now, and the trips a day to and from the place it reaches.
+// ---------------- the card ----------------
+export interface PortalFacts { perDay: number; trips: { all: number; lines: number }; trains?: number; action?: { label: string; onClick: () => void } }
+// Tapped: a small card, where it goes and three numbers (vehicles in and out a day, or the trains
+// running there and the trips it carries for the railway), and one action at most.
 export function openPortal(shell: Shell, p: Portal, f: PortalFacts) {
   const n = (x: number) => Math.round(x).toLocaleString('en-GB');
   const rail = p.kind === 'rail';
-  const stats: [string, string][] = rail ? [['Trips a day', n(f.trips.all)], ['By your lines', n(f.trips.lines)]]
-    : [['In an hour', n(f.perHour)], ['Out an hour', n(f.perHour)], ['Trips a day', n(f.trips.all)]];
-  const facts: [string, string][] = [['Leads to', `${p.place}, ${p.miles} miles ${SIDE_WORD[p.side]}`], ['Lives there', `${n(p.people)} people · ${n(p.jobs)} jobs`]];
-  if (!rail) facts.push(['Lorries', `about ${Math.round(f.lorries * 100)}% of the traffic`]);
-  if (!rail) facts.push(['Of those trips, by your lines', n(f.trips.lines)]);
   shell.openInfo({
-    key: `portal:${p.id}`, title: portalTitle(p), sub: portalLine(p), icon: rail ? 'train' : p.kind === 'motorway' ? 'motorway' : 'road',
-    stats, facts,
-    note: rail
-      ? `Trains can run off the map to ${p.place}: build a station on the line near the edge, and a rail line from your stations out to it. More people travel when the trains are quick and frequent.`
-      : `Traffic comes and goes here all day, busiest in the rush hours${p.kind === 'motorway' ? ', and more of it passes straight through' : ''}. A coach or railway line out towards the edge links your towns to ${p.place}, and more people travel.`,
-    actions: [{ label: 'Go there', icon: 'pin', onClick: f.onGo }],
+    key: `portal:${p.id}`, title: p.place, sub: `${rail ? 'Railway' : p.route} · ${SIDE_WORD[p.side]} · ${p.miles} miles off the map`, icon: rail ? 'train' : p.kind === 'motorway' ? 'motorway' : 'road',
+    stats: rail ? [['Trains running', n(f.trains ?? 0)], ['Trips a day', n(f.trips.all)], ['By your lines', n(f.trips.lines)]]
+      : [['In a day', n(f.perDay)], ['Out a day', n(f.perDay)], ['Trips a day', n(f.trips.all)]],
+    actions: f.action ? [{ label: f.action.label, icon: rail ? 'transport' : 'pin', kind: 'primary', onClick: f.action.onClick }] : undefined,
   });
 }
+// vehicles a day each way through a portal (at the traffic setting `level`)
+export function perDay(p: Portal, level = 1) { let t = 0; for (let h = 0; h < 24; h += 0.25) t += demand(h) * 0.25; return RATE[p.kind] * level * 3600 * t; }
 
 // ---------------- the railway's way off ----------------
 // The station off the map where the railway's way off leads: on the stretch of line past the

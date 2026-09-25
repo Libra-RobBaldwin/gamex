@@ -72,6 +72,9 @@ export interface EdgeOpts {
   step?: number; // the ground's grid (m): the face's columns fall on its lines, so its top is the ground's
   // the water's level where the ground dips below it (a number, or per point: null where there's none)
   level?: number | ((x: number, z: number) => number | null);
+  span?: { side: number; u0: number; u1: number }; // just this stretch of one side (EdgeFace builds it a stretch at a time)
+  coarse?: boolean; // columns only on the grid, however the ground bends between (seen from far off)
+  material?: THREE.Material; // (shared by every stretch)
 }
 
 // A line across one column of the face: its heights at the column's two ends
@@ -202,25 +205,27 @@ export function edgeMesh(edge: number, crossings: EdgeCrossing[] = [], ground: (
   // so a river's banks keep their shape, and at the edges of anything running off the map.)
   const grid = opts.step ?? 4;
   for (let k = 0; k < 4; k++) {
-    const mine = crossings.filter((x) => x.side === k);
+    if (opts.span && opts.span.side !== k) continue;
+    const lo = opts.span?.u0 ?? -edge, hi = opts.span?.u1 ?? edge;
+    const mine = crossings.filter((x) => x.side === k && x.u + x.half > lo && x.u - x.half < hi);
     const marks = new Set<number>();
-    for (const x of mine) for (const h of x.rail ? [x.half] : [x.half, x.kerb]) { marks.add(x.u - h); marks.add(x.u + h); }
+    if (!opts.coarse) for (const x of mine) for (const h of x.rail ? [x.half] : [x.half, x.kerb]) { marks.add(x.u - h); marks.add(x.u + h); }
     const step = Math.max(grid, (2 * edge) / MAX_COLS);
     const us: number[] = [];
-    for (let u = -edge; u < edge - 1e-6; u += step) {
-      const u1 = Math.min(edge, u + step), g0 = gAt(k, u), g1 = gAt(k, u1);
+    for (let u = lo; u < hi - 1e-6; u += step) {
+      const u1 = Math.min(hi, u + step), g0 = gAt(k, u), g1 = gAt(k, u1);
       // (straight between the grid's lines? then one column does)
-      const bent = [0.25, 0.5, 0.75].some((t) => Math.abs(gAt(k, u + (u1 - u) * t) - (g0 + (g1 - g0) * t)) > 0.02);
+      const bent = !opts.coarse && [0.25, 0.5, 0.75].some((t) => Math.abs(gAt(k, u + (u1 - u) * t) - (g0 + (g1 - g0) * t)) > 0.02);
       const n = bent ? Math.ceil((u1 - u) / 0.5) : 1;
       for (let i = 0; i < n; i++) us.push(u + ((u1 - u) * i) / n);
     }
-    us.push(edge);
-    for (const m of marks) if (m > -edge && m < edge) us.push(m);
+    us.push(hi);
+    for (const m of marks) if (m > lo && m < hi) us.push(m);
     us.sort((a, b) => a - b);
     for (let i = 0; i + 1 < us.length; i++) {
       const u0 = us[i], u1 = us[i + 1];
       if (u1 - u0 < 1e-3) continue;
-      const um = (u0 + u1) / 2, road = mine.find((x) => Math.abs(um - x.u) < x.half) ?? null;
+      const um = (u0 + u1) / 2, road = opts.coarse ? null : mine.find((x) => Math.abs(um - x.u) < x.half) ?? null;
       column(k, u0, u1, road);
     }
   }
@@ -228,7 +233,8 @@ export function edgeMesh(edge: number, crossings: EdgeCrossing[] = [], ground: (
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  g.computeBoundingSphere();
+  const m = new THREE.Mesh(g, opts.material ?? new THREE.MeshLambertMaterial({ vertexColors: true }));
   m.name = 'map edge';
   m.userData.noDrape = true; // (its heights are the ground's already)
   return m;
@@ -239,12 +245,18 @@ export function edgeMesh(edge: number, crossings: EdgeCrossing[] = [], ground: (
 // the map reads as a slab of land standing over the wider world. It's a backdrop: drawn first,
 // under everything, never clipped by the camera's far plane, and it never hides the map or its
 // cut face. One draw call, no shadows; its haze follows the sky (dusk too): `update(sky)`.
-export function farCountry(edge: number, level: number, colours: string[], seed = 1) {
+// `level` mode instead (Cities: Skylines 2's "extended world"): the country carries on at the
+// map's own height beyond a gap (so the cut still shows, across it), `ground` continued out from
+// the nearest point of the edge and fading into low hills, drawn with depth like the map.
+export function farCountry(edge: number, level: number, colours: string[], seed = 1, o: { mode?: 'lowland' | 'level'; ground?: (x: number, z: number) => number } = {}) {
+  const flat = o.mode === 'level', gap = Math.max(80, edge * 0.02);
   const R = Math.max(40000, edge * 6); // how far it runs (the camera's widest look out, and more)
   // the grid's lines: fine by the edge, coarser further off (and the map's own square left out)
   const ring: number[] = [];
-  for (let d = 0, s = Math.max(120, edge / 40); d < R - edge; d += s, s *= 1.13) ring.push(edge + d);
+  for (let d = 0, s = Math.max(120, edge / 40); d < R - edge; d += s, s *= 1.13) if (!flat || d === 0 || d > gap + 20) ring.push(edge + d);
+  if (flat) ring.push(edge + gap - 0.5, edge + gap); // (the gap's floor, and the far bank rising from it)
   ring.push(R);
+  ring.sort((a, b) => a - b);
   const inner: number[] = [];
   const n = Math.max(8, Math.round((2 * edge) / Math.max(150, edge / 30)));
   for (let i = 1; i < n; i++) inner.push(-edge + (2 * edge * i) / n);
@@ -259,15 +271,22 @@ export function farCountry(edge: number, level: number, colours: string[], seed 
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const x = xs[i], z = xs[j], d = Math.max(0, Math.max(Math.abs(x), Math.abs(z)) - edge);
     // (gentle: no slope steeper than the camera ever looks down, so it never hides itself)
-    const lift = Math.min(1, d / 9000) ** 1.5, y = level - 40 * (1 - Math.exp(-d / 700)) + lift * (160 + 140 * hill(x, z)); // (meeting the foot of the cut, then falling away)
+    const lift = Math.min(1, d / 9000) ** 1.5;
+    let y = level - 40 * (1 - Math.exp(-d / 700)) + lift * (160 + 140 * hill(x, z)); // (meeting the foot of the cut, then falling away)
+    if (flat) {
+      // (the gap's floor at the foot of the cut, then the ground carried on from the edge)
+      const cx = Math.max(-edge, Math.min(edge, x)), cz = Math.max(-edge, Math.min(edge, z)), g0 = o.ground?.(cx, cz) ?? 0, k = Math.min(1, d / 3000);
+      y = d < gap ? level : g0 * (1 - k) + k * lift * (160 + 140 * hill(x, z)) - 2;
+    }
     pos.push(x, y, z);
     // a patchwork of fields and woods, blurred by distance
     const a = cols[Math.floor(hash(i, j) * cols.length)], b = cols[Math.floor(hash(j + 91, i - 7) * cols.length)];
     c.copy(a).lerp(b, 0.5);
+    if (flat && d < gap - 0.1) c.set(EARTH_COLOURS.bedrock).multiplyScalar(0.7); // (the gap's floor and the foot of its far bank: rock in shadow)
     const lightness = 0.9 + 0.1 * hill(z, x);
     col.push(c.r * lightness, c.g * lightness, c.b * lightness);
     // how much of it the haze takes: some even at the foot of the cut, all of it far out
-    hz.push(Math.min(1, 0.2 + 0.8 * (1 - Math.exp(-d / 7000)) + (d > R - edge - 8000 ? (d - (R - edge - 8000)) / 8000 : 0)));
+    hz.push(Math.min(1, (flat ? 0.05 : 0.2) + (flat ? 0.95 : 0.8) * (1 - Math.exp(-d / 7000)) + (d > R - edge - 8000 ? (d - (R - edge - 8000)) / 8000 : 0)));
   }
   const inside = (i: number, j: number) => { const x = (xs[i] + xs[i + 1]) / 2, z = (xs[j] + xs[j + 1]) / 2; return Math.abs(x) < edge && Math.abs(z) < edge; };
   for (let j = 0; j + 1 < N; j++) for (let i = 0; i + 1 < N; i++) {
@@ -282,7 +301,7 @@ export function farCountry(edge: number, level: number, colours: string[], seed 
   g.setIndex(idx);
   g.computeVertexNormals();
   const haze = { value: new THREE.Color('#a9cbe3') };
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, depthWrite: false, depthTest: false });
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, depthWrite: flat, depthTest: flat, flatShading: flat });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uHaze = haze;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float haze;\nvarying float vHaze;')
@@ -294,7 +313,7 @@ export function farCountry(edge: number, level: number, colours: string[], seed 
   mat.customProgramCacheKey = () => 'far-country';
   const m = new THREE.Mesh(g, mat);
   m.name = 'far country';
-  m.renderOrder = -100; // (first: everything else draws over it)
+  m.renderOrder = flat ? 0 : -100; // (first: everything else draws over it; level with the map, it's drawn as the map is)
   m.frustumCulled = false;
   m.userData.noDrape = true;
   const update = (sky: THREE.Color) => { if (!haze.value.equals(sky)) haze.value.copy(sky); };
@@ -304,3 +323,92 @@ export function farCountry(edge: number, level: number, colours: string[], seed 
 // Is this wholly past the ground's edge (the railway's stretch off the map, to its station there)?
 // Nothing there is drawn: it's the world beyond, where trains go on to.
 export const beyondEdge = (edge: number, pts: { x: number; z: number }[]) => pts.length > 0 && pts.every((p) => Math.max(Math.abs(p.x), Math.abs(p.z)) >= edge - 0.5);
+
+// The cut face of a big map (up to 50 km across), built a stretch at a time where the camera can
+// see it, not all round at once: each side is cut into stretches of `span` metres, built exactly
+// (as edgeMesh) when one comes within sight, kept while it's near and let go once it's far.
+// Zoomed right out, one coarse face all round stands in (columns on the ground's grid only,
+// `coarseStep` apart), so the whole map's rim is a draw call or four however big it is; the two
+// are never shown together. A stretch a road running off the map changed is built again and
+// swapped in the same frame. The height field is only asked for where a stretch is built.
+export class EdgeFace {
+  readonly group = new THREE.Group();
+  readonly material = new THREE.MeshLambertMaterial({ vertexColors: true });
+  private spans = new Map<string, { side: number; u0: number; u1: number; mesh: THREE.Mesh | null; sig: string; want: string }>();
+  private coarse: { mesh: THREE.Mesh | null; sig: string; want: string } = { mesh: null, sig: '', want: 'coarse' };
+  private crossings: EdgeCrossing[] = [];
+  stats = { built: 0, dropped: 0, ms: 0 };
+  // `farH`: the view height (m) from which the coarse face stands in
+  constructor(readonly edge: number, private ground: (x: number, z: number) => number, private opts: EdgeOpts, readonly span = 1000, private farH = 2600) {
+    this.group.name = 'map edge';
+    this.group.userData.noDrape = true;
+    for (let side = 0; side < 4; side++) for (let u0 = -edge; u0 < edge - 1e-6; u0 += span) {
+      const key = `${side}:${Math.round(u0)}`;
+      this.spans.set(key, { side, u0, u1: Math.min(edge, u0 + span), mesh: null, sig: '', want: '' });
+    }
+    this.setCrossings([]);
+  }
+  // The roads and railways running off the map: only the stretches they changed are built again.
+  setCrossings(list: EdgeCrossing[]) {
+    this.crossings = list;
+    for (const sp of this.spans.values()) sp.want = JSON.stringify(list.filter((x) => x.side === sp.side && x.u + x.half > sp.u0 && x.u - x.half < sp.u1));
+    // (the coarse face leaves roads out: a pixel or less across from that far off)
+  }
+  private build(o: EdgeOpts) {
+    const t0 = performance.now();
+    const m = edgeMesh(this.edge, this.crossings, this.ground, { ...this.opts, ...o, material: this.material });
+    m.userData.noDrape = true;
+    this.stats.built++;
+    this.stats.ms += performance.now() - t0;
+    return m;
+  }
+  private put(old: THREE.Mesh | null, m: THREE.Mesh) { if (old) { this.group.remove(old); old.geometry.dispose(); } this.group.add(m); return m; }
+  // Each frame: which stretches are in sight (a circle round the view's middle that holds the
+  // screen), built now if they're needed and missing, and the next ring out ahead of time within
+  // `budgetMs`. (view: the camera's target, its view height and its tilt; aspect: width / height)
+  update(view: { x: number; z: number; h: number; el: number }, aspect: number, budgetMs = 2) {
+    const far = view.h > this.farH;
+    if (far) {
+      if (!this.coarse.mesh || this.coarse.sig !== this.coarse.want) {
+        const step = Math.max(4 * (this.opts.step ?? 4), (2 * this.edge) / 400);
+        this.coarse.mesh = this.put(this.coarse.mesh, this.build({ coarse: true, step }));
+        this.coarse.sig = this.coarse.want;
+      }
+      this.coarse.mesh.visible = true;
+      for (const sp of this.spans.values()) if (sp.mesh) sp.mesh.visible = false;
+      return;
+    }
+    if (this.coarse.mesh) this.coarse.mesh.visible = false;
+    const R = Math.hypot((view.h * aspect) / 2, view.h / Math.max(0.2, Math.sin(view.el)) / 2) * 1.25 + 150;
+    const t0 = performance.now();
+    const list = [...this.spans.values()].map((sp) => ({ sp, d: this.dist(sp, view) })).sort((a, b) => a.d - b.d);
+    const ahead: typeof list = [];
+    for (const it of list) {
+      const { sp, d } = it;
+      if (d < R) {
+        // (in sight: built now if it isn't, so nothing's ever missing from the rim)
+        if (!sp.mesh || sp.sig !== sp.want) { sp.mesh = this.put(sp.mesh, this.build({ span: sp })); sp.sig = sp.want; }
+        sp.mesh.visible = true;
+      } else {
+        if (sp.mesh) sp.mesh.visible = false;
+        if (d < R * 1.8) ahead.push(it);
+        else if (sp.mesh && d > R * 4) { this.group.remove(sp.mesh); sp.mesh.geometry.dispose(); sp.mesh = null; sp.sig = ''; this.stats.dropped++; }
+      }
+    }
+    // (the next ring out, a little each frame)
+    for (const { sp } of ahead) {
+      if (performance.now() - t0 > budgetMs) break;
+      if (!sp.mesh || sp.sig !== sp.want) { sp.mesh = this.put(sp.mesh, this.build({ span: sp })); sp.sig = sp.want; sp.mesh.visible = false; }
+    }
+  }
+  // how far a stretch is from a point (on the ground)
+  private dist(sp: { side: number; u0: number; u1: number }, p: { x: number; z: number }) {
+    const E = this.edge, P = (u: number) => (sp.side === 0 ? { x: E, z: -u } : sp.side === 1 ? { x: u, z: E } : sp.side === 2 ? { x: -E, z: u } : { x: -u, z: -E });
+    const a = P(sp.u0), b = P(sp.u1), dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.z - a.z) * dz) / L));
+    return Math.hypot(p.x - (a.x + dx * t), p.z - (a.z + dz * t));
+  }
+  // every stretch built and shown as update() would, for a view (the loading screen, tests)
+  get shown() { return this.group.children.filter((c) => c.visible).length; }
+  dispose() { for (const c of [...this.group.children]) { this.group.remove(c); (c as THREE.Mesh).geometry.dispose(); } this.material.dispose(); }
+}
