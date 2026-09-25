@@ -36,6 +36,9 @@ const state = (page) => page.evaluate(() => {
     econ: JSON.stringify(P.town.econ.save()),
   };
 });
+// Screenshots are for looking at, not checks: on a slow runner, with two game tabs drawing, one can
+// take longer than Playwright's 30 s, so they get more time and a miss is logged, not fatal.
+const shot = (page, name) => page.screenshot({ path: `${out}/${name}.png`, timeout: 90000 }).catch((e) => console.log(`(screenshot ${name} skipped: ${e.message.split('\n')[0]})`));
 const diff = (a, b) => Object.keys(a).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 
 // ---- a new game, changed ----
@@ -84,7 +87,7 @@ if (changed.error) fail(changed.error);
 await A.evaluate(() => window.proto.skip(1440 + 200));
 // ---- Menu > Save town, by touch ----
 await A.tap('[data-bar="menu"]'); await A.waitForTimeout(400);
-await A.screenshot({ path: `${out}/save-0-menu.png` });
+await shot(A, 'save-0-menu');
 const saveCard = await A.$('[data-menu]:has-text("Save town")');
 ok(saveCard && !(await saveCard.getAttribute('aria-disabled')), 'Menu has Save town, enabled');
 await saveCard.tap();
@@ -93,7 +96,7 @@ const saved = await A.evaluate(() => window.__saved);
 console.log('saved in', saved.ms.toFixed(1), 'ms (the snapshot, and storage copying it)');
 ok(saved.ms < 400, `a save takes a moment, not a stall (${saved.ms.toFixed(0)} ms)`);
 await A.waitForTimeout(600);
-await A.screenshot({ path: `${out}/save-1-saved.png` });
+await shot(A, 'save-1-saved');
 const sa = await state(A);
 const id = await A.evaluate(() => window.proto.saveId);
 
@@ -101,7 +104,7 @@ const id = await A.evaluate(() => window.proto.saveId);
 await (await A.$('[data-menu]:has-text("Load town")')).tap();
 await A.waitForSelector('.saverow', { timeout: 5000 });
 await A.waitForTimeout(300);
-await A.screenshot({ path: `${out}/save-2-load.png` });
+await shot(A, 'save-2-load');
 const rows = await A.$$eval('.saverow b', (b) => b.map((x) => x.textContent));
 ok(rows.length === 1 && /this town/.test(rows[0]), `Load town lists this town (${rows.join(' | ')})`);
 await A.tap('#sheet .close').catch(() => {});
@@ -120,7 +123,7 @@ ok(sb.segs.some((s) => s.split(':')[3] === '1'), 'one-way carriageways (the moto
 ok(sb.segs.some((s) => s.split(':')[5]), 'bridges and their types are kept');
 ok(changed.stations === 2 && sb.stations.length === 2 && sb.raillines === 1, `railway stations and the rail line are kept (${JSON.stringify(changed)})`);
 ok(await B.evaluate(() => window.proto.railway.trains.length) === await A.evaluate(() => window.proto.railway.trains.length), 'the rail line runs as many trains');
-await B.screenshot({ path: `${out}/save-3-loaded.png` });
+await shot(B, 'save-3-loaded');
 
 // ---- both run on: the same town ----
 for (const p of [A, B]) await p.evaluate(() => window.proto.skip(2 * 1440));
@@ -138,7 +141,7 @@ const M = await ctx.newPage();
 M.on('pageerror', (e) => errs.push(e.message));
 await M.goto(url.replace(/\?.*$/, ''));
 await M.waitForSelector('[data-continue]', { timeout: 10000 }).catch(() => {});
-await M.screenshot({ path: `${out}/save-4-continue.png` });
+await shot(M, 'save-4-continue');
 const cont = await M.$('[data-continue]');
 ok(!!cont, 'the start menu offers Continue');
 if (cont) {
