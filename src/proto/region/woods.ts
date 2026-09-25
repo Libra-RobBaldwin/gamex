@@ -9,6 +9,7 @@
 //  - Conifer plantations on high ground, in blocks.
 // Pure: no three.js, no DOM.
 import { mix } from './random';
+import { COUNTRYSIDE } from './countryside';
 
 export interface WoodSite {
   x: number; z: number; area: number; // the field's middle and size (m²)
@@ -30,25 +31,25 @@ function noise(seed: number) {
 }
 
 export function chooseWoods(sites: WoodSite[], o: { seed: number; woods: number; pines: number }): WoodKind[] {
-  const n = noise(mix(o.seed, 81)), n2 = noise(mix(o.seed, 82));
+  const n = noise(mix(o.seed, 81)), n2 = noise(mix(o.seed, 82)), W = COUNTRYSIDE.woods;
   const blockPine = (b: number) => (mix(o.seed, 83, b) & 0xffff) / 0xffff;
   return sites.map((s) => {
     if (s.town < 40) return null; // (the village's own land: its gardens and paddocks)
     const r = s.rand, high = s.hMax > 25 ? s.height / s.hMax : 0;
     // how likely this field is wood, from each reason there'd be one
     let p = 0;
-    const clump = n(s.x, s.z, 1300) * 0.75 + n2(s.x, s.z, 450) * 0.25; // (where the old woods are)
-    if (clump > 0.64) p = Math.max(p, 0.5 + (clump - 0.64) * 3);
-    if (s.slope > 0.12) p = Math.max(p, Math.min(0.6, (s.slope - 0.12) * 5 + 0.25)); // hanging woods on the steepest sides
-    if (s.water < 50 && s.area < 3e4) p = Math.max(p, 0.4); // wet woodland by the river
-    if (s.area < 1.6e4 && s.town > 250) p = Math.max(p, 0.16); // a copse
-    if (high > 0.7) p = Math.max(p, 0.22); // (the rest of the high ground is rough grazing: fields.ts)
-    if (s.belt) p = 0.92;
+    const clump = n(s.x, s.z, W.clump.scale) * 0.75 + n2(s.x, s.z, W.clump.fine) * 0.25; // (where the old woods are)
+    if (clump > W.clump.above) p = Math.max(p, 0.5 + (clump - W.clump.above) * W.clump.gain);
+    if (s.slope > W.hanging.slope) p = Math.max(p, Math.min(W.hanging.most, (s.slope - W.hanging.slope) * W.hanging.gain + W.hanging.base)); // hanging woods on the steepest sides
+    if (s.water < W.wet.water && s.area < W.wet.maxArea) p = Math.max(p, W.wet.chance); // wet woodland by the river
+    if (s.area < W.copse.maxArea && s.town > W.copse.town) p = Math.max(p, W.copse.chance); // a copse
+    if (high > W.high.above) p = Math.max(p, W.high.chance); // (the rest of the high ground is rough grazing: fields.ts)
+    if (s.belt) p = W.belt;
     p *= o.woods;
-    if (s.town < 250) p *= 0.3 + 0.7 * (s.town - 40) / 210; // (few right next to a village)
+    if (s.town < W.nearTown) p *= 0.3 + 0.7 * (s.town - 40) / (W.nearTown - 40); // (few right next to a village)
     if (r >= p) return null;
     // plantations: on the high ground, a farm block at a time
-    const pine = (high > 0.6 ? 0.55 : 0.12) * Math.min(1, o.pines / 0.3);
+    const pine = (high > W.conifer.high ? W.conifer.onHigh : W.conifer.elsewhere) * Math.min(1, o.pines / 0.3);
     return blockPine(s.block) < pine && !s.belt ? 'conifer' : 'broadleaf';
   });
 }

@@ -75,6 +75,15 @@ docs/ground.md):
   grass, 30% arable, with rape in flower under 2%.
 - **Farmsteads:** about one a farm block (33 on the default map), beside a road or out in the
   fields with a track to one, 380 m or more apart, out of the villages, the water and the woods.
+- **Lazily, a tile at a time (for 50 km maps):** `new Countryside({ seed, bounds, settlements,
+  lanes, waterDist, heightAt, hMax })`, then `near(tileBox)`: every farm block touching the tile,
+  whole, so fields cross tile borders and neighbouring tiles agree. Each block depends only on the
+  seed, its place and what's near it (no whole-map pass; blocks are remembered, `forget(box)` drops
+  them), about 1.5 ms a 1 km tile once warm. No DOM or three.js, so it can run in a worker.
+  `tileCover(box, n)` is a far tile's cheap look: n × n RGBA, a colour a field and dark hedge lines
+  (about 13 ms for 128²). `layFields(inp)` is the same over a whole box at once (the 6 km region).
+- **Tuning:** every number (block size, field sizes, crop shares, woodland rules, farms, the far
+  palette) is in `region/countryside.ts` (`COUNTRYSIDE`), for the OS import to fit to real data.
 - **Reacting to the land:** `countryPlan` takes the height field (`heightAt`), the water's
   distance (`MapWater.edgeDistance`: the one place to add a sea's) and the roads as built. It's
   pure and quick (about 50 ms for the 6 km map).
