@@ -82,6 +82,20 @@ docs/ground.md):
   them), about 1.5 ms a 1 km tile once warm. No DOM or three.js, so it can run in a worker.
   `tileCover(box, n)` is a far tile's cheap look: n × n RGBA, a colour a field and dark hedge lines
   (about 13 ms for 128²). `layFields(inp)` is the same over a whole box at once (the 6 km region).
+- **Winding roads (`lanes.ts`):** B roads, and a lane from each village to the nearest place it has
+  no road to yet (`minorLinks`, `rural-40`), follow `laneRoute(a, b, ctx, { minR })`: the cheapest
+  way over a 40 m grid in a corridor round the straight line. Each step costs its length times how
+  unwelcome the ground is: steep ground (so they go round hills, along the contours), water
+  (crossed square on), the old woods, other villages, running beside a motorway or A road, and a
+  slow noise so they wander where nothing else makes them; running beside a stream draws them.
+  Then smoothed until no bend is tighter than the road type allows (80 m for a B road, 40 m for a
+  lane). On flat ground the B roads come out about 10% longer than straight, the lanes 13%. It's
+  deterministic from the seed and the two ends and looks only at the corridor, so a route can be
+  made on its own, a tile at a time. `interchange/region.ts` builds each as one road along that
+  path (`opts.path`), straight if that way can't be built. The motorway and the A roads are
+  unchanged (the 50 km world session owns the trunk network). Houses aren't strung along the lanes,
+  and along a B road only within 350 m of a place (`queuePlots` in main.ts, big maps only); hedges
+  run along both sides of both.
 - **Tuning:** every number (block size, field sizes, crop shares, woodland rules, farms, the far
   palette) is in `region/countryside.ts` (`COUNTRYSIDE`), for the OS import to fit to real data.
 - **Reacting to the land:** `countryPlan` takes the height field (`heightAt`), the water's

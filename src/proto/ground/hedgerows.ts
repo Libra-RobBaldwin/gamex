@@ -174,8 +174,11 @@ export function planHedges(layout: Layout, box: Box, occ: Occupancy, lanes = tru
       const g: HedgeGroup = { key: `l${li}:${side}`, pieces: [], trees: [], gates: [] };
       // (a lane is laid whole or not at all, so its group is the same however it's reached)
       if (!ln.path.some((p, s) => s > 0 && touches(ln.path[s - 1], p))) continue;
-      for (let s = 1; s < ln.path.length; s++) {
-        const p = ln.path[s - 1], q = ln.path[s], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, nx = (-(q.z - p.z) / L) * side, nz = ((q.x - p.x) / L) * side;
+      // (a plan's roads wind, drawn every few metres: taken in runs of 20 m or more, as a hedge
+      // piece is 8 m and a shorter run would get none)
+      const path = layout.plan ? runs(ln.path, 20) : ln.path;
+      for (let s = 1; s < path.length; s++) {
+        const p = path[s - 1], q = path[s], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, nx = (-(q.z - p.z) / L) * side, nz = ((q.x - p.x) / L) * side;
         const off = ln.half + CLEAR + 0.3;
         const a = { x: p.x + nx * off, z: p.z + nz * off }, b = { x: q.x + nx * off, z: q.z + nz * off };
         walk(g, a, b, (li * 131 + s * 7 + side) | 0, occ, (x, z) => kindAt(x + nx * 2, z + nz * 2).kind !== 'town', false, clip, hs);
@@ -183,5 +186,12 @@ export function planHedges(layout: Layout, box: Box, occ: Occupancy, lanes = tru
       out.push(g);
     }
   });
+  return out;
+}
+// a polyline with points dropped so every stretch is at least `min` metres (the ends kept)
+function runs(path: XZ[], min: number): XZ[] {
+  const out = [path[0]];
+  for (let k = 1; k < path.length - 1; k++) { const l = out[out.length - 1]; if (Math.hypot(path[k].x - l.x, path[k].z - l.z) >= min) out.push(path[k]); }
+  out.push(path[path.length - 1]);
   return out;
 }

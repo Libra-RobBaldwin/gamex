@@ -30,6 +30,12 @@ function noise(seed: number) {
   };
 }
 
+// where the old woods are (0..1; above COUNTRYSIDE.woods.clump.above, a wood is likely): lanes go round them
+export function woodiness(seed: number) {
+  const n = noise(mix(seed, 81)), n2 = noise(mix(seed, 82)), W = COUNTRYSIDE.woods;
+  return (x: number, z: number) => n(x, z, W.clump.scale) * 0.75 + n2(x, z, W.clump.fine) * 0.25;
+}
+
 export function chooseWoods(sites: WoodSite[], o: { seed: number; woods: number; pines: number }): WoodKind[] {
   const n = noise(mix(o.seed, 81)), n2 = noise(mix(o.seed, 82)), W = COUNTRYSIDE.woods;
   const blockPine = (b: number) => (mix(o.seed, 83, b) & 0xffff) / 0xffff;

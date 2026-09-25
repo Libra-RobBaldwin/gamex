@@ -36,7 +36,10 @@ import { UnderView } from './game/underview';
 import { RailDraw } from './rail/draw';
 import { RailGame } from './rail/game';
 import { layRegionRail, planRegionRail } from './rail/region';
-import { layRegionRoads } from './interchange/region';
+import { layRegionRoads, REGION_ROADS } from './interchange/region';
+import { laneRoute, minorLinks } from './region/lanes';
+import { reach, type Kind } from './region/generate';
+import { MapWater } from './region/water';
 import { edgeCrossings, edgeMesh } from './game/edge';
 import { STD } from './standards';
 import { Loading } from './loading';
@@ -600,10 +603,15 @@ function refreshInfillWithin(boxes: Box[]) {
 
 // the centre to lay a road's plots out from: its settlement's, as central as its size says (region/mapspec.ts)
 const centreFor = (a: P, b: P = { x: a.x + 1, z: a.z }) => plotCentre(MAP, a, b);
+// (on a big map, houses aren't strung along the country lanes, nor all the way along the B roads:
+// only as they come into a place)
+const nearPlace = (p: P) => { const s = settlementAt(MAP, p); return Math.hypot(p.x - s.x, p.z - s.z) < reach(s.kind as Kind, s.r) + 350; };
 function queuePlots(segs: number[]) {
   for (const id of segs) {
     const sg = net.segs.get(id);
-    const plots = sg ? net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))) : [];
+    if (BIG && sg?.type === REGION_ROADS.lane) continue;
+    let plots = sg ? net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))) : [];
+    if (BIG && sg?.type === REGION_ROADS.B) plots = plots.filter(nearPlace);
     // denser, taller near the centre; a few gaps elsewhere
     for (const p of plots) if (centrality(MAP, p) < 200 || rand() < 0.75) queue.push(p);
   }
@@ -640,7 +648,12 @@ async function seedTown() {
     // then the roads between them: a motorway across the map with its junctions, A roads between
     // the city and the towns, B roads out to the villages (interchange/region.ts)
     await loading.stage('Building the motorway and the roads between places', 0.04);
-    const roads = layRegionRoads(net, { bound: BOUND, settlements: MAP.settlements, links: MAP.links });
+    // (B roads and the lanes between villages wind round the hills, woods and water: region/lanes.ts)
+    const laneMw = new MapWater(MAP.water), laneTowns = MAP.settlements.map((s) => ({ x: s.x, z: s.z, reach: reach(s.kind, s.r) }));
+    const bigRoads = () => [...net.segs.values()].filter((s) => { const d = net.def(s); return d.family === 'Motorway' || s.type === REGION_ROADS.A; }).map((s) => net.path(s));
+    const roads = layRegionRoads(net, { bound: BOUND, settlements: MAP.settlements, links: [...MAP.links, ...minorLinks(MAP.settlements, MAP.links)] }, {
+      route: (a, b, road) => laneRoute(a, b, { seed: MAP.seed, heightAt: RELIEF?.heightAt, waterDist: (x, z) => laneMw.edgeDistance({ x, z }, 200), settlements: laneTowns, roads: bigRoads() }, { minR: ROADS[road === 'B' ? REGION_ROADS.B : REGION_ROADS.lane].minR }),
+    });
     interchanges.push(...roads.interchanges);
     if (roads.failed.length) console.info('region roads:', roads.failed.join(' · '));
   } else {

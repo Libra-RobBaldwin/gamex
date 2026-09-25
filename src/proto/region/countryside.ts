@@ -31,6 +31,15 @@ export const COUNTRYSIDE = {
   },
   // ---- farmsteads ----
   farms: { none: 0.35, two: 0.45, reach: 700, beside: 260, off: 30, apart: 380, town: 160 },
+  // ---- lanes (lanes.ts): what a winding country road's route costs, per metre, on top of 1 ----
+  lanes: {
+    grid: 40, corridor: { share: 0.3, least: 360 }, // the grid (m), and how far either side of the straight line it may wander
+    wander: 0.85, wanderScale: 280, // a slow noise, so it winds where nothing else makes it
+    climb: 2.5, // × (grade in %)² / 100: round the hills rather than over them
+    water: 12, stream: 0.25, // in the water (crossed square on), and the draw of running beside a stream
+    wood: 1.2, town: 4, bigRoad: 2, // through the old woods, other villages, alongside a motorway or A road
+    minor: { perVillage: 1, reach: 3200 }, // extra lanes: each village to its nearest place it has no road to, this near
+  },
   // ---- the far look: one colour a cover class (sRGB), for a far tile's texture (fields.ts tileCover) ----
   far: {
     grass: '#6b8a47', ley: '#6f9a4c', wheat: '#b69d5d', barley: '#bfb17f', plough: '#7a6650', rape: '#c3b54e', stubble: '#b0a077',
