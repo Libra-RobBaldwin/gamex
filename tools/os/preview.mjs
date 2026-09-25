@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Draw a baked region (or part of it) as a PNG map, to check a bake against the OS map.
 //
-//   node tools/os/preview.mjs exe out.png [x0 z0 x1 z1] [--px 2000]
+//   node tools/os/preview.mjs exe out.png [x0 z0 x1 z1] [--px 2000] [--bare]   (--bare: no names or credit, for a menu card's thumbnail)
 //
 // Game metres (x east, z south, the region's centre at 0, 0). Draws hill shading, the sea and
 // foreshore, woods, green space, water, roads by class, railways, buildings and place names.
@@ -13,6 +13,7 @@ import { decodeTile, tileFile } from '../../src/proto/real/format.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
+const BARE = args.includes('--bare'); if (BARE) args.splice(args.indexOf('--bare'), 1);
 const pxi = args.indexOf('--px'), PX = pxi >= 0 ? Number(args.splice(pxi, 2)[1]) : 2000;
 const [id = 'exe', out = 'preview.png', ...box] = args;
 const dir = join(ROOT, 'public/regions', id), m = JSON.parse(readFileSync(join(dir, 'region.json'), 'utf8'));
@@ -28,7 +29,7 @@ for (let j = 0; j < m.n; j++) for (let i = 0; i < m.n; i++) {
 }
 const W = PX, H = Math.round((PX * (z1 - z0)) / (x1 - x0));
 const html = `<canvas id=c width=${W} height=${H}></canvas><script>
-const T = ${JSON.stringify(tiles)}, P = ${JSON.stringify(m.places.filter((p) => p.kind !== 'hamlet' && p.kind !== 'suburb'))}, B = [${x0}, ${z0}, ${x1}, ${z1}];
+const T = ${JSON.stringify(tiles)}, P = ${BARE ? '[]' : JSON.stringify(m.places.filter((p) => p.kind !== 'hamlet' && p.kind !== 'suburb'))}, B = [${x0}, ${z0}, ${x1}, ${z1}];
 const c = document.getElementById('c'), g = c.getContext('2d'), s = ${W} / (B[2] - B[0]);
 const X = (x) => (x - B[0]) * s, Z = (z) => (z - B[1]) * s;
 // hill shading: each height post a square, lit from the north-west
@@ -50,13 +51,13 @@ line('rail', (c) => c >= 3 ? ['#444', 3, [8, 8]] : ['#222', 4]);
 poly('buildings', (c) => c ? '#7a5a8a' : '#8a7d73');
 g.font = 'bold ' + Math.max(11, Math.min(28, 900 * s)) + 'px sans-serif'; g.textAlign = 'center';
 for (const p of P) { const fs = p.kind === 'city' ? 1.6 : p.kind === 'town' ? 1.2 : 0.85; g.font = 'bold ' + Math.round(Math.max(10, Math.min(26, 700 * s)) * fs) + 'px sans-serif'; g.lineWidth = 3; g.strokeStyle = '#fff'; g.strokeText(p.name, X(p.x), Z(p.z)); g.fillStyle = '#111'; g.fillText(p.name, X(p.x), Z(p.z)); }
-g.font = '14px sans-serif'; g.textAlign = 'left'; g.fillStyle = '#000'; g.fillText(${JSON.stringify(m.attribution)}, 8, ${H} - 8);
+${BARE ? '' : `g.font = '14px sans-serif'; g.textAlign = 'left'; g.fillStyle = '#000'; g.fillText(${JSON.stringify(m.attribution)}, 8, ${H} - 8);`}
 document.title = 'done';
 </script>`;
 const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
 const page = await browser.newPage({ viewport: { width: W, height: H } });
 await page.setContent(html);
 await page.waitForFunction(() => document.title === 'done', null, { timeout: 120000 });
-writeFileSync(out, await page.locator('#c').screenshot());
+writeFileSync(out, await page.locator('#c').screenshot(/\.jpe?g$/i.test(out) ? { type: 'jpeg', quality: 72 } : {}));
 await browser.close();
 console.log('wrote', out, `${W}×${H}`);

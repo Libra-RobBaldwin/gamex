@@ -2,10 +2,11 @@
 // game plays: `?map=<region id>` (the region's home place in the middle), `&home=<place>` for
 // another of its towns.
 import { decodeTile, tileFile, type RegionManifest } from './format';
+import { REAL_REGION_LIST } from './list';
 import { homeOf, realMap, tilesFor, windowBox, type RealMap } from './map';
 
 // the regions that have been baked (public/regions)
-export const REAL_REGIONS = ['exe', 'teme'];
+export const REAL_REGIONS = REAL_REGION_LIST.map((r) => r.id);
 export const isRealQuery = (q: URLSearchParams) => REAL_REGIONS.includes(q.get('map') ?? '');
 
 export async function loadRealMap(q: URLSearchParams, base = `${import.meta.env.BASE_URL}regions/`): Promise<RealMap> {
