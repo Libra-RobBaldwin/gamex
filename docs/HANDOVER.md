@@ -2,6 +2,23 @@
 
 ## Latest: HUD, start menu and region work (25 Sep 2026)
 
+**PAUSED 25 Sep ~20:40 UTC for a credit limit. To resume:**
+1. All six region sessions were told to commit and push, write a note on where they stopped and
+   stop. Their check-ins were disabled, not deleted: `trig_01AyapkhwsVcMhAMAKQ9caju` (#42),
+   `trig_01Ek1SW3wQooCqKrBfHwT3j9` (#44), `trig_013GtCHP7rnmTLWuPbJjyB2r` (#43) and
+   `trig_01LkUZuKGwCSYrq9QoDTE41o` (#45). The coordinator's check-in is
+   `trig_01UboPgMjMc2T4TShqSC9vTi`. Re-enable them, or message each session to carry on.
+2. Merge order: world50 (PR #42) first. It merged cleanly onto `a024fca` in a trial and passed tsc.
+   Then #41 (countryside), #44 (edge), #43 (OS), #45 (vernacular) and terrain. Run tsc, vitest,
+   the six phone e2es and `?map=region` by eye after each, then push and archive the session.
+   The loop, lines, save, stations and rail suites take the address as their first argument
+   (`node e2e/loop.e2e.mjs http://localhost:5180/?map=town`). The menu suite takes it from `BASE=`.
+3. Then wire terrain's landform presets and islands into the region setup's first step, and do
+   HUD phase 3 (small tap cards for a bus, stop or building).
+4. The user's home town is still named in the repo in a few places, from before the privacy
+   rule (region names, vehicle brands, tests, docs). It's gone from the menu. Ask the user
+   before removing the rest.
+
 Coordinator: https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. Integration branch as before.
 - **HUD, second pass (`ui/shell.ts`, `proto.css`):** a rounded floating dock with a Build button
   in the middle, and a status pill showing money with its trend, population, the clock and speed.
