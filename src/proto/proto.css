@@ -380,3 +380,80 @@ body.tooling #goal, #drawer:not([hidden]) ~ #goal { display: none; }
 #tpanel .choice button:disabled span { color: var(--muted); }
 #tpanel .why { margin: 0; font-size: 12px; line-height: 1.35; color: var(--muted); }
 #tpanel [data-more] { align-self: flex-start; min-height: 36px; padding: 0 12px; }
+
+/* ================= the HUD, second pass (docs/hud.md): friendly and light, like the best phone
+   builders. Rounded panels that float over the map, not bars bolted to the edges; one status pill
+   top left (money and which way it's going, people, the clock), round speed buttons top right, and
+   a floating dock at the bottom with Build as the big button in the middle. Same colours and type. */
+:root { --r: 18px; --r-s: 12px; --panel: rgba(13, 43, 29, 0.93); --lift: 0 6px 20px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.25); }
+.facet, .act.primary, .act.danger, .badge, .tab, #hint, .stabs button, .sb .grp > button:not(.act), .sb > button:not(.act):not(.lrow), .sb .rl button, .sb .plan, .sb .fl button, #bar button[aria-expanded='true'] { clip-path: none; }
+.act { border-radius: var(--r-s); }
+.badge { border-radius: 10px; }
+.tab { border-radius: 999px; padding: 4px 10px 3px; }
+.card { border-radius: var(--r-s); border-left: 0; box-shadow: inset 3px 0 0 var(--forest); }
+.card.on { box-shadow: inset 3px 0 0 var(--mode); }
+.card.locked { box-shadow: inset 3px 0 0 var(--gold); }
+.stabs button { border-radius: 999px; }
+.sb .grp > button:not(.act), .sb > button:not(.act):not(.lrow), .sb .rl button, .sb .plan { border-radius: var(--r-s); }
+.sb .fl button, .sb .row3 button { border-radius: 10px; }
+.tiles > div { border-radius: var(--r-s); }
+
+/* top: the status pill and the speed buttons */
+#status { background: none; border: 0; height: auto; align-items: center; gap: 8px; pointer-events: none; }
+#status > * { pointer-events: auto; }
+#clockbtn { flex: 0 1 auto; min-height: 50px; padding: 5px 14px 5px 14px; gap: 2px; flex-direction: column; align-items: flex-start; justify-content: center; background: var(--panel); border-radius: var(--r); box-shadow: var(--lift); }
+#clockbtn[aria-expanded='true'] { box-shadow: var(--lift), inset 0 0 0 2px var(--lime); }
+#clockbtn .sm { display: flex; align-items: baseline; gap: 8px; }
+#clockbtn .money { margin: 0; font: 700 17px/1 var(--font-display); letter-spacing: 0.01em; color: var(--money); padding-top: 2px; }
+#trend { font: 600 11.5px/1 var(--font-ui); font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#trend.up { color: #8fd96a; }
+#trend.down { color: var(--bad); }
+#clockbtn .sp { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+#popc { display: inline-flex; align-items: center; gap: 4px; }
+#popc .ic { width: 14px; height: 14px; color: var(--lime); }
+#popc b { color: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; }
+#popdir { font-style: normal; font-size: 9px; }
+#popdir.up { color: #8fd96a; }
+#popdir.down { color: var(--bad); }
+#clockbtn .clk { display: inline-flex; align-items: baseline; gap: 6px; }
+#st-clock { font: 600 12px/1 var(--font-ui); padding: 0; color: var(--paper); }
+#st-rush { font-size: 9.5px; padding: 0; }
+#clockbtn .chev { display: none; }
+#status .spd { margin-left: auto; display: flex; gap: 6px; }
+#sp-pause, #sp-rate { width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--panel); box-shadow: var(--lift); font: 700 15px/1 var(--font-display); }
+#sp-rate.on { background: var(--lime); color: var(--ink); }
+#drawer { border-radius: var(--r); margin-top: 0; box-shadow: var(--lift); }
+#compass, #viewbtn, #ugbtn { box-shadow: var(--lift); }
+#goal { border-radius: var(--r); box-shadow: var(--lift), inset 3px 0 0 var(--gold); top: 66px; }
+#firstrun { border-radius: 999px; top: 66px; }
+#firstrun:not([hidden]) ~ #goal { top: 116px; }
+
+/* bottom: the floating dock, Build raised in the middle */
+#bar { left: calc(10px + var(--safe-l)); right: calc(10px + var(--safe-r)); bottom: calc(10px + var(--safe-b)); grid-template-columns: repeat(5, 1fr); gap: 0; padding: 4px 6px; border: 0; border-radius: 24px; background: var(--panel); box-shadow: var(--lift); overflow: visible; }
+#bar button { height: 54px; gap: 3px; font: 700 9.5px/1 var(--font-display); letter-spacing: 0.08em; border-radius: 16px; }
+#bar button .ic { width: 23px; height: 23px; }
+#bar button[aria-expanded='true'] { background: rgba(92, 184, 58, 0.16); color: #bfe8a8; }
+#bar button.fab { position: relative; height: 54px; color: var(--paper); }
+#bar button.fab .ic { box-sizing: content-box; width: 28px; height: 28px; padding: 14px; margin-top: -30px; border-radius: 50%; background: var(--lime); color: var(--ink); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), 0 0 0 4px rgba(13, 43, 29, 0.93); stroke-width: 2.2; }
+#bar button.fab[aria-expanded='true'] { background: none; color: #bfe8a8; }
+#bar button.fab[aria-expanded='true'] .ic { background: #8fd96a; }
+
+/* sheets and cards float too, with rounded corners and a handle */
+.sheet { left: calc(8px + var(--safe-l)); right: calc(8px + var(--safe-r)); bottom: calc(var(--chrome-b) + 8px); border-top: 0; border-radius: 22px; box-shadow: var(--lift), inset 0 3px 0 var(--mode); overflow: hidden; }
+.sheet::before { content: ''; flex: none; align-self: center; width: 38px; height: 4px; margin-top: 7px; border-radius: 2px; background: rgba(242, 245, 239, 0.22); }
+.sheet header { padding-top: 4px; }
+#layers { border-top: 0; border-radius: var(--r); box-shadow: var(--lift), inset 0 3px 0 var(--lime); }
+#tpanel { border-top: 0; border-radius: var(--r); box-shadow: var(--lift), inset 0 3px 0 var(--mode); }
+#hint { border-radius: 999px; box-shadow: var(--lift), inset 3px 0 0 var(--mode); padding: 8px 14px 8px 12px; }
+#tool { border-top: 0; border-radius: 22px 22px 0 0; box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.25), inset 0 3px 0 var(--mode); }
+#tool .opts .orow { border-radius: var(--r-s); overflow: hidden; }
+#tool #t-undo, #tool #t-cancel, #tool #t-opts { border-radius: 50%; }
+@media (max-height: 500px) and (min-width: 600px) {
+  #bar { left: auto; right: calc(10px + var(--safe-r)); bottom: calc(10px + var(--safe-b)); grid-template-columns: 1fr; border-radius: 22px; }
+  #bar button.fab .ic { margin-top: 0; padding: 10px; box-shadow: none; }
+}
+.tiles b.good, .lrow b.good { color: #8fd96a; }
+.tiles b.badv, .lrow b.badv { color: var(--bad); }
+.lrow span b { font: inherit; font-weight: 700; }
+.facts dd.colh { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+#townbtn, #perfbtn { border-radius: 999px; padding: 0 14px; }
