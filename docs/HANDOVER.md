@@ -1,5 +1,36 @@
 # Handover: where everything stands
 
+## Latest: the map's edge, and ways off it (25 Sep 2026)
+
+Session https://claude.ai/code/session_01RaCFKDUBqUzXicwJchgEUN, branch `claude/work-edge`, on the
+user's "the map edges look really bad... should be earth crust, and... out-of-map portals for
+traffic". **Read `docs/edge.md`.**
+- **Cut face on the region:** a slab of crust all round. The soil follows the ground, and below it
+  are rock beds folding across the country, down to a level base (about 2% of the half-width).
+  Water shows in section where a river or the sea meets the edge. It's cut exactly: no overlaps
+  (the test adds up the area) and no gap at the ground.
+- **Far country:** beyond and below the edge, a hazy lowland fading into the sky. It's a backdrop
+  that never hides the map, one draw call.
+- **Ways off:**
+  - the motorway runs on to the edge at both ends;
+  - an A road leaves by each other side;
+  - the main line runs through the face to a station 480 m past it, which isn't drawn.
+  Each leads to a named place off the map, with a UK-style sign; tapping the sign shows its flows.
+- **Traffic in and out** through them near the camera, by time of day: the motorway busiest and
+  mostly passing through. Vehicles are cut off cleanly at the face.
+- **The economy:** a town per place off the map, so trips to and from it are counted and good links
+  out to the edge carry them. A rail line can end at the station off the map. Another company's
+  trains run through between two railway portals.
+- **For the terrain session:**
+  - the face reads the ground through `surfaceAt` in `main.ts`
+    (`gameWater.shapes.ground + RELIEF.heightAt`), and `level` can be a function for a sea;
+  - `edgeDepth` and the far country scale with the ground's half-width.
+- **For the streaming session:** long roads are now cut into pieces of 450 m at most
+  (`splitLong`), because a road drawn by its middle's cell vanished when that cell was out of view.
+  The railway's straights are left whole, for stations. Every region road and track also gets a
+  point at least every 20 m (`densify`). With points 2 km apart, the drape drew the A and B roads
+  and the main line straight through the hills, under the ground.
+
 ## Latest: saving and loading (24 Sep 2026, night)
 
 Session https://claude.ai/code/session_01PQ93PyRyTyLaPDoybw2MMw. **Read `docs/save.md`.**

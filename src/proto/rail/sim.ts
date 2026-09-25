@@ -17,7 +17,8 @@ import { LevelCrossing, type CrossingSite } from './crossing';
 
 // The same shape as a bus line (game/lines.ts): stops in order, looping or there and back. Here the
 // stops are stations, and `depot` names the station whose siding the line's trains come from.
-export interface RailLine { id: number; num: number; stops: number[]; loop: boolean; offer?: string; depot?: number; colour?: string }
+// (`other`: run by another company, through the map between its ways off (game/portals.ts): not the player's)
+export interface RailLine { id: number; num: number; stops: number[]; loop: boolean; offer?: string; depot?: number; colour?: string; other?: string }
 export function callOrder(stops: number[], loop: boolean) { return loop || stops.length < 3 ? [...stops] : [...stops, ...stops.slice(1, -1).reverse()]; }
 
 export type TrainState = 'run' | 'dwell' | 'held';
