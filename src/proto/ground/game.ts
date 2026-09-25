@@ -14,6 +14,8 @@ export interface GameWorld {
   water?: () => XZ[][]; // the water's outlines, if the game has them (else the lake's circle)
   industrial: (p: XZ) => boolean;
   parks?: () => { cells: XZ[]; size: number }[]; // leftover land the game landscaped (parks, verges): cell centres
+  // what else stands on the ground (a 50 km map's places not live yet: worldmap/, drawn as scenery)
+  extra?: () => { plots: { poly: XZ[]; kind: 'garden' | 'yard' }[]; blocked: XZ[][] };
 }
 
 // how many plots at the front of the queue show as building sites (bare earth, cleared)
@@ -48,12 +50,14 @@ export class GameGround {
     this.sites = new Set();
     for (const l of q) { if (this.sites.size >= SITES) break; if (net.lotFree(l)) this.sites.add(l); }
     for (const l of this.sites) plots.push({ poly: net.parcelRect(l), kind: 'site' });
+    if (this.w.extra) plots.push(...this.w.extra().plots);
     return { seed: 11, ...fixed, plots, trees: this.w.trees(), town: q.map((l) => ({ x: l.x, z: l.z })) };
   }
   private fixedInput() {
     const { net } = this.w;
     const blocked: XZ[][] = [];
     for (const c of net.land.all()) if (c.owner !== 'water') blocked.push(...c.polys); // (water isn't a road: no verge round it)
+    if (this.w.extra) blocked.push(...this.w.extra().blocked);
     const lanes: GroundInput['lanes'] = [];
     for (const s of net.segs.values()) {
       const d = ROADS[s.type] && net.def(s);
@@ -86,6 +90,16 @@ export class GameGround {
     const boxes = [l, ...[...before].filter((x) => !this.sites.has(x)), ...[...this.sites].filter((x) => !before.has(x))].map((x) => boxOf(this.w.net.parcelRect(x)));
     this.ground.change(inp, boxes);
   }
+  // A first paint of only part of the map (a 50 km map's live play area: round the start town),
+  // the rest painted later a box at a time (`paintBox`).
+  startIn(box: { x0: number; z0: number; x1: number; z1: number }) {
+    const a = this.ground.cover?.a; // (unpainted is plain pasture)
+    if (a) for (let k = 0; k < a.length; k += 4) { a[k] = 128; a[k + 1] = 0; a[k + 2] = 128; a[k + 3] = 128; }
+    this.ground.layout.setInput(this.input());
+    this.full = false;
+    this.ground.change(this.input(), [box]);
+  }
+  paintBox(box: { x0: number; z0: number; x1: number; z1: number }) { this.ground.change(this.input(), [box]); }
   // First paint: settle the scattered trees into woods first (see Ground.settleTrees).
   start(trees: XZ[]) {
     this.ground.layout.setInput(this.input());

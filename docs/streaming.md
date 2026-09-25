@@ -91,3 +91,118 @@ table; `node e2e/perf.e2e.mjs <base url> town,region 0,1,2,3,4 out.json` reprodu
 - Spawning cars at the rate each link's flow implies (needs link flows from the economy).
 - Start-up: most of what's left is generating the streets, putting up the buildings and the
   water; on SwiftShader a few seconds are the GPU catching up.
+
+# 50 km maps: a world plan and tiles made as you go (work-world50)
+
+Every map is 50 km across now (`?map=region`, `size=50`, the setup screen's default; the 6 km region
+is still there as `size=6`, and saves made on it open on it). A real 50 km square of England holds
+hundreds of thousands of buildings, so nothing fine is made for the whole map up front. There are
+two levels:
+
+1. **The world plan** (`src/proto/worldmap/plan.ts`, pure, about 0.4 s): the coarse facts of the whole map.
+   - **Where things are.** The places: the start town at (0, 0), two cities, a dozen market towns and
+     150 or so villages, each with its size, kind, name and seed.
+   - **The water.** The coast along one edge with the sea beyond, rivers widening on their way down
+     to it, and lakes (`water.ts`).
+   - **The trunk network.** Motorways, A roads, B roads and railways, as centre lines (`routes.ts`).
+   - **The hills.** A function of x, z (`terrain.ts`).
+2. **Tiles** (`tilegen.ts`, pure, in workers: `tile.worker.ts`): everything fine, made a tile at a time as the
+   camera nears it, from the plan and the tile's key alone:
+   - streets, plots and buildings (`towns.ts`);
+   - fields, their crops, woods and their trees, hedgerows and farmsteads (`country.ts`);
+   - the trunk roads' carriageways and markings, railways and stations;
+   - the sea, lakes and rivers.
+
+   Every item belongs to exactly one tile, so neighbours meet without a seam and nothing is drawn twice:
+   - a building by its centre;
+   - a street by its middle;
+   - a stretch of trunk road by each piece's middle;
+   - the ground's cover by the ground library's world-anchored fields.
+
+## Tiles and levels (`view.ts`)
+
+A quadtree over the map. The view shows, for each part of the map, the finest level its zoom wants
+(what's on screen at the zoom's level, a level coarser just off it, coarser again further out). It
+swaps a tile for its children only once all of them are ready, and back only once the parent is.
+So the map is always covered exactly once, with no holes and nothing fighting.
+
+| Level | Tile | Shown until the view is | Ground grid, cover | What's on it |
+|---|---|---|---|---|
+| near | 1 km | 1,000 m tall | 25 m, 4 m texels | every building (gables, window bands on flats and offices), streets with footways, junctions and centre lines, trunk roads with lane markings, railways with rails, stations, farmsteads, the woods' trees, hedgerows |
+| mid | 1 km | 5,000 m | 50 m, 8 m | the same, without markings, window bands or hedgerows; lower trees |
+| far | 4 km | 17,000 m | 100 m, 16 m | buildings as boxes, main streets, trunk roads and railways drawn wider |
+| vast | 16 km | the whole map | 400 m, 64 m | roofs only, trunk roads and railways wider still |
+
+- The thresholds have 12% of slack.
+- Heights come from one field on a 50 m grid that everything drawn follows (`drape.ts`). A worker makes
+  it while the start town is laid out, and the main thread makes only the live area's part.
+- Tiles have skirts, so a coarser neighbour never shows a crack.
+- Tiles are built into meshes a few milliseconds a frame. They're kept while there's room (160 MB) and
+  dropped least recently used first.
+
+## The live play area (`live.ts`, `spec.ts`, `game.ts`)
+
+An 8 km square round the start town (`LIVE_HALF`, two far tiles each way) is where the game's own code
+runs: the Network, junctions, plots, buildgen buildings, traffic, people and the economy's zones. The
+MapSpec the game gets is that square (`worldMapSpec`); the plan rides along as `MapSpec.world`.
+
+- **Before the first frame:**
+  - the start town's streets and buildings;
+  - the plan's railway and the A and B roads through the area, on the Network, ending exactly where
+    the scenery's own stretch begins;
+  - the ground painted round the town.
+- **Once it's running:** the rest of the area's ground and woods are painted a kilometre square at a time.
+- **The other places in the square** stay scenery until the camera gets close. Then they come to life:
+  - their streets and the roads to them are built;
+  - their buildings go up a few a frame;
+  - their scenery goes.
+
+  Until then the live ground shows their gardens and verges (`GameWorld.extra`).
+- **Nothing straddles the square's edge.** Places are placed wholly in or out of it, and motorways keep 500 m clear.
+
+## The sim at scale
+
+- **Traffic:** only near the camera (R4, unchanged).
+- **The economy:** the game's own, zone by zone, for the live places. For every other place,
+  `econ.ts`'s coarse economy: people and jobs from the plan, growing a little each day with how well
+  joined the place is, and gravity-model trips between places. It's a function of the plan and the
+  day, so nothing extra is saved.
+- **Saves** (`game/save.ts`, version 2) are the difference from the seed:
+  - the map's query, which makes the plan and all the scenery again;
+  - which places had come to life (`world.live`);
+  - the Network and the rest as before, for the live area only.
+
+  A save from before (version 1) with no size in its query was made on the 6 km region, and opens on it.
+
+## Interfaces for the sessions working alongside
+
+Each of these is where a neighbouring session's work plugs in; keep the shapes and the rest follows.
+
+- **Terrain and water (claude/work-terrain-2).**
+  - `WorldTerrain` must keep three things: `heightAt(x, z)` (smooth, anywhere), `bed(x, z)` (≤ 0: how
+    far a lake or the sea dips below it) and `field(step)`/`partField(box, step)` (the drape grid).
+  - `WorldWater`, a `MapWater` with the sea, must keep: `edgeDistance(p, cap)`, `seaDistance(x, z)`,
+    `riverWidth(x, z)`, `kindAt(x, z)`, and `world: { sea, rivers (paths and widths), lakes }`.
+  - Replace the bodies; keep `heightAt` 0 on the water and level round places.
+- **Countryside (claude/work-country).** `country.ts`:
+  - `countryInput(plan, box, fine)`: a `GroundInput` for a box;
+  - `paintCover(input, box, texel)`: the cover map, via the ground library's `Layout` and `CoverMap`;
+  - `woodTrees(layout, box, spacing, pines, seed)`: x, z, scale, kind per tree;
+  - `farmsIn(plan, box)`;
+  - `hedges(layout, input, box)`.
+
+  Fields and woods are the ground library's (`ground/layout.ts`), so a change there shows everywhere:
+  in the live area and in every tile.
+- **Map edge and portals (claude/work-edge).**
+  - The map runs from −25,000 to 25,000 each way (`plan.half`).
+  - The plan's `roads` with `b: null` are A roads off the map's edges (the portals' places). Ground
+    tiles stop at the edge with 40 m skirts.
+  - The live area's own edge isn't a map edge: roads cross it as Network roads that end where the
+    scenery's stretch begins.
+- **Real OS data (claude/work-os).** A plan made from data instead of a seed needs the same fields:
+  - `settlements` (with `seed`, `axis` and `plan` for the street layout, or streets of its own);
+  - `water.world`;
+  - `roads` and `rails` (centre lines, kinds, end places);
+  - a `WorldTerrain`.
+
+  `tilegen.ts` needs nothing else.

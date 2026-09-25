@@ -203,7 +203,7 @@ export class RegionView {
         const im = new THREE.InstancedMesh(g, mat, arr.length);
         arr.forEach((x, i) => { place(x); im.setMatrixAt(i, m4.compose(v, q, sc)); });
         im.castShadow = true; im.receiveShadow = true;
-        im.computeBoundingSphere();
+        im.computeBoundingSphere(); im.userData.cull = true; // (its instances stay put: drape.ts keeps it culled)
         im.visible = false;
         this.root.add(im);
         t.trees[level].push(im);
