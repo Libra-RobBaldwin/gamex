@@ -42,9 +42,11 @@ https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, de
    about 10–14 s (the first-view runs), as before.
 6. Docs: `docs/regiongen.md` (the block size and the follow rule); this brief.
 
-**Checks before the push:** `tsc` clean; `vitest run --no-file-parallelism` 1103 passed, 8 skipped, the one
-failure `economy.test.ts` "a well-served town grows" (the coordinator's, decision 2); the phone e2es on
-`?map=region&seed=42`: firstview (above), E2E_RESULTS_PLACEHOLDER
+**Checks before the push**, on the branch merged with the integration head 58ec61a (PR #60, the economy
+fix): `tsc` clean; `vitest run --no-file-parallelism` 117 files, 1104 passed, 8 skipped, no failures (the
+economy growth test passes with #60 in); the phone e2es on `?map=region&seed=42`: firstview (six starts
+before the merge, three after, 0% blank on every shot), lines, loop, rail, save, stations and the menu
+e2e all pass, before the merge and after it.
 
 ## Not done
 
