@@ -1,81 +1,59 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { Network, pathLength, rng } from '../roads';
+import { DEFAULT_OPTS, Network, pathLength, pointAt, rng } from '../roads';
 import { Traffic } from '../traffic';
-import { layRegionRoads, type RegionIn } from '../interchange/region';
+import { buildPair } from '../interchange/build';
 import { isRealPlace } from '../region/names';
 import { OUTSIDE_ID, PortalTraffic, findPortals } from './portals';
 
-// The made-up region of interchange/region.test.ts, with ground past the map's edge (as the game has it)
-const EDGE = 4500;
-const REGION: RegionIn = {
-  bound: 3000, edge: EDGE,
-  settlements: [
-    { id: 0, name: 'Castleford Magna', kind: 'city', x: -200, z: 300, r: 450 },
-    { id: 1, name: 'Ashby Wold', kind: 'town', x: 1700, z: 900, r: 300 },
-    { id: 2, name: 'Mellow Cross', kind: 'town', x: -1900, z: -300, r: 300 },
-    { id: 3, name: 'Thornleigh', kind: 'town', x: 900, z: -1700, r: 280 },
-    { id: 4, name: 'Upper Hale', kind: 'village', x: -1200, z: 1900, r: 120 },
-    { id: 5, name: 'Brockham', kind: 'village', x: 2300, z: -900, r: 110 },
-    { id: 6, name: 'Little Sneed', kind: 'village', x: -2400, z: -2200, r: 100 },
-    { id: 7, name: 'Fenwick', kind: 'village', x: 400, z: 2500, r: 110 },
-    { id: 8, name: 'Oxley Green', kind: 'village', x: -600, z: -2400, r: 100 },
-    { id: 9, name: 'Harrow End', kind: 'village', x: 2500, z: 2300, r: 100 },
-  ],
-  links: [
-    { a: 0, b: 1, road: 'A' }, { a: 0, b: 2, road: 'A' }, { a: 0, b: 3, road: 'A' }, { a: 1, b: 3, road: 'A' },
-    { a: 4, b: 0, road: 'B' }, { a: 5, b: 3, road: 'B' }, { a: 6, b: 2, road: 'B' }, { a: 7, b: 0, road: 'B' }, { a: 8, b: 3, road: 'B' }, { a: 9, b: 1, road: 'B' },
-  ],
-};
-function region() {
-  const net = new Network(() => false, REGION.bound);
-  net.edge = EDGE;
-  for (const s of REGION.settlements) net.build({ x: s.x - s.r * 0.6, z: s.z }, { x: s.x + s.r * 0.6, z: s.z }, undefined);
-  const roads = layRegionRoads(net, REGION);
-  return { net, roads };
+// The rim of a 50 km map, with roads the player might build out through it (the seeded start's own
+// roads off the map are lanes, and the live area doesn't reach the rim: worldPortals below). Here the
+// Network reaches the rim, with a motorway across the map (a pair of carriageways, in through the
+// west rim and out through the east), an A road out through the south and a B road out through the
+// north, each far from the others, as ways off that lead to places of their own. (The Network builds
+// nothing past its bound, so here the roads end on the rim itself.)
+const H = 25000, NAMES = ['Oakby', 'Fenmere', 'Castleford Magna'];
+function rim() {
+  const net = new Network(() => false, H);
+  net.edge = H;
+  const mw = buildPair(net, [{ x: -H, z: 2000 }, { x: H, z: 2000 }], 'motorway');
+  expect(mw.ok, 'reason' in mw ? mw.reason : '').toBe(true);
+  net.build({ x: 3000, z: -H + 3000 }, { x: 3000, z: -H }, undefined, { ...DEFAULT_OPTS, type: 'rural-60' });
+  net.build({ x: -8000, z: H - 3000 }, { x: -8000, z: H }, undefined, { ...DEFAULT_OPTS, type: 'rural-50' });
+  // (in pieces, as the game keeps its roads: none longer than 450 m)
+  for (const s of [...net.segs.values()]) {
+    const L = pathLength(net.path(s)), n = Math.floor(L / 450);
+    let id = s.id;
+    for (let k = n; k >= 1; k--) { const node = net.split(id, pointAt(net.path(net.segs.get(id)!), (L * k) / (n + 1))); id = net.segsAt(node).find((x) => x.b === node)?.id ?? id; }
+  }
+  return net;
 }
 
 describe('ways off the map', () => {
-  const { net, roads } = region();
-  const portals = findPortals(net, EDGE, { seed: 7, names: REGION.settlements.map((s) => s.name ?? '') });
-
-  it('the motorway runs out to the ground’s edge at both ends, and A roads leave by the other sides', () => {
-    expect(roads.failed).toEqual([]);
-    for (const p of roads.motorway) expect(Math.max(Math.abs(p.x), Math.abs(p.z))).toBeGreaterThan(EDGE - 5);
-    expect(roads.out.length).toBeGreaterThan(0);
-    // (nothing's built past the map's own bound but the roads out)
-    for (const s of net.segs.values()) for (const p of net.path(s)) if (Math.max(Math.abs(p.x), Math.abs(p.z)) > REGION.bound) {
-      const d = net.def(s);
-      expect(d.family === 'Motorway' || d.family === 'Rural').toBe(true);
-    }
-    // (the carriageways run on the same way: at every plain join of one-way roads, one comes in and one goes on)
-    for (const n of net.nodes.values()) {
-      const at = net.segsAt(n.id);
-      if (at.length === 2 && at.every((x) => x.oneway)) expect(at.filter((x) => x.b === n.id).length, `node ${n.id}`).toBe(1);
-    }
-    // (and none so long it'd be drawn from one cell kilometres off)
-    for (const s of net.segs.values()) if (!s.aux && !roads.interchanges.some((ix) => ix.segs.includes(s.id))) expect(pathLength(net.path(s))).toBeLessThan(470);
-  }, 120_000);
+  const net = rim();
+  const portals = findPortals(net, H, { seed: 7, names: NAMES });
 
   it('each is one way off, to a named place of its own, with its own road number', () => {
     const mw = portals.filter((p) => p.kind === 'motorway');
     expect(mw.length).toBe(2);
     for (const p of mw) expect(p.segs.length).toBe(2); // (both carriageways)
-    expect(portals.filter((p) => p.kind === 'A' || p.kind === 'B').length).toBeGreaterThanOrEqual(1);
+    expect(portals.filter((p) => p.kind === 'A').length).toBe(1);
+    expect(portals.filter((p) => p.kind === 'B').length).toBe(1);
     // (one name for each place off the map; ways off close together lead to the same one)
     const towns = new Map(portals.map((p) => [p.town, p.place]));
     expect(new Set(towns.values()).size).toBe(towns.size);
     for (const p of portals) for (const q of portals) if (p.town !== q.town) expect(Math.hypot(p.at.x - q.at.x, p.at.z - q.at.z)).toBeGreaterThan(3000);
     for (const p of portals) {
-      expect(REGION.settlements.some((s) => s.name === p.place)).toBe(false);
+      expect(NAMES).not.toContain(p.place);
       expect(isRealPlace(p.place)).toBe(false);
       expect(p.town).toBeGreaterThan(OUTSIDE_ID);
-      expect(Math.max(Math.abs(p.at.x), Math.abs(p.at.z))).toBeCloseTo(EDGE, 5);
+      expect(Math.max(Math.abs(p.at.x), Math.abs(p.at.z))).toBeCloseTo(H, 5);
       expect(p.offMin).toBeGreaterThan(3);
+      expect(Math.max(Math.abs(p.sign.x), Math.abs(p.sign.z))).toBeLessThan(H); // (its sign on the map)
     }
     expect(new Set(portals.map((p) => p.route)).size).toBe(portals.length);
     // the same map, the same ways off
-    expect(findPortals(net, EDGE, { seed: 7, names: REGION.settlements.map((s) => s.name ?? '') })).toEqual(portals);
+    expect(findPortals(net, H, { seed: 7, names: NAMES })).toEqual(portals);
   });
 
   it('traffic comes in and goes out through them near the camera, busiest in the rush hour and on the motorway', () => {
@@ -86,7 +64,7 @@ describe('ways off the map', () => {
       for (let t = 0; t < 240; t++) { flows.step(1 / 4, hour, 1, p.look, 1000, { homes: [], jobs: [], shops: [] }); tr.update(1 / 4, t * 250); }
       return { flows, tr, n: flows.stats.in + flows.stats.out, p };
     };
-    const peak = count(8.2, 'motorway'), night = count(3, 'motorway'), a = count(8.2, portals.find((x) => x.kind === 'A') ? 'A' : 'B');
+    const peak = count(8.2, 'motorway'), night = count(3, 'motorway'), a = count(8.2, 'A');
     expect(peak.n).toBeGreaterThan(20);
     expect(peak.n).toBeGreaterThan(night.n * 4);
     expect(peak.n).toBeGreaterThan(a.n * 2);

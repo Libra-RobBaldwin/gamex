@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { eraAt, fallbackRock, placeResolver, provinceOf, setGeology, vernOf, VERNS } from './vernacular';
-import { regionMap } from './region';
+import { rng } from './region/random';
 
+// a map's places (a city, three towns and eight villages, spread over 6 km by the seed), as a resolver takes them
 const spec = (seed: number, style = 'temperate', relief = 'rolling') => {
-  const m = regionMap({ seed, style: style as 'temperate', relief: relief as 'rolling' });
-  return { seed, style, relief, settlements: m.settlements };
+  const r = rng(seed * 31 + 7), kinds = ['city', 'town', 'town', 'town', 'village', 'village', 'village', 'village', 'village', 'village', 'village', 'village'];
+  const settlements: { x: number; z: number; kind: string }[] = [];
+  for (const kind of kinds) for (let tries = 0; tries < 200; tries++) {
+    const p = { x: Math.round((r() * 2 - 1) * 2600), z: Math.round((r() * 2 - 1) * 2600), kind };
+    if (settlements.every((s) => Math.hypot(s.x - p.x, s.z - p.z) > 900)) { settlements.push(p); break; }
+  }
+  return { seed, style, relief, settlements };
 };
 
 describe('vernacular places', () => {

@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { area, centroidOf, Countryside, layFields, type FieldsInput } from './fields';
 import { budget, cpuMs } from '../test/speed';
-import { generateRegion, reach } from './generate';
+import { reach } from './generate';
+import { generateRegion } from './sixkm.fixture'; // (a 6 km spread of places, lanes and a river to lay fields over)
 import { MapWater } from '../worldmap/water';
 
 const box = { x0: -3000, z0: -3000, x1: 3000, z1: 3000 };

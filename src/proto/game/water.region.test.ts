@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { GameWater } from './water';
-import { generateRegion } from '../region/generate';
-import { MapWater, lakeRadiusOf } from '../worldmap/water';
+import { MapWater, lakeRadiusOf, type RiverSpec, type WaterSpec } from '../worldmap/water';
 
-// The game's water on a generated region: several lakes and a river (docs/regiongen.md).
-describe('game water on the region map', () => {
-  const g = generateRegion(7), spec = g.water, mw = new MapWater(spec);
+// The game's water on a map with lakes and a river across it, as a region's live area has them
+// (worldmap/water.ts waterInBox): the same spec shape the 50 km plan's water comes in.
+const B = 3000; // the map's half-width; its ground reaches 1.5 times that
+function river(): RiverSpec {
+  const path = [];
+  for (let t = -1.65 * B; t <= 1.65 * B + 1e-6; t += 20) path.push({ x: t, z: 300 + 250 * Math.sin(t / 1600) + 80 * Math.sin(t / 620 + 1) });
+  return { path, width: 18 };
+}
+const spec: WaterSpec = { lakes: [{ x: -1500, z: -1400, r: 150, waves: [0.7, 2.1, 0.4] }, { x: 1800, z: 1900, r: 120, waves: [1.3, 0.2, 2.8] }], rivers: [river()] };
+const settlements = [{ x: -200, z: -900 }, { x: 1700, z: -1200 }, { x: -1900, z: 1500 }]; // (places on dry land)
+describe('game water on a map’s lakes and river', () => {
+  const g = { bound: B, settlements }, mw = new MapWater(spec);
   const gw = new GameWater(g.bound * 1.5, spec);
   const R = spec.rivers[0], mid = R.path[Math.floor(R.path.length / 2)], next = R.path[Math.floor(R.path.length / 2) + 1];
   const L = Math.hypot(next.x - mid.x, next.z - mid.z), nx = -(next.z - mid.z) / L, nz = (next.x - mid.x) / L;
