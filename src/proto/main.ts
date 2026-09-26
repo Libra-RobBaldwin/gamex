@@ -98,6 +98,8 @@ const loading = new Loading(MAP.name, mapLine());
 function mapLine() {
   const o = MAP.options, n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   if (!o) return '';
+  // (a 50 km map counts the whole map's places and rivers, not the live area's)
+  if (WORLD) return [`seed ${o.seed}`, n(WORLD.settlements.length, 'place', 'places'), n(WORLD.water.rivers.length, 'river', 'rivers'), o.style].join(' · ');
   return [`seed ${o.seed}`, n(MAP.settlements.length, 'place', 'places'), n(MAP.water.rivers.length, 'river', 'rivers'), n(MAP.water.lakes.length, 'lake', 'lakes'), o.style].join(' · ');
 }
 await loading.stage(MAP.relief !== 'flat' ? 'Raising the hills and filling the rivers' : MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
