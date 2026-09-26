@@ -45,7 +45,15 @@ https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, de
    live area's first whole-area paint); the small repaints after it size them again. On the region 15 s
    after loading: the pools were 110 MB, now 22 MB; the JS heap 427 MB, now 341 MB. A test in
    `ground.test.ts` covers it.
-7. Docs: `docs/regiongen.md` (the block size and the follow rule); this brief.
+7. **Farmsteads per km², judged and put back** (same branch). With 800 m blocks the farms fell from about
+   0.95 to 0.67 a km² (seed 42's middle 100 km²). `COUNTRYSIDE.farms` now leaves fewer blocks without a
+   farm (`none` 0.35 → 0.15) and gives more of the rest two (`two` 0.45 → 0.6): 0.85 to 0.96 a km² on seeds
+   42 and 7, about what the 650 m blocks gave. Over 336 km² of seed 42 outside the live area, 227 farms
+   became 309. Screenshots at 2 km over the 2 km square at (1000, 7000), where 5 farms became 10:
+   `docs/reports/country/before-farms-2km.jpg`, `after-farms-2km.jpg` (three in view, then four; farm
+   buildings are small from 2 km). Farmsteads are tile scenery, and no scenery is made inside the 8 km
+   live play area (`tilegen.ts` `inLive`), so the live area has no farmsteads at all; see "Not done".
+8. Docs: `docs/regiongen.md` (the block size and the follow rule); this brief.
 
 **Checks before the push**, on the branch merged with the integration head 58ec61a (PR #60, the economy
 fix): `tsc` clean; `vitest run --no-file-parallelism` 117 files, 1104 passed, 8 skipped, no failures (the
@@ -63,8 +71,12 @@ e2e all pass, before the merge and after it.
   the lane, which is right. If world50 has the screenshot, the spot would settle it.
 - **Wood edges up close:** the canopy's crowns still make a sawtooth along a straight wood edge from far out
   (the domes' tips at the outline). Not a staircase, and #52 had the same; a smoother edge row is possible.
-- **Farmsteads per km² fell** with the bigger blocks (about one farm a block, and blocks are 1.5× the area).
-  `COUNTRYSIDE.farms.none` could come down from 0.35 to keep the old density; not judged on screen yet.
+- **No farmsteads in the live play area.** They are tile scenery (`worldmap/country.ts` `farmsIn`), and the
+  tiles make nothing inside the 8 km live square, whose ground is the game's own. The live ground paints
+  no farm yards either (its `GroundInput` comes from `ground/game.ts`, not `countryInput`). So the start
+  town's own countryside has hedges, fields and woods but no farms. Fixing it means the live area asking
+  `countryFor(plan).farmsNear` for its farms and placing them as buildings on the Network's land (or as
+  scenery), and painting their yards and tracks; a day's work with the play session, not started.
 
 ## Files touched
 
