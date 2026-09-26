@@ -44,20 +44,30 @@ the drawn building, met the lifted bounds, and missed the triangles, which are s
 `111-building-card-fixed.png` ("Modern apartments · 8 storeys · Housing · Residents 45 · Add a bus stop").
 The lines e2e now taps a building after its bus. Industry sites had the same pick and get the same fix.
 
-### 2. The line tool frames the stops half off the screen (confusing, fix in this PR)
+### 2. The line tool frames the stops half off the screen (confusing, fixed in this PR)
 
 `41-line-tool-framing.png`: New line zooms to fit every stop, but fits them to the screen's height, so with
 two stops 200 m apart on the 45° view one badge is at x = 3 and the other at x = 409 of 412, and the hint
 says "Tap the stop the line starts from" with nothing to tap in the clear part of the screen. Cause:
 `startLineTool` picks a view height from the stops' extent alone; portrait phones are less than half as wide
-as they are tall. Fix: fit the stops' box to the clear rect with `nav.fit`.
+as they are tall. Fixed in `startLineTool`: it zooms out by how far apart the stops are on the screen until
+they all fit the clear rect with room for their badges. Checked: `112-line-tool-framing-fixed.png`.
 
-### 3. Two guides at once (confusing, fix in this PR)
+### 2b. The stop badges went missing in the top half of the screen (confusing, fixed in this PR)
+
+`28-line-tool.png`: two stops, a hint saying "Tap the stop the line starts from", and no orange badge on
+either. Cause: the drape draws every mesh lifted by the ground's height in its shader, but three.js culls a
+sprite where it thinks it is, about 200 m below where it's drawn, so a badge in the top half of a phone's
+screen was tested as off the bottom. Fixed in `game/lines.ts`: the badge sprites are drawn uncut. Checked:
+`112-line-tool-framing-fixed.png`, all three badges.
+
+### 3. Two guides at once (confusing, fixed in this PR)
 
 `13-build-sheet.png` next to `10-after-drag.png`: on a first game the app's guide says "Step 2 of 5 · Build a
 road" while the game's own goal strip under it says "Step 1 of 3 · Build bus stops where people live and
 work". Two step counters that disagree, and the guide's road step isn't part of the loop (the first line
-needs no road). Fix: the guide drops its road step, and the goal strip hides while the guide is up.
+needs no road). Fixed: the guide goes move, stop, line, done, and the goal strip hides while the guide is up
+(`proto.css`); the menu e2e checks both.
 
 ### 4. A first bridge fails with a grade message (confusing, reported)
 
@@ -106,17 +116,19 @@ stop" reads 0%. On the seeded region the loop e2e forbids a town that declines b
 Owner: OS (the real live pack's jobs) and the economy. The seeded start is taken as balanced
 (`GAME_TUNE`); a real town needs the same.
 
-Also on the real region: a console error `Unexpected token '<' ... is not valid JSON` (a fetch that got the
-page instead of JSON), see below when found.
+Also on the real region: a console error `Unexpected token '<' ... is not valid JSON`: something fetches
+`/assets/regions/teme/region.json` (under the built assets folder, which serves the page instead) as well as
+the right `/regions/teme/region.json`. A relative `regions/` path resolved from inside a built chunk or the
+tile worker. Owner: OS (`real/worldmap.ts` builds its base from `import.meta.env.BASE_URL`).
 
 ### 8. The line card's "Riders a day" (cosmetic, reported)
 
 See 6. If the month stays, "Riders a month" is the honest label.
 
-### 9. The loading screen counts the wrong things (cosmetic, fix in this PR if cheap)
+### 9. The loading screen counts the wrong things (cosmetic, fixed in this PR)
 
 `06-loading.png`: "seed 42 · 6 places · 1 river · 0 lakes · temperate" for a region with 203 places and
-16 rivers. The text comes from the old 6 km options.
+16 rivers. The text counted the live area. Fixed in `mapLine`: a 50 km map counts the whole plan's places and rivers.
 
 ### 10. Buildings and scenery (cosmetic, for their owners)
 
@@ -137,9 +149,11 @@ See 6. If the month stays, "Riders a month" is the honest label.
 
 ## Done and not done
 
-- Done: the play-through above, this brief, fix 1 (building tap) with an e2e step, fix 5 (rail Join).
-- In progress: fix 2 (line framing), fix 3 (two guides), fix 9 (loading text).
-- Not done: 4, 6, 7, 8, 10 are reported for their owners.
+- Done in this PR, each its own commit: 1 (building tap, with a lines e2e step), 2 (line framing), 2b (stop
+  badges), 3 (one guide, with menu e2e checks), 5 (rail Join), 9 (loading counts). Each is checked on a
+  screenshot named above; "live" once the PR is merged and the integration branch is deployed.
+- Reported for their owners, not done: 4 (a short bridge is refused), 6 (money), 7 (real regions decline),
+  8 (riders label), 10 (buildings and scenery), the `/assets/regions` fetch.
 
 ## Test results
 
