@@ -2,7 +2,7 @@
 // three-stop line, watch its buses call at those stops only and in order, tap a bus for its sheet.
 // node e2e/lines.e2e.mjs [url] [shots dir]
 import { chromium } from 'playwright-core';
-const url = process.argv[2] ?? 'http://localhost:5173/?map=town';
+const url = process.argv[2] ?? 'http://localhost:5173/proto.html?map=region&seed=42';
 const out = process.argv[3] ?? '.';
 const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -23,7 +23,7 @@ if (none.lines || none.stops) fail('the game starts with stops or lines already 
 await page.evaluate(() => {
   const P = window.proto, net = P.net;
   for (const q of [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }]) {
-    const n = net.nearestSeg(q, 30, (s) => net.def(s).cls === 'road' && net.def(s).family !== 'Motorway');
+    const n = net.nearestSeg(q, 80, (s) => net.def(s).cls === 'road' && net.def(s).family !== 'Motorway' && net.def(s).family !== 'Rural');
     if (n) for (const side of [1, -1]) for (const d of [0, 15, -15, 30, -30]) { const { plans } = net.planStop(n.seg.id, n.s + d, side); const pl = plans.find((x) => x.ok && x.kind === 'kerb') ?? plans.find((x) => x.ok); if (pl) { net.addStop(n.seg.id, n.s + d, side, pl); break; } }
   }
   P.rebuild();

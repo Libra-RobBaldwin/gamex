@@ -6,7 +6,10 @@
 // opens it; autosave on hiding the page works. No console errors.
 // node e2e/save.e2e.mjs [url] [shots dir]
 import { chromium } from 'playwright-core';
-const url = process.argv[2] ?? 'http://localhost:5173/?map=town';
+const url = process.argv[2] ?? 'http://localhost:5173/proto.html?map=region&seed=42';
+// (the same map with a save to open, and the start menu at the site's root)
+const withSave = (id) => { const u = new URL(url); u.searchParams.set('save', id); return u.toString(); };
+const menu = new URL('./', url).toString().replace(/proto\.html$/, '');
 const out = process.argv[3] ?? '.';
 const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: 'en-GB', serviceWorkers: 'block' });
@@ -110,7 +113,7 @@ ok(rows.length === 1 && /this town/.test(rows[0]), `Load town lists this town ($
 await A.tap('#sheet .close').catch(() => {});
 
 // ---- the save, opened in a second tab ----
-const B = await open(url.replace(/\?.*$/, '') + `?map=town&save=${id}`);
+const B = await open(withSave(id));
 await B.evaluate(() => window.proto.setSpeed(0));
 const sb = await state(B);
 const d0 = diff(sa, sb);
@@ -139,7 +142,7 @@ await B.waitForFunction(() => window.__saved?.why === 'hide', null, { timeout: 2
 // ---- the start menu: Continue opens it ----
 const M = await ctx.newPage();
 M.on('pageerror', (e) => errs.push(e.message));
-await M.goto(url.replace(/\?.*$/, ''));
+await M.goto(menu);
 await M.waitForSelector('[data-continue]', { timeout: 10000 }).catch(() => {});
 await shot(M, 'save-4-continue');
 const cont = await M.$('[data-continue]');
