@@ -259,13 +259,14 @@ for (const id of ['town', 'sandbox']) {
   // simple steps, one question each: a tap on a card answers it and moves on
   check(await page.$$eval('.steps span', (d) => d.length) === 4 && await page.$('[data-place]') !== null, 'region setup: step 1 asks what kind of place');
   check(await page.$$eval('[data-real]', (d) => d.length) >= 2, 'region setup: real places from OS maps are offered on the first step');
-  await page.tap('[data-place="rolling"]');
+  check(await page.$$eval('[data-place]', (d) => d.length) === 7, 'region setup: the seven landforms (vale to islands) on a 50 km map');
+  await page.tap('[data-place="islands"]');
   await page.waitForSelector('[data-climate]');
   await page.tap('[data-climate="arctic"]');
   await page.waitForSelector('[data-size]');
   await page.tap('[data-size="city"]');
   await page.waitForSelector('.summary');
-  check(/Rolling country/.test(await page.textContent('.summary')) && /Cold/.test(await page.textContent('.summary')), 'region setup: the summary shows what was picked');
+  check(/Islands/.test(await page.textContent('.summary')) && /Cold/.test(await page.textContent('.summary')), 'region setup: the summary shows what was picked');
   // the finer settings are folded away under More options
   await page.tap('details.more summary');
   const rivers0 = Number(await page.textContent('[data-count="rivers"] output'));

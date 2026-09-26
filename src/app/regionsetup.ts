@@ -3,7 +3,7 @@
 // (region/options.ts, pure, no three.js); the same options always make the same map, and the
 // game reads them from the address (?map=region&seed=…). The last region started is remembered.
 
-import { DEFAULT_OPTIONS, SIZES as MAP_SIZES, STYLES, limitsFor, optionsFromQuery, optionsQuery, regionOptions, type RegionOptions, type Style } from '../proto/region/options';
+import { LANDFORMS, DEFAULT_OPTIONS, SIZES as MAP_SIZES, STYLES, limitsFor, optionsFromQuery, optionsQuery, regionOptions, type RegionOptions, type Style } from '../proto/region/options';
 import { REAL_REGION_LIST } from '../proto/real/list';
 import { icon } from '../proto/ui/icons';
 import { KEYS, load, save } from './store';
@@ -47,6 +47,12 @@ const PLACES: Pick[] = [
   { id: 'uplands', name: 'Hills and lakes', note: 'High ground, deep valleys, lakes in the hollows', ic: 'mountain', patch: { relief: 'upland', rivers: 1, lakes: 3 } },
   { id: 'mountains', name: 'Mountains', note: 'Big peaks and passes; towns squeeze into the valleys', ic: 'mountain', patch: { relief: 'mountain', rivers: 1, lakes: 2 } },
 ];
+// on a 50 km map the kinds of place are the terrain's landforms (region/options.ts LANDFORMS: vale,
+// downs, estuary, uplands, mountains, coast, islands); the old 6 km map keeps its four
+const LANDFORM_ICONS: Record<string, Parameters<typeof icon>[0]> = { vale: 'wheat', downs: 'trees', estuary: 'droplet', uplands: 'mountain', mountains: 'mountain', coast: 'droplet', islands: 'map' };
+const placesFor = (o: RegionOptions): Pick[] => o.size > 6
+  ? LANDFORMS.map((l) => ({ id: l.id, name: l.name, note: l.note, ic: LANDFORM_ICONS[l.id] ?? 'map', patch: l.options }))
+  : PLACES;
 const CLIMATES: [Style, string, string, Parameters<typeof icon>[0]][] = [
   ['temperate', 'Temperate', 'Green fields, woods and hedgerows', 'trees'],
   ['arctic', 'Cold', 'Snow, and dark pine woods', 'mountain'],
@@ -75,7 +81,7 @@ export function regionBody(o: RegionOptions) {
   const dots = `<div class="steps" aria-label="Step ${step + 1} of ${STEPS.length}">${STEPS.map((_, i) => `<span class="${i === step ? 'on' : i < step ? 'done' : ''}">${i < step ? icon('check') : i + 1}</span>`).join('')}</div>`;
   const nav = (next: string) => `<div class="stepnav">${step ? `<button class="act" data-prev>${icon('arrowLeft')}<span>Back</span></button>` : '<span></span>'}${next}</div>`;
   if (step === 0) return `${dots}<h3 class="q">What kind of place?</h3>
-    ${cards(PLACES.map((p) => ({ ...p, on: same(o, p.patch) })), 'data-place')}
+    ${cards(placesFor(o).map((p) => ({ ...p, on: same(o, p.patch) })), 'data-place')}
     <button class="act wide lib-link" data-surprise>${icon('sparkles')}<span>Surprise me</span></button>
     ${nav(`<button class="act primary" data-next>${icon('play')}<span>Next</span></button>`)}
     <h4 class="or">Or play a real place</h4>
@@ -88,7 +94,7 @@ export function regionBody(o: RegionOptions) {
     ${cards(sizesFor(o).map((p) => ({ ...p, on: same(o, p.patch) })), 'data-size')}
     ${nav(`<button class="act primary" data-next>${icon('play')}<span>Next</span></button>`)}`;
   // the summary: what was picked (tap a line to change it), the big button, and the rest folded away
-  const place = PLACES.find((p) => same(o, p.patch)), size = sizesFor(o).find((p) => same(o, p.patch)), clim = CLIMATES.find((c) => c[0] === o.style)!;
+  const place = placesFor(o).find((p) => same(o, p.patch)), size = sizesFor(o).find((p) => same(o, p.patch)), clim = CLIMATES.find((c) => c[0] === o.style)!;
   const count = (k: Counted, label: string, note: string) => {
     const v = o[k], [lo, hi] = limitsFor(o.size)[k], au = auto(k, o), isAuto = au && v === -1;
     return `<div class="stepper" data-count="${k}">
@@ -127,13 +133,13 @@ export function bindRegion(root: HTMLElement, o0: RegionOptions, redraw: (o: Reg
   const go = (n: number) => { step = Math.max(0, Math.min(STEPS.length - 1, n)); redraw(o); };
   const on = (sel: string, f: (el: HTMLElement) => void) => root.querySelectorAll<HTMLElement>(sel).forEach((el) => el.addEventListener('click', () => f(el)));
   // (a card answers its step and moves on)
-  on('[data-place]', (el) => { const p = PLACES.find((x) => x.id === el.dataset.place)!; o = regionOptions({ ...o, ...p.patch }); go(step + 1); });
+  on('[data-place]', (el) => { const p = placesFor(o).find((x) => x.id === el.dataset.place)!; o = regionOptions({ ...o, ...p.patch }); go(step + 1); });
   on('[data-climate]', (el) => { o = regionOptions({ ...o, style: el.dataset.climate as Style }); go(step + 1); });
   on('[data-size]', (el) => { const p = sizesFor(o).find((x) => x.id === el.dataset.size)!; o = regionOptions({ ...o, ...p.patch }); go(step + 1); });
   on('[data-surprise]', () => {
     const r = (n: number) => Math.floor(Math.random() * n);
     const sz = sizesFor(o);
-    o = regionOptions({ ...o, ...PLACES[r(PLACES.length)].patch, ...sz[r(sz.length)].patch, style: CLIMATES[r(CLIMATES.length)][0], seed: r(99999) + 1 });
+    o = regionOptions({ ...o, ...(() => { const pl = placesFor(o); return pl[r(pl.length)].patch; })(), ...sz[r(sz.length)].patch, style: CLIMATES[r(CLIMATES.length)][0], seed: r(99999) + 1 });
     go(STEPS.length - 1);
   });
   // (a real place from OS maps: started as it is, nothing to set up: real/list.ts)
