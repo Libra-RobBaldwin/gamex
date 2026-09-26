@@ -12,8 +12,9 @@ import { MODEL, purchaseList, type Offer } from './vehicles';
 import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
-import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
-import { placeResolver, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
+import { Parking } from './game/parking';
+import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops // drives and car parks in use (the traffic's own cars park in them)
+import { placeResolver, REAL_VERN, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
@@ -86,7 +87,8 @@ const WORLD = MAP.world ?? null; // (a 50 km map's plan: MAP is its live play ar
 // (a generated map builds in its places' traditions; ?vern=cotswold, nordic, … sets one on any map)
 const VERN = new URLSearchParams(MAP_QUERY).get('vern') as Vern | null, vernForced = VERN && VERNS.includes(VERN) ? VERN : undefined;
 setParkedCars(false); // (parked cars are real ones: game/parking.ts)
-if (MAP.generated || vernForced) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.settlements }, vernForced));
+const vernReal = REAL ? REAL_VERN[(MAP as RealMap).real.region] : undefined; // (a real map: its region's tradition)
+if (MAP.generated || vernForced || vernReal) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.settlements }, vernForced ?? vernReal));
 // the loading screen, while the map is built (it goes once the first frame is drawn)
 const loading = new Loading(MAP.name, mapLine());
 function mapLine() {
@@ -628,12 +630,13 @@ function refreshInfillWithin(boxes: Box[]) {
 }
 
 // the centre to lay a road's plots out from: its settlement's, as central as its size says (region/mapspec.ts)
-const centreFor = (a: P, b: P = { x: a.x + 1, z: a.z }) => plotCentre(MAP, a, b);
+const centreFor = (a: P, b: P = { x: a.x + 1, z: a.z }) => ({ ...plotCentre(MAP, a, b), kind: settlementAt(MAP, { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }).kind }); // (kind: towns and cities get retail parks)
 function queuePlots(segs: number[]) {
   for (const id of segs) {
     const sg = net.segs.get(id);
     if (WORLD && sg && ROADS[sg.type]?.family === 'Rural') continue; // (a 50 km map's country lanes run through fields, not houses)
-    const plots = sg ? net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))) : [];
+    // (shops side by side become one shopping complex: complexes.ts)
+    const plots = sg ? groupShops(net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))), { free: (l) => net.lotFree(l) }) : [];
     // denser, taller near the centre; a few gaps elsewhere
     for (const p of plots) if (centrality(MAP, p) < 200 || rand() < 0.75) queue.push(p);
   }

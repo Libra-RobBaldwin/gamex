@@ -9,7 +9,7 @@
 // so a line's effect shows while you watch.
 import { Economy, type EconomySave } from '../economy';
 import { BUILDINGS, VEHICLES, type Action, type BuildingKind, type EconEvent, type LineIn, type Oracles, type StopIn, type TownReport, type VehicleKind, type ZoneIn } from '../econdefs';
-import { USE } from '../buildgen';
+import { USE, unitsOf } from '../buildgen';
 import type { Lot, LotKind, Network, P } from '../roads';
 import type { Traffic } from '../traffic';
 import type { Lines } from './lines';
@@ -101,7 +101,7 @@ export class TownEconomy {
     if (from) this.econ = this.resume(from);
     else {
       const zones = this.zoneList();
-      const buildings = h.standing().map((l) => { this.lotById.set(l.id, l); return { id: l.id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) }; });
+      const buildings = h.standing().map((l) => { this.lotById.set(l.id, l); return { id: l.id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) * unitsOf(l) }; });
       // Until freight is in the game the town finds its own goods and building materials; and it
       // finds most of its visitors itself, so the starter line about holds it steady and more
       // service is what tips it into growth.
@@ -196,7 +196,7 @@ export class TownEconomy {
     for (const id of this.econ.buildingIds()) if (!now.has(id)) { this.econ.removeBuilding(id); this.lotById.delete(id); }
     const zl = this.zoneList();
     for (const z of zl) this.econ.setZone(z);
-    for (const [id, l] of now) if (!this.lotById.has(id)) { this.lotById.set(id, l); this.econ.addBuilding({ id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) }); }
+    for (const [id, l] of now) if (!this.lotById.has(id)) { this.lotById.set(id, l); this.econ.addBuilding({ id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) * unitsOf(l) }); }
     const s = this.sig();
     if (s !== this.serviceSig) {
       this.serviceSig = s;
@@ -262,7 +262,7 @@ export class TownEconomy {
       if (!l) { this.econ.decline(a.req); this.stats.declined++; return; }
       this.h.build(l);
       this.lotById.set(l.id, l);
-      this.econ.addBuilding({ id: l.id, zone: a.zone, x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) }, a.req);
+      this.econ.addBuilding({ id: l.id, zone: a.zone, x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) * unitsOf(l) }, a.req);
       this.stats.builds++;
     } else if (a.t === 'densify') {
       const l = this.lotById.get(a.building);
