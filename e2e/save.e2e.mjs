@@ -6,7 +6,10 @@
 // opens it; autosave on hiding the page works. No console errors.
 // node e2e/save.e2e.mjs [url] [shots dir]
 import { chromium } from 'playwright-core';
-const url = process.argv[2] ?? 'http://localhost:5173/?map=town';
+const url = process.argv[2] ?? 'http://localhost:5173/proto.html?map=region&seed=42';
+// (the same map with a save to open, and the start menu at the site's root)
+const withSave = (id) => { const u = new URL(url); u.searchParams.set('save', id); return u.toString(); };
+const menu = new URL('./', url).toString().replace(/proto\.html$/, '');
 const out = process.argv[3] ?? '.';
 const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: 'en-GB', serviceWorkers: 'block' });
@@ -46,9 +49,12 @@ const A = await open(url);
 await A.evaluate(() => window.proto.setSpeed(0)); // (paused from here: only the town's clock moves, by skip)
 const changed = await A.evaluate(() => {
   const P = window.proto, net = P.net;
-  // a branch line across the north of the town, two stations on it and a rail line between them
+  // a branch line just north of the start town, two stations on it and a rail line between them
   P.purse.balance += 3_000_000;
-  P.buildRoad({ x: -480, z: 340 }, { x: 480, z: 340 }, 'rail-branch');
+  P.buildRoad({ x: -480, z: 540 }, { x: 480, z: 540 }, 'rail-branch');
+  P.rebuild();
+  // and a one-way carriageway north out of town, bridging the branch (the region starts with neither)
+  P.buildRoad({ x: 150, z: 350 }, { x: 150, z: 1300 }, 'dual', { oneway: true });
   P.rebuild();
   const R = P.railway, seg = [...net.segs.values()].filter((x) => net.def(x).cls === 'rail').sort((a, b) => net.length(b) - net.length(a))[0];
   const made = [];
@@ -110,7 +116,7 @@ ok(rows.length === 1 && /this town/.test(rows[0]), `Load town lists this town ($
 await A.tap('#sheet .close').catch(() => {});
 
 // ---- the save, opened in a second tab ----
-const B = await open(url.replace(/\?.*$/, '') + `?map=town&save=${id}`);
+const B = await open(withSave(id));
 await B.evaluate(() => window.proto.setSpeed(0));
 const sb = await state(B);
 const d0 = diff(sa, sb);
@@ -119,7 +125,7 @@ if (d0.length) for (const k of d0.slice(0, 3)) console.log(k, JSON.stringify(sa[
 ok(sb.mine.includes(`${changed.junction}:${sa.mine.find((x) => x.startsWith(`${changed.junction}:`))?.split(':')[1]}`), 'the junction of the player’s design is kept');
 ok(sb.lines.some((l) => l.startsWith(`${changed.line}:`)), 'the new line is kept, with its buses');
 ok(sb.segs.some((s) => s.includes(`:${changed.stop}`)), 'the new stop is kept');
-ok(sb.segs.some((s) => s.split(':')[3] === '1'), 'one-way carriageways (the motorway) are kept');
+ok(sb.segs.some((s) => s.split(':')[3] === '1'), 'one-way carriageways are kept');
 ok(sb.segs.some((s) => s.split(':')[5]), 'bridges and their types are kept');
 ok(changed.stations === 2 && sb.stations.length === 2 && sb.raillines === 1, `railway stations and the rail line are kept (${JSON.stringify(changed)})`);
 ok(await B.evaluate(() => window.proto.railway.trains.length) === await A.evaluate(() => window.proto.railway.trains.length), 'the rail line runs as many trains');
@@ -139,7 +145,7 @@ await B.waitForFunction(() => window.__saved?.why === 'hide', null, { timeout: 2
 // ---- the start menu: Continue opens it ----
 const M = await ctx.newPage();
 M.on('pageerror', (e) => errs.push(e.message));
-await M.goto(url.replace(/\?.*$/, ''));
+await M.goto(menu);
 await M.waitForSelector('[data-continue]', { timeout: 10000 }).catch(() => {});
 await shot(M, 'save-4-continue');
 const cont = await M.$('[data-continue]');

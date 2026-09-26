@@ -9,7 +9,7 @@
     "preview": "vite preview --host",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "node e2e/places.e2e.mjs"
+    "test:e2e": "node e2e/menu.e2e.mjs"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.22",

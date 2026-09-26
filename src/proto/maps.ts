@@ -16,13 +16,9 @@ export interface MapInfo {
   icon: Icon;
   /** playable in the game now */
   ready: boolean;
-  /** what the card says while it isn't ready */
-  soon?: string;
-  /** a card that opens another page instead (Real Town Plans) */
-  link?: { href: string; label: string };
   /** runs before the game module loads, e.g. `() => import('./region')`; a failure is shown on the menu */
   load?: () => Promise<unknown>;
-  /** the first-visit guide runs over this map (it needs the starter town's roads and stops) */
+  /** the first-visit guide runs over this map (in its start town) */
   guide?: boolean;
   /** Play opens a setup screen first (the region's seed, style, rivers and towns: region/options.ts) */
   setup?: boolean;
@@ -31,14 +27,13 @@ export interface MapInfo {
 }
 
 export const MAPS: MapInfo[] = [
-  { id: 'town', name: 'Starter town', blurb: 'A small market town by a lake, with a railway, an estate and room to grow.', icon: 'home', ready: true, guide: true },
-  { id: 'region', name: 'Region', blurb: 'Fifty kilometres of towns, villages, hills and coast, joined by country lanes: the rest is yours to build.', icon: 'map', ready: true, setup: true },
+  { id: 'region', name: 'Region', blurb: 'Fifty kilometres of towns, villages, hills and coast, joined by country lanes: the rest is yours to build.', icon: 'map', ready: true, setup: true, guide: true },
   { id: 'exe', name: 'Exeter', blurb: 'The real city and its river, railway and hills, from Ordnance Survey maps. The Exe estuary around it is 50 km of real Devon.', icon: 'building', ready: true, inRegion: true },
   { id: 'teme', name: 'Ludlow', blurb: 'A real market town on the Teme under its castle, from Ordnance Survey maps, in 50 km of the Shropshire Hills and the Welsh Marches.', icon: 'building', ready: true, inRegion: true },
-  { id: 'place', name: 'Real town', blurb: 'A real UK town from OpenStreetMap, anywhere you pick.', icon: 'pin', ready: false, soon: 'Plans only for now', link: { href: './places.html', label: 'Open Real Town Plans' } },
-  { id: 'sandbox', name: 'Sandbox', blurb: 'Empty land by the lake. Build a town from nothing.', icon: 'hammer', ready: true },
 ];
 
-/** The map a game opens with: `?map=<id>`, the starter town by default. */
-export const DEFAULT_MAP = 'town';
+/** The map a game opens with: `?map=<id>`, the region by default. There is one map: the 50 km region. */
+export const DEFAULT_MAP = 'region';
+/** Maps the game once had (the one-map clean-up, docs/briefs/PLAN.md): links and saves on them are turned away politely. */
+export const GONE: Record<string, string> = { town: 'The starter town', sandbox: 'The sandbox', place: 'Real Town Plans' };
 export const mapById = (id: string | null | undefined) => MAPS.find((m) => m.id === id);

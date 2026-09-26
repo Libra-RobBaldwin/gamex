@@ -57,16 +57,16 @@ jobs:
           cat vite.log; exit 1
       - name: Bus lines (e2e/lines.e2e.mjs)
         if: success() || failure() # (every phone test runs, so one log shows all that fail)
-        run: node e2e/lines.e2e.mjs "http://127.0.0.1:5173/?map=town" shots
+        run: node e2e/lines.e2e.mjs "http://127.0.0.1:5173/proto.html?map=region&seed=42" shots
       - name: The loop (e2e/loop.e2e.mjs)
         if: success() || failure() # (every phone test runs, so one log shows all that fail)
-        run: node e2e/loop.e2e.mjs "http://127.0.0.1:5173/?map=town" shots
+        run: node e2e/loop.e2e.mjs "http://127.0.0.1:5173/proto.html?map=region&seed=42" shots
       - name: Rail (e2e/rail.e2e.mjs)
         if: success() || failure() # (every phone test runs, so one log shows all that fail)
-        run: node e2e/rail.e2e.mjs "http://127.0.0.1:5173/proto.html?map=town" shots
+        run: node e2e/rail.e2e.mjs "http://127.0.0.1:5173/proto.html?map=region&seed=42" shots
       - name: Saving and loading (e2e/save.e2e.mjs)
         if: success() || failure() # (every phone test runs, so one log shows all that fail)
-        run: if [ -f e2e/save.e2e.mjs ]; then node e2e/save.e2e.mjs "http://127.0.0.1:5173/?map=town" shots; else echo "not on this branch yet"; fi
+        run: if [ -f e2e/save.e2e.mjs ]; then node e2e/save.e2e.mjs "http://127.0.0.1:5173/proto.html?map=region&seed=42" shots; else echo "not on this branch yet"; fi
       - name: Start menu (e2e/menu.e2e.mjs, on the build)
         if: success() || failure() # (every phone test runs, so one log shows all that fail)
         run: node e2e/menu.e2e.mjs shots

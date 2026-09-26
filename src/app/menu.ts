@@ -5,7 +5,7 @@
 // the starter town (art/, taken from the game) drifting slowly behind a short stack of choices,
 // with the one that matters most (Continue, or New game) the biggest.
 
-import { MAPS, type MapInfo } from '../proto/maps';
+import { GONE, MAPS, type MapInfo } from '../proto/maps';
 import { REAL_REGION_LIST } from '../proto/real/list';
 import { NAME, markSvg } from '../proto/ui/brand';
 import { icon, type Icon } from '../proto/ui/icons';
@@ -16,10 +16,7 @@ import type { SaveEntry } from '../proto/game/savedb';
 import type { Screen } from './route';
 import heroTall from './art/hero-tall.webp';
 import heroWide from './art/hero-wide.webp';
-import mapTown from './art/map-town.webp';
 import mapRegion from './art/map-region.webp';
-import mapPlace from './art/map-place.webp';
-import mapSandbox from './art/map-sandbox.webp';
 import { TIER_NAMES, TIER_NOTES, guideSeen, quality, setGuideSeen, setQuality } from './store';
 
 export interface MenuHost {
@@ -38,13 +35,14 @@ export interface MenuHost {
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // a picture of each map, for its card (and a saved town's); a map without one shows its icon
-const MAP_ART: Record<string, string> = { town: mapTown, region: mapRegion, place: mapPlace, sandbox: mapSandbox, ...Object.fromEntries(REAL_REGION_LIST.map((r) => [r.id, `${import.meta.env.BASE_URL}${r.thumb}`])) }; // (the real regions: their baked map, proto/real/list.ts)
+const MAP_ART: Record<string, string> = { region: mapRegion, ...Object.fromEntries(REAL_REGION_LIST.map((r) => [r.id, `${import.meta.env.BASE_URL}${r.thumb}`])) }; // (the real regions: their baked map, proto/real/list.ts)
 const artFor = (id: string) => MAP_ART[id];
-// a saved town's map: its query names it (the sandbox is saved on the town's map)
+// a saved town's map: its query names it
 const savedMap = (e: SaveEntry) => new URLSearchParams(e.map.query).get('map') ?? e.map.id;
-// a region saved before 50 km maps: it still opens as the old 6 km map (game/save.ts), so say so
-const oldMap = (e: SaveEntry) => savedMap(e) === 'region' && (new URLSearchParams(e.map.query).get('size') ?? '6') === '6';
-const oldNote = (e: SaveEntry) => (oldMap(e) ? ' · old 6 km map' : '');
+// a town saved on a map the game no longer has (the starter town, the sandbox, a 6 km region): it can't
+// open, so it's listed as such with Delete, and Continue passes it over
+export const goneSave = (e: SaveEntry) => !!GONE[savedMap(e)] || !!GONE[e.map.id] || (savedMap(e) === 'region' && (new URLSearchParams(e.map.query).get('size') ?? '6') === '6');
+const playable = (h: MenuHost) => h.saves.filter((e) => !goneSave(e));
 
 // the town behind the menu: a tall picture for a phone held upright, a wide one otherwise
 const hero = (cls: string, src?: string) => src
@@ -56,7 +54,7 @@ function tile(id: string, ic: Icon, label: string) {
 }
 
 function home(h: MenuHost) {
-  const s = h.saves[0];
+  const s = playable(h)[0];
   return `<div class="home">
     <header class="brand">
       ${markSvg('bigmark')}
@@ -66,9 +64,9 @@ function home(h: MenuHost) {
     <nav class="dock" aria-label="Start">
       ${s ? `<button class="cont" data-continue>
           ${artFor(savedMap(s)) ? `<img class="thumb" src="${artFor(savedMap(s))}" alt="" decoding="async">` : ''}
-          <span class="t"><small>Continue</small><b>${esc(s.name)}</b><em>${esc(describe(s.summary))} · saved ${esc(when(s.savedAt))}${oldNote(s)}</em></span>
+          <span class="t"><small>Continue</small><b>${esc(s.name)}</b><em>${esc(describe(s.summary))} · saved ${esc(when(s.savedAt))}</em></span>
           <i class="playc">${icon('play')}</i></button>` : ''}
-      <button class="newgame${s ? '' : ' primary'}" data-go="new">${icon(s ? 'plus' : 'play')}<span>New game</span></button>
+      <button class="newgame${s ? '' : ' primary'}" data-go="region">${icon(s ? 'plus' : 'play')}<span>New game</span></button>
       <div class="tiles">
         ${h.saves.length > 1 ? tile('saves', 'clock', 'Saved') : ''}
         ${tile('how', 'finger', 'How to play')}
@@ -83,9 +81,13 @@ function home(h: MenuHost) {
 // every saved town: open it, or delete it (a second tap confirms)
 function saves(h: MenuHost) {
   if (!h.saves.length) return `<p class="fine">No saved towns yet. A town saves itself as you play, every few game hours and when you leave it.</p>`;
-  return `<ul class="maps saves">${h.saves.map((e, i) => `<li class="map ready">
+  return `<ul class="maps saves">${h.saves.map((e, i) => goneSave(e) ? `<li class="map">
+      ${art({ id: savedMap(e), icon: 'clock', ready: false })}
+      <div class="t"><b>${esc(e.name)}</b><small>Made on a map that no longer exists</small><small>Saved ${esc(when(e.savedAt))}</small></div>
+      <div class="go"><button class="act" data-del="${i}" aria-label="Delete ${esc(e.name)}, saved ${esc(when(e.savedAt))}">${icon('trash')}<span>Delete</span></button></div>
+    </li>` : `<li class="map ready">
       ${art({ id: savedMap(e), icon: 'clock', ready: true })}
-      <div class="t"><b>${esc(e.name)}</b><small>${esc(describe(e.summary))}</small><small>Saved ${esc(when(e.savedAt))}${oldNote(e)}</small></div>
+      <div class="t"><b>${esc(e.name)}</b><small>${esc(describe(e.summary))}</small><small>Saved ${esc(when(e.savedAt))}</small></div>
       <div class="go"><button class="act primary" data-open="${i}">${icon('play')}<span>Open</span></button><button class="act" data-del="${i}" aria-label="Delete ${esc(e.name)}, saved ${esc(when(e.savedAt))}">${icon('trash')}</button></div>
     </li>`).join('')}</ul>
     <p class="fine">Saved towns are kept in this browser on this device.</p>`;
@@ -95,19 +97,6 @@ function saves(h: MenuHost) {
 const art = (m: Pick<MapInfo, 'id' | 'icon' | 'ready'>) => artFor(m.id)
   ? `<i class="art pic${m.ready ? '' : ' off'}"><img src="${artFor(m.id)}" alt="" decoding="async" loading="lazy"></i>`
   : `<i class="art${m.ready ? '' : ' off'}">${icon(m.icon)}</i>`;
-
-function newGame(notice?: string) {
-  return `${notice ? `<p class="notice" role="status">${icon('info')}<span>${esc(notice)}</span></p>` : ''}
-    <ul class="maps">${MAPS.filter((m) => !m.inRegion).map((m) => `<li class="map${m.ready ? ' ready' : ''}">
-      ${art(m)}
-      <div class="t"><b>${esc(m.name)}</b><small>${esc(m.blurb)}</small>
-        ${m.ready ? '' : `<em class="chip">${esc(m.soon ?? 'Coming soon')}</em>`}</div>
-      <div class="go">${m.ready
-        ? m.setup ? `<button class="act primary" data-go="${m.id}" aria-label="Set up ${esc(m.name)}">${icon('adjustments')}<span>Set up and play</span></button>`
-          : `<button class="act primary" data-play="${m.id}" aria-label="Play ${esc(m.name)}">${icon('play')}<span>Play</span></button>`
-        : m.link ? `<a class="act" href="${m.link.href}">${icon('map')}<span>${esc(m.link.label)}</span></a>` : ''}</div>
-    </li>`).join('')}</ul>`;
-}
 
 function how() {
   const item = (ic: Icon, title: string, text: string) => `<li>${icon(ic)}<div><b>${title}</b><p>${text}</p></div></li>`;
@@ -121,7 +110,7 @@ function how() {
     </ul>
     <button class="act primary wide" data-guide>${icon('play')}<span>Start the guided game</span></button>
     <button class="act wide lib-link" data-go="library">${icon('layers')}<span>See every vehicle and bridge in the Library</span></button>
-    <p class="fine">The guide takes you through your first road, stop and line in the starter town. You can skip it at any point.</p>`;
+    <p class="fine">The guide takes you through your first road, stop and line in your region's start town. You can skip it at any point.</p>`;
 }
 
 // the game's building blocks, each on its own explorer page (src/app/library.ts)
@@ -144,7 +133,7 @@ function settings() {
       <div class="opts" role="radiogroup" aria-label="Quality">${opt('auto', 'Auto', 'Recommended')}${TIER_NAMES.map((n, i) => opt(i, n, TIER_NOTES[i])).join('')}</div>
     </section>
     <section class="grp"><h3>Guided start</h3>
-      <p class="fine" data-guide-state>${guideSeen() ? 'You’ve seen the guide. It can show again the next time you start the starter town.' : 'The guide shows the next time you start the starter town.'}</p>
+      <p class="fine" data-guide-state>${guideSeen() ? 'You’ve seen the guide. It can show again the next time you start a new game.' : 'The guide shows the next time you start a new game.'}</p>
       <button class="act wide" data-guide-reset ${guideSeen() ? '' : 'disabled'}>${icon('restore')}<span>Show the guide again</span></button>
     </section>
     <section class="grp danger"><h3>Saved data</h3>
@@ -172,7 +161,7 @@ function about() {
 const TITLES: Record<Exclude<Screen, 'home'>, [string, Icon]> = {
   saves: ['Saved towns', 'clock'],
   new: ['New game', 'play'],
-  region: ['Region', 'map'],
+  region: ['New game', 'map'],
   how: ['How to play', 'finger'],
   library: ['Library', 'layers'],
   settings: ['Settings', 'cog'],
@@ -181,7 +170,7 @@ const TITLES: Record<Exclude<Screen, 'home'>, [string, Icon]> = {
 
 /** Draw a screen into the menu's root, and wire it. */
 export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: string) {
-  const body = screen === 'home' ? home(h) : screen === 'saves' ? saves(h) : screen === 'new' ? newGame(notice) : screen === 'region' ? regionFirst(lastRegion()) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
+  const body = screen === 'home' ? home(h) : screen === 'saves' ? saves(h) : screen === 'new' || screen === 'region' ? `${notice ? `<p class="notice" role="status">${icon('info')}<span>${esc(notice)}</span></p>` : ''}${regionFirst(lastRegion())}` : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
   const [title, ic] = screen === 'home' ? ['', 'home' as Icon] : TITLES[screen];
   root.innerHTML = `<div class="scr scr-${screen}">
       ${hero(screen === 'home' ? 'hero' : 'hero dim')}
@@ -190,7 +179,7 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
     </div>`;
   root.querySelectorAll<HTMLElement>('[data-go]').forEach((b) => b.addEventListener('click', () => h.go(b.dataset.go as Screen)));
   root.querySelector('[data-back]')?.addEventListener('click', () => h.back());
-  root.querySelector('[data-continue]')?.addEventListener('click', () => { if (h.saves[0]) h.open(h.saves[0]); });
+  root.querySelector('[data-continue]')?.addEventListener('click', () => { const s = playable(h)[0]; if (s) h.open(s); });
   root.querySelectorAll<HTMLElement>('[data-open]').forEach((b) => b.addEventListener('click', () => h.open(h.saves[+b.dataset.open!])));
   root.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) => b.addEventListener('click', () => {
     if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.innerHTML = `${icon('trash')}<span>Delete?</span>`; return; }
@@ -211,9 +200,9 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
   reset?.addEventListener('click', () => {
     setGuideSeen(false);
     reset.disabled = true;
-    root.querySelector('[data-guide-state]')!.textContent = 'The guide shows the next time you start the starter town.';
+    root.querySelector('[data-guide-state]')!.textContent = 'The guide shows the next time you start a new game.';
   });
-  if (screen === 'region') {
+  if (screen === 'region' || screen === 'new') {
     const region = MAPS.find((m) => m.id === 'region')!;
     const wire = (o: ReturnType<typeof lastRegion>) => bindRegion(root.querySelector('.body')!, o, (next) => {
       const y = root.scrollTop;

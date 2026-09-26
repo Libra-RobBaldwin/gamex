@@ -231,7 +231,7 @@ export class WorldView {
       if (nor) g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
       if (col) g.setAttribute('color', new THREE.BufferAttribute(col, 3));
       g.setIndex(new THREE.BufferAttribute(idx, 1));
-      g.computeBoundingSphere();
+      g.computeBoundingSphere(); g.computeBoundingBox(); // (both now: the arrays are let go once on the GPU, and the underground view asks for the box)
       for (const a of Object.values(g.attributes)) (a as THREE.BufferAttribute).onUpload(function (this: THREE.BufferAttribute) { (this as unknown as { array: ArrayLike<number> | null }).array = null; });
       g.index!.onUpload(function (this: THREE.BufferAttribute) { (this as unknown as { array: ArrayLike<number> | null }).array = null; });
       bytes += pos.byteLength + idx.byteLength + (nor?.byteLength ?? 0) + (col?.byteLength ?? 0);
