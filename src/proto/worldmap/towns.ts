@@ -15,11 +15,12 @@ import { mix, rng, type Rand } from '../region/random';
 import type { XZ } from '../region/water';
 import { ROUTE_HALF, type Route, type Rail } from './routes';
 import type { WorldPlan, WorldSettlement } from './plan';
+import { REAL_VERN, paletteOf, placeResolver, type Vern } from '../vernacular';
 
 export interface SceneStreet { path: XZ[]; kerb: number; half: number; role: StreetCall['role']; settlement: number }
 // A building: its footprint (centre, width along the street, depth, turn), eaves height, roof
 // (0 flat, else the ridge's height above the eaves, gable along the width), and its colours.
-export interface SceneBuilding { x: number; z: number; w: number; d: number; rot: number; h: number; ridge: number; wall: number; roof: number; kind: BKind; settlement: number }
+export interface SceneBuilding { x: number; z: number; w: number; d: number; rot: number; h: number; ridge: number; wall: number; roof: number; kind: BKind; settlement: number; wc?: string; rc?: string } // (wc, rc: the place's own wall and roof colours, from vernacular.ts, over the indices)
 export type BKind = 'house' | 'terrace' | 'shop' | 'flats' | 'office' | 'tower' | 'shed' | 'church' | 'farm' | 'barn';
 export interface ScenePlot { poly: XZ[]; kind: 'garden' | 'yard' }
 export interface Scene { streets: SceneStreet[]; buildings: SceneBuilding[]; plots: ScenePlot[]; junctions: { x: number; z: number; r: number; rot: number }[] }
@@ -103,6 +104,18 @@ export function settlementScene(plan: WorldPlan, s: WorldSettlement): Scene {
   return sc;
 }
 
+// a place's building tradition, as the live buildings pick it (a real region has its own)
+const resolvers = new WeakMap<WorldPlan, ReturnType<typeof placeResolver>>();
+export function vernOf(plan: WorldPlan, s: WorldSettlement): Vern {
+  let at = resolvers.get(plan);
+  if (!at) {
+    const force = plan.source === 'real' ? REAL_VERN[plan.id] : undefined;
+    at = placeResolver({ seed: plan.seed, style: plan.options.style, relief: plan.options.relief, settlements: plan.settlements }, force);
+    resolvers.set(plan, at);
+  }
+  return at(s.x, s.z).vern;
+}
+
 function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
   const { streets: calls, zone } = layStreets({ ...s, gates: [] }, plan.water, plan.half);
   const r = rng(mix(s.seed, 77));
@@ -180,6 +193,12 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
         }
       }
     }
+  }
+  // (houses, terraces, shops and churches in the place's own building tradition, as its live
+  // buildings are: vernacular.ts; offices, towers, flats and sheds keep their concrete and glass)
+  const pal = paletteOf(vernOf(plan, s));
+  for (const b of buildings) if (b.kind === 'house' || b.kind === 'terrace' || b.kind === 'shop' || b.kind === 'church') {
+    b.wc = pal.walls[b.wall % pal.walls.length]; b.rc = pal.roofs[b.roof % pal.roofs.length];
   }
   return { streets, buildings, plots, junctions };
 }
