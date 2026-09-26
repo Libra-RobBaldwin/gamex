@@ -12,8 +12,8 @@ import { MODEL, purchaseList, type Offer } from './vehicles';
 import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
-import { Parking } from './game/parking';
-import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops // drives and car parks in use (the traffic's own cars park in them)
+import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
+import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops
 import { placeResolver, REAL_VERN, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
@@ -2485,14 +2485,14 @@ function snapshot(): GameSave {
 // Save now (the town is copied as it's written, so play carries straight on). False if it couldn't.
 function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
   if (!canSave) return Promise.resolve(false);
-  // (one at a time: a second asks for the same; but hiding the page mid-save saves again after it,
-  // so what's kept is the town as it was left)
-  if (saving) return why === 'hide' ? saving.then(() => saveGame('hide')) : saving;
+  // (one at a time: a second asks for the same. But hiding the page saves now, even mid-save: storage
+  // writes in the order asked, so what's kept is the town as it was left)
+  if (saving && why !== 'hide') return saving;
   const t0 = performance.now();
   let s: GameSave;
   try { s = snapshot(); } catch (e) { console.warn('save', e); return Promise.resolve(false); }
   const put = putSave(s), ms = performance.now() - t0; // (storage copies the town as it's put: that's in the time too)
-  saving = put.then(() => {
+  const mine: Promise<boolean> = put.then(() => {
     lastSaved = s.savedAt;
     (window as unknown as { __saved: unknown }).__saved = { why, at: s.savedAt, ms, clock: s.clock }; // (for e2e/save.e2e.mjs)
     if (why === 'manual') hint(`Town saved · ${describeSave(s.summary)}`, 'floppy');
@@ -2501,8 +2501,9 @@ function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
     console.warn('save', e);
     if (why !== 'hide') hint('Couldn’t save · this browser isn’t keeping storage for the game', 'alert');
     return false;
-  }).finally(() => { saving = null; });
-  return saving;
+  }).finally(() => { if (saving === mine) saving = null; });
+  saving = mine;
+  return mine;
 }
 if (canSave) {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void saveGame('hide'); });
@@ -2691,6 +2692,8 @@ function judgeFrames(now: number) {
 function togglePerf() { perfOn = !perfOn; shell.setPerf(perfOn); }
 
 function frame(now: number) {
+  // (a hidden page draws nothing and moves nothing, as browsers stop its frames anyway: it has just been saved)
+  if (document.visibilityState === 'hidden') { last = now; requestAnimationFrame(frame); return; }
   const rawMs = now - last;
   const dt = Math.min(0.1, rawMs / 1000);
   last = now;
