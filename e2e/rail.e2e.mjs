@@ -23,14 +23,14 @@ await page.evaluate(() => { window.proto.setSpeed(4); window.proto.purse.balance
 const starter = await page.evaluate(() => { const R = window.proto.railway; return { stations: R.stations.map((s) => s.name), lines: R.lines.length, trains: R.trains.length }; });
 console.log('at the start', JSON.stringify(starter));
 if (starter.stations.length || starter.lines || starter.trains) fail('the town starts with railway stations or lines already built');
-await page.evaluate(() => window.proto.focusOn({ x: -300, z: 540 }, 220));
+await page.evaluate(() => window.proto.focusOn({ x: -300, z: 590 }, 220));
 await wait(2500);
 await page.screenshot({ path: `${out}/rail-0-starter.png` });
 
 // a branch line just north of the start town: it crosses the lane north on the level
 const laid = await page.evaluate(() => {
   const P = window.proto;
-  P.buildRoad({ x: -480, z: 540 }, { x: 480, z: 540 }, 'rail-branch');
+  P.buildRoad({ x: -480, z: 590 }, { x: 480, z: 590 }, 'rail-branch');
   P.rebuild();
   return { crossings: P.railway.crossings.length, balance: 0 };
 });
@@ -46,7 +46,7 @@ async function buildStation(x) {
   for (const c of cards) if ((await c.getAttribute('aria-label'))?.startsWith('Railway station')) { await c.tap(); hit = true; break; }
   if (!hit) { fail('no Railway station card'); return; }
   await wait(500);
-  await page.evaluate((x) => window.proto.focusOn({ x, z: 540 }, 380), x);
+  await page.evaluate((x) => window.proto.focusOn({ x, z: 590 }, 380), x);
   await wait(1800);
   const s = await page.evaluate((x) => window.proto.toScreen({ x, z: 537 }), x);
   await page.touchscreen.tap(s.x, s.y);
@@ -72,7 +72,7 @@ let started = false;
 for (const b of newLine) if ((await b.textContent())?.includes('New line from here')) { await b.tap(); started = true; break; }
 if (!started) fail('no New line from here on the station sheet');
 await wait(600);
-await page.evaluate(() => window.proto.focusOn({ x: 0, z: 540 }, 900));
+await page.evaluate(() => window.proto.focusOn({ x: 0, z: 590 }, 900));
 await wait(2200);
 const first = built.find((s) => s.x < 0 && Math.abs(s.x) < 400);
 const fp = await page.evaluate((id) => { const P = window.proto, sh = P.railway.shapes.get(id); return P.toScreen(sh.mid); }, first.id);
@@ -86,7 +86,7 @@ console.log('line', JSON.stringify(line));
 if (!line || line.stops.length !== 2) fail('the rail line was not created');
 
 // run: calls at both stations, doors open at a platform, the crossing shuts and holds the road
-await page.evaluate(() => window.proto.focusOn({ x: 0, z: 540 }, 160));
+await page.evaluate(() => window.proto.focusOn({ x: 0, z: 590 }, 160));
 let doorsSeen = false, closedSeen = false, carsHeld = 0, onTrack = 0;
 for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a second)
   await wait(1000);
@@ -110,7 +110,7 @@ for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a
   if (s.red) fail('a train passed a red signal');
 }
 if (onTrack) fail(`a car was on the level crossing while a train held its block (${onTrack} samples)`);
-await page.evaluate(() => window.proto.focusOn({ x: 300, z: 540 }, 120));
+await page.evaluate(() => window.proto.focusOn({ x: 300, z: 590 }, 120));
 await wait(2500);
 await page.screenshot({ path: `${out}/rail-5-station.png` });
 // Transport > Railway lists the line

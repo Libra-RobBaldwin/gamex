@@ -51,10 +51,10 @@ const changed = await A.evaluate(() => {
   const P = window.proto, net = P.net;
   // a branch line just north of the start town, two stations on it and a rail line between them
   P.purse.balance += 3_000_000;
-  P.buildRoad({ x: -480, z: 540 }, { x: 480, z: 540 }, 'rail-branch');
+  P.buildRoad({ x: -480, z: 590 }, { x: 480, z: 590 }, 'rail-branch');
   P.rebuild();
   // and a one-way carriageway north out of town, bridging the branch (the region starts with neither)
-  P.buildRoad({ x: 150, z: 350 }, { x: 150, z: 1300 }, 'dual', { oneway: true });
+  P.buildRoad({ x: -300, z: 350 }, { x: -300, z: 1300 }, 'dual', { oneway: true });
   P.rebuild();
   const R = P.railway, seg = [...net.segs.values()].filter((x) => net.def(x).cls === 'rail').sort((a, b) => net.length(b) - net.length(a))[0];
   const made = [];
