@@ -151,14 +151,14 @@ describe('a road joined where a stop stands', () => {
     const stopsAfter = [...w.net.segs.values()].reduce((k, s) => k + s.stops.length, 0);
     return { l, check: c, before, balance, stops, stopsAfter };
   }
-  it.fails('warns, or keeps the stop and the line', () => {
+  it('warns, or keeps the stop and the line', () => {
     const w = world({ lines: 'pair' });
     const r = join(w);
     expect(r.check.ok, `Network.check: ${r.check.reason}`).toBe(true); // (nothing stops the road being built there)
     expect(r.stopsAfter, `${r.stops} stops before the road, ${r.stopsAfter} after`).toBe(r.stops);
     expect(w.lines.list).toContain(r.l);
   });
-  it.fails('or at least refunds the buses the line loses', () => {
+  it('or at least refunds the buses the line loses', () => {
     const w = world({ lines: 'pair' });
     const r = join(w);
     const after = w.lines.list.includes(r.l) ? w.lines.buses(r.l).length : 0;
