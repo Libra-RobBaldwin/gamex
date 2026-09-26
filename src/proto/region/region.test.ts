@@ -86,9 +86,10 @@ describe('the roads out of a place (PRIORS.exits: as real roads leave real place
   const deg = (r: number) => (r * 180) / Math.PI;
   const heading = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.atan2(b.z - a.z, b.x - a.x);
   const norm = (a: number) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
-  test('every settlement has four ways out: both ends of its high street and of its main cross street, each facing out', () => {
+  test('every settlement has its ways out: its radials’ ends, the high street’s two among them, each facing out', () => {
     for (const seed of SEEDS) for (const s of plan(seed).settlements) {
-      expect(s.spokes?.length).toBe(4);
+      expect(s.spokes!.length).toBeGreaterThanOrEqual(2);
+      expect(s.spokes!.length).toBeLessThanOrEqual(8);
       expect(s.gates).toEqual(s.spokes!.filter((k) => k.along === 'high').map(({ x, z }) => ({ x, z })));
       for (const k of s.spokes!) {
         expect(Math.hypot(k.ux, k.uz)).toBeCloseTo(1, 6);

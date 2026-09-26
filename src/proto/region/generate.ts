@@ -9,7 +9,7 @@
 //
 // Pure: no three.js, no DOM, no Network. Plots, infill and buildings come from the game's own
 // Network and buildgen once the streets are built (docs/region.md).
-import { rng, range, pick } from './random';
+import { rng, range, pick, type Rand } from './random';
 import { MapWater, type XZ } from '../worldmap/water';
 import { GRID_PLAN, PRIORS } from './priors';
 
@@ -51,115 +51,169 @@ const INDUSTRIAL_ROAD = 'arterial-1-40-0-0-0';
 export const reach = (kind: Kind, r: number) => r + (KINDS[kind].industrial ? KINDS[kind].spacing * (KINDS[kind].industrial!.rows + 1) : 0) + 30;
 
 // ---------------- streets ----------------
-interface LNode { i: number; j: number; u: number; v: number; ind: boolean }
-interface LEdge { a: LNode; b: LNode; role: Role; curve: number; tree?: boolean }
-
-// A settlement's streets: a lattice in its own frame (u along the high street, v across it), its
-// outline a wobbly circle. Row 0 is the high street and column 0 the main cross street; the city
-// and the towns have an industrial edge of wider blocks on one side. A grid plan keeps the lattice
-// square; an organic one jitters it, bends the streets and leaves some out (keeping every place
-// reachable). Streets that would touch water or leave the map are dropped, then only what's joined
-// to the centre is kept, and the calls come out in that order, each starting on a street already
-// built: so every settlement's streets are one connected piece, whatever the water took.
+// A place grown along its roads, as real ones are (PRIORS.towns, measured from OS maps): its radials
+// meet at the middle (the high street is one pair, running along `axis`; a village has 2–4, a town
+// 4–6, a city 6–8, the next one 30° or more on); the houses run further out along the radials than
+// between them, so the edge follows the roads, ragged; cross streets join neighbouring radials as
+// T-junctions part way out; side streets and closes branch off every 60–80 m (a village's every
+// 120 m), about one in five a close; the city and the towns have an industrial estate, a small grid
+// of wide blocks, on one radial's outer end. Streets that would touch water or leave the map are
+// dropped, then only what's joined to the centre is kept, and the calls come out in the order they're
+// reached from there, each starting on a street already built: so every place is one connected piece.
+interface LNode { x: number; z: number }
+interface LEdge { a: LNode; b: LNode; role: Role; curve: number; type?: string }
+const NODE = (n: Map<string, LNode>, x: number, z: number) => { const k = `${Math.round(x)},${Math.round(z)}`; let v = n.get(k); if (!v) n.set(k, (v = { x, z })); return v; };
+const pickQ = (r: Rand, qsv: readonly number[]) => { // a draw between a prior's quartiles (the 25th to the 75th)
+  return qsv[1] + (qsv[3] - qsv[1]) * r();
+};
 export function layStreets(s: Settlement, mw: MapWater, bound: number): { streets: StreetCall[]; zone: ZoneRule | null } {
   const K = KINDS[s.kind], S = K.spacing, r = rng(s.seed), organic = s.plan === 'organic';
-  const w1 = range(r, 0, 6.28), w2 = range(r, 0, 6.28);
-  const edgeAt = (th: number) => s.r * (1 + 0.12 * Math.sin(3 * th + w1) + 0.07 * Math.sin(5 * th + w2));
-  const ca = Math.cos(s.axis), sa = Math.sin(s.axis);
-  const world = (u: number, v: number): XZ => ({ x: s.x + u * ca - v * sa, z: s.z + u * sa + v * ca });
-  const n = Math.ceil((s.r * 1.25) / S) + 1;
-  const indRows = K.industrial ? K.industrial.rows : 0;
-  const j0 = Math.floor(s.r / S) + 1; // the first industrial row (on the +v side)
-  const nodes = new Map<string, LNode>();
-  const id = (i: number, j: number) => `${i},${j}`;
-  for (let j = -n; j <= n + indRows; j++) for (let i = -n - 1; i <= n + 1; i++) {
-    const ind = K.industrial !== null && j >= j0 && j < j0 + indRows;
-    let u = i * S, v = j * S;
-    if (ind) { if (Math.abs(u) > K.industrial!.width) continue; }
-    else if (j >= j0 && K.industrial) continue;
-    else {
-      const d = Math.hypot(u, v), inside = d <= edgeAt(Math.atan2(v, u));
-      // the high street runs a block past the edge each way; the cross street to the edge
-      const spine = (j === 0 && Math.abs(u) <= s.r + S * 0.6) || (i === 0 && Math.abs(v) <= s.r);
-      if (!inside && !spine) continue;
-    }
-    if (organic && !(i === 0 && j === 0)) {
-      const k = j === 0 ? 0.05 : 0.18; // (the high street keeps nearly straight)
-      u += range(r, -k, k) * S; v += range(r, -k, k) * S;
-    }
-    nodes.set(id(i, j), { i, j, u, v, ind });
+  const T = s.kind === 'village' ? 'village' : 'town', P = PRIORS.towns;
+  const nodes = new Map<string, LNode>(), edges: LEdge[] = [];
+  const centre = NODE(nodes, s.x, s.z);
+  const add = (a: LNode, b: LNode, role: Role, curve = 0, type?: string) => { if (a !== b) edges.push({ a, b, role, curve, type }); };
+  // 1. the radials: the high street's two ways, then the rest spread round, none within `minGap` of another
+  const nRad = s.kind === 'village' ? 2 + Math.floor(r() * 3) : s.kind === 'town' ? 4 + Math.floor(r() * 3) : 6 + Math.floor(r() * 3);
+  const minGap = (s.kind === 'village' ? 40 : 28) * (Math.PI / 180);
+  const angles = [s.axis, s.axis + Math.PI];
+  for (let tries = 0; angles.length < nRad && tries < 80; tries++) {
+    const a = range(r, 0, 2 * Math.PI);
+    if (angles.every((b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) >= minGap)) angles.push(a);
   }
-  // the lattice's streets
-  const edges: LEdge[] = [];
-  for (const a of nodes.values()) {
-    for (const [di, dj] of [[1, 0], [0, 1]]) {
-      const b = nodes.get(id(a.i + di, a.j + dj));
-      if (!b) continue;
-      const ind = a.ind || b.ind;
-      // industrial blocks are twice as long: cross streets only on every other column (and the spine)
-      if (ind && dj === 1 && a.i % 2 !== 0 && a.ind && b.ind) continue;
-      const role: Role = dj === 0 && a.j === 0 ? 'high' : di === 0 && a.i === 0 ? (ind ? 'industrial' : 'main') : ind ? 'industrial' : 'street';
-      edges.push({ a, b, role, curve: organic && role === 'street' ? range(r, -0.14, 0.14) : 0 });
+  // how far the edge reaches along a radial (the ribbon) against between them (the built circle, r)
+  const along = Math.max(1.05, pickQ(r, P.edgeAlongOverBetween[T]));
+  // side streets and closes: how often they branch off a radial, how many are closes, how long they run
+  const every = pickQ(r, [0, 1000 / P.sideStreetsPerKm[T][3], 1000 / P.sideStreetsPerKm[T][2], 1000 / P.sideStreetsPerKm[T][1], 0]);
+  const closeShare = pickQ(r, P.closeShare[T]);
+  const sideLen = () => Math.min(s.r * 0.6, Math.max(40, pickQ(r, P.sideStreetLengthM[T])));
+  const closeLen = () => Math.min(s.r * 0.5, Math.max(40, pickQ(r, P.closeLengthM[T])));
+  const grid = !organic;
+  interface Radial { angle: number; high: boolean; pts: LNode[]; dist: number[]; len: number }
+  let side = 1;
+  const radials: Radial[] = angles.map((angle, i) => {
+    const high = i < 2, L = s.r * along * range(r, 0.85, 1.15) + (high ? S * 0.6 : 0);
+    // the line: vertices a block or so apart, wandering a little
+    const verts: { x: number; z: number; d: number; h: number }[] = [{ x: s.x, z: s.z, d: 0, h: angle }];
+    let x = s.x, z = s.z, h = angle, run = 0;
+    const bend = organic ? range(r, -0.05, 0.05) : 0;
+    while (run < L - 20) {
+      const step = Math.min(S * range(r, 0.8, 1.2), L - run);
+      if (organic) h += bend + range(r, -0.06, 0.06);
+      x += Math.cos(h) * step; z += Math.sin(h) * step; run += step;
+      verts.push({ x, z, d: run, h });
     }
-  }
-  // Keep off water and the map's edge (the whole road band, with the water's gap for the bank).
-  const pathOf = (e: LEdge) => {
-    const A = world(e.a.u, e.a.v), B = world(e.b.u, e.b.v);
-    const c = e.curve ? ctrlOf(A, B, e.curve) : undefined;
-    return { A, B, c };
+    // where the side streets branch: every `every` metres from a block out, well short of the end
+    const branches: number[] = [];
+    // (a radial longer than a block always has one, even in the smallest village)
+    for (let d = run > 1.2 * S ? Math.min(S * 0.6 + range(r, 0, every), run - 40) : run; d < run - 30; d += every * range(r, 0.7, 1.3)) branches.push(d);
+    // the nodes along it: the vertices and the branch points, in order, none within 12 m of the last
+    const marks = [...verts.map((v) => ({ d: v.d, branch: false })), ...branches.map((d) => ({ d, branch: true }))].sort((p, q) => p.d - q.d);
+    const posAt = (d: number) => { let k = 1; while (k < verts.length - 1 && verts[k].d < d) k++; const a = verts[k - 1], b = verts[k], t = b.d > a.d ? (d - a.d) / (b.d - a.d) : 0; return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, h: b.h }; };
+    const pts: LNode[] = [centre], dist = [0], heads = [angle];
+    for (const m of marks) {
+      if (m.d <= 0 || m.d - dist[dist.length - 1] < 12) { if (m.branch && m.d - dist[dist.length - 1] < 12 && dist.length > 1) branchAt(pts[pts.length - 1], heads[heads.length - 1]); continue; }
+      const q = posAt(m.d), n = NODE(nodes, q.x, q.z);
+      if (n === pts[pts.length - 1]) continue;
+      add(pts[pts.length - 1], n, high ? 'high' : 'main', 0);
+      pts.push(n); dist.push(m.d); heads.push(q.h);
+      if (m.branch) branchAt(n, q.h);
+    }
+    return { angle, high, pts, dist, len: dist[dist.length - 1] };
+    function branchAt(from: LNode, hr: number) {
+      const hs = hr + (side * Math.PI) / 2 + (grid ? 0 : range(r, -0.25, 0.25));
+      const isClose = r() < closeShare, len = isClose ? closeLen() : sideLen();
+      const to = NODE(nodes, from.x + Math.cos(hs) * len, from.z + Math.sin(hs) * len);
+      add(from, to, 'street', organic && !isClose ? range(r, -0.1, 0.1) : 0);
+      if (!isClose && organic && r() < 0.5) { // (a through street turns to run on with the radial, a loop road)
+        const h2 = hs + (r() < 0.5 ? 1 : -1) * (Math.PI / 2) * range(r, 0.8, 1.1), l2 = sideLen();
+        add(to, NODE(nodes, to.x + Math.cos(h2) * l2, to.z + Math.sin(h2) * l2), 'street', range(r, -0.1, 0.1));
+      }
+      if (grid || r() > 0.25) side = -side;
+    }
+  });
+  const at = (R: Radial, d: number): LNode => { // the radial's node nearest `d` out from the centre
+    let best = R.pts[0], bd = Infinity;
+    for (let k = 0; k < R.pts.length; k++) { const e = Math.abs(R.dist[k] - d); if (e < bd) { bd = e; best = R.pts[k]; } }
+    return best;
   };
+  // 2. cross streets between neighbouring radials, part way out (each a T on both radials, offset so
+  // the two never line up across a radial as a crossroads)
+  const byAngle = [...radials].sort((p, q) => norm2(p.angle) - norm2(q.angle));
+  const rings = s.kind === 'village' ? [0.6] : s.kind === 'town' ? [0.45, 0.8] : [0.35, 0.6, 0.85];
+  for (let i = 0; i < byAngle.length && byAngle.length > 2; i++) {
+    const A = byAngle[i], B = byAngle[(i + 1) % byAngle.length];
+    let gap = norm2(B.angle) - norm2(A.angle); if (gap <= 0) gap += 2 * Math.PI;
+    if (gap < 0.6 || gap > 2.6) continue; // (too narrow a wedge for a street between, or the far side of a linear place)
+    for (const f of rings) {
+      const d = s.r * f, a = at(A, d * range(r, 0.9, 1.1)), b = at(B, d * range(r, 0.9, 1.1));
+      const L = Math.hypot(b.x - a.x, b.z - a.z);
+      if (L < 50 || L > 4 * S || a === centre || b === centre) continue;
+      add(a, b, 'street', organic ? range(r, -0.12, 0.12) : 0);
+    }
+  }
+  // 4. the industrial estate (city and towns): a small grid of wide blocks on the end of the radial
+  // nearest the cross street's +v way, beyond the houses
+  let zone: ZoneRule | null = null;
+  if (K.industrial) {
+    const want = s.axis + Math.PI / 2;
+    const R = radials.reduce((b, q) => (Math.abs(Math.atan2(Math.sin(q.angle - want), Math.cos(q.angle - want))) < Math.abs(Math.atan2(Math.sin(b.angle - want), Math.cos(b.angle - want))) ? q : b));
+    // (its frame: the radial's node about a block short of the houses' end, and the radial's line there)
+    const base = at(R, s.r * 0.95), bi = R.pts.indexOf(base), prevN = R.pts[Math.max(0, bi - 1)];
+    const hd = Math.atan2(base.z - prevN.z, base.x - prevN.x), ux = Math.cos(hd), uz = Math.sin(hd), vx = -uz, vz = ux, W = K.industrial.width, rows = K.industrial.rows;
+    const world = (u: number, v: number): XZ => ({ x: base.x + ux * u + vx * v, z: base.z + uz * u + vz * v });
+    // the spine on along the radial's line, then the rows across it and the links between them
+    let prev = base;
+    for (let j = 1; j <= rows; j++) { const n = NODE(nodes, world(j * S, 0).x, world(j * S, 0).z); add(prev, n, 'industrial', 0, INDUSTRIAL_ROAD); prev = n; }
+    const cols = Math.max(1, Math.round(W / (2 * S)));
+    for (let j = 0; j <= rows; j++) for (let c = -cols; c < cols; c++) {
+      const a = NODE(nodes, world(j * S, c * 2 * S).x, world(j * S, c * 2 * S).z), b = NODE(nodes, world(j * S, (c + 1) * 2 * S).x, world(j * S, (c + 1) * 2 * S).z);
+      add(a, b, 'industrial');
+      if (j < rows && c % 2 === 0 && c !== 0) add(a, NODE(nodes, world((j + 1) * S, c * 2 * S).x, world((j + 1) * S, c * 2 * S).z), 'industrial');
+    }
+    const v0 = -cols * 2 * S - S * 0.55, v1 = cols * 2 * S + S * 0.55, u0 = -S * 0.5, u1 = rows * S + S * 0.75;
+    zone = { kind: 'industrial', settlement: s.id, poly: [world(u0, v0), world(u1, v0), world(u1, v1), world(u0, v1)] };
+  }
+  // keep off water and the map's edge (the whole road band, with the water's gap for the bank)
+  const pathOf = (e: LEdge) => { const A: XZ = { x: e.a.x, z: e.a.z }, B: XZ = { x: e.b.x, z: e.b.z }; return { A, B, c: e.curve ? ctrlOf(A, B, e.curve) : undefined }; };
   const dry = (e: LEdge) => {
-    const { A, B, c } = pathOf(e);
-    const L = Math.hypot(B.x - A.x, B.z - A.z);
-    for (let k = 0; k <= Math.ceil(L / 5); k++) {
-      const t = k / Math.ceil(L / 5), p = c ? quad(A, c, B, t) : { x: A.x + (B.x - A.x) * t, z: A.z + (B.z - A.z) * t };
+    const { A, B, c } = pathOf(e), L = Math.hypot(B.x - A.x, B.z - A.z), n = Math.max(1, Math.ceil(L / 5));
+    for (let k = 0; k <= n; k++) {
+      const t = k / n, p = c ? quad(A, c, B, t) : { x: A.x + (B.x - A.x) * t, z: A.z + (B.z - A.z) * t };
       if (Math.abs(p.x) > bound - 60 || Math.abs(p.z) > bound - 60) return false;
       if (mw.edgeDistance(p, 60) < 30) return false; // (a road's band, the 9.5 m bank gap and room for plots)
     }
     return true;
   };
-  let kept = edges.filter(dry);
-  // An organic plan leaves some streets out, but never one that would cut a place off: a spanning
-  // tree from the centre (along the high street and the cross street first) always stays.
-  if (organic) {
-    const tree = spanningTree(kept, nodes.get(id(0, 0))!);
-    kept = kept.filter((e) => tree.has(e) || e.role !== 'street' || r() > PRIORS.roads.junctions.deadEnd); // (about as many dead ends as real towns have: priors.ts)
-  }
-  // then only what's joined to the centre, in the order it's reached from there
-  const order = reachOrder(kept, nodes.get(id(0, 0))!);
+  const kept = edges.filter(dry);
+  // only what's joined to the centre, in the order it's reached from there
+  const order = reachOrder(kept, centre);
   const high = pick(r, [K.high[0], K.high[1]]);
   const streetType = () => (organic ? K.street[r() < 0.5 ? 1 : 0] : K.street[0]);
   const streets: StreetCall[] = order.map(({ e, from }) => {
-    const [p, q] = from === e.a ? [e.a, e.b] : [e.b, e.a];
-    const { A, B, c } = pathOf(e);
-    const fwd = p === e.a;
-    // the city's boulevard only through its centre, then an avenue
-    const type = e.role === 'high' ? (s.kind === 'city' && Math.max(Math.abs(p.i), Math.abs(q.i)) > 2 ? 'avenue' : high)
-      : e.role === 'main' ? K.main : e.role === 'industrial' ? (e.a.i === 0 && e.b.i === 0 ? INDUSTRIAL_ROAD : 'street') : streetType();
+    const { A, B, c } = pathOf(e), fwd = from === e.a;
+    const far = Math.max(Math.hypot(A.x - s.x, A.z - s.z), Math.hypot(B.x - s.x, B.z - s.z));
+    // the city's boulevard only through its centre, then an avenue; a radial is its main type near the
+    // middle and a street further out
+    const type = e.type ?? (e.role === 'high' ? (s.kind === 'city' && far > 2.5 * S ? 'avenue' : high) : e.role === 'main' ? (far > s.r * 0.9 ? K.street[0] : K.main) : e.role === 'industrial' ? 'street' : streetType());
     return { settlement: s.id, a: fwd ? A : B, b: fwd ? B : A, c, type, role: e.role };
   });
-  // where the high street leaves town, each way: the gates; and with the main cross street's two
-  // ends, the four ways out (spokes), each facing out along its street
-  const built = (x: LNode) => order.some(({ e }) => e.a === x || e.b === x);
-  const hs = [...nodes.values()].filter((x) => x.j === 0 && built(x)), ms = [...nodes.values()].filter((x) => x.i === 0 && built(x));
+  // the ways out: each radial's end, facing out along it; the gates are the high street's two
+  const reached = new Set<LNode>(); for (const { e } of order) { reached.add(e.a); reached.add(e.b); }
   const spokes: Spoke[] = [];
-  const spoke = (x: LNode, du: number, dv: number, along: Spoke['along']) => { const p = world(x.u, x.v); spokes.push({ ...p, ux: du * ca - dv * sa, uz: du * sa + dv * ca, along }); return p; };
-  if (hs.length) {
-    const lo = hs.reduce((m, x) => (x.i < m.i ? x : m)), hi = hs.reduce((m, x) => (x.i > m.i ? x : m));
-    s.gates = [spoke(lo, -1, 0, 'high'), spoke(hi, 1, 0, 'high')];
-  }
-  if (ms.length) {
-    const lo = ms.reduce((m, x) => (x.j < m.j ? x : m)), hi = ms.reduce((m, x) => (x.j > m.j ? x : m));
-    if (lo !== hi) { spoke(lo, 0, -1, 'main'); spoke(hi, 0, 1, 'main'); }
+  for (const R of radials) {
+    let k = R.pts.length - 1;
+    while (k > 1 && !reached.has(R.pts[k])) k--; // (a radial cut short by water ends where it got to)
+    if (k < 1 || !reached.has(R.pts[k])) continue;
+    const end = R.pts[k], o = R.pts[k - 1], dl = Math.hypot(end.x - o.x, end.z - o.z);
+    if (dl < 1) continue;
+    spokes.push({ x: end.x, z: end.z, ux: (end.x - o.x) / dl, uz: (end.z - o.z) / dl, along: R.high ? 'high' : 'main' });
   }
   s.spokes = spokes;
-  let zone: ZoneRule | null = null;
-  if (K.industrial) {
-    const W = K.industrial.width + S * 0.55, v0 = (j0 - 0.5) * S, v1 = (j0 + indRows - 1) * S + S * 0.75;
-    zone = { kind: 'industrial', settlement: s.id, poly: [world(-W, v0), world(W, v0), world(W, v1), world(-W, v1)] };
-  }
+  const hs = spokes.filter((k) => k.along === 'high');
+  s.gates = hs.map(({ x, z }) => ({ x, z }));
   return { streets, zone };
 }
+const norm2 = (a: number) => { a %= 2 * Math.PI; if (a < 0) a += 2 * Math.PI; return a; };
 // a curve's control point: off the middle, square to the chord, by `k` of its length
 function ctrlOf(A: XZ, B: XZ, k: number): XZ {
   const mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2, dx = B.x - A.x, dz = B.z - A.z;
@@ -173,21 +227,6 @@ function adjacency(edges: LEdge[]) {
   return adj;
 }
 const rank = (e: LEdge) => (e.role === 'high' ? 0 : e.role === 'main' ? 1 : 2);
-// breadth first from the centre, the main streets before the rest
-function spanningTree(edges: LEdge[], root: LNode) {
-  const adj = adjacency(edges), seen = new Set([root]), tree = new Set<LEdge>();
-  let frontier = [root];
-  while (frontier.length) {
-    const next: LNode[] = [];
-    for (const x of frontier) for (const e of [...(adj.get(x) ?? [])].sort((p, q) => rank(p) - rank(q))) {
-      const y = e.a === x ? e.b : e.a;
-      if (seen.has(y)) continue;
-      seen.add(y); tree.add(e); next.push(y);
-    }
-    frontier = next;
-  }
-  return tree;
-}
 // every edge joined to the root, each with the end it's reached from (already built when it's laid)
 function reachOrder(edges: LEdge[], root: LNode) {
   const adj = adjacency(edges), seen = new Set([root]), done = new Set<LEdge>(), out: { e: LEdge; from: LNode }[] = [];
