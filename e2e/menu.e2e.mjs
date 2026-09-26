@@ -207,8 +207,9 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   const steps = await page.$$eval('#guide .g-dots i', (d) => d.length);
   check(steps >= 3 && steps <= 5, `the guide has 3–5 steps (${steps})`);
   await page.screenshot({ path: `${shots}/5-guide-next.png` });
-  await page.tap('#guide [data-skip]');
-  check(await page.$('#guide') === null, 'Skip guide closes it');
+  // (Next from the line step lands on the last step, which has Start playing in place of Skip)
+  await page.tap('#guide [data-skip], #guide [data-next].primary');
+  check(await page.$('#guide') === null, 'Skip guide (or Start playing on the last step) closes it');
   noErrors(page, 'guide');
   // a second game: no guide
   await page.goto(BASE + '/');
