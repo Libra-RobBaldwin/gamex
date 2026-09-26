@@ -632,7 +632,9 @@ function cornice(k: Kit, cx: number, cz: number, w: number, d: number, y: number
   k.cap(rect(cx + w / 2 + out / 2, cz, out, d), y + h, m);
 }
 function flatRoof(k: Kit, cx: number, cz: number, w: number, d: number, y: number, edge: THREE.Material, r: () => number, plant = true) {
-  k.cap(rect(cx, cz, w - 0.2, d - 0.2), y + 0.05, plain(GRAVEL));
+  // (not every flat roof is the same grey: felt, gravel or a pale membrane)
+  const felt = ['#5d5e5f', GRAVEL, '#9d9a94', '#6e6a64'][hash(`${w.toFixed(1)}|${d.toFixed(1)}|${y.toFixed(1)}`) % 4];
+  k.cap(rect(cx, cz, w - 0.2, d - 0.2), y + 0.05, plain(felt));
   parapet(k, cx, cz, w, d, y, 0.8, edge);
   if (plant) for (let i = 0; i < 1 + Math.floor(r() * 3); i++) k.box(cx + (r() - 0.5) * w * 0.5, y, cz + (r() - 0.5) * d * 0.5, 1.5 + r() * 2.5, 1 + r() * 1.4, 1.2 + r() * 2, plain(pick(r, ['#a7a9ab', '#9aa0a4', '#c1c3c4'])));
 }
@@ -832,7 +834,13 @@ function shop(k: Kit, l: Lot, r: () => number) {
   k.block(0, 0, W, D, gh, up, fh, cellOf(L.win), fm(L), blank(L), fm(L));
   cornice(k, 0, 0, W, D, gh - 0.1, plain(TRIM), 0.2, 0.3);
   let roofName = 'parapet roof';
-  if (style === 'victorian' && r() < 0.6) { k.gable(0, 0, W, D, top, 3, 0.2, roofM(pick(r, SLATE)[0]), blank(L)); roofName = 'slate roof'; }
+  // (most old high-street shops have pitched roofs, gable or front-gable; the stone and modern ones parapets)
+  const pitchedRoof = style === 'victorian' ? r() < 0.9 : style === 'render' ? r() < 0.7 : false;
+  if (pitchedRoof) {
+    const rc = style === 'victorian' ? pick(r, SLATE)[0] : pick(r, [...TILE, ...SLATE])[0];
+    if (W < 11 && r() < 0.4) { k.at(0, 0, Math.PI / 2, () => k.gable(0, 0, D, W, top, Math.min(4.5, W * 0.45), 0.2, roofM(rc), fm(L))); roofName = 'front gable'; }
+    else { k.gable(0, 0, W, D, top, Math.min(3.6, D * 0.28), 0.25, roofM(rc), blank(L), 0.05); chimney(k, W / 2 - 0.5, -0.4, top + Math.min(3.6, D * 0.28), blank(L)); roofName = style === 'victorian' ? 'slate roof' : 'pitched roof'; }
+  }
   else if (style === 'deco') { flatRoof(k, 0, 0, W, D, top, blank(L), r); k.box(0, top, zf - 0.6, W * 0.3, 2.2, 1.2, blank(L)); extras.push('Deco parapet'); }
   else { cornice(k, 0, 0, W, D, top - 0.3, plain(TRIM), 0.25, 0.35); flatRoof(k, 0, 0, W, D, top, blank(L), r); }
   if (r() < 0.55) { const n = Math.max(1, Math.round(W / 4.5)); for (let i = 0; i < n; i++) awning(k, -W / 2 + (W / n) * (i + 0.5), zf, (W / n) * 0.9, 3.5, fascia); extras.push('striped awning'); }
