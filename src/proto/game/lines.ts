@@ -210,6 +210,10 @@ export class StopMarkers {
       const s = new THREE.Sprite(m);
       s.position.set(p.x, p.y ?? 4, p.z);
       s.renderOrder = 21;
+      // (on a hilly map the badge is drawn lifted by the ground's height in its shader, drape.ts, but
+      // three.js culls a sprite where it thinks it is: badges in the top half of a phone's screen went
+      // missing. A dozen sprites cost nothing to draw uncut.)
+      s.frustumCulled = false;
       s.userData.px = key !== undefined ? 40 : 30; // css pixels across
       this.group.add(s);
     }
