@@ -80,6 +80,17 @@ Moretonhampstead 8 from its centre; Ludlow's are its A roads and lanes continuin
 4. Lanes' grades and density (`PRIORS.follow`, more links).
 5. Evidence: side-by-side shots, compare rows, the hero pictures retaken.
 
+## Also mine, from the logic review (coordinator, 21:22 UTC; `docs/reports/review-2026-09-26.md` on `claude/review-2026-09-26`)
+Lower priority than step 4's PR and the stream above; in this PR or a small one of their own.
+1. **Bug 11 (verified):** `worldmap/view.ts` clears `pending` on a rejected tile request and remembers nothing,
+   so the tile is asked for again every frame for ever, with a warning each time. Remember failed tiles and
+   retry with a back-off, a few times at most. Test: "the streamed view › stops asking for a tile whose
+   request failed" in `src/proto/review.flow.test.ts` on that branch.
+2. **Suspected:** `worldmap/econ.ts` `pop()` grows every far place linearly for ever regardless of service, and
+   on activation a place's people jump to the sum of its generated buildings' capacity (`main.ts:2061`). Make
+   the coarse growth bounded and consistent with what the generator will build, so a place doesn't change size
+   when it comes to life.
+
 ## State
 | Item | State |
 |---|---|
@@ -90,3 +101,5 @@ Moretonhampstead 8 from its centre; Ludlow's are its A roads and lanes continuin
 | Generator: town grown along its radials | not started |
 | Lane grades and density | not started |
 | Side-by-side evidence, compare yardsticks, hero pictures retaken | not started |
+| Review bug 11 (failed tiles asked for for ever) | not started |
+| Review: bounded coarse growth, no jump on activation | not started |
