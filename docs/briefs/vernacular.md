@@ -4,13 +4,14 @@ Session https://claude.ai/code/session_013W364Qf7cmYt1ejuVbvaHq · branch `claud
 
 PRs:
 - merged: #45 (regional styles, parking), #48 (shopping complexes);
-- open: #50 (scenery dressed up close, save on hide, level on slopes).
+- merged: #50 (scenery dressed up close, save on hide, level on slopes).
+- open: the street-trees follow-up.
 
 **Honesty rule:** "done" below means live on the integration branch and checked on a 412×915 close-zoom screenshot. "In PR" means pushed and checked here, but not merged yet.
 
 ## Now (ONE MAP, PLAN.md 07:40)
 
-1. **Urgent: the phone's plain grey boxes that don't improve on zoom.** **Live** (merged into the integration branch at 63e7a2f). Street trees in dressed places followed in #50 (pushed 10:20).
+1. **Urgent: the phone's plain grey boxes that don't improve on zoom.** **Live** (merged into the integration branch at 63e7a2f). Street trees in dressed places: in a follow-up PR (pushed 10:20, after #50 merged).
    - Cause: on the 50 km map, towns outside the live play area, and places in it not yet live, are world50's scenery boxes at every zoom.
    - Fix: `game/dress.ts` rebuilds them with buildgen below a 700 m view and hides the boxes in the same frame.
    - Checked at 412×915 on `?map=region&seed=42`: a town 7 km out and a city (screenshots in `docs/reports/dress/`).
