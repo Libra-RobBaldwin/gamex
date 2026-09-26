@@ -3,6 +3,63 @@
 Session: world50, branch `claude/work-world50`. PR #42 is merged into the integration branch and live.
 Written 26 Sep 2026, ~01:20 UTC, after merging the integration branch in (b57164e).
 
+## Status now (26 Sep, ~10:00 UTC)
+
+This section wins over the tables below, which are the brief as first written.
+
+**Rule:** "live" means merged into the integration branch and checked on a 412×915 screenshot. "Done
+locally" means it isn't live yet.
+
+### Live
+- **50 km map with a world plan** (#42, merged).
+  - The plan has places in every 10 km square with land, industries with lanes in, trunk routes over the land (off at the start), OS priors for the counts, `WorldSource` (seeded or real), and far towns in vernacular palettes.
+  - The live area's trees are lighter from mid zoom out, and places come to life a few streets a frame.
+  - Checked on screenshots: the start town, a far town, the docks, the steelworks and a village.
+
+### Done locally, waiting on PR #51 (open)
+- **The first view frames the start town's centre** again. Checked on a screenshot.
+- **Roundabouts are rare on 50 km maps.** The start town went from 14 minis and 4 roundabouts to 1 roundabout, 2 sets of signals and 24 give-ways, and a village's 3 minis became crossroads. Checked on screenshots.
+
+### In progress: one map (PLAN.md, top section)
+Local commits, which go up once #51 has merged.
+
+**Done locally:**
+- `maps.ts` lists one map, with real places inside it.
+- New game goes straight to the Region setup, and the guide is set to run in the region's start town. I haven't checked the guide on a screenshot yet.
+- Old `?map=town`, `?map=sandbox` and `?place=` links open the Region setup with a notice.
+- Old saves are shown as "made on a map that no longer exists", with Delete, and Continue skips them. This isn't checked on a screenshot yet.
+- `main.ts` has lost the starter town's, the sandbox's and the 6 km map's own branches.
+
+**Bugs found and fixed along the way (local):**
+- `focusOn` aimed at height 0, so on the hills every "go to" framed the wrong spot.
+- The underground view crashed on 50 km maps: the scenery tiles free their vertex arrays, and the view needed their bounding boxes.
+
+**e2e suites on `proto.html?map=region&seed=42`:**
+
+| Suite | State |
+|---|---|
+| loop | passes |
+| lines | passes |
+| stations | being fixed: the underground stations had to move clear of the start town's streets, 450 m apart, and the train needs longer |
+| save | not run yet |
+| rail | not run yet |
+| menu | not rewritten yet |
+
+**Not started:**
+- Deleting the dead code: the 6 km parts of `region/generate.ts`, `interchange/region.ts`, `rail/region.ts`, `region/town.ts` (the town map), `places.html` and `osm/` (unless OS uses them).
+- Updating the docs that describe the deleted maps.
+- Closing PR #22.
+- The start menu's hero pictures still show the old starter town. They need retaking from the region.
+
+### Not done, and waiting on others
+- Grades from `PRIORS.follow` (OS hasn't added them).
+- Fewer places on hills by real height (terrain's heights before placement).
+- The cover-map scratch memory (205 MB, countryside's `ground/paint.ts`).
+- Scenery houses from `buildgen.ts` (with vernacular).
+
+### Finding for the economy
+On the region's start town, the loop e2e shows the town turning to declining once its line is withdrawn. But within 8 to 16 days its people and jobs don't always fall below where they stood with the line: they did on one run and not on another. On the old starter town they fell every time. The suite now checks for the turn to declining, and logs the numbers.
+
 ## (a) Everything asked of this session
 
 ### The original task (the coordinator, 25 Sep)
