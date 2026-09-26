@@ -2476,8 +2476,9 @@ export const COMPLEXES = ['parade', 'arcade', 'retailpark', 'mall'] as const;
 export type Complex = (typeof COMPLEXES)[number];
 export const isComplex = (a?: string): a is Complex => !!a && (COMPLEXES as readonly string[]).includes(a);
 // how many shops a complex holds (each counts as a shop's worth of jobs in the economy)
-export function unitsOf(l: Pick<Lot, 'kind' | 'arch' | 'w' | 'd'>) {
+export function unitsOf(l: Pick<Lot, 'kind' | 'arch' | 'w' | 'd'> & { units?: number }) {
   if (l.kind !== 'shop' || !isComplex(l.arch)) return 1;
+  if (l.units) return l.units; // (a complex made from plots holds as many shops as they did: complexes.ts)
   const W = l.w, D = l.d;
   return l.arch === 'parade' ? Math.max(2, Math.round(W / 6)) : l.arch === 'arcade' ? Math.max(6, Math.round((W * Math.min(D, 32)) / 110))
     : l.arch === 'retailpark' ? Math.max(3, Math.round(W / 18)) : Math.max(12, Math.round((W * Math.min(D, 90)) / 320));
