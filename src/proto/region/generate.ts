@@ -74,11 +74,13 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
   const add = (a: LNode, b: LNode, role: Role, curve = 0, type?: string) => { if (a !== b) edges.push({ a, b, role, curve, type }); };
   // 1. the radials: the high street's two ways, then the rest spread round, none within `minGap` of another
   const nRad = s.kind === 'village' ? 2 + Math.floor(r() * 3) : s.kind === 'town' ? 4 + Math.floor(r() * 3) : 6 + Math.floor(r() * 3);
-  const minGap = (s.kind === 'village' ? 40 : 28) * (Math.PI / 180);
+  const minGap = (s.kind === 'village' ? 40 : 28) * (Math.PI / 180), offHigh = 45 * (Math.PI / 180);
   const angles = [s.axis, s.axis + Math.PI];
+  const apart = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
   for (let tries = 0; angles.length < nRad && tries < 80; tries++) {
     const a = range(r, 0, 2 * Math.PI);
-    if (angles.every((b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) >= minGap)) angles.push(a);
+    // (45° or more off the high street's line, so a radial's first piece never runs alongside it)
+    if (angles.every((b, k) => apart(a, b) >= (k < 2 ? offHigh : minGap))) angles.push(a);
   }
   // how far the edge reaches along a radial (the ribbon) against between them (the built circle, r)
   const along = Math.max(1.05, pickQ(r, P.edgeAlongOverBetween[T]));
@@ -88,17 +90,43 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
   const sideLen = () => Math.min(s.r * 0.6, Math.max(40, pickQ(r, P.sideStreetLengthM[T])));
   const closeLen = () => Math.min(s.r * 0.5, Math.max(40, pickQ(r, P.closeLengthM[T])));
   const grid = !organic;
-  interface Radial { angle: number; high: boolean; pts: LNode[]; dist: number[]; len: number }
+  // where the line p→q meets u→v: how far along p→q (0..1), or -1 when they don't meet
+  const meet = (p: LNode, q: LNode, u: LNode, v: LNode) => {
+    const d = (q.x - p.x) * (v.z - u.z) - (q.z - p.z) * (v.x - u.x);
+    if (Math.abs(d) < 1e-9) return -1;
+    const t = ((u.x - p.x) * (v.z - u.z) - (u.z - p.z) * (v.x - u.x)) / d, w = ((u.x - p.x) * (q.z - p.z) - (u.z - p.z) * (q.x - p.x)) / d;
+    return t > 0 && t < 1 && w > 0 && w < 1 ? t : -1;
+  };
+  interface Radial { angle: number; high: boolean; pts: LNode[]; dist: number[]; len: number; joins: number[] }
+  const branchNodes = new Set<LNode>(); // (where a side street leaves a radial: no cross street joins there too)
   let side = 1;
-  const radials: Radial[] = angles.map((angle, i) => {
+  // the far ends of the through side streets, by radial and side: consecutive ones on the same side are
+  // joined by a back street, so they end on a street (a T), as real ones do; closes end free
+  const backs: LNode[][] = [];
+  // (the others start on the high street a block or two off the middle, staggered either side, as
+  // roads meet a market town's high street: T-junctions, not one great crossroads)
+  const radials: Radial[] = [];
+  const sideCount = [0, 0];
+  const startFor = (i: number, angle: number, L: number): LNode => {
+    if (i < 2) return centre;
+    const w = Math.cos(angle - s.axis) >= 0 ? 0 : 1, H = radials[w], k0 = 1 + (sideCount[w]++ % 2);
+    // (and from where its line crosses none of the radials laid before it: two mains meet at the
+    // high street, not out in the houses)
+    const clear = (n: LNode) => { const q = { x: n.x + Math.cos(angle) * L, z: n.z + Math.sin(angle) * L }; return !edges.some((e) => e.role !== 'street' && e.a !== n && e.b !== n && meet(n, q, e.a, e.b) >= 0); };
+    for (let k = k0; k < H.pts.length; k++) if (!branchNodes.has(H.pts[k]) && H.dist[k] < s.r * 0.7 && clear(H.pts[k])) return H.pts[k];
+    for (let k = k0; k < H.pts.length; k++) if (!branchNodes.has(H.pts[k]) && H.dist[k] < s.r * 0.7) return H.pts[k];
+    return H.pts[Math.min(1, H.pts.length - 1)];
+  };
+  angles.forEach((angle, i) => {
     const high = i < 2, L = s.r * along * range(r, 0.85, 1.15) + (high ? S * 0.6 : 0);
+    const start = startFor(i, angle, L);
     // the line: vertices a block or so apart, wandering a little
-    const verts: { x: number; z: number; d: number; h: number }[] = [{ x: s.x, z: s.z, d: 0, h: angle }];
-    let x = s.x, z = s.z, h = angle, run = 0;
+    const verts: { x: number; z: number; d: number; h: number }[] = [{ x: start.x, z: start.z, d: 0, h: angle }];
+    let x = start.x, z = start.z, h = angle, run = 0;
     const bend = organic ? range(r, -0.05, 0.05) : 0;
     while (run < L - 20) {
       const step = Math.min(S * range(r, 0.8, 1.2), L - run);
-      if (organic) h += bend + range(r, -0.06, 0.06);
+      if (organic && !(high && run < 1.7 * S)) h += bend + range(r, -0.06, 0.06); // (the high street runs straight through the middle)
       x += Math.cos(h) * step; z += Math.sin(h) * step; run += step;
       verts.push({ x, z, d: run, h });
     }
@@ -106,35 +134,41 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
     const branches: number[] = [];
     // (a radial longer than a block always has one, even in the smallest village)
     for (let d = run > 1.2 * S ? Math.min(S * 0.6 + range(r, 0, every), run - 40) : run; d < run - 30; d += every * range(r, 0.7, 1.3)) branches.push(d);
-    // the nodes along it: the vertices and the branch points, in order, none within 12 m of the last
-    const marks = [...verts.map((v) => ({ d: v.d, branch: false })), ...branches.map((d) => ({ d, branch: true }))].sort((p, q) => p.d - q.d);
+    // the nodes along it: the vertices, the branch points and (on the high street) where the other
+    // radials start, in order, none within 12 m of the last
+    const marks: { d: number; branch: boolean; node?: LNode }[] = [...verts.map((v) => ({ d: v.d, branch: false })), ...branches.map((d) => ({ d, branch: true }))].sort((p, q) => p.d - q.d);
     const posAt = (d: number) => { let k = 1; while (k < verts.length - 1 && verts[k].d < d) k++; const a = verts[k - 1], b = verts[k], t = b.d > a.d ? (d - a.d) / (b.d - a.d) : 0; return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, h: b.h }; };
-    const pts: LNode[] = [centre], dist = [0], heads = [angle];
+    const pts: LNode[] = [start], dist = [0], heads = [angle];
+    const ends: Record<number, LNode[]> = { 1: [], [-1]: [] };
     for (const m of marks) {
-      if (m.d <= 0 || m.d - dist[dist.length - 1] < 12) { if (m.branch && m.d - dist[dist.length - 1] < 12 && dist.length > 1) branchAt(pts[pts.length - 1], heads[heads.length - 1]); continue; }
-      const q = posAt(m.d), n = NODE(nodes, q.x, q.z);
+      if (m.d <= 0 || (m.d - dist[dist.length - 1] < 12 && !m.node)) { if (m.branch && m.d - dist[dist.length - 1] < 12 && dist.length > 1) branchAt(pts[pts.length - 1], heads[heads.length - 1]); continue; }
+      const q = posAt(m.d), n = m.node ?? NODE(nodes, q.x, q.z);
       if (n === pts[pts.length - 1]) continue;
       add(pts[pts.length - 1], n, high ? 'high' : 'main', 0);
       pts.push(n); dist.push(m.d); heads.push(q.h);
       if (m.branch) branchAt(n, q.h);
     }
-    return { angle, high, pts, dist, len: dist[dist.length - 1] };
+    backs.push(ends[1], ends[-1]);
+    radials.push({ angle, high, pts, dist, len: dist[dist.length - 1], joins: [] });
     function branchAt(from: LNode, hr: number) {
       const hs = hr + (side * Math.PI) / 2 + (grid ? 0 : range(r, -0.25, 0.25));
       const isClose = r() < closeShare, len = isClose ? closeLen() : sideLen();
       const to = NODE(nodes, from.x + Math.cos(hs) * len, from.z + Math.sin(hs) * len);
       add(from, to, 'street', organic && !isClose ? range(r, -0.1, 0.1) : 0);
-      if (!isClose && organic && r() < 0.5) { // (a through street turns to run on with the radial, a loop road)
-        const h2 = hs + (r() < 0.5 ? 1 : -1) * (Math.PI / 2) * range(r, 0.8, 1.1), l2 = sideLen();
-        add(to, NODE(nodes, to.x + Math.cos(h2) * l2, to.z + Math.sin(h2) * l2), 'street', range(r, -0.1, 0.1));
-      }
+      branchNodes.add(from);
+      if (!isClose) ends[side].push(to);
       if (grid || r() > 0.25) side = -side;
     }
   });
-  const at = (R: Radial, d: number): LNode => { // the radial's node nearest `d` out from the centre
-    let best = R.pts[0], bd = Infinity;
-    for (let k = 0; k < R.pts.length; k++) { const e = Math.abs(R.dist[k] - d); if (e < bd) { bd = e; best = R.pts[k]; } }
-    return best;
+  for (const list of backs) for (let k = 1; k < list.length; k++) {
+    const a = list[k - 1], b = list[k], L = Math.hypot(b.x - a.x, b.z - a.z);
+    if (L >= 40 && L <= 3 * S) add(a, b, 'street', organic ? range(r, -0.1, 0.1) : 0);
+  }
+  const at = (R: Radial, d: number, k0 = 0): LNode => { // the radial's node nearest `d` out from the centre (`k0`: one further out), not a branch point
+    let best = 0, bd = Infinity;
+    for (let k = 1; k < R.pts.length; k++) { if (branchNodes.has(R.pts[k])) continue; const e = Math.abs(R.dist[k] - d); if (e < bd) { bd = e; best = k; } }
+    for (let k = best + k0; k < R.pts.length; k++) if (!branchNodes.has(R.pts[k])) return R.pts[k];
+    return R.pts[best];
   };
   // 2. cross streets between neighbouring radials, part way out (each a T on both radials, offset so
   // the two never line up across a radial as a crossroads)
@@ -144,34 +178,18 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
     const A = byAngle[i], B = byAngle[(i + 1) % byAngle.length];
     let gap = norm2(B.angle) - norm2(A.angle); if (gap <= 0) gap += 2 * Math.PI;
     if (gap < 0.6 || gap > 2.6) continue; // (too narrow a wedge for a street between, or the far side of a linear place)
-    for (const f of rings) {
-      const d = s.r * f, a = at(A, d * range(r, 0.9, 1.1)), b = at(B, d * range(r, 0.9, 1.1));
+    rings.forEach((f, ri) => {
+      // (on a radial, the wedge on each side takes a different node at each ring: a T each, never a crossroads)
+      const d = s.r * f, a = at(A, d * range(r, 0.9, 1.1), (A.joins[ri] ?? 0) % 2), b = at(B, d * range(r, 0.9, 1.1), (B.joins[ri] ?? 0) % 2);
       const L = Math.hypot(b.x - a.x, b.z - a.z);
-      if (L < 50 || L > 4 * S || a === centre || b === centre) continue;
+      if (L < 50 || L > 4 * S || a === centre || b === centre || a === b) return;
+      // (clear of the streets already laid: no end of another street within 30 m of its line, but its own)
+      const ux = (b.x - a.x) / L, uz = (b.z - a.z) / L;
+      const near = (q: LNode) => { if (q === a || q === b) return false; const t = (q.x - a.x) * ux + (q.z - a.z) * uz; if (t < -5 || t > L + 5) return false; return Math.abs(-(q.x - a.x) * uz + (q.z - a.z) * ux) < 30; };
+      if (edges.some((e) => near(e.a) || near(e.b))) return;
       add(a, b, 'street', organic ? range(r, -0.12, 0.12) : 0);
-    }
-  }
-  // 4. the industrial estate (city and towns): a small grid of wide blocks on the end of the radial
-  // nearest the cross street's +v way, beyond the houses
-  let zone: ZoneRule | null = null;
-  if (K.industrial) {
-    const want = s.axis + Math.PI / 2;
-    const R = radials.reduce((b, q) => (Math.abs(Math.atan2(Math.sin(q.angle - want), Math.cos(q.angle - want))) < Math.abs(Math.atan2(Math.sin(b.angle - want), Math.cos(b.angle - want))) ? q : b));
-    // (its frame: the radial's node about a block short of the houses' end, and the radial's line there)
-    const base = at(R, s.r * 0.95), bi = R.pts.indexOf(base), prevN = R.pts[Math.max(0, bi - 1)];
-    const hd = Math.atan2(base.z - prevN.z, base.x - prevN.x), ux = Math.cos(hd), uz = Math.sin(hd), vx = -uz, vz = ux, W = K.industrial.width, rows = K.industrial.rows;
-    const world = (u: number, v: number): XZ => ({ x: base.x + ux * u + vx * v, z: base.z + uz * u + vz * v });
-    // the spine on along the radial's line, then the rows across it and the links between them
-    let prev = base;
-    for (let j = 1; j <= rows; j++) { const n = NODE(nodes, world(j * S, 0).x, world(j * S, 0).z); add(prev, n, 'industrial', 0, INDUSTRIAL_ROAD); prev = n; }
-    const cols = Math.max(1, Math.round(W / (2 * S)));
-    for (let j = 0; j <= rows; j++) for (let c = -cols; c < cols; c++) {
-      const a = NODE(nodes, world(j * S, c * 2 * S).x, world(j * S, c * 2 * S).z), b = NODE(nodes, world(j * S, (c + 1) * 2 * S).x, world(j * S, (c + 1) * 2 * S).z);
-      add(a, b, 'industrial');
-      if (j < rows && c % 2 === 0 && c !== 0) add(a, NODE(nodes, world((j + 1) * S, c * 2 * S).x, world((j + 1) * S, c * 2 * S).z), 'industrial');
-    }
-    const v0 = -cols * 2 * S - S * 0.55, v1 = cols * 2 * S + S * 0.55, u0 = -S * 0.5, u1 = rows * S + S * 0.75;
-    zone = { kind: 'industrial', settlement: s.id, poly: [world(u0, v0), world(u1, v0), world(u1, v1), world(u0, v1)] };
+      A.joins[ri] = (A.joins[ri] ?? 0) + 1; B.joins[ri] = (B.joins[ri] ?? 0) + 1;
+    });
   }
   // keep off water and the map's edge (the whole road band, with the water's gap for the bank)
   const pathOf = (e: LEdge) => { const A: XZ = { x: e.a.x, z: e.a.z }, B: XZ = { x: e.b.x, z: e.b.z }; return { A, B, c: e.curve ? ctrlOf(A, B, e.curve) : undefined }; };
@@ -184,6 +202,75 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
     }
     return true;
   };
+  // 4. the industrial estate (city and towns): a small grid of wide blocks beside one radial's outer
+  // end, its way in a T off the radial, its rows running along the radial, as estates sit on the main
+  // road out of a market town
+  let zone: ZoneRule | null = null;
+  const tryEstate = (R: Radial): boolean => {
+    const W = K.industrial!.width, rows = K.industrial!.rows, cols = Math.max(1, Math.round(W / (2 * S)));
+    // (its frame: the radial's node a little short of the houses' end, and the radial's line there;
+    // the side the rest of the town's streets leave clear, else the other)
+    const base = at(R, s.r * 0.9), bi = R.pts.indexOf(base), prevN = R.pts[Math.max(0, bi - 1)];
+    if (base === centre || bi < 1) return false;
+    const hd = Math.atan2(base.z - prevN.z, base.x - prevN.x), vx = Math.cos(hd), vz = Math.sin(hd);
+    const sides = r() < 0.5 ? [1, -1] : [-1, 1];
+    for (const sg of sides) {
+      const made: LEdge[] = [];
+      const addE = (a: LNode, b: LNode, type?: string) => { if (a !== b) made.push({ a, b, role: 'industrial', curve: 0, type }); };
+      const ux = -vz * sg, uz = vx * sg;
+      const world = (u: number, v: number): XZ => ({ x: base.x + ux * u + vx * v, z: base.z + uz * u + vz * v });
+      // the way in, square off the radial, then the rows along it and the links between them
+      addE(base, NODE(nodes, world(S, 0).x, world(S, 0).z), INDUSTRIAL_ROAD);
+      for (let j = 1; j <= rows + 1; j++) for (let c = -cols; c < cols; c++) {
+        const a = NODE(nodes, world(j * S, c * 2 * S).x, world(j * S, c * 2 * S).z), b = NODE(nodes, world(j * S, (c + 1) * 2 * S).x, world(j * S, (c + 1) * 2 * S).z);
+        addE(a, b);
+        // (the links between the rows: on alternate columns row by row, never straight across a row)
+        if (j <= rows && (c + j) % 2 === 0 && c !== 0) addE(a, NODE(nodes, world((j + 1) * S, c * 2 * S).x, world((j + 1) * S, c * 2 * S).z));
+      }
+      // (it must cross no other main street, its way in must be dry, and most of it: what's wet is left out)
+      if (made.some((e) => edges.some((f) => f.role !== 'street' && f.a !== e.a && f.b !== e.a && f.a !== e.b && f.b !== e.b && meet(e.a, e.b, f.a, f.b) >= 0))) continue;
+      if (!dry(made[0]) || made.filter(dry).length < made.length * 0.6) continue;
+      // (the radial's side streets on that side, alongside the estate, make way for it)
+      const span = cols * 2 * S + S;
+      for (let k = edges.length - 1; k >= 0; k--) {
+        const e = edges[k];
+        if (e.role !== 'street' || !R.pts.includes(e.a)) continue;
+        const d = R.dist[R.pts.indexOf(e.a)] - R.dist[bi];
+        if (Math.abs(d) <= span && (e.b.x - e.a.x) * ux + (e.b.z - e.a.z) * uz > 0) edges.splice(k, 1);
+      }
+      edges.push(...made);
+      const v0 = -cols * 2 * S - S * 0.55, v1 = cols * 2 * S + S * 0.55, u0 = S * 0.5, u1 = (rows + 1) * S + S * 0.75;
+      zone = { kind: 'industrial', settlement: s.id, poly: [world(u0, v0), world(u1, v0), world(u1, v1), world(u0, v1)] };
+      return true;
+    }
+    return false;
+  };
+  if (K.industrial) {
+    const want = s.axis + Math.PI / 2, off = (q: Radial) => Math.abs(Math.atan2(Math.sin(q.angle - want), Math.cos(q.angle - want)));
+    for (const R of [...radials].sort((a, b) => off(a) - off(b))) if (R.len > s.r * 0.8 && tryEstate(R)) break;
+  }
+  // 5. no street crosses another: a side, back or cross street that meets a radial (or the estate)
+  // ends on it, a T (the network splits the road there); one that would cross another street, meet
+  // a road too flat to make a junction, or pass within 25 m of a node not its own, is left out
+  const trunk = edges.filter((e) => e.role !== 'street'), laid: LEdge[] = [...trunk];
+  for (const e of edges) {
+    if (e.role !== 'street') continue;
+    let t0 = 1, hit: LEdge | undefined;
+    for (const f of trunk) { if (f.a === e.a || f.b === e.a || f.a === e.b || f.b === e.b) continue; const t = meet(e.a, e.b, f.a, f.b); if (t >= 0 && t < t0) { t0 = t; hit = f; } }
+    let b = e.b;
+    if (hit) {
+      const L0 = Math.hypot(e.b.x - e.a.x, e.b.z - e.a.z), Lf = Math.hypot(hit.b.x - hit.a.x, hit.b.z - hit.a.z);
+      const sin = Math.abs(((e.b.x - e.a.x) * (hit.b.z - hit.a.z) - (e.b.z - e.a.z) * (hit.b.x - hit.a.x)) / (L0 * Lf));
+      if (sin < 0.35 || L0 * t0 < 40) continue;
+      b = NODE(nodes, e.a.x + (e.b.x - e.a.x) * t0, e.a.z + (e.b.z - e.a.z) * t0);
+    }
+    const L = Math.hypot(b.x - e.a.x, b.z - e.a.z), ux = (b.x - e.a.x) / L, uz = (b.z - e.a.z) / L;
+    if (laid.some((f) => f.role === 'street' && f.a !== e.a && f.b !== e.a && f.a !== b && f.b !== b && meet(e.a, b, f.a, f.b) >= 0)) continue;
+    const tooNear = (q: LNode) => { if (q === e.a || q === b) return false; const t = (q.x - e.a.x) * ux + (q.z - e.a.z) * uz; return t > 15 && t < L + 15 && Math.abs(-(q.x - e.a.x) * uz + (q.z - e.a.z) * ux) < 25; };
+    if (laid.some((f) => tooNear(f.a) || tooNear(f.b))) continue;
+    laid.push(b === e.b ? e : { ...e, b, curve: 0 });
+  }
+  edges.length = 0; edges.push(...laid);
   const kept = edges.filter(dry);
   // only what's joined to the centre, in the order it's reached from there
   const order = reachOrder(kept, centre);
@@ -227,20 +314,25 @@ function adjacency(edges: LEdge[]) {
   return adj;
 }
 const rank = (e: LEdge) => (e.role === 'high' ? 0 : e.role === 'main' ? 1 : 2);
-// every edge joined to the root, each with the end it's reached from (already built when it's laid)
+// every edge joined to the root, each with the end it's reached from (already built when it's laid):
+// nearest the centre first, by distance along the streets, a side street counting half as long again
+// as a radial, so a radial's pieces are reached along the radial (a refused side street then never
+// leaves the rest of the radial with nothing to start on)
 function reachOrder(edges: LEdge[], root: LNode) {
-  const adj = adjacency(edges), seen = new Set([root]), done = new Set<LEdge>(), out: { e: LEdge; from: LNode }[] = [];
-  let frontier = [root];
-  while (frontier.length) {
-    const next: LNode[] = [];
-    for (const x of frontier) for (const e of [...(adj.get(x) ?? [])].sort((p, q) => rank(p) - rank(q))) {
+  const adj = adjacency(edges), best = new Map<LNode, number>([[root, 0]]), done = new Set<LEdge>(), out: { e: LEdge; from: LNode }[] = [];
+  const open: { n: LNode; d: number }[] = [{ n: root, d: 0 }], closed = new Set<LNode>();
+  while (open.length) {
+    let bi = 0; for (let i = 1; i < open.length; i++) if (open[i].d < open[bi].d) bi = i;
+    const { n: x, d } = open.splice(bi, 1)[0];
+    if (closed.has(x)) continue;
+    closed.add(x);
+    for (const e of [...(adj.get(x) ?? [])].sort((p, q) => rank(p) - rank(q))) {
       if (done.has(e)) continue;
       done.add(e);
       out.push({ e, from: x });
-      const y = e.a === x ? e.b : e.a;
-      if (!seen.has(y)) { seen.add(y); next.push(y); }
+      const y = e.a === x ? e.b : e.a, nd = d + Math.hypot(e.b.x - e.a.x, e.b.z - e.a.z) * (e.role === 'street' ? 1.5 : 1);
+      if (nd < (best.get(y) ?? Infinity)) { best.set(y, nd); open.push({ n: y, d: nd }); }
     }
-    frontier = next;
   }
   return out;
 }

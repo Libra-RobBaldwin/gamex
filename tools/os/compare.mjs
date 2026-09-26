@@ -12,6 +12,7 @@ import { planWorld, loadPlan } from '../../src/proto/worldmap/plan.ts';
 import { setRegionReader } from '../../src/proto/real/world.ts';
 import { readRegion } from '../../src/proto/real/node.ts';
 import { PRIORS } from '../../src/proto/region/priors.ts';
+import { layStreets } from '../../src/proto/region/generate.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 setRegionReader(async (id) => readRegion(id, { half: 40000 }));
@@ -78,6 +79,46 @@ routes over the plan's heights, so they read a little lower.)
 |---|${cols.map(() => '---').join('|')}|
 ${rows.map((r) => `| ${r} | ${cols.map((c) => c.m[r]).join(' | ')} |`).join('\n')}
 | plan made in (ms) | ${cols.map((c) => Math.round(c.ms)).join(' | ')} |
+`;
+
+// ---------------- the places themselves: seeded street layouts against the real towns' ----------------
+// (the real figures are PRIORS.towns and PRIORS.roads, measured by tools/os/towns.mjs and measure.mjs over
+// the bakes' own streets; the seeded ones are layStreets over each seeded plan's places)
+function places(p) {
+  const out = { town: { radials: [], deadEnd: 0, tee: 0, cross: 0, pieces: [], bins: new Float64Array(36) }, village: { radials: [], deadEnd: 0, tee: 0, cross: 0, pieces: [], bins: new Float64Array(36) } };
+  for (const s of p.settlements) {
+    const T = s.kind === 'village' ? 'village' : 'town', o = out[T];
+    const { streets } = layStreets({ ...s, gates: [] }, p.water, p.half);
+    o.radials.push(s.spokes?.length ?? 0);
+    const deg = new Map(), key = (q) => `${Math.round(q.x)},${Math.round(q.z)}`;
+    for (const st of streets) { for (const q of [st.a, st.b]) deg.set(key(q), (deg.get(key(q)) ?? 0) + 1); const L = Math.hypot(st.b.x - st.a.x, st.b.z - st.a.z); o.pieces.push(L); const b = ((Math.atan2(st.b.z - st.a.z, st.b.x - st.a.x) * 180) / Math.PI + 360) % 180; o.bins[Math.floor(b / 10) % 18] += L; o.bins[(Math.floor(b / 10) % 18) + 18] += L; }
+    // (a radial's end is where a lane leaves, not a dead end: the plan's lanes carry on from the spokes)
+    const spokeKeys = new Set((s.spokes ?? []).map((k) => key(k)));
+    for (const [k, d] of deg) { if (d === 1) { if (!spokeKeys.has(k)) o.deadEnd++; } else if (d === 3) o.tee++; else if (d >= 4) o.cross++; }
+  }
+  const order = (bins) => { const tot = bins.reduce((t, v) => t + v, 0); let Hh = 0; for (const v of bins) if (v > 0) Hh -= (v / tot) * Math.log(v / tot); const Hmax = Math.log(36), Hg = Math.log(4); return +(1 - ((Hh - Hg) / (Hmax - Hg)) ** 2).toFixed(2); };
+  const row = (o) => { const n = o.deadEnd + o.tee + o.cross || 1; return { radials: median(o.radials), junctions: `${(o.deadEnd / n).toFixed(2)} / ${(o.tee / n).toFixed(2)} / ${(o.cross / n).toFixed(2)}`, piece: Math.round(median(o.pieces)), order: order(o.bins) }; };
+  return { town: row(out.town), village: row(out.village) };
+}
+const PT = PRIORS.towns, PR = PRIORS.roads;
+const realPlaces = { town: { radials: PT.radials.town[2], junctions: `${PR.junctions.deadEnd} / ${PR.junctions.tee} / ${PR.junctions.cross}`, piece: `${PR.streetPieceM[0][1]}–${PR.streetPieceM[1][1]}`, order: `${PR.orientationOrder.core[0]}–${PR.orientationOrder.core[1]} (core), ${PR.orientationOrder.suburb[0]}–${PR.orientationOrder.suburb[1]} (suburb)` }, village: { radials: PT.radials.village[2], junctions: '(as towns)', piece: '(as towns)', order: '(as towns)' } };
+const seededPlaces = SEEDS.map((sd) => ({ seed: sd, m: places(planWorld({ seed: sd, size: 50 })) }));
+md += `
+## The places: the seeded street layouts on the real towns' yardsticks
+
+The real column is what \`tools/os/towns.mjs\` and \`measure.mjs\` measured over the bakes' own streets
+(\`PRIORS.towns\`, \`PRIORS.roads\`); the seeded columns are \`layStreets\` over every place on those plans.
+
+| | real (measured) | ${SEEDS.map((sd) => `seeded: ${sd}`).join(' | ')} |
+|---|---|${SEEDS.map(() => '---').join('|')}|
+| radials per town (median) | ${realPlaces.town.radials} | ${seededPlaces.map((c) => c.m.town.radials).join(' | ')} |
+| radials per village (median) | ${realPlaces.village.radials} | ${seededPlaces.map((c) => c.m.village.radials).join(' | ')} |
+| junctions in towns: dead ends / T / crossroads | ${realPlaces.town.junctions} | ${seededPlaces.map((c) => c.m.town.junctions).join(' | ')} |
+| junctions in villages: dead ends / T / crossroads | ${realPlaces.village.junctions} | ${seededPlaces.map((c) => c.m.village.junctions).join(' | ')} |
+| street piece between junctions, towns (m, median) | ${realPlaces.town.piece} | ${seededPlaces.map((c) => c.m.town.piece).join(' | ')} |
+| street piece, villages (m, median) | ${realPlaces.village.piece} | ${seededPlaces.map((c) => c.m.village.piece).join(' | ')} |
+| orientation order, towns (1 a grid, 0 every bearing alike) | ${realPlaces.town.order} | ${seededPlaces.map((c) => c.m.town.order).join(' | ')} |
+| orientation order, villages | ${realPlaces.village.order} | ${seededPlaces.map((c) => c.m.village.order).join(' | ')} |
 `;
 mkdirSync(join(ROOT, 'docs/reports/os'), { recursive: true });
 writeFileSync(join(ROOT, 'docs/reports/os/seeded-vs-real.md'), md);

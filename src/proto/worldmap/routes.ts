@@ -64,8 +64,7 @@ export function planRoutes(c: Ctx, full = false): { roads: Route[]; rails: Rail[
   if (full) for (const line of motorwayLines(c, r)) add('motorway', L.through(line, [], 'motorway'), null, null);
   for (const l of [...c.links].sort((p, q) => p.length - q.length)) {
     const A = c.settlements[l.a], B = c.settlements[l.b], kind = full ? l.road : 'B';
-    const sa = stem(c, A, B), sb = stem(c, B, A);
-    add(kind, joinStems(sa, L.find(sa.end, sb.end, [A.id, B.id], kind, true), sb, kind, () => L.find(sa.end, sb.end, [A.id, B.id], kind)), A.id, B.id);
+    add(kind, laneBetween(c, L, A, B, kind), A.id, B.id);
   }
   for (const e of edgeExits(c, r)) {
     // (found to just inside the edge, then straight on off it)
@@ -280,13 +279,43 @@ export function spokeFor(A: WorldSettlement, toward: XZ): Spoke | null {
   const score = (s: Spoke) => { const dx = toward.x - s.x, dz = toward.z - s.z, d = Math.hypot(dx, dz) || 1; return (s.ux * dx + s.uz * dz) / d; };
   return A.spokes.reduce((b, s) => (score(s) > score(b) ? s : b));
 }
+// A lane between two places: out of each by the spoke facing the other, straight, then the way found
+// between. Where the way found from the best-facing spoke turns straight back (water or another
+// place beyond it), the next spoke is tried, so a lane never doubles back through the place it leaves.
+function laneBetween(c: Ctx, L: LaneFinder, A: WorldSettlement, B: WorldSettlement, kind: RouteKind): XZ[] | null {
+  const spokesOf = (P: WorldSettlement, toward: XZ) => {
+    if (!P.spokes?.length) return [null];
+    // (a spoke facing water within its stem's length is a poor way out: it counts against it)
+    const wet = (s: Spoke) => { for (let d = 30; d <= STEM; d += 30) if (standing(c.water, { x: s.x + s.ux * d, z: s.z + s.uz * d }) < 60) return true; return false; };
+    const score = (s: Spoke) => { const dx = toward.x - s.x, dz = toward.z - s.z, d = Math.hypot(dx, dz) || 1; return (s.ux * dx + s.uz * dz) / d - (wet(s) ? 1 : 0); };
+    return [...P.spokes].sort((p, q) => score(q) - score(p)).slice(0, 2);
+  };
+  // (does the way found leave the stem's end going on, not back past the place?)
+  const goesOn = (st: Stem, s: Spoke | null, path: XZ[] | null) => {
+    if (!path || !s || st.pts.length < 2) return true;
+    let run = 0, i = 1;
+    for (; i < path.length && run < 150; i++) run += dist(path[i], path[i - 1]);
+    const q = path[Math.min(i, path.length - 1)], dx = q.x - st.end.x, dz = q.z - st.end.z, d = Math.hypot(dx, dz) || 1;
+    return (dx * s.ux + dz * s.uz) / d > -0.5;
+  };
+  let best: XZ[] | null = null;
+  for (const sa of spokesOf(A, B)) for (const sb of spokesOf(B, A)) {
+    const a = stem(c, A, B, sa), b = stem(c, B, A, sb);
+    const raw = L.find(a.end, b.end, [A.id, B.id], kind, true);
+    const path = joinStems(a, raw, b, kind, () => L.find(a.end, b.end, [A.id, B.id], kind));
+    if (!path) continue;
+    if (!best) best = path;
+    if (goesOn(a, sa, raw) && goesOn(b, sb, raw ? [...raw].reverse() : null)) return path;
+  }
+  return best;
+}
 // A road's first stretch out of a place: straight on along its spoke's street, `STEM` metres (real
 // roads run straight out of a place and only then bend: PRIORS.exits.netTurnFirstKmDeg), stopping
 // short of water or the map's edge. `end` is where the road is found from; `pts` the stretch.
 interface Stem { pts: XZ[]; end: XZ }
 export const STEM = 240;
-function stem(c: Ctx, A: WorldSettlement, toward: XZ): Stem {
-  const s = spokeFor(A, toward);
+function stem(c: Ctx, A: WorldSettlement, toward: XZ, chosen?: Spoke | null): Stem {
+  const s = chosen === undefined ? spokeFor(A, toward) : chosen;
   if (!s) { const e = endOf(A, toward); return { pts: [e], end: e }; }
   let L = STEM;
   const at = (d: number) => ({ x: s.x + s.ux * d, z: s.z + s.uz * d });
@@ -311,6 +340,24 @@ function joinStems(a: Stem, cells: XZ[] | null, b: Stem | null, kind: RouteKind 
   const r = resample(all, STEP), sm = smooth(r, P.smooth, 2);
   const holdA = a.pts.length > 1 ? Math.min(HOLD, a.pts.length) : 0, holdB = b && b.pts.length > 1 ? Math.min(HOLD, b.pts.length) : 0;
   const out = r.map((p, i) => (i < holdA || i >= r.length - holdB ? p : sm[i]));
+  // (from the end of each held stretch, a curve that leaves it on its line and meets the smoothed
+  // course further on with its heading: no corner where the stem ends, however sharp the turn)
+  const BLEND = 8;
+  const blend = (i0: number, dir: 1 | -1) => {
+    const i3 = i0 + dir * BLEND;
+    if (i0 < 1 || i0 >= out.length - 1 || i3 < 1 || i3 >= out.length - 1) return;
+    const p0 = out[i0], p3 = out[i3], prev = out[i0 - dir], next = out[i3 + dir];
+    const L = dist(p0, p3) / 3;
+    const t0 = { x: p0.x - prev.x, z: p0.z - prev.z }, t3 = { x: next.x - p3.x, z: next.z - p3.z };
+    const n0 = Math.hypot(t0.x, t0.z) || 1, n3 = Math.hypot(t3.x, t3.z) || 1;
+    const c1 = { x: p0.x + (t0.x / n0) * L, z: p0.z + (t0.z / n0) * L }, c2 = { x: p3.x - (t3.x / n3) * L, z: p3.z - (t3.z / n3) * L };
+    for (let k = 1; k < BLEND; k++) {
+      const t = k / BLEND, u = 1 - t;
+      out[i0 + dir * k] = { x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p3.x, z: u * u * u * p0.z + 3 * u * u * t * c1.z + 3 * u * t * t * c2.z + t * t * t * p3.z };
+    }
+  };
+  if (holdA) blend(holdA - 1, 1);
+  if (holdB) blend(out.length - holdB, -1);
   return resample(chaikin(chaikin(out)), STEP);
 }
 
