@@ -1,5 +1,31 @@
 # Handover: where everything stands
 
+## Latest: a new coordinator, 26 Sep 2026 (20:10 UTC)
+
+Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (this account). The previous coordinator
+and the six region sessions ran on the user's other account and stopped answering at about 16:00 UTC; their
+branches keep all their work. The decisions are in `docs/briefs/PLAN.md`, top section.
+
+- **Integration branch:** `claude/cloud-session-history-rvqkm1`, as before. Vercel production follows it.
+- **Landed at 19:52:** #58, #59, #57, #55, in that order, plus the repo-root screenshot clean-up.
+- **CI:** the `check` job stays red on one test until the economy fix lands: `economy.test.ts` "a well-served
+  town grows and gets denser" (796 against 902.4; deterministic; fails locally the same way). The fix is on
+  `claude/work-economy-growth`, with the bridge timing test made to measure best-of-five (PLAN.md decision 3).
+  The `phone` job runs the six e2es on `?map=region&seed=42`.
+- **Sessions started at 20:08 (this account), each on its own branch with a PR into integration:**
+
+  | Stream | Branch | Session | Owns |
+  |---|---|---|---|
+  | ONE MAP step 4: delete the 6 km code, setup wording, Leaflet, docs, hero pictures | `claude/work-onemap-4` | session_01N2xhRAKzQWsSt6RZQH8jdG | `region/generate.ts`, `interchange/region.ts`, `rail/region.ts`, `region/town.ts`, `maps.ts`, `app/regionsetup.ts`, README and docs about deleted maps, `app/art` |
+  | Countryside: bring #52 back on the new head, fields test passing, first view proven not blank | `claude/work-country-2` | session_016uD19qC4yiFZR8AhPrtiib | `region/fields.ts`, `woods.ts`, `lanes.ts`, `countryside.ts`, `worldmap/country.ts`, `ground/*`, `game/country.ts` |
+  | Play review: the region played as a player at 412×915, problems written up with screenshots, loop-breaking ones fixed | `claude/work-play` | session_01DGEkjY29QMXCGUF7EoXkuj | `game/*` (except country, parking, dress, edge, portals), `ui/*`, `app/*`, `e2e/*`, docs/loop.md, docs/hud.md |
+
+  The coordinator owns `economy*.ts`, `econ*.ts`, `bridges/perf.review.test.ts`, PLAN.md and this file, and merges
+  each PR once its CI is green and its screenshots have been looked at.
+- **Open PRs:** #54 (countryside's brief) closes when the country-2 PR opens.
+- **Branches:** 52 of 61 remote branches are fully merged into integration and can be deleted once the user agrees.
+- **The repo's default branch** is still `claude/runescape-transport-puzzle-game-q1uhy8`, about 300 commits behind
+  integration. Either make integration the default on GitHub, or merge integration into it.
 ## Latest: one map, step 4: the 6 km code is gone (26 Sep 2026, evening)
 
 Branch `claude/work-onemap-4` (brief: `docs/briefs/onemap-4.md`). After #59 made the game one 50 km map,

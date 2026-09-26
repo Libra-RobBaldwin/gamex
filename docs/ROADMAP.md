@@ -45,3 +45,27 @@ nothing should assume a flat world, a fixed-size map or hand-placed content.
   assume one global flat plane.
 - **Anything procedural must be able to take real data instead:** the height source, road
   and plot layout, and building footprints.
+
+## V2 ideas, from Cities in Motion 2 (26 Sep 2026)
+
+The user liked Cities in Motion 2. What it did well is worth taking for a second version; what sank
+it (a 6/10 game that felt like working at a transit authority) is worth avoiding. Nothing here is for
+V1: V1 is the loop on the region, played and fixed.
+
+Take, for V2:
+- **Passenger types** with different price and time sensitivity: commuters who shrug at fares and ride
+  the town lines, students who are price-sensitive, pensioners who travel off-peak to the shops,
+  visitors who never buy a season ticket. The economy already moves people by home and job; types
+  make fares and timetables mean something without new UI.
+- **Rush hours:** a demand curve by hour of the game clock, so buses fill and bunch at eight in the
+  morning, and a single "more buses at peak" toggle per line. No per-line timetables.
+- **Growth beside the stop, seen:** buildings going up next to a busy stop within days.
+- **A stop's "why nobody rides" card:** too dear, too slow, too full, no route. The town panel's
+  reasons, at the stop.
+- **Eras:** the vehicle library's eras unlocking over the decades.
+
+Avoid, for good:
+- fare zones drawn on the map, ticket kinds (single, day, monthly), per-line timetables with separate
+  rush-hour schedules, employee wages, vehicle wear, and depots every route must start and end at;
+- empty-map missions: each challenge hands the player a situation, not a blank region;
+- a metro tool harder than the bus stop tool.
