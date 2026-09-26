@@ -468,9 +468,14 @@ export class Pairs {
 
 // ---------------- reach ----------------
 // Two-step floating catchment: each destination's supply is shared among everyone who can
-// reach it in time; each origin adds up its shares. 1 means "enough within reach". With
-// `share` it also shares each origin's people among the destinations they reach (a Huff
-// model), which says how many workers or customers each place gets.
+// reach it in time, nearer first; each origin adds up its shares. 1 means "enough within
+// reach". A journey within the limit counts, fading to nothing at half as long again, and
+// weighs less the longer it is (falling off over that same span), so a town's own people
+// have first call on its jobs over commuters from twenty minutes off: sharing everyone within
+// the window alike would house the workers for a town's new jobs wherever demand was keenest
+// already, which can be the next town along the railway. With `share` it also shares each
+// origin's people among the destinations they reach (a Huff model), which says how many
+// workers or customers each place gets.
 // A journey by your lines counts only for those who find room on board; the rest go on foot or
 // by car if they can. The two groups are capped at `cap` separately, so a full line into a town
 // with jobs to spare still leaves most of its would-be riders without one.
@@ -478,7 +483,8 @@ export class Pairs {
 export interface Reach { car: Float64Array; nc: Float64Array; pt: Float64Array; ratio: Float64Array; lost: Float64Array }
 
 export function reach(p: Pairs, demand: Float64Array, supply: Float64Array, carShare: Float64Array, T: number, share: boolean, cap = Infinity): Reach {
-  const Z = demand.length, g = (t: number) => (t <= T ? 1 : t >= 1.5 * T ? 0 : (1.5 * T - t) / (0.5 * T));
+  const Z = demand.length, far = 1.5 * T;
+  const g = (t: number) => (t >= far ? 0 : (t <= T ? 1 : (far - t) / (far - T)) * Math.exp(-t / far));
   const S = p.sum(supply), denom = new Float64Array(p.N), sc = new Float64Array(Z), sn = new Float64Array(Z);
   const out: Reach = { car: new Float64Array(Z), nc: new Float64Array(Z), pt: new Float64Array(Z), ratio: new Float64Array(Z), lost: new Float64Array(Z) };
   const lim = 1.5 * T, [GC, GN] = p.scratch;
