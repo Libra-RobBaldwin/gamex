@@ -5,7 +5,7 @@ Session https://claude.ai/code/session_013W364Qf7cmYt1ejuVbvaHq · branch `claud
 PRs:
 - merged: #45 (regional styles, parking), #48 (shopping complexes);
 - merged: #50 (scenery dressed up close, save on hide, level on slopes).
-- open: the street-trees follow-up.
+- open: #55 (parked cars on the ground: the user's "cars floating in the sky"; street trees in dressed scenery).
 
 **Honesty rule:** "done" below means live on the integration branch and checked on a 412×915 close-zoom screenshot. "In PR" means pushed and checked here, but not merged yet.
 
@@ -25,6 +25,9 @@ PRs:
    - Next (mine, once world50 agrees): strip the windows, doors and chimneys from tilegen's `building()`, so no second style of building exists.
    - Not done until the near scenery is always buildgen and the far boxes match in colour.
 3. **Keep this brief honest.** Ongoing.
+
+## Also fixed (in #55, not merged yet)
+- **"All the cars floating in the sky"** (user, 11:40). Parked cars were given the ground's height on top of the drape, so on the 50 km map they floated about 250 m up. They now sit on their car parks. Checked at 412×915 at a low tilt, and `parking.test.ts` checks every parked car is within 0.5 m of the ground.
 
 ## Earlier asks, where they stand
 - **Regional vernacular from geology, era by distance, the Nordic, desert and Mediterranean climates.** Done (#45). Tropical was dropped by the plan.
