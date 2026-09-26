@@ -168,6 +168,23 @@ shape, so no extra draw calls. Shared file: `buildgen.ts` (`makeRegion` only). T
 line at the phone's usual zoom; if the user wants it bolder, the wall's height and the railings' weight are
 one line each in `makeRegion`.
 
+## The logic review's play rows (`docs/reports/review-2026-09-26.md`, 21:20)
+
+Its tests are in the branch: `game/review.play.test.ts` and `review.play.flow.test.ts`. A row's test is a real
+test once its fix is in; the rest are `it.fails` (expected to fail), so CI stays green in between.
+
+| Row | What | Done |
+|---|---|---|
+| 3 | "Riders a day" ×30 on the line sheet and Lines tab; the milestone ladder judged the same number and paid about £900k of grants at once | Fixed: the count is a town-day's riders, shown plain and judged plain. The 500-rider first milestone still comes with the first line (a two-stop line carries about 700 a day in a town of 2,200); 2,000, 5,000 and 12,000 now take a network. |
+| 4 | Bulldozing a lane the map gave refunded half its price, about £100k | Fixed: the game keeps and saves the ids of the roads the player paid for; only those refund. The save e2e checks both. |
+| 2 (play half) | A road joined where a stop stands took the stop, the line and its buses with no warning or refund | Fixed here: the blueprint card names the stop and the line the join takes, Build turns red, and a line left with one stop is withdrawn with its buses sold back at Sell's price. Keeping the stop across the split is the vehicles session's half: the review's two tests stay expected-to-fail until it lands. |
+| village | A place half built at a hide-save reloaded as finished | Fixed: busy, not live, until it stands; tests that a busy place isn't saved live and that its streets aren't laid twice on the reload. |
+| 8 | The goal card asked for a line between two stops that are one place | Fixed: it counts places. |
+| 7 | The economy put each stop at the wrong point on its road | Fixed: `pointAt` by arc length, as the overlay. |
+| 9 | The guide's road step ticked when a village came to life | The road step is gone (fix 3 above), so nothing of the guide's ticks on activation. The review's test measures the world's activation radius (3.3 km at a 2 km view, `worldmap/game.ts`), which is world50's call: it stays expected-to-fail with a note. |
+| 10 | Continue offered an old real-region save the game refuses | Fixed in `menu.ts`, with the same rule as `isOldRealSave`. |
+| rest | "No route" line problem never shown; goalDone/firstLineAt not saved; real-region saves named "Region"; track and stations can't be bulldozed | Next. |
+
 ### 11. Bulldoze refuses a road with a reason (fine)
 
 `58-bulldoze-road-preview.png`: "Buildings face this road, and it's their only way in", Remove disabled.
@@ -181,9 +198,8 @@ one line each in `makeRegion`.
 - Done in this PR too: 12 (fields stay fields, no ponds, paths from the gates), 13 (park walls and gates).
 - Reported for their owners, not done: 4 (a short bridge is refused), 6 (money), 7 (real regions decline),
   8 (riders label), 10 (buildings and scenery), the `/assets/regions` fetch, a pond in a real hollow (12).
-- Next, from the logic review (`docs/reports/review-2026-09-26.md`): riders a day ×30 and the milestones,
-  map roads refunded when bulldozed, a road joined at a stop, a village half built at a hide-save, then the
-  rest of the play rows. Their tests are in the branch as `it.fails` until each lands.
+- From the logic review: rows 3, 4, 2 (play half), the half-built village, 8, 7 and 10 are fixed in this PR,
+  each its own commit (table above); the rest of the play list is next.
 
 ## Test results
 
