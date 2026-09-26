@@ -62,10 +62,19 @@ Tests: `review.vehicles.test.ts` (3, the review's), `game/review.split.test.ts` 
 plus the reported stops), `traffic.edits.test.ts` (a split under real traffic, a road bulldozed
 under a bus, twelve buses on one short road, the leg re-base). Typecheck clean.
 
-## Not done / to check before the PR is final
+## Checked (22:20 UTC)
 
-- The full unit suite and the six phone e2es on the region: running now; results go in the PR.
-- The play session's part of bug 2 (the road tool's warning from `check.stops`, and the refund).
+- `npx tsc --noEmit`: clean.
+- `npx vitest run --no-file-parallelism`: 120 files, 1117 passed, 8 skipped, none failed (the traffic
+  harness keeps zero overlaps and its give-up limit; the doors test's random stream is as before).
+- Phone e2es on `?map=region&seed=42`: lines, loop, rail, save and stations all pass with no console
+  errors; the menu e2e passes (on the dev server). Screenshots in `shots/` locally, not committed.
+
+## Not done
+
+- The play session's part of bug 2: the road tool's warning from `check.stops`, and the refund.
 - A stop kept across a split stands hard against the new junction, as the review's test demands;
   a bus calling there holds its junction slot while it dwells. The warning is what stops a player
-  doing that by accident.
+  doing that by accident. If the coordinator would rather the road tool refused to land on a stop,
+  that's a one-line change in main.ts from `check.stops`.
+- Not played on a phone by hand: checked by the e2es and the unit tests only.
