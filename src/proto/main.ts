@@ -1280,7 +1280,7 @@ function showLineInfo(l: Line) {
     // (the three numbers that matter as tiles, the stops in a line, and the actions in a row;
     // a game day is the town's month, so "a day" is what the player sees)
     key: `line:${l.id}`, title: `Line ${l.num}`, sub: `${lines.title(l)} · ${l.loop ? 'circular' : 'there and back'}`, icon: 'transport', tone: 'stop',
-    stats: [['Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
+    stats: [['Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
     facts: [['Stops', l.stops.map((id) => lines.name(id)).join(' · ')]],
     note: `Each rider pays £2${books.lastRunning ? `; the buses cost ${money(books.lastRunning)} a day to run` : ', and the buses cost a little each day to run'}.`,
     actions: [
@@ -2413,7 +2413,7 @@ shell.addStatsTab({
     if (!lines.list.length) { el.innerHTML = '<p class="note">No lines yet. Build two stops and draw a line through them, and its numbers show here.</p>'; return; }
     const rows = lines.list.map((l) => {
       const b = purse.line(l.id), st = townRef?.line(l.id), p = b.lastFares - b.lastRunning, n = lines.buses(l).length;
-      return { l, p, html: `<button class="lrow tone-stop" data-sl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${st ? `${Math.round((st.carriedLastMonth || st.carried) * 30).toLocaleString('en-GB')} riders a day · ` : ''}${n} ${n === 1 ? 'bus' : 'buses'} · <b class="${p >= 0 ? 'good' : 'badv'}">${p >= 0 ? '+' : '−'}${money(Math.abs(p))}/day</b></span></button>` };
+      return { l, p, html: `<button class="lrow tone-stop" data-sl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${st ? `${Math.round(st.carriedLastMonth || st.carried).toLocaleString('en-GB')} riders a day · ` : ''}${n} ${n === 1 ? 'bus' : 'buses'} · <b class="${p >= 0 ? 'good' : 'badv'}">${p >= 0 ? '+' : '−'}${money(Math.abs(p))}/day</b></span></button>` };
     }).sort((a, b) => a.p - b.p);
     el.innerHTML = `<p class="note">Worst first: a line losing money wants more stops where people are, or fewer buses.</p>${rows.map((r) => r.html).join('')}`;
     el.querySelectorAll<HTMLButtonElement>('[data-sl]').forEach((b) => b.addEventListener('click', () => { const l = lines.list.find((x) => x.id === +b.dataset.sl!); if (l) showLineInfo(l); }));
@@ -2609,7 +2609,9 @@ function drawFlow(now: number) {
 // ---------------- milestones (the gold ring by the bell, once the guide is done) ----------------
 // Goals that grow with the network, each paying a grant when it's reached (money, like CS2's
 // milestones): riders a day across all the player's lines, and a few firsts.
-const ridersADay = () => lines.list.reduce((a, l) => { const st = townRef?.line(l.id); return a + (st ? (st.carriedLastMonth || st.carried) * 30 : 0); }, 0);
+// (a game day is the town's month, so a line's carried count is already a town-day's riders: the
+// purse pays a month of fares for it; showing or judging it times 30 was the review's bug 3)
+const ridersADay = () => lines.list.reduce((a, l) => { const st = townRef?.line(l.id); return a + (st ? (st.carriedLastMonth || st.carried) : 0); }, 0);
 const MILESTONES: { title: string; sub: string; grant: number; at: () => number }[] = [
   { title: '500 riders a day', sub: 'Across all your lines', grant: 50_000, at: () => ridersADay() / 500 },
   { title: 'A second line', sub: 'Link another part of town', grant: 60_000, at: () => lines.list.length / 2 },

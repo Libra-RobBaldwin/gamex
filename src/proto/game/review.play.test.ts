@@ -55,12 +55,13 @@ function world(opts: { lines?: 'none' | 'two' | 'pair'; buses?: number } = {}) {
 
 
 describe('riders a day', () => {
-  it.fails('as the line sheet and the milestones count them, is not more than twice the town (main.ts x30)', () => {
+  it('as the line sheet and the milestones count them, is not more than twice the town', () => {
     const p = world({ lines: 'pair' });
     p.run(60);
     p.days(3);
     const r = p.town.report!;
-    const ridersADay = p.lines.list.reduce((a, l) => { const st = p.town.line(l.id); return a + (st ? (st.carriedLastMonth || st.carried) * 30 : 0); }, 0);
+    // (main.ts ridersADay: a line's carried count is a town-day's riders, the purse's month fiction is its own)
+    const ridersADay = p.lines.list.reduce((a, l) => { const st = p.town.line(l.id); return a + (st ? (st.carriedLastMonth || st.carried) : 0); }, 0);
     log('riders a day (x30)', ridersADay, 'carried', p.town.line(p.lines.list[0].id)?.carriedLastMonth, 'residents', r.residents, 'load', p.town.line(p.lines.list[0].id)?.loadFactor);
     expect(ridersADay, `one two-stop line, ${Math.round(r.residents)} residents, buses ${Math.round((p.town.line(p.lines.list[0].id)?.loadFactor ?? 0) * 100)}% full`).toBeLessThanOrEqual(r.residents * 2);
     // (and the 12,000-riders milestone, the last on the ladder, isn't reached by the first line)
