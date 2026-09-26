@@ -108,6 +108,50 @@ function measure(id) {
     ribbon: { buildingsNearABOutside: r2(bOutNear / (bOut || 1)), landNearABOutside: r2(landNear / (landOut || 1)), lift: r2(bOutNear / (bOut || 1) / (landNear / (landOut || 1))) },
   };
 
+  // ---------------- how roads follow the land ----------------
+  // along each class: the grade every 50 m, against the steepest slope of the ground there (a road
+  // straight up the hill has a ratio of 1; one along the contour, 0); how much a road winds between
+  // junctions (length over the straight line, pieces over 300 m); and how low it runs (height above
+  // the lowest ground within 1 km, against the land's)
+  const lowIn = (x, z) => { let lo = Infinity; for (let dx = -1000; dx <= 1000; dx += 250) for (let dz = -1000; dz <= 1000; dz += 250) lo = Math.min(lo, H(x + dx, z + dz)); return H(x, z) - lo; };
+  const follow = {};
+  for (const c of ['motorway', 'primary', 'a', 'b', 'minor', 'local']) {
+    const grades = [], ratios = [], sin = [], above = [];
+    for (const f of roads) {
+      if (ROAD_CLASSES[f.c & 15] !== c) continue;
+      const a = f.parts[0], L = len(a);
+      if (L > 300) { const d = Math.hypot(a[a.length - 2] - a[0], a[a.length - 1] - a[1]); if (d > 1) sin.push(L / d); }
+      // (points every 50 m along it)
+      let acc = 0, next = 0, px = a[0], pz = a[1], ph = H(a[0], a[1]);
+      for (let k = 2; k < a.length; k += 2) {
+        const sl = Math.hypot(a[k] - a[k - 2], a[k + 1] - a[k - 1]);
+        while (acc + sl >= next + 50) {
+          next += 50;
+          const t = (next - acc) / sl, x = a[k - 2] + (a[k] - a[k - 2]) * t, z = a[k - 1] + (a[k + 1] - a[k - 1]) * t, h = H(x, z);
+          const g = Math.abs(h - ph) / 50, s0 = slope(x, z);
+          grades.push(g);
+          if (s0 > 0.04) ratios.push(Math.min(1, g / s0));
+          if (grades.length % 4 === 0 && !isSea(x, z)) above.push(lowIn(x, z));
+          px = x; pz = z; ph = h;
+        }
+        acc += sl;
+      }
+    }
+    if (!grades.length) continue;
+    follow[c] = {
+      gradeMedian: r2(q(grades, 0.5), 3), gradeP90: r2(q(grades, 0.9), 3), over10pct: r2(grades.filter((g) => g > 0.1).length / grades.length, 3),
+      gradeOverSlope: r2(q(ratios, 0.5), 2), // (on ground steeper than 4%)
+      sinuosity: [q(sin, 0.25), q(sin, 0.5), q(sin, 0.75)].map((v) => r2(v, 3)),
+      aboveValleyM: Math.round(q(above, 0.5)),
+    };
+  }
+  const landAbove = [];
+  for (let x = -M.size / 2 + 1500; x < M.size / 2 - 1500; x += 700) for (let z = -M.size / 2 + 1500; z < M.size / 2 - 1500; z += 700) if (!isSea(x, z)) landAbove.push(lowIn(x, z));
+  follow.land = { aboveValleyM: Math.round(q(landAbove, 0.5)), slopeMedian: r2(q(landAbove.length ? (() => { const a = []; for (let x = -M.size / 2 + 1500; x < M.size / 2 - 1500; x += 700) for (let z = -M.size / 2 + 1500; z < M.size / 2 - 1500; z += 700) if (!isSea(x, z)) a.push(slope(x, z)); return a; })() : [0], 0.5), 3) };
+  // (and where places stand: height above the valley at their middles)
+  follow.places = { aboveValleyM: Math.round(q(places.filter((p) => p.kind !== 'hamlet').map((p) => lowIn(p.x, p.z)), 0.5)) };
+  road.followLand = follow;
+
   // ---------------- coast ----------------
   let coast = null;
   const seaF = all('sea').filter((f) => f.c === 0);

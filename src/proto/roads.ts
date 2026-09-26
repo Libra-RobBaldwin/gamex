@@ -225,9 +225,44 @@ export interface RoadOpts { height: HeightMode; grade: number; cross: CrossMode;
 export const DEFAULT_OPTS: RoadOpts = { height: 'auto', grade: 0.06, cross: 'junction', spec: GRADES.road, type: 'street' };
 export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; path: P[]; profile?: Profile; bridges: number; raised: number; tunnels: number; sunk: number; choices: BridgeChoice[] }
 
+// The network's segments, which keep an index of the segments at each node as they're set and
+// deleted (segsAt is asked about constantly; a scan of every segment each time was a big map's
+// slowest step). The index holds each node's segments in the map's own order, as the scan did.
+// (A segment's ends never change once it's in the map: a moved road is a new segment.)
+export class SegMap extends Map<number, RSeg> {
+  private at: Map<number, RSeg[]> | null = null;
+  set(id: number, s: RSeg) {
+    const was = super.get(id);
+    super.set(id, s);
+    if (this.at) {
+      if (was) this.at = null; // (replaced in place: rebuilt when next asked)
+      else { this.add(s.a, s); if (s.b !== s.a) this.add(s.b, s); }
+    }
+    return this;
+  }
+  delete(id: number) {
+    const s = super.get(id);
+    if (!super.delete(id)) return false;
+    if (this.at && s) for (const n of s.b !== s.a ? [s.a, s.b] : [s.a]) {
+      const l = this.at.get(n);
+      if (l) { const i = l.indexOf(s); if (i >= 0) l.splice(i, 1); }
+    }
+    return true;
+  }
+  clear() { super.clear(); this.at = null; }
+  private add(n: number, s: RSeg) { let l = this.at!.get(n); if (!l) this.at!.set(n, (l = [])); l.push(s); }
+  // the segments at a node (a new array: the caller may keep or change it)
+  atNode(n: number): RSeg[] {
+    if (!this.at) { this.at = new Map(); for (const s of this.values()) { this.add(s.a, s); if (s.b !== s.a) this.add(s.b, s); } }
+    return this.at.get(n)?.slice() ?? [];
+  }
+}
+
 export class Network {
   nodes = new Map<number, RNode>();
-  segs = new Map<number, RSeg>();
+  private _segs = new SegMap();
+  get segs(): SegMap { return this._segs; }
+  set segs(m: Map<number, RSeg>) { this._segs = m instanceof SegMap ? m : new SegMap(m); }
   lots: Lot[] = [];
   nextId = 1;
   isWater: (p: P) => boolean;
@@ -236,6 +271,7 @@ export class Network {
   edge: number;
   private rand: Rng;
   zoneAt: (p: P) => Zone = () => 'town';
+  turningHeads = false; // a dead end just stops, as a standard UK dead end does; true draws a turning circle at each one (the old look)
   // lots whose plots the last build() cut into (their gardens get trimmed)
   touched: Lot[] = [];
   // who owns the ground (see land.ts): roads claim theirs here, junctions theirs when designed
@@ -253,7 +289,7 @@ export class Network {
   set randState(v: number) { this.rand.state = v; }
   node(id: number) { return this.nodes.get(id)!; }
   segEnds(s: RSeg) { return [this.node(s.a), this.node(s.b)] as const; }
-  segsAt(n: number) { return [...this.segs.values()].filter((s) => s.a === n || s.b === n); }
+  segsAt(n: number) { return this._segs.atNode(n); }
   other(s: RSeg, n: number) { return s.a === n ? s.b : s.a; }
   path(s: RSeg): P[] { const [a, b] = this.segEnds(s); return [a, ...s.mid, b]; }
   // the path walked starting from node `from`

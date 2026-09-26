@@ -51,9 +51,11 @@ import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; 
 import { mapById as menuMap } from './maps';
 import { WorldGame } from './worldmap/game'; // a 50 km map: streamed scenery round a live play area (docs/streaming.md)
 import { layLiveRoutes } from './worldmap/live';
-import { GROUND_SEED, woodTrees } from './worldmap/country';
+import { GROUND_SEED, countryFor, woodTrees } from './worldmap/country';
 import { isRealQuery, loadRealMap } from './real/load';
-import { clearOf, greenRegions, layReal, placeLots } from './real/lay';
+import { clearOf, greenRegions, layReal, parkLeafiness, placeLots } from './real/lay';
+import { DeadEndPaths } from './game/paths';
+import { LotStream, restorePack } from './real/live';
 import type { RealMap } from './real/map';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type MapSpec, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
@@ -80,7 +82,7 @@ if (PARAMS.get('save')) {
 // A real region (public/regions, real/: Ordnance Survey data) is fetched first.
 const MAP_Q = SAVED ? new URLSearchParams(SAVED.map.query) : PARAMS;
 const MAP: MapSpec = isRealQuery(MAP_Q) ? await loadRealMap(MAP_Q) : mapFromQuery(MAP_Q);
-const REAL: { parks: Region[] } | null = 'real' in MAP ? { parks: [] } : null; // (a real map: real/)
+const REAL: { parks: Region[]; forms?: Map<number, { form: Form; slip: boolean }>; stream?: LotStream } | null = 'real' in MAP ? { parks: [] } : null; // (a real map: real/)
 // (the query that makes this map, kept with its saves)
 const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(PARAMS); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
@@ -113,6 +115,7 @@ const EDGE = gameWater.half; // (where the ground ends, in a cut face: game/edge
 const net = new Network(isWater, BOUND, 11);
 net.edge = EDGE; // (roads running off the map run on to the ground's edge)
 const railway = new Railway(net); // (rebuilt with the roads: commitRoads)
+const footpaths = new DeadEndPaths(); // (a path on from each dead end, which just stops: game/paths.ts)
 gameWater.claim(net.land); // the water's land ('water', 3 m past the waterline): plots and parks keep off it
 // the map's industrial estates (the town's is south of the centre)
 const INDUSTRIAL = (p: P) => zoneOf(MAP, p) === 'industrial';
@@ -164,7 +167,7 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half, WORLD ? GROUND_SEED : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half, WORLD ? GROUND_SEED : undefined, WORLD ? countryFor(WORLD) : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
@@ -300,6 +303,7 @@ function refreshTrees(only?: Lot | Box[]) {
 // ---------------- roads ----------------
 const roadGroup = new THREE.Group();
 scene.add(roadGroup);
+scene.add(footpaths.mesh);
 // every bridge in the town: one mesh per material (game/bridges.ts)
 const bridgeLayer = new BridgeLayer();
 scene.add(bridgeLayer.group);
@@ -313,7 +317,7 @@ const geoFor = (node: number) => ({ fits: (polys: P[][]) => landFits(net, node, 
 // which form each of its own junctions takes (its roundabouts, give-ways, merges and diverges)
 const interchanges: Interchange[] = [];
 // (an interchange's junctions take the form it built them for, without slip lanes of their own)
-const preferAt = (node: number) => { for (const ix of interchanges) if (ix.prefer[node]) return { form: ix.prefer[node], slip: false }; return undefined; };
+const preferAt = (node: number) => { const f = REAL?.forms?.get(node); if (f) return f; for (const ix of interchanges) if (ix.prefer[node]) return { form: ix.prefer[node], slip: false }; return undefined; }; // (a real map's packed junctions keep their forms: real/live.ts)
 function redesignJunctions() {
   for (const id of [...junctions.keys()]) if (!net.nodes.has(id) || legsAt(net, id).length < 3) junctions.delete(id);
   for (const n of net.nodes.values()) {
@@ -430,6 +434,7 @@ function commitRoads(made: number[] = []) {
   else lamps = drawRoads(net, roadGroup, junctions, trunkMat, crownMat, editJ);
   if (made.length) queuePlots(made);
   onRoadsChanged();
+  footpaths.update(net, net.lots); // (a path on from each dead end: game/paths.ts)
   // (a big map's ground is repainted round the edit on the next frame, so the edit and the repaint don't land in one)
   if (regionView) { groundBoxes.push(...editBoxes); infillBoxes.push(...editBoxes); }
   else gameGround.invalidate();
@@ -602,7 +607,7 @@ function refreshInfill() {
   gameGround.invalidate();
 }
 function addInfill(r: Region) {
-  const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges });
+  const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges, leafy: REAL ? parkLeafiness(r.cells.length) : undefined });
   const lot: Lot = { id: -1, x: r.centre.x, z: r.centre.z, rot: 0, w: 0, d: 0, h: 0, kind: 'civic', seg: -1, seed: r.seed, row: 0, front: 0, back: 0, px: 0, pw: 0, arch: r.kind };
   const b: Built = { lot, born: 0, height: shape.height, name: shape.name, detail: shape.detail, parts: bakeGroup(shape.group), solo: null, chunk: null, region: r };
   toChunk(b);
@@ -664,10 +669,28 @@ function queuePlots(segs: number[]) {
 async function seedTown() {
   // a real map (real/): its roads, railway and buildings as they are, through the OSM importer's
   // stages; the junctions design themselves, and the town grows on plots between its buildings
+  const pack = (MAP as RealMap).real?.pack;
+  if (REAL && pack) {
+    // (packed ahead of time: the network restored, each junction designed in its packed form, every
+    // lot on the land, and the buildings near the start drawn now, the rest as the camera comes near)
+    await loading.stage('Laying out the roads and the railway', 0.08);
+    const r = restorePack(net, pack);
+    REAL.forms = r.forms;
+    commitRoads(); // (the plots the town grows on come packed, already clear of the buildings)
+    queue = r.queue;
+    net.lots.push(...r.lots);
+    footpaths.set(net, r.paths);
+    REAL.parks = r.parks;
+    const stream = (REAL.stream = new LotStream(r, (l) => spawnLot(l, false, true)));
+    await loading.stage('Putting up the buildings round you', 0.3);
+    stream.near(view.x, view.z, 1200);
+    return;
+  }
   if (REAL) {
     await loading.stage('Laying out the roads and the railway', 0.08);
-    const laid = layReal(net, (MAP as RealMap).real.overpass, MAP.settlements);
+    const laid = layReal(net, (MAP as RealMap).real.overpass!, MAP.settlements);
     commitRoads([...net.segs.keys()]);
+    footpaths.clear(net); // (the real buildings go up first; the dead ends' paths keep clear of them)
     const lots = placeLots(net, laid.lots);
     await loading.stage(`Putting up ${lots.length.toLocaleString('en-GB')} buildings`, 0.3);
     const clear = clearOf(lots);
@@ -677,7 +700,8 @@ async function seedTown() {
       spawnLot(l, false, true);
       if (i % 64 === 0) await loading.tick(i / lots.length);
     }
-    REAL!.parks = greenRegions(net, lots, (MAP as RealMap).real.green);
+    REAL!.parks = greenRegions(net, lots, (MAP as RealMap).real.green ?? []);
+    footpaths.update(net, net.lots);
     return;
   }
   // a generated region's railway first: a main line through the city and two towns, a branch to a
@@ -744,13 +768,17 @@ async function seedTown() {
 // its woods planted (from the ground's own layout of fields and woods).
 const worldJobs: { x0: number; z0: number; x1: number; z1: number }[] = [];
 let worldJobAt = 0;
+// (the woods as a canopy, with trees along their edges: ground/canopy.ts)
+const liveCanopy = gameGround.woods({ broadleaf: LOOK.trees.crown, conifer: LOOK.trees.pine });
+scene.add(liveCanopy.group); nav.onChange(() => liveCanopy.setView(view.h));
 function worldIdle(budget: number) {
   const t0 = performance.now();
   while (worldJobs.length && performance.now() - t0 < budget) {
     const b = worldJobs.shift()!, s0 = WORLD!.settlements[WORLD!.start], R0 = s0.reach + 450;
     // (round the start town it's painted already)
     if (!(b.x0 >= s0.x - R0 && b.x1 <= s0.x + R0 && b.z0 >= s0.z - R0 && b.z1 <= s0.z + R0)) gameGround.paintBox(b);
-    const got = woodTrees(gameGround.ground.layout, b, 16, LOOK.trees.pines, MAP.seed + 17);
+    liveCanopy.add(b);
+    const C = gameGround.ground.cover!, got = woodTrees(gameGround.ground.layout, { a: C.a, x0: C.region.x0, z0: C.region.z0, size: C.region.size, n: C.region.n }, b, 14);
     for (let k = 0; k < got.length; k += 4) trees.push({ x: got[k], z: got[k + 1], s: got[k + 2] * 1.45, kind: got[k + 3] });
     worldJobAt++;
     if (got.length) refreshTrees([b]);
@@ -772,7 +800,13 @@ async function bringToLife(id: number) {
   const st = WORLD.settlements[id], q = worldGame.towns.places.find((x) => x.id === id)!;
   const t0 = performance.now();
   q.live = true; // (so the roads to it are built now)
-  const made = buildStreets(net, MAP.streets.filter((x) => x.settlement === id), DEFAULT_OPTS, true).made;
+  // (its streets a few at a time, a frame between, so the view doesn't stall while a place is laid out)
+  const made: number[] = [], streets = MAP.streets.filter((x) => x.settlement === id), begun = new Set<number | undefined>();
+  let slice0 = performance.now();
+  for (let k = 0; k < streets.length; k += 4) {
+    made.push(...buildStreets(net, streets.slice(k, k + 4), DEFAULT_OPTS, true, begun).made);
+    if (performance.now() - slice0 > 8) { await nextFrame(); slice0 = performance.now(); }
+  }
   made.push(...layLiveRoutes(net, WORLD, DEFAULT_OPTS, 'road', (k) => !!worldGame.towns.places.find((x) => x.id === k)?.live, id).made);
   const t1 = performance.now();
   commitRoads(made);
@@ -2416,7 +2450,7 @@ const town = new TownEconomy({
   byEdge: MAP.placeBy === 'edge',
   // (and each place off the map, at its way off: game/portals.ts; a save from before there were any has none; a 50 km map's go to its coarse economy instead)
   outside: WORLD || (SAVED && !SAVED.town.econ.towns.some((t) => t.id >= 900)) ? [] : outsidePlaces(portals, EDGE, (id) => railway.station(id)).map((t) => ({ ...t, station: t.station === undefined ? undefined : RAIL_ID + t.station })),
-  standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
+  standing: () => (REAL?.stream ? net.lots.filter((l) => l.id >= 0) : buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot)), // (a real map's town is all its lots, drawn or not yet: real/live.ts)
   free: () => queue,
   build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); regionView?.groundChanged([{ x0: l.x - 40, z0: l.z - 40, x1: l.x + 40, z1: l.z + 40 }]); },
   rebuild: (l, kind) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; l.kind = kind; regenerate(b); placesDirty = true; },
@@ -2701,6 +2735,7 @@ function frame(now: number) {
   const t0 = performance.now();
   perf.frames++; perf.frameMs += rawMs; perf.worst = Math.max(perf.worst, rawMs);
   nav.update(dt, now);
+  REAL?.stream?.tick(view.x, view.z, 4); // (a real map's buildings, a tile at a time, nearest first: real/live.ts)
   if (gameGround.sync()) renderer.shadowMap.needsUpdate = true;
   // keep blueprint handles a finger's width wide at any zoom
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }
@@ -2834,7 +2869,7 @@ Object.assign((window as unknown as { proto: object }).proto, { interchanges, bl
 Object.assign((window as unknown as { proto: object }).proto, { railway, railDraw, railGame }); // (rail/)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
-Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, worldGame, portals, portalFlows, rail: railway, edgeFace }); // (the map being played, and how long its loading took, stage by stage)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, worldGame, portals, portalFlows, rail: railway, edgeFace, footpaths }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

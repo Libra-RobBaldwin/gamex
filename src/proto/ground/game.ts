@@ -5,6 +5,9 @@ import { circlePoly } from '../land';
 import type { Lot, Network } from '../roads';
 import { Ground, type GroundInput, type XZ } from './index';
 import { CROP_NAMES, PALETTE, type CropName } from './covers';
+import type { FieldSource } from './plan';
+import { CanopyMeshes } from './canopymesh';
+import type { CanopyLook } from './canopy';
 
 export interface GameWorld {
   net: Network;
@@ -28,10 +31,10 @@ export class GameGround {
   private reach: number; // how far out industrial land is looked for
   // (`texel`: metres per cover texel, coarser on a big map so its covers stay a sensible size; `hedges`: plant hedgerows;
   // `edge`: half the ground's width, if the covers should be painted right out to it)
-  // (`seed`: the field layout's; a 50 km map's has straighter fields: ground/layout.ts setParcelStyle)
-  constructor(private w: GameWorld, bound: number, texel?: number, hedges = true, edge?: number, private seed = 11) {
+  // (`seed`: the field layout's; `fields`: where they come from, a 50 km map's own farm blocks: worldmap/country.ts countryFor)
+  constructor(private w: GameWorld, bound: number, texel?: number, hedges = true, edge?: number, private seed = 11, fields?: FieldSource) {
     const size = Math.ceil(((edge ? edge * 2 : bound * 2 + 160)) / 10) * 10;
-    this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed, texel, hedges });
+    this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed, texel, hedges, fields });
     this.reach = Math.max(600, Math.ceil((bound * 1.15) / 40) * 40);
   }
   // A map's style: its palette and crops over the British ones (region/styles.ts). Nothing given, nothing changes.
@@ -101,6 +104,20 @@ export class GameGround {
     this.ground.change(this.input(), [box]);
   }
   paintBox(box: { x0: number; z0: number; x1: number; z1: number }) { this.ground.change(this.input(), [box]); }
+  // The woods drawn as a canopy (ground/canopy.ts): add `canopy.group` to the scene. Kept up with
+  // the paint, a kilometre box at a time (a box is made when it's first painted, and again when a
+  // change repaints it).
+  canopy: CanopyMeshes | null = null;
+  woods(look: CanopyLook) {
+    this.canopy ??= new CanopyMeshes(this.ground, look);
+    this.ground.onChanged = (boxes) => this.canopy!.changed(boxes);
+    return this.canopy;
+  }
+  private canopyAll() {
+    const R = this.ground.cover?.region;
+    if (!this.canopy || !R) return;
+    for (let i = Math.floor(R.x0 / 1000); i * 1000 < R.x0 + R.size; i++) for (let j = Math.floor(R.z0 / 1000); j * 1000 < R.z0 + R.size; j++) this.canopy.add({ x0: i * 1000, z0: j * 1000, x1: (i + 1) * 1000, z1: (j + 1) * 1000 });
+  }
   // First paint: settle the scattered trees into woods first (see Ground.settleTrees).
   start(trees: XZ[]) {
     this.ground.layout.setInput(this.input());
@@ -112,6 +129,7 @@ export class GameGround {
     if (!this.full) return false;
     this.full = false;
     this.ground.paint(this.input());
+    this.canopyAll();
     return true;
   }
 }

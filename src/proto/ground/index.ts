@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { CoverMap, type Region } from './paint';
 import { Layout, type GroundInput, type XZ } from './layout';
+import type { FieldSource } from './plan';
 import { Occupancy, planHedges, type HedgeGroup } from './hedgerows';
 import { Hedges } from './hedges';
 import { packCover } from './covers';
@@ -30,6 +31,7 @@ export interface GroundOptions {
   base?: THREE.MeshLambertMaterial; // patch this material instead of making one (keeps its settings)
   hedges?: boolean; // plant hedgerows (true)
   terrain?: boolean; // for meshes that aren't flat: rock and scree on steep slopes, heather high up (false)
+  fields?: FieldSource; // where the fields come from (a map's own farm blocks: region/fields.ts); else farm blocks from the seed alone
 }
 type Box = { x0: number; z0: number; x1: number; z1: number };
 // covers at a point, for paintWith (weights 0..1; crop from CROP; dir in radians)
@@ -65,6 +67,8 @@ export class Ground {
   private origin = { x: 0, z: 0 };
   // timings of the last paint and change, in ms
   stats = { paint: 0, change: 0, hedges: 0, pieces: 0, trees: 0 };
+  // told the boxes a change repainted (the canopy over a plan's woods follows it: canopy.ts)
+  onChanged: ((boxes: Box[]) => void) | null = null;
 
   constructor(o: GroundOptions = {}) {
     const t = o.texel ?? 2.5;
@@ -74,7 +78,7 @@ export class Ground {
     this.tex = this.cover ? coverTexture(this.cover.a, region!.n) : coverTexture(new Uint8Array([128, 0, 128, 128]), 1);
     this.uniforms = groundUniforms(this.tex);
     this.material = patchGround(o.base ?? new THREE.MeshLambertMaterial(), this.uniforms, o.terrain);
-    this.layout = new Layout({ seed: o.seed ?? 1 });
+    this.layout = new Layout({ seed: o.seed ?? 1 }, o.fields);
     this.plants = o.hedges === false || !region ? null : new Hedges(); // (nothing to plant without a map)
     this.hedges = this.plants?.group ?? new THREE.Group();
     this.setOrigin(0, 0);
@@ -135,6 +139,7 @@ export class Ground {
       for (let j = r.j0; j < r.j1; j++) this.tex.addUpdateRange((j * n + r.i0) * 4, (r.i1 - r.i0) * 4);
       this.tex.needsUpdate = true;
     }
+    this.onChanged?.(dirty);
     this.stats.change = performance.now() - t0;
   }
 
@@ -169,22 +174,28 @@ export class Ground {
   // every hedge piece and hedgerow tree (for tests and for anything placing things near hedges)
   hedgeList() { const p = [], t = []; for (const g of this.groups.values()) { p.push(...g.pieces); t.push(...g.trees); } return { pieces: p, trees: t }; }
 
-  // Move trees standing in the middle of arable or grass fields into the woods (keeping how
-  // many there are, so nothing costs more), for scenes that scattered trees at random.
+  // Move trees standing out in the fields to the woods' edges, 2 to 6 m in, keeping how many there
+  // are: the game uses it at start-up, because its trees were scattered at random.
   settleTrees<T extends XZ>(trees: T[]) {
     if (!this.cover) return trees;
-    const R = this.cover.region, spots: XZ[] = [], h = { id: 0, cell: this.layout.parcels.cell(0, 0), edge: 0 };
-    for (let x = R.x0 + 6; x < R.x0 + R.size; x += 9) for (let z = R.z0 + 6; z < R.z0 + R.size; z += 9) {
-      this.layout.parcels.hit(x, z, h);
-      if (h.edge > 5 && this.layout.about(h).kind === 'wood') spots.push({ x, z });
+    const L = this.layout, P = L.plan, R = this.cover.region, box = { x0: R.x0, z0: R.z0, x1: R.x0 + R.size, z1: R.z0 + R.size }, spots: XZ[] = [];
+    L.ensure(box);
+    for (const n of P.fieldsNear(box)) {
+      if (L.about(n).kind !== 'wood') continue;
+      const b = P.boxes[n];
+      for (let x = Math.ceil(b.x0 / 7) * 7; x < b.x1; x += 7) for (let z = Math.ceil(b.z0 / 7) * 7; z < b.z1; z += 7) {
+        if (P.fieldAt(x, z) !== n) continue;
+        const e = L.woodEdge(x, z);
+        if (e > 2 && e < 6) spots.push({ x, z });
+      }
     }
     let k = 0;
     for (const t of trees) {
-      this.layout.parcels.hit(t.x, t.z, h);
-      const kind = this.layout.about(h).kind;
-      if ((kind !== 'arable' && kind !== 'grass') || h.edge < 3 || !spots.length) continue;
+      const f = P.fieldAt(t.x, t.z), kind = f < 0 ? 'grass' : L.about(f).kind;
+      if ((kind !== 'arable' && kind !== 'grass' && kind !== 'wood') || !spots.length) continue;
+      if (kind === 'wood' && L.woodEdge(t.x, t.z) < 6) continue;
       const s = spots[Math.floor(((k++ * 0.618034) % 1) * spots.length)];
-      t.x = s.x + ((k * 0.37) % 1 - 0.5) * 8; t.z = s.z + ((k * 0.71) % 1 - 0.5) * 8;
+      t.x = s.x + ((k * 0.37) % 1 - 0.5) * 3; t.z = s.z + ((k * 0.71) % 1 - 0.5) * 3;
     }
     return trees;
   }

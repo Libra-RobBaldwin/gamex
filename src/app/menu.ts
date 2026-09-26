@@ -6,6 +6,7 @@
 // with the one that matters most (Continue, or New game) the biggest.
 
 import { MAPS, type MapInfo } from '../proto/maps';
+import { REAL_REGION_LIST } from '../proto/real/list';
 import { NAME, markSvg } from '../proto/ui/brand';
 import { icon, type Icon } from '../proto/ui/icons';
 import { EXPLORERS, libraryHref } from './library';
@@ -35,7 +36,7 @@ export interface MenuHost {
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // a picture of each map, for its card (and a saved town's); a map without one shows its icon
-const MAP_ART: Record<string, string> = { town: mapTown, region: mapRegion, place: mapPlace, sandbox: mapSandbox };
+const MAP_ART: Record<string, string> = { town: mapTown, region: mapRegion, place: mapPlace, sandbox: mapSandbox, ...Object.fromEntries(REAL_REGION_LIST.map((r) => [r.id, `${import.meta.env.BASE_URL}${r.thumb}`])) }; // (the real regions: their baked map, proto/real/list.ts)
 const artFor = (id: string) => MAP_ART[id];
 // a saved town's map: its query names it (the sandbox is saved on the town's map)
 const savedMap = (e: SaveEntry) => new URLSearchParams(e.map.query).get('map') ?? e.map.id;
@@ -92,7 +93,7 @@ const art = (m: Pick<MapInfo, 'id' | 'icon' | 'ready'>) => artFor(m.id)
 
 function newGame(notice?: string) {
   return `${notice ? `<p class="notice" role="status">${icon('info')}<span>${esc(notice)}</span></p>` : ''}
-    <ul class="maps">${MAPS.map((m) => `<li class="map${m.ready ? ' ready' : ''}">
+    <ul class="maps">${MAPS.filter((m) => !m.inRegion).map((m) => `<li class="map${m.ready ? ' ready' : ''}">
       ${art(m)}
       <div class="t"><b>${esc(m.name)}</b><small>${esc(m.blurb)}</small>
         ${m.ready ? '' : `<em class="chip">${esc(m.soon ?? 'Coming soon')}</em>`}</div>
@@ -202,7 +203,7 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
       root.querySelector('.body')!.innerHTML = regionBody(next);
       wire(next);
       root.scrollTop = y;
-    }, (q) => h.play(region, false, q));
+    }, (q) => h.play(MAPS.find((m) => m.id === new URLSearchParams(q).get('map')) ?? region, false, q));
     wire(lastRegion());
   }
   // move focus to the new screen's heading, so a screen reader reads where it landed

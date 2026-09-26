@@ -150,7 +150,10 @@ two levels:
      and rolling hills of up to about 40 m on them.
 2. **Tiles** (`tilegen.ts`, pure, in workers: `tile.worker.ts`): everything fine, made a tile at a time as the
    camera nears it, from the plan and the tile's key alone:
-   - streets, plots and buildings (`towns.ts`);
+   - streets, plots and buildings (`towns.ts`). Houses, terraces, shops and churches take the
+     walls and roofs of their place's building tradition from `vernacular.ts` (`paletteOf`,
+     through the same `placeResolver` the live buildings use), so the far towns match the near
+     ones. If terrain's `setGeology` drives the traditions, the tile worker must call it too.
    - fields, their crops, woods and their trees, hedgerows and farmsteads (`country.ts`);
    - the trunk roads' carriageways and markings, railways and stations;
    - the sea, lakes and rivers.

@@ -2,34 +2,14 @@
 import { describe, expect, it } from 'vitest';
 import { bandPolys, circlePoly } from '../land';
 import { Ground, type GroundInput, type XZ } from './index';
-import { Layout, fromGrid, toGrid } from './layout';
+import { Layout } from './layout';
 
-// Every field parcel's outline in a square of countryside, as the player sees it: a merged pair
-// is one field, a split cell is two. Corners where the outline turns by less than 12 degrees are
-// not corners.
+// Every field's outline in a square of countryside, as the player sees it (the layout's farm blocks).
+// Corners where the outline turns by less than 12 degrees are not corners.
 function parcelOutlines(seed: number, half: number) {
-  const L = new Layout({ seed });
-  const P = L.parcels, out: XZ[][] = [];
-  const [i0, j0] = toGrid(-half, -half).map(Math.floor), n = Math.ceil((half * 2) / 165);
-  for (let i = i0 - n; i <= i0 + 2 * n; i++) for (let j = j0 - n; j <= j0 + 2 * n; j++) {
-    const c = P.cell(i, j), m = fromGrid(c.u, c.v);
-    if (Math.abs(m.x) > half || Math.abs(m.z) > half) continue;
-    if (c.merge || P.cell(i - 1, j).merge) continue; // (merged pairs: leave out, they're the minority)
-    const { pts } = P.polygon(c);
-    if (!c.split) { out.push(pts); continue; }
-    // the two halves of a split cell
-    const s = c.split, side = (p: XZ) => { const [u, v] = toGrid(p.x, p.z); return s.nu * u + s.nv * v - s.c; };
-    for (const sgn of [1, -1]) {
-      const poly: XZ[] = [];
-      for (let k = 0; k < pts.length; k++) {
-        const a = pts[k], b = pts[(k + 1) % pts.length], fa = side(a) * sgn, fb = side(b) * sgn;
-        if (fa >= 0) poly.push(a);
-        if ((fa >= 0) !== (fb >= 0)) { const t = fa / (fa - fb); poly.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t }); }
-      }
-      if (poly.length >= 3) out.push(poly);
-    }
-  }
-  return out;
+  const L = new Layout({ seed }), box = { x0: -half, z0: -half, x1: half, z1: half };
+  L.ensure(box);
+  return L.plan.fieldsNear(box).map((n) => L.plan.fields[n].poly);
 }
 function corners(poly: XZ[]) {
   const angles: number[] = [];
@@ -64,14 +44,11 @@ describe('review: fields read as a patchwork, not a honeycomb', () => {
   // Every field on one rotated grid: rows (along each field's longest edge) cluster on a couple of
   // directions across the whole map instead of each field having its own.
   it('arable rows point in many directions across the map', () => {
-    const L = new Layout({ seed: 11 });
-    const h = { id: 0, cell: L.parcels.cell(0, 0), edge: 0 }, seen = new Set<number>(), bins = new Array(6).fill(0);
+    const L = new Layout({ seed: 11 }), box = { x0: -1500, z0: -1500, x1: 1500, z1: 1500 }, bins = new Array(6).fill(0);
+    L.ensure(box);
     let n = 0;
-    for (let x = -1500; x <= 1500; x += 40) for (let z = -1500; z <= 1500; z += 40) {
-      L.parcels.hit(x, z, h);
-      if (seen.has(h.id)) continue;
-      seen.add(h.id);
-      const inf = L.about(h);
+    for (const id of L.plan.fieldsNear(box)) {
+      const inf = L.about(id);
       if (inf.kind !== 'arable') continue;
       bins[Math.floor((inf.dir / Math.PI) * 6) % 6]++; n++;
     }

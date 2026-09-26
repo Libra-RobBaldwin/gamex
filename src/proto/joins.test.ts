@@ -195,8 +195,16 @@ describe('where a dual carriageway becomes a single road', () => {
 });
 
 describe('where roads end', () => {
-  it('a cul-de-sac gets a turning head, whose land is freed when the road is carried on', () => {
+  it('a dead end just stops: no turning circle', () => {
     const n = new Network();
+    const [id] = n.build({ x: 0, z: 0 }, { x: 100, z: 0 });
+    expect(courseOf(n, n.segs.get(id)!).kinds[1]).toBe('end');
+    expect(n.land.at({ x: 108, z: -6 })).toBeUndefined();
+    expect(drawn(n).at('asph', { x: 100, z: STD.turningHead.R - 0.3 })).toBe(false);
+  });
+  it('with turning heads asked for, a cul-de-sac gets one, whose land is freed when the road is carried on', () => {
+    const n = new Network();
+    n.turningHeads = true;
     const [id] = n.build({ x: 0, z: 0 }, { x: 100, z: 0 });
     const c = courseOf(n, n.segs.get(id)!);
     expect(c.kinds[1]).toBe('head');

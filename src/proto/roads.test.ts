@@ -151,3 +151,27 @@ describe('free-form roads', () => {
     expect(l.back).toBeLessThan(deep);
   });
 });
+
+describe('segsAt (the index of each node\'s segments)', () => {
+  const scan = (n: Network, id: number) => [...n.segs.values()].filter((s) => s.a === id || s.b === id);
+  const same = (n: Network) => { for (const id of n.nodes.keys()) expect(n.segsAt(id)).toEqual(scan(n, id)); };
+  it('matches a scan of every segment as roads are built, split, removed and replaced', () => {
+    const n = new Network();
+    const id = (x: number, z: number) => { const k = n.nextId++; n.nodes.set(k, { id: k, x, z, y: 0 }); return k; };
+    const a = id(0, 0), b = id(100, 0), c = id(100, 100), d = id(0, 100);
+    const ab = n.addSeg(a, b), bc = n.addSeg(b, c);
+    same(n); // (the index built on first asking)
+    n.addSeg(c, d); n.addSeg(d, a);
+    same(n); // (kept up as segments are added)
+    n.removeSeg(bc);
+    same(n);
+    const s = n.segs.get(ab)!;
+    n.segs.set(ab, { ...s, b: c }); // (replaced in place, with a different end)
+    same(n);
+    expect(n.segsAt(a)).not.toBe(n.segsAt(a)); // (a new array each time)
+    n.segs = new Map([...n.segs].slice(0, 1)); // (a whole map put in, as a load does)
+    same(n);
+    n.segs.clear();
+    expect(n.segsAt(a)).toEqual([]);
+  });
+});

@@ -79,27 +79,57 @@ height) aren't painted: with `new Ground({ terrain: true })` the shader works th
 Tune them with `ground.uniforms.uSlope.value`: rock from/to, then heather from/to in metres,
 default `(0.2, 0.34, 70, 130)`. A flat map leaves `terrain` off and doesn't pay for them.
 
-Fields are world-anchored, so every map anywhere agrees about them. They come from a jittered
-grid, rotated and longer one way than the other:
+Fields are world-anchored, so every map anywhere agrees about them. There is one field style
+everywhere, the farm blocks of `region/fields.ts` (`Countryside`, docs/regiongen.md). A `Layout` takes a field
+source (`FieldSource.blocksNear(box)`, `plan.ts`) and lays out the blocks touching any box it's
+asked about, whole and only once (`ensure`), into a `PlanIndex`. A 50 km map's source is
+`worldmap/country.ts` `countryFor(plan)`, which follows its roads, rivers and hills. The town and
+the demos use `defaultFields(seed)`, which follows nothing. (The old jittered-grid parcels, with
+their bent and swirled edges, are gone.)
 
-- each cell is a Voronoi parcel of about 4 ha;
-- 30% of cells are split in two by a straight hedge;
-- about 20% are merged with a neighbour.
+What a field becomes is its source's (arable, grass, wood, rough), unless:
 
-So parcels run from 2 to 8 ha and don't form a grid. What a parcel becomes depends on what's in
-it:
+- the town has grown over it (more than 15% of it within 30 m of plots), which makes it town;
+- industry has (more than 12%), which makes it rough;
+- it's arable at the water's edge, which makes it grass.
 
-- town if more than 15% of it is within 30 m of plots;
-- rough if it's industrial or touches water;
-- otherwise wood, arable or grass, from landscape-scale noise.
+Arable fields get a crop and rows along their longest edge. The painter fills each field with its
+index and bands each boundary for the field margins. A hedged line between farmland is banded again
+and painted as a dark hedge foot (woodland floor), so field boundaries read from far out, where the
+3D hedges aren't drawn. The margin and foot widths scale with the texel size (a 10 m far tile
+still shows an unbroken line). A wood's edge wanders up to 4.5 m in from its boundary (scrub where
+the trees stop short).
 
-Arable parcels get a crop, and rows along their longest edge. Hedges run along the edges
-between different parcels (not between two town parcels), and along both sides of country
-lanes. Each hedge:
+Hedges run along every hedged line between farmland (not against a wood, not across open rough
+grazing), and along both sides of country lanes. Each hedge:
 
 - keeps 2.2 m off roads, plots, parks and water, at both ends of every 8 m piece;
 - usually has one gateway, with worn earth either side;
-- has a hedgerow tree about every 70 m.
+- has a hedgerow tree about every 55 m.
+
+A line's seed comes from its own coordinates, so two tiles that share it plant the same hedge.
+`settleTrees` moves trees standing in the fields to the woods' edges.
+
+**Woods as a canopy (`canopy.ts`, pure; `canopymesh.ts`, three.js).** Over each wood there is one
+low-poly, flat-shaded surface, with vertex colours: crowns (domes on a jittered grid, spires in a
+conifer plantation) with dark gaps, going down steeply into the ground at the wood's edge. Its
+outline is the cover map's woodland weight, so it follows the painted wood, and a road or the town
+cuts it.
+
+- On a 50 km map's tiles (`worldmap/tilegen.ts`) it is built in the worker, into the tile's one
+  solid mesh, so it costs no extra draw call. The grid is 5 m near, 10 m mid, 24 m far, 64 m vast.
+- On the live cover map (the town, and the 50 km map's live area), `GameGround.woods(look)` gives
+  a `CanopyMeshes`: one mesh per 1 km box that has woods, at a 5 m grid below a view 1,100 m tall
+  and 24 m above. A box is made when it's first painted, and remade only when a repaint touches
+  a wood.
+
+The trees along the woods' edges (`fringe`) stand out of it close up.
+
+**Farmsteads (`farms.ts`, `region/fields.ts`).** A farmhouse, a barn and a shed round a worn yard,
+where the lanes are. Their yards are plots of kind `yard` (hedges and fields keep off them). A farm
+standing back from its road has a farm track, routed over the land like a lane (`region/lanes.ts`
+`laneRoute`: round hills, woods and water) and painted as a `track` plot. On a 50 km map the
+buildings are tile scenery (`worldmap/country.ts` `farmsIn`).
 
 ### Painting and repainting
 

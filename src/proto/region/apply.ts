@@ -17,9 +17,9 @@ export interface Built { made: number[]; skipped: { street: MapStreet; reason: s
 // if the Network refuses it, and a settlement's streets after its first must start on a road
 // already built (so a refused street can't leave the ones hanging off it cut off). Without it
 // (hand-drawn maps) each is built as drawn, as seedTown() always did.
-export function buildStreets(net: StreetNet, streets: MapStreet[], base: RoadOpts, careful = false): Built {
+// (`started`: the places begun so far, when a place's streets are built a few at a time)
+export function buildStreets(net: StreetNet, streets: MapStreet[], base: RoadOpts, careful = false, started = new Set<number | undefined>()): Built {
   const made: number[] = [], skipped: Built['skipped'] = [];
-  const started = new Set<number | undefined>();
   for (const st of streets) {
     const opts: RoadOpts = { ...base, type: st.type, ...(st.cross ? { cross: st.cross } : {}), ...(st.grade !== undefined ? { grade: st.grade } : {}) };
     const snap = st.snap !== false;
