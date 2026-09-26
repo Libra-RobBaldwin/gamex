@@ -13,7 +13,7 @@ import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
 import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
-import { placeResolver, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
+import { placeResolver, setGeology, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
@@ -164,6 +164,7 @@ window.addEventListener('resize', resize);
 const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half, WORLD ? GROUND_SEED : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 if (WORLD) gameGround.ground.uniforms.uSlope.value.set(...slopeLook()); // (the hills' rock and moor: region/terrain.ts, as the far tiles have it)
+if (WORLD) setGeology((x, z) => { const r = WORLD.terrain.geologyAt(x, z); return r === 'alluvium' ? 'clay' : r; }); // (the buildings' stone from the rock under them: worldmap/landform.ts)
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
 ground.userData.noDrape = true; // (the hills are in its heights already)

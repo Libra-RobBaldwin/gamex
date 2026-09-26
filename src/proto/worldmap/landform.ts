@@ -189,7 +189,7 @@ function makeLand(o: LandOptions, half: number): CoarseLand {
       const blob = fbm(N[0], (x * k) / 14000, (z * k) / 14000, 5, 0.55);
       const home = 0.55 * (1 - smooth(0.12, islandsMode === 'one' ? 0.75 : 0.32, rr)); // (the middle is land)
       const rim = islandsMode === 'one' ? -0.7 * smooth(0.55, 0.95, rr) : -0.25 * smooth(0.6, 1.05, rr);
-      pot[j * n + i] = blob + home + rim - (islandsMode === 'archipelago' ? 0.12 : 0.02);
+      pot[j * n + i] = blob + home + rim + (islandsMode === 'archipelago' ? 0.1 : 0.12);
     }
   } else if (seaShare > 0) {
     // the sea along one side (or two, meeting at a corner, on a coast map), with a fractal coast

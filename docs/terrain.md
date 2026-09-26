@@ -300,3 +300,46 @@ scene.add(groundTile(tileMesh(src, ti, tj, { cells: 256 }), ground.material, ori
 The ground samples everything in world space, so it needs no UVs and runs on seamlessly across
 tiles. Place tiles at `offset − origin` and call `ground.setOrigin(origin.x, origin.z)` whenever
 the floating origin moves.
+
+## The 50 km land
+
+A 50 km map (`?map=region`) has one height function that everything reads: the live ground, the far
+tiles, the drape and the routes (`worldmap/terrain.ts` `heightAt`, with `bed` for the water's dips).
+It comes from the coarse land (`worldmap/landform.ts`), made once per map on a 200 m grid in about
+0.65 s:
+
+1. **Outline.** The sea along one or two sides with a fractal coast, or islands (the `islands`
+   option: none, few, archipelago, one). The start town is always well inland.
+2. **Bones.** Broad swells, rolling hills a few kilometres across, ridged ranges along a strike,
+   scarps, plateaux and granite massifs, as much of each as the landform preset has
+   (`LANDFORM_PARAMS`: vale, downs, estuary, uplands, mountains, coast, islands). Coast maps tilt up
+   away from the sea; inland maps tilt away from the edge their rivers leave by.
+3. **Rain.** Priority-flood routing, flow accumulation and implicit stream-power erosion with creep,
+   ten rounds, so each valley is cut by the river in it. Floodplains widen the big rivers' floors.
+4. **Glaciers** (mountains): U-shaped valleys with basins, the ribbon lakes to be.
+5. **Sea rise.** The lowest valleys joined to the sea drown into rias and estuaries. Hollows left
+   deep enough become lakes, the deepest first, up to a share of the land.
+
+Then the rivers are traced where they drain enough, and the rock is set by height, scarp, massif and
+valley floor (`geologyAt`, for vernacular's `setGeology`).
+
+`worldmap/water.ts` turns that into the water. The sea comes from the coast's signed distance,
+smoothed, with small bays. Rivers are smoothed from the grid's cell steps into gentle meanders. They
+widen downstream (1.25·√km² m) and three times over their last 3 km into an estuary, each at its
+own level. Lakes get smooth shores from their cells' distance field, and each has its own level.
+The terrain lays the ground level to the water:
+- a river's floor at its level, the valley side eased down no steeper than about 1 in 8;
+- a lake's shore at its level;
+- the coast down to 0, with cliffs on the headlands and beaches in the bays.
+
+Each place stands on its own gently tilted flat (at most 2.5%), easing out over 650 m. Nearby
+places' flats are weighed together (w⁴ / (1 − w)), so they meet smoothly.
+
+Every tunable is in `PARAMS` and `LANDFORM_PARAMS` (`setLandParams`, `setLandformParams`), for OS's
+priors (region/priors.ts) to set.
+
+**Lighting**, in one place (`region/terrain.ts`):
+- `GROUND_LIFT` (3): the hills are lit this many times steeper than they are, on the live ground
+  (`game/water.ts`) and the far tiles (`worldmap/tilegen.ts`);
+- `slopeLook()`: the ground shader's `uSlope`, with bare rock from a 1 in 2 slope and moor on the
+  tops from 300 m.
