@@ -2267,7 +2267,7 @@ refreshTrees();
 // every building merged into its chunk before the first frame (not two a frame as it plays)
 await loading.stage('Finishing the buildings', 0.03);
 { const dirty = [...chunks.values()].filter((c) => c.dirty); for (const [i, c] of dirty.entries()) { rebuildChunk(c); await loading.tick(i / dirty.length); } }
-if (regionView) { await loading.stage('Drawing the map round you', 0.05); await regionView.settle(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), (f) => loading.tick(f)); }
+if (regionView) { await loading.stage('Drawing the map round you', 0.05); await regionView.settle(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), (f) => loading.tick(f), !!REAL); } // (a real region's whole live area, its far tiles too: thousands of building chunks drawn at once are too slow a frame to make them in)
 await loading.stage('Starting the traffic and the town', 0.15);
 
 // ---------------- clock and traffic ----------------

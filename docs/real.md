@@ -2,8 +2,10 @@
 
 Two parts:
 - **Real regions.** A bake turns a real 50 km square of Britain into the game's map data, from free
-  OS OpenData. The game plays a window of it round a home town. `/?map=exe` is Exeter, and the Exe
-  estuary round it is baked for the world-scale work to stream.
+  OS OpenData. A real region is the other source of the game's one map, the 50 km region: `/?map=exe`
+  is the Exe estuary round Exeter, `/?map=teme` the Teme valley round Ludlow. It's drawn, streamed and
+  played through the same WORLD pipeline as a seeded map (`src/proto/worldmap/`); only the source
+  differs.
 - **Priors.** Numbers measured from those regions tell the seeded generator what real Britain looks
   like (`src/proto/region/priors.ts`).
 
@@ -100,23 +102,55 @@ offshore (no land feature, every height at sea level or below) gets a sea polygo
 
   Rural places come out high, because farm buildings count.
 
-## In the game (`src/proto/real/`)
+## On the 50 km map (`real/world.ts`, `real/worldmap.ts`)
 
-`/?map=exe` (`&home=<place>` for another of its towns) fetches the manifest and the tiles round the
-home place (`load.ts`). `realMap` (`map.ts`) then makes a `MapSpec` for a 6 km window (bound 3000,
-as big as the engine takes today; the ground runs 1.5 × further):
+`?map=region&real=exe` (or `?map=exe` for short; a game saves with the long form) makes the 50 km
+map from the bake. `real/world.ts` is a `WorldSource` (`worldmap/source.ts`): the same facts a seeded
+map's plan is made from, read from the tiles instead of made up. It registers itself with
+`setRealSource`, on the main thread and in the tile worker, so both make the same plan.
 
-- **Places:** the cities, towns and villages in the window. A spot belongs to the place whose edge
-  is nearest (`placeBy: 'edge'`), not its middle, so Exeter's suburbs are Exeter's. In the economy,
-  Exeter has 134,573 people.
-- **Rivers:** OS Open Rivers links of 6 m or more, chained by name into runs of one width (the
-  median). The game's river code draws them (the Exe at 20–40 m, the Exeter Canal beside it).
-- **Lakes:** still water with no river through it, as round lakes of the same area, if it lies at
-  its river's level.
-- **Hills:** the real height above the nearest river's level, eased to 0 over 200 m to the bank.
-  All the game's water lies at one level. It goes to the map as `ground`, the relief grid itself,
-  and `region/terrain.ts` uses it as it is.
-- **Woods:** a tree every 700 m² inside the real woodland (`trees.spots`).
+- **The square:** the bake is centred on the region's home place, which the plan puts at 0, 0. The
+  map runs 24.5 km each way round it. The Exe bake was moved north to put Exeter in the middle, so
+  it now runs from Tiverton to Dawlish and from Dartmoor's edge to Sidmouth (Torbay is off it).
+- **Places:** Open Names' cities, towns and villages (hamlets of 150 people or more count as
+  villages). Each is sized by the people the bake counted in it, at about 250 m² of town a head,
+  never more than Open Names' own extent. A village well inside a bigger place's extent is one of
+  its suburbs and is folded into it. Exe has 286 places, Teme about 100.
+- **The land:** Terrain 50, bilinear between its 50 m posts. Each river's floor is laid at its water
+  and eased up to the land beside it, as the seeded terrain does. Nothing is below the sea.
+- **The sea:** OpenMap Local's tidal water covers only the strip along the shore and up the
+  estuaries, so the sea is that plus any ground at sea level (Terrain 50's sea is 0 or below) that
+  reaches it or the map's edge. It goes to the plan's water as a 100 m coarse grid of the signed
+  distance to the coast (`realLand`), which `WorldWater` reads as it reads a seeded map's.
+- **Rivers:** Open Rivers at their measured widths (6–90 m), each run's water level read off the
+  heights along it and never rising downstream. Still water of a hectare or more becomes a lake.
+- **Roads and railways:** OpenMap Local's motorways, A roads (and primary routes), B roads and minor
+  roads become the plan's routes (minor roads as B). The pieces the bake cut at its tiles are joined
+  end to end and resampled to the plan's 25 m step. Main roads and railways leaving the map run on
+  60 m past its rim, where `game/portals.ts` makes their ways off it: on Exe, the M5, 13 A roads, 4 B
+  roads and 7 railways. A road leaving at both ends is split in two.
+- **Woods:** OpenMap Local's woodland, by tile (`woods(box)`).
+- **Not from OS yet:** industries (the plan's `industries` is empty), and far towns' buildings. The
+  scenery draws each place beyond the live area as the plan's generated town at the real place and
+  size (`worldmap/towns.ts`), not its real buildings.
+
+The plan takes 3.6 s in node for Exe (`real/world.test.ts`).
+
+## The live play area (`real/live.ts`, made by `tools/os/pack.mjs`)
+
+The 8 km square round the home place, where the game's own network, buildings, traffic and economy
+run, is the real one. It's worked out ahead of time by `tools/os/pack.mjs`, which runs the code below
+over the tiles and writes `public/regions/<id>/live/<home>.json`. The game restores it inside the
+WORLD path (`main.ts seedTown`) in place of the streets a seeded map lays out. Every place inside it
+starts live, since its real streets are all there. What the pack is made from (`map.ts realMap` for
+the window, then `lay.ts`):
+
+- **Places:** in the game they're the plan's (above). A spot belongs to the place whose edge is
+  nearest (`placeBy: 'edge'`), not its middle, so Exeter's suburbs are Exeter's. In the economy
+  the 8 km round Exeter has 178,000 people. That's more than the real city (about 130,000), because
+  the pack's lots count every building in the square, and the economy fills each lot.
+- **Water, for laying out:** the pack's network keeps off OS Open Rivers' rivers of 6 m or more,
+  chained by name into runs of one width. In the game the live area's water is the plan's.
 - **Parks:** OS Open Greenspace sites become the parks, playing fields, allotments and churchyards
   (`lay.ts greenRegions`). The leftover-land finder is off, because a real map's gaps are its
   gardens.
@@ -178,10 +212,16 @@ real city has many materials a chunk.
 
 ## Speed: the live pack (`tools/os/pack.mjs`, `src/proto/real/live.ts`)
 
+**On the 50 km map (26 Sep, 08:40), under SwiftShader at 412 × 915:** Exeter loads in 53–60 s and
+Ludlow in 21–22 s. The rest of the 50 km then streams in over about a minute. The pack is now the
+8 km live area: Exeter's holds 3,629 road segments, 38,219 buildings and 3,317 plots (4.4 MB,
+1.1 MB gzipped), and Ludlow's 7,614 buildings (0.26 MB gzipped). The history below is from the
+6 km window, before the 50 km map.
+
 Everything the game used to work out while the player waited is now worked out in the bake:
 
 ```
-node --experimental-transform-types --no-warnings --import ./tools/os/ts-register.mjs tools/os/pack.mjs exe [--home Exeter] [--half 3000]
+node --experimental-transform-types --no-warnings --import ./tools/os/ts-register.mjs tools/os/pack.mjs exe [--home Exeter] [--half 4000]
 ```
 
 `pack.mjs` runs the game's own code over the baked tiles: `realMap`, the OSM importer's stages,
@@ -189,7 +229,6 @@ node --experimental-transform-types --no-warnings --import ./tools/os/ts-registe
 `greenRegions` and `deadEndPaths`. (`ts-register.mjs` lets node import the game's TypeScript.)
 It writes `public/regions/<id>/live/<home>.json`, rounded columns that compress well. The file
 holds:
-- the map, with the relief as Int16 decimetres;
 - the nodes and segments;
 - each junction's chosen form;
 - every lot, tagged with its 1 km tile;
