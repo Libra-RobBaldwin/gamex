@@ -1,20 +1,19 @@
 // The start menu's logic without a browser: where addresses lead, the map registry's contract,
 // and settings surviving blocked storage.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_MAP, MAPS, mapById } from '../proto/maps';
+import { DEFAULT_MAP, GONE, MAPS, mapById } from '../proto/maps';
 import { gameSearch, route, screenOf } from './route';
 
 describe('maps.ts, the registry the menu lists', () => {
-  it('has the starter town (ready and the default), the region, real places and the sandbox', () => {
-    expect(MAPS.map((m) => m.id)).toEqual(['town', 'region', 'exe', 'teme', 'place', 'sandbox']);
-    expect(mapById(DEFAULT_MAP)?.ready).toBe(true);
-    expect(mapById('region')).toMatchObject({ ready: true, setup: true });
+  it('has one map, the region (the default, with its setup and the guide), and real places inside it', () => {
+    expect(MAPS.map((m) => m.id)).toEqual(['region', 'exe', 'teme']);
+    expect(DEFAULT_MAP).toBe('region');
+    expect(mapById('region')).toMatchObject({ ready: true, setup: true, guide: true });
+    expect(MAPS.filter((m) => m.id !== 'region').every((m) => m.inRegion)).toBe(true);
+    expect(Object.keys(GONE)).toEqual(['town', 'sandbox', 'place']);
   });
-  it('gives every map a name, a line of description and an icon, and says why one is not ready', () => {
-    for (const m of MAPS) {
-      expect(m.name && m.blurb && m.icon).toBeTruthy();
-      if (!m.ready) expect(m.soon).toBeTruthy();
-    }
+  it('gives every map a name, a line of description and an icon', () => {
+    for (const m of MAPS) expect(m.name && m.blurb && m.icon).toBeTruthy();
     expect(new Set(MAPS.map((m) => m.id)).size).toBe(MAPS.length);
   });
 });
@@ -25,25 +24,22 @@ describe('route: the menu or straight into a game', () => {
     expect(route('', '#about')).toEqual({ kind: 'menu', screen: 'about' });
     expect(screenOf('#nonsense')).toBe('home');
   });
-  it('goes straight into a ready map, and into the default for a real place', () => {
-    expect(route('?map=town', '')).toMatchObject({ kind: 'game', map: { id: 'town' }, guide: false });
-    expect(route('?map=sandbox&guide=1', '')).toMatchObject({ kind: 'game', map: { id: 'sandbox' }, guide: true });
-    expect(route('?place=horley', '')).toMatchObject({ kind: 'game', map: { id: DEFAULT_MAP } });
+  it('turns old links to the starter town, the sandbox and Real Town Plans to the region setup, saying so', () => {
+    expect(route('?map=town', '')).toMatchObject({ kind: 'menu', screen: 'region', notice: expect.stringMatching(/starter town is gone/) });
+    expect(route('?map=sandbox&guide=1', '')).toMatchObject({ kind: 'menu', screen: 'region', notice: expect.stringMatching(/sandbox is gone/) });
+    expect(route('?place=horley', '')).toMatchObject({ kind: 'menu', screen: 'region', notice: expect.stringMatching(/Real Town Plans is gone/) });
+    expect(screenOf('#new')).toBe('region');
+  });
+  it('goes straight into a real place, and into the region with the guide', () => {
+    expect(route('?map=exe', '')).toMatchObject({ kind: 'game', map: { id: 'exe' }, guide: false });
+    expect(route('?map=region&guide=1', '')).toMatchObject({ kind: 'game', map: { id: 'region' }, guide: true });
   });
   it('goes straight into a region, with its options', () => {
     expect(route('?map=region&seed=42&style=desert', '')).toMatchObject({ kind: 'game', map: { id: 'region' } });
     expect(gameSearch(mapById('region')!, 'map=region&seed=42')).toBe('?map=region&seed=42');
   });
-  it('lists the maps, saying why, for a map that is not ready or not there', () => {
-    const place = mapById('place')!;
-    expect(route('?map=place', '')).toMatchObject({ kind: 'menu', screen: 'new', notice: expect.stringMatching(new RegExp(place.name)) });
-    expect(route('?map=nowhere', '')).toMatchObject({ kind: 'menu', screen: 'new', notice: expect.stringMatching(/nowhere/) });
-  });
-  it('turns a flipped ready flag into a playable deep link', () => {
-    const place = mapById('place')!;
-    place.ready = true;
-    try { expect(route('?map=place', '')).toMatchObject({ kind: 'game', map: { id: 'place' } }); } finally { place.ready = false; }
-    expect(gameSearch(place)).toBe('?map=place');
+  it('opens the region setup, saying so, for a map that is not there', () => {
+    expect(route('?map=nowhere', '')).toMatchObject({ kind: 'menu', screen: 'region', notice: expect.stringMatching(/nowhere/) });
   });
 });
 
