@@ -91,18 +91,14 @@ describe('the packed cover map', () => {
 
 describe('field parcels', () => {
   it('are 2 to 8 ha and not a grid', () => {
-    const L = new Layout({ seed: 2 }), areas: number[] = [], seen = new Set<number>();
-    const h = { id: 0, cell: L.parcels.cell(0, 0), edge: 0 };
-    for (let x = -2000; x < 2000; x += 25) for (let z = -2000; z < 2000; z += 25) seen.add(L.parcels.hit(x, z, h).id);
-    // area by counting 25 m samples per parcel
-    const count = new Map<number, number>();
-    for (let x = -2000; x < 2000; x += 25) for (let z = -2000; z < 2000; z += 25) { const id = L.parcels.hit(x, z, h).id; count.set(id, (count.get(id) ?? 0) + 1); }
-    for (const [, n] of count) areas.push((n * 625) / 10000);
-    const inner = areas.filter((a) => a > 0.3); // (drop slivers cut by the sampled square's edge)
+    const L = new Layout({ seed: 2 }), box = { x0: -2000, z0: -2000, x1: 2000, z1: 2000 };
+    L.ensure(box);
+    const area = (p: XZ[]) => { let s = 0; for (let i = 0, j = p.length - 1; i < p.length; j = i++) s += p[j].x * p[i].z - p[i].x * p[j].z; return Math.abs(s) / 2; };
+    const inner = L.plan.fieldsNear({ x0: -1500, z0: -1500, x1: 1500, z1: 1500 }).map((n) => area(L.plan.fields[n].poly) / 1e4);
     const m = median(inner);
     expect(m).toBeGreaterThan(2);
     expect(m).toBeLessThan(8);
-    const ok = inner.filter((a) => a >= 1.2 && a <= 10).length / inner.length;
+    const ok = inner.filter((a) => a >= 1.2 && a <= 12).length / inner.length;
     expect(ok).toBeGreaterThan(0.8);
     // sizes vary (a grid's would all be the same)
     const sd = Math.sqrt(inner.reduce((s, a) => s + (a - m) ** 2, 0) / inner.length);

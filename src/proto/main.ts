@@ -51,7 +51,7 @@ import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; 
 import { mapById as menuMap } from './maps';
 import { WorldGame } from './worldmap/game'; // a 50 km map: streamed scenery round a live play area (docs/streaming.md)
 import { layLiveRoutes } from './worldmap/live';
-import { GROUND_SEED, woodTrees } from './worldmap/country';
+import { GROUND_SEED, countryFor, woodTrees } from './worldmap/country';
 import { isRealQuery, loadRealMap } from './real/load';
 import { clearOf, greenRegions, layReal, parkLeafiness, placeLots } from './real/lay';
 import { DeadEndPaths } from './game/paths';
@@ -167,7 +167,7 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half, WORLD ? GROUND_SEED : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half, WORLD ? GROUND_SEED : undefined, WORLD ? countryFor(WORLD) : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
@@ -767,13 +767,17 @@ async function seedTown() {
 // its woods planted (from the ground's own layout of fields and woods).
 const worldJobs: { x0: number; z0: number; x1: number; z1: number }[] = [];
 let worldJobAt = 0;
+// (the woods as a canopy, with trees along their edges: ground/canopy.ts)
+const liveCanopy = gameGround.woods({ broadleaf: LOOK.trees.crown, conifer: LOOK.trees.pine });
+scene.add(liveCanopy.group); nav.onChange(() => liveCanopy.setView(view.h));
 function worldIdle(budget: number) {
   const t0 = performance.now();
   while (worldJobs.length && performance.now() - t0 < budget) {
     const b = worldJobs.shift()!, s0 = WORLD!.settlements[WORLD!.start], R0 = s0.reach + 450;
     // (round the start town it's painted already)
     if (!(b.x0 >= s0.x - R0 && b.x1 <= s0.x + R0 && b.z0 >= s0.z - R0 && b.z1 <= s0.z + R0)) gameGround.paintBox(b);
-    const got = woodTrees(gameGround.ground.layout, b, 16, LOOK.trees.pines, MAP.seed + 17);
+    liveCanopy.add(b);
+    const C = gameGround.ground.cover!, got = woodTrees(gameGround.ground.layout, { a: C.a, x0: C.region.x0, z0: C.region.z0, size: C.region.size, n: C.region.n }, b, 14);
     for (let k = 0; k < got.length; k += 4) trees.push({ x: got[k], z: got[k + 1], s: got[k + 2] * 1.45, kind: got[k + 3] });
     worldJobAt++;
     if (got.length) refreshTrees([b]);
