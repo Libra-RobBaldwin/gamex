@@ -51,14 +51,14 @@ const changed = await A.evaluate(() => {
   const P = window.proto, net = P.net;
   // a branch line just north of the start town, two stations on it and a rail line between them
   P.purse.balance += 3_000_000;
-  P.buildRoad({ x: -480, z: 540 }, { x: 480, z: 540 }, 'rail-branch');
+  P.buildRoad({ x: -480, z: 590 }, { x: 480, z: 590 }, 'rail-branch');
   P.rebuild();
   // and a one-way carriageway north out of town, bridging the branch (the region starts with neither)
-  P.buildRoad({ x: 150, z: 350 }, { x: 150, z: 1300 }, 'dual', { oneway: true });
+  P.buildRoad({ x: -300, z: 350 }, { x: -300, z: 1300 }, 'dual', { oneway: true });
   P.rebuild();
   const R = P.railway, seg = [...net.segs.values()].filter((x) => net.def(x).cls === 'rail').sort((a, b) => net.length(b) - net.length(a))[0];
   const made = [];
-  for (const at of [0.25, 0.75]) { const pl = [1, -1].flatMap((side) => R.plan(seg.id, net.length(seg) * at, side, 130).plans).find((x) => x.ok); if (pl) made.push(R.build(pl).station.id); }
+  for (const at of [0.4, 0.85]) { const pl = [1, -1].flatMap((side) => R.plan(seg.id, net.length(seg) * at, side, 130).plans).find((x) => x.ok); if (pl) made.push(R.build(pl).station.id); }
   const f = P.traffic.fleet, dmu = f.defFor(f.offerFor('dmu'));
   const rl = made.length === 2 ? R.addLine(made, false, [dmu]) : 'no stations';
   P.rebuild();
