@@ -12,7 +12,7 @@
 // flat roofs (desert), and stilted, verandahed houses under tin (tropical).
 import { rng } from './roads';
 
-export type Rock = 'limestone' | 'gritstone' | 'granite' | 'slate' | 'chalk' | 'clay' | 'sandstone';
+export type Rock = 'limestone' | 'gritstone' | 'granite' | 'slate' | 'chalk' | 'clay' | 'sandstone' | 'alluvium'; // (terrain's geologyAt: docs/briefs/PLAN.md)
 export type Vern =
   | 'cotswold' | 'pennine' | 'lakeland' | 'cornish' | 'scots' | 'flint' | 'clayvale' | 'weald' | 'marches'
   | 'nordic' | 'med' | 'desert' | 'tropical';
@@ -82,6 +82,7 @@ export function vernOf(rock: Rock, prov: Province): Vern {
     case 'chalk': return 'flint';
     case 'sandstone': return prov === 'scotland' ? 'scots' : prov === 'southeast' ? 'weald' : prov === 'north' ? 'pennine' : 'marches';
     case 'clay': return prov === 'southeast' ? 'weald' : prov === 'scotland' ? 'scots' : 'clayvale';
+    case 'alluvium': return prov === 'southeast' ? 'flint' : prov === 'scotland' ? 'scots' : 'clayvale'; // (river flats: brick, from the clay dug there)
   }
 }
 
@@ -97,6 +98,10 @@ export function eraAt(d: number, kind: Place['kind'], jitter: number): Era {
   for (const [lim, era] of ERAS) if (e < lim) return era;
   return 'modern';
 }
+
+// the real regions' building traditions (real/list.ts): Exeter's red brick and sandstone, Ludlow's
+// black-and-white timber frame
+export const REAL_VERN: Record<string, Vern> = { exe: 'clayvale', teme: 'marches' };
 
 // ---------------- places ----------------
 export interface PlaceMap {
@@ -133,3 +138,26 @@ export function placeResolver(m: PlaceMap, force?: Vern) {
     return { vern: s ? vernAt(bi) : force ?? 'clayvale', era: eraAt(bd, kind, jitter), kind };
   };
 }
+
+// ---------------- palettes for far scenery ----------------
+// The colours a place's buildings are, for scenery drawn without the building generator (world50's
+// far towns): its walls and roofs, commonest first. The same traditions as the live buildings.
+export interface Palette { walls: string[]; roofs: string[] }
+const PALETTES: Record<Vern, Palette> = {
+  cotswold: { walls: ['#d2ae74', '#c9a468', '#dcc08a', '#d8bf8e'], roofs: ['#8a8174', '#7d7466', '#535c66'] },
+  pennine: { walls: ['#76705f', '#65604f', '#857b66', '#8a6a55'], roofs: ['#5a554c', '#474e57', '#5d5f62'] },
+  lakeland: { walls: ['#f3f1ea', '#7b8079', '#e9e6dc', '#80857e'], roofs: ['#4a5058', '#474e57'] },
+  cornish: { walls: ['#f4f2ec', '#a19e96', '#ece7dc', '#9e9b93'], roofs: ['#50575f', '#535c66'] },
+  scots: { walls: ['#efe9dc', '#e3d2b0', '#dadcd6', '#b2876a', '#c8b391'], roofs: ['#4a5058', '#474e57'] },
+  flint: { walls: ['#6f6e6a', '#9a4b35', '#d6c28e', '#efe8da'], roofs: ['#9c463b', '#8a4a38', '#535c66'] },
+  clayvale: { walls: ['#9a4b35', '#8e4430', '#b0603f', '#efe8da'], roofs: ['#9c463b', '#8a4a38', '#535c66', '#6d5a50'] },
+  weald: { walls: ['#a2503a', '#f1eee6', '#9a4b35', '#efe6d2'], roofs: ['#9c463b', '#a55a40', '#6d5a50'] },
+  marches: { walls: ['#f2efe6', '#9c5f4a', '#9a4b35', '#a8705a'], roofs: ['#8a4a38', '#7d7466', '#535c66'] },
+  nordic: { walls: ['#8e2b22', '#d9a441', '#f2efe6', '#e8d9a8', '#7a8f9c'], roofs: ['#eef3f6', '#2f3236'] },
+  med: { walls: ['#f5f1e6', '#e9c98f', '#e7b8a0', '#f0dca8'], roofs: ['#b5623e', '#a8583a', '#c07048'] },
+  desert: { walls: ['#c9a574', '#d6b98c', '#bfa27a', '#e8dcc4'], roofs: ['#cdbb98', '#bfa27a'] },
+  tropical: { walls: ['#f5f1e6', '#e9c98f'], roofs: ['#b5623e'] },
+};
+export const paletteOf = (v: Vern): Palette => PALETTES[v];
+// the palette at a point of a map (the same resolver the live buildings use)
+export const paletteAt = (at: (x: number, z: number) => Place, x: number, z: number) => PALETTES[at(x, z).vern];
