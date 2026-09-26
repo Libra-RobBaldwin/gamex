@@ -160,10 +160,8 @@ and tested; `draw.ts` and `game.ts` hold the three.js drawing and the HUD.
   - Stations are `rail_station` stops in the economy, and rail lines are its lines
     (`TownHooks.rail`, ids from 1,000,000). The economy gets journey times along the track, fares
     at twice the bus fare, and each train's running costs.
-- **The starter town:** its two wandering trains are replaced by a line between two stations on
-  the main line, **Central** and **Parkway**. The line humps 7.8 m over the high road, so it's
-  only level near the ends, and the stations are at x ≈ ±420. The line runs an intercity and a
-  local. They start at the platforms: there's no room for a depot there.
+- **The map starts with no railway:** the player lays the track, builds the stations and draws
+  the lines. Trains start at the platforms where a station has no room for a depot.
 
 ## How the signalling works
 
@@ -230,14 +228,9 @@ rw.sim.log                                    // every call: { train, line, stat
   in. The bus-loop session's line tool can take stations as stops: tap a station (use
   `rw.stationAt(p)`, or the station badges), then `rw.addLine(ids, loop, trains)`.
   `RailGame.startLineTool(first?)` is a working rail line tool that can be reused.
-- **The region:** the region generator's `SettlementInfo` already has the right shape.
-  ```ts
-  import { planRegionRail, layRegionRail } from './rail/region';
-  const plan = planRegionRail(spec.settlements, { bound, isWater });
-  const made = layRegionRail(railway, plan); // { stations, lines, problems, length }
-  ```
-  - The main line runs through the city and the two towns it lies most nearly between (or from
-    the city out through two towns). Stations are on straights, and gentle curves join them.
+- **The region starts with no railway** (the user: "no rail, no upgraded roads, then it's up
+  to the player"). The 6 km region's generated main line and branch (`rail/region.ts`) went
+  with that map.
   - A single-track branch leaves the city's straight through points. It runs to the nearest
     village off the main line, with a passing loop at its station.
   - There's one line per route.
@@ -282,7 +275,7 @@ rw.sim.log                                    // every call: { train, line, stat
     claimed, dearer than a viaduct one, found by a tap over it, trains calling;
   - refused in a cutting;
   - viaduct and underground stations saved and restored as they were.
-- `e2e/stations.e2e.mjs`: by touch at 412×915, DPR 2, in the starter town: a curve, a viaduct and a
+- `e2e/stations.e2e.mjs`: by touch at 412×915, DPR 2, on the region (`?map=region&seed=42`): a curve, a viaduct and a
   deep tunnel laid; a station built on each from Build > Stops (the underground ones by tapping
   the track in the underground view); a line drawn between the two underground stations and its
   train calling at both with its doors open, 14 m down; the view off again with nothing left over;
@@ -296,7 +289,7 @@ rw.sim.log                                    // every call: { train, line, stat
   - Transport > Railway lists the lines;
   - no console errors.
 
-## Performance (starter town, SwiftShader, Fast tier, 412×915 DPR 2)
+## Performance (measured on the old starter town, SwiftShader, Fast tier, 412×915 DPR 2)
 
 | View | Frame (median), before → after | Draw calls, before → after | Triangles, before → after |
 |---|---|---|---|

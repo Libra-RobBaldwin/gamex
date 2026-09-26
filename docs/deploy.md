@@ -2,14 +2,13 @@
 
 The repo builds as a plain static site: `npm run build` writes every page into `dist/`, and
 Vercel serves that folder. There is no server code, so there is nothing to configure beyond
-connecting the repo. `vercel.json` only turns on clean addresses (`/places` as well as
-`/places.html`).
+connecting the repo. `vercel.json` only turns on clean addresses (`/proto` as well as
+`/proto.html`).
 
 | Page | Address on the site |
 |---|---|
 | The 2D game | `/` |
 | The 3D game | `/proto` |
-| Real Town Plans | `/places` |
 | Demos | `/ground-demo`, `/bridges-demo`, `/industries-demo`, `/people-demo`, `/vehicles-demo`, `/water-demo` |
 
 ## Where it's deployed now
@@ -41,14 +40,13 @@ It takes about five minutes. The free Hobby plan is enough.
    of the site, or **Continue to Dashboard** and then **Visit**.
 
 Your site's address is shown under **Domains**, something like `gamex-xyz.vercel.app`.
-Add `/places` to it for Real Town Plans.
 
 ## Make the site follow the branch you play
 
 Vercel builds **every branch** you push to. Each branch gets its own preview address. The
 **production** address (`gamex-xyz.vercel.app`) follows one branch. To start with, that's
-the repo's default branch, `claude/runescape-transport-puzzle-game-q1uhy8`, which doesn't
-have Real Town Plans yet. To follow the integration branch instead:
+the repo's default branch, `claude/runescape-transport-puzzle-game-q1uhy8`. To follow the
+integration branch instead:
 
 1. In the project on Vercel, tap **Settings**, then **Environments**, then **Production**.
 2. Under **Branch Tracking**, type `claude/cloud-session-history-rvqkm1` and tap **Save**.
@@ -73,12 +71,6 @@ later).
 
 ## What the site talks to
 
-Everything runs in the visitor's browser. The site itself never receives a postcode or any
-map data.
-
-- **postcodes.io**: Real Town Plans sends the postcode there to find it, and nowhere else.
-- **tile.openstreetmap.org**: the base map on the area picker. OpenStreetMap's
-  [tile policy](https://operations.osmfoundation.org/policies/tiles/) allows light use like
-  this, with the credit shown. If the site ever gets busy, switch `TILE_URL` in
-  `src/places/map.ts` to a paid tile provider.
-- **The public Overpass servers**: the map data for an area, one tile at a time.
+Everything runs in the visitor's browser, and the site talks to nothing else: the real regions
+(`public/regions/`) are baked into the site from Ordnance Survey open data at build time
+(`docs/real.md`), and a game fetches its region's files from the site itself.
