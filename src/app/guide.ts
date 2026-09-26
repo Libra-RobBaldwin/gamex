@@ -1,5 +1,6 @@
 // The guided start: a few steps over the live game, each ticked off when the player does it
-// (moves the map, builds a road, places a stop, starts a line). It watches the game through
+// (moves the map, places a stop, starts a line). It says what the game's own goal strip would, so that
+// strip hides while the guide is up (proto.css). It watches the game through
 // window.proto rather than hooking into it, so the game needs no changes for it. Skippable at any
 // step; finishing or skipping it is remembered (store.ts), and How to play starts it again.
 
@@ -18,7 +19,7 @@ interface Step { id: string; icon: Icon; title: string; text: string; done?: (g:
 const stops = (g: Game) => { let n = 0; for (const s of g.net.segs.values()) n += s.stops.length; return n; };
 
 function steps(g: Game): Step[] {
-  const v0 = { ...g.view }, roads0 = g.net.segs.size, stops0 = stops(g), lines0 = g.lines?.list.length ?? 0;
+  const v0 = { ...g.view }, stops0 = stops(g), lines0 = g.lines?.list.length ?? 0;
   const out: Step[] = [
     {
       id: 'move', icon: 'finger', title: 'Move the map',
@@ -26,13 +27,8 @@ function steps(g: Game): Step[] {
       done: (x) => Math.hypot(x.view.x - v0.x, x.view.z - v0.z) > 25 || Math.abs(Math.log(x.view.h / v0.h)) > 0.2 || Math.abs(Math.atan2(Math.sin(x.view.az - v0.az), Math.cos(x.view.az - v0.az))) > 0.25,
     },
     {
-      id: 'road', icon: 'road', title: 'Build a road',
-      text: 'Tap <b>Build</b> and pick a road. Drag from where it starts to where it ends, then tap <b>Build</b> on the strip.',
-      done: (x) => x.net.segs.size > roads0,
-    },
-    {
       id: 'stop', icon: 'busStop', title: 'Place a bus stop',
-      text: 'In <b>Build</b>, open <b>Stops</b> and pick the bus stop. Tap beside a road to put one there.',
+      text: 'Tap <b>Build</b>, open <b>Stops</b> and pick the bus stop. Tap beside a road to put one there. Two stops make a line.',
       done: (x) => stops(x) > stops0,
     },
   ];
@@ -42,7 +38,7 @@ function steps(g: Game): Step[] {
     text: 'Tap <b>Transport</b>, then <b>New line</b> under Lines. Tap orange stops in the order the bus calls, then <b>Create</b>.',
     done: (x) => (x.lines?.list.length ?? 0) > lines0,
   });
-  out.push({ id: 'end', icon: 'trendUp', title: 'That’s the loop', text: 'People walk to your stops and ride your buses, and good service makes the town grow. <b>Menu</b> has quality and the way back to the start.' });
+  out.push({ id: 'end', icon: 'trendUp', title: 'That’s the loop', text: 'People walk to your stops and ride your buses, and good service makes the town grow. Roads and railways are in <b>Build</b> too. <b>Menu</b> has quality and the way back to the start.' });
   return out;
 }
 

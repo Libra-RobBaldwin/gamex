@@ -191,13 +191,17 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   check(/Move the map/.test(await page.textContent('#guide')), 'the guide starts with moving the map');
   // do it: drag the map, and the step ticks itself off
   await page.evaluate(() => window.proto.focusOn({ x: 120, z: 90 }, 260));
-  await page.waitForFunction(() => /Build a road/.test(document.querySelector('#guide')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => {});
-  check(/Build a road/.test(await page.textContent('#guide')), 'moving the map ticks step 1 and moves on to building a road');
-  await page.screenshot({ path: `${shots}/5-guide-road.png` });
-  // build one (as the road tool would), and place a stop
-  await page.evaluate(() => window.proto.buildRoad({ x: 150, z: 0 }, { x: 150, z: 110 }));
-  await page.waitForFunction(() => /bus stop/i.test(document.querySelector('#guide')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => {});
-  check(/bus stop/i.test(await page.textContent('#guide')), 'building a road moves on to the bus stop');
+  await page.waitForFunction(() => /Place a bus stop/.test(document.querySelector('#guide')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => {});
+  check(/Place a bus stop/.test(await page.textContent('#guide')), 'moving the map ticks step 1 and moves on to placing a bus stop');
+  check(await page.evaluate(() => { const g = document.querySelector('#goal'); return !g || g.getClientRects().length === 0; }), 'the game\'s own goal strip stays hidden while the guide is up');
+  await page.screenshot({ path: `${shots}/5-guide-stop.png` });
+  // place one (as the stop tool would), and the guide moves on to the line
+  await page.evaluate(() => {
+    const P = window.proto, net = P.net, n = net.nearestSeg({ x: 120, z: 0 }, 120, (s) => net.def(s).cls === 'road');
+    if (n) for (const side of [1, -1]) for (const d of [0, 15, -15]) { const { plans } = net.planStop(n.seg.id, n.s + d, side); const pl = plans.find((x) => x.ok); if (pl) { net.addStop(n.seg.id, n.s + d, side, pl); P.rebuild(); return; } }
+  });
+  await page.waitForFunction(() => /Start a bus line/.test(document.querySelector('#guide')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => {});
+  check(/Start a bus line/.test(await page.textContent('#guide')), 'placing a stop moves on to starting a line');
   await page.tap('#guide [data-next]');
   await page.waitForTimeout(200);
   const steps = await page.$$eval('#guide .g-dots i', (d) => d.length);
