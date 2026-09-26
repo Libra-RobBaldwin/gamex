@@ -2288,7 +2288,7 @@ parking = new Parking(traffic.fleet, rng(11), (lot, heavy) => {
     if (heavy ? m.category === 'lorry' && m.dims.length < 12.5 : m.category === 'car' || (m.category === 'van' && m.dims.length < 5.6)) return d;
   }
   return null;
-}, RELIEF?.heightAt);
+}); // (no ground height: the drape puts parked cars on the hills, as it does every car)
 traffic.parking = parking;
 traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;

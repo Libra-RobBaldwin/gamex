@@ -61,6 +61,7 @@ function along(p: { x: number; z: number }[], s: number) {
   return { x: e.x, z: e.z, hx: 1, hz: 0 };
 }
 
+export const PARK_Y = -0.21;
 export class Parking {
   private spots = new Map<number, Spot>();
   private grid = new Map<string, Set<Spot>>();
@@ -72,7 +73,7 @@ export class Parking {
   view = { x: 0, z: 0, r: 400 };
   stats = { parkedIn: 0, pulledOut: 0 };
 
-  constructor(private fleet: Fleet, private rand: () => number, private carFor: (lot: Lot, heavy: boolean) => Dressed | null, private heightAt?: (x: number, z: number) => number) {}
+  constructor(private fleet: Fleet, private rand: () => number, private carFor: (lot: Lot, heavy: boolean) => Dressed | null) {}
 
   // a building's spaces (again, if it was rebuilt: the cars still fit are kept)
   set(lot: Lot, bays: Bay[] | undefined) {
@@ -151,7 +152,9 @@ export class Parking {
   // brought towards its share of cars for the hour.
   draw(dt: number) {
     const parts: Rect[] = [{ x: 0, z: 0, hx: 1, hz: 0, hl: 2, hw: 0.9 }];
-    const y = (x: number, z: number) => (this.heightAt ? this.heightAt(x, z) : 0) - 0.21; // (the fleet lifts cars to the carriageway: car parks are lower)
+    // (height above the ground: the drape lifts everything onto the hills, as it does the traffic;
+    // the fleet lifts cars to the carriageway, and car parks and drives are a little lower)
+    const y = (_x: number, _z: number) => PARK_Y;
     const put = (id: number, d: Dressed, x: number, z: number, hx: number, hz: number, v: number, parked: boolean, step: number) => {
       parts[0].x = x; parts[0].z = z; parts[0].hx = hx; parts[0].hz = hz;
       const drv: Driven = { id, v, s: 0, lane: 0, dress: d.dress, parked };
