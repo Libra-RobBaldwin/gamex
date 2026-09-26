@@ -1,7 +1,7 @@
 // The game's water: one water system (src/proto/water) over today's flat map, and everything the
 // game needs from it. main.ts only calls these few things:
 //
-//   const gw = new GameWater(BOUND, map.water);   // (the map's lakes and rivers: region/water.ts)
+//   const gw = new GameWater(BOUND, map.water);   // (the map's lakes and rivers: worldmap/water.ts)
 //   gw.isWater(p)                 // the game's isWater: roads, plots, bridges and traffic use it
 //   gw.claim(net.land)            // the lake's land claims ('water' owner, 3 m off the bank)
 //   ground.geometry = gw.groundGeometry(...)   // the map's ground, dipping into the lake bed
@@ -13,7 +13,7 @@
 //   gw.crossings(path) / navLimits / pierBans   // for the bridges and road height solver
 //
 // The map is flat (height 0) apart from its lakes and rivers: hollows in an FnHeight (noise-warped
-// bowls with a gently shelving rim, and channels along a centre line; region/water.ts), which the
+// bowls with a gently shelving rim, and channels along a centre line; worldmap/water.ts), which the
 // water system fills to its level. Terrain comes later; then the source becomes the terrain
 // library's and nothing else here changes.
 import * as THREE from 'three';
@@ -22,13 +22,13 @@ import { TILE } from '../terrain/height';
 import { KIND_CODE, WaterSystem, claimWater, navLimits, pierBans, reedSpots, shoreColours, waterClaims, waterSurface, type Crossing, type WaterMesh, type WaterTile } from '../water';
 import { WATER_LIGHT, patchGroundMaterial, reedGeometry, reedMaterial, reedMesh, rippleTexture, setWaterLight, waterGeometry, waterMaterial, type WaterLight } from '../water/material';
 import type { Land } from '../land';
-import { GROUND_LIFT, swellSlope } from '../region/terrain';
-import { DROP, LEVEL, MapWater, RIM, TOWN_LAKE, TOWN_WATER, WATER_LEVEL, lakeBox, lakeGroundOf, lakeRadiusOf, riverReach, type LakeSpec, type WaterSpec } from '../region/water';
+import { GROUND_LIFT, swellSlope } from '../worldmap/terrain';
+import { DROP, LEVEL, MapWater, RIM, TOWN_LAKE, TOWN_WATER, WATER_LEVEL, lakeBox, lakeGroundOf, lakeRadiusOf, riverReach, type LakeSpec, type WaterSpec } from '../worldmap/water';
 
 export interface XZ { x: number; z: number }
 
 // The town's lake (the default map's): where it is and roughly how big (the bowl's radius wobbles
-// by up to ±13% round this). The shapes and the ground they make are in region/water.ts.
+// by up to ±13% round this). The shapes and the ground they make are in worldmap/water.ts.
 export const LAKE = TOWN_LAKE;
 export { LEVEL, WATER_LEVEL };
 export const lakeRadius = (a: number) => lakeRadiusOf(TOWN_LAKE, a);
@@ -73,7 +73,7 @@ export class GameWater {
   private dusk = -1;
   private lit: { scene: THREE.Scene; sun: THREE.DirectionalLight; hemi: THREE.HemisphereLight | null; day: { sun: THREE.Color; sunI: number; sky: THREE.Color; gnd: THREE.Color; hemiI: number; bg: THREE.Color | null } } | null = null;
   readonly tiles: WaterTile[] = []; // the tiles with water on the map
-  readonly shapes: MapWater; // the map's lakes and rivers (region/water.ts)
+  readonly shapes: MapWater; // the map's lakes and rivers (worldmap/water.ts)
   // (half the map's width, and the tiles it covers; the map's water, the town's lake by default)
   constructor(readonly half: number, spec: WaterSpec = TOWN_WATER) {
     const W = (this.shapes = new MapWater(spec));
@@ -146,7 +146,7 @@ export class GameWater {
   // for the flat plane the game lays down with rotation.x = −π/2. (Rivers are flat here: their beds
   // are separate strips, drawn over it; see beds().)
   //
-  // On a map with hills (`relief`, region/terrain.ts), the grid is the hills' own (25 m), the lakes'
+  // On a map with hills (`relief`, worldmap/terrain.ts), the grid is the hills' own (25 m), the lakes'
   // boxes are snapped out onto it, and every vertex carries the hills' height: the mesh is then
   // exactly the surface everything else is draped on (drape.ts).
   groundGeometry(size: number, relief?: { step: number; heightAt: (x: number, z: number) => number }, swell = 0) {
@@ -224,7 +224,7 @@ export class GameWater {
     for (let v = 0; v < V; v++) {
       const x = pos[v * 3], z = pos[v * 3 + 2];
       let gx = (G(x + e, z) - G(x - e, z)) / (2 * e), gz = (G(x, z + e) - G(x, z - e)) / (2 * e);
-      if (H) { gx += GROUND_LIFT * (H(x + eH, z) - H(x - eH, z)) / (2 * eH); gz += GROUND_LIFT * (H(x, z + eH) - H(x, z - eH)) / (2 * eH); } // (lit steeper than it is: region/terrain.ts)
+      if (H) { gx += GROUND_LIFT * (H(x + eH, z) - H(x - eH, z)) / (2 * eH); gz += GROUND_LIFT * (H(x, z + eH) - H(x, z - eH)) / (2 * eH); } // (lit steeper than it is: worldmap/terrain.ts)
       if (swell) { const [sx, sz] = swellSlope(x, z, swell); gx += sx; gz += sz; } // (and its swells, for the light only)
       const l = Math.hypot(gx, 1, gz);
       nor[v * 3] = -gx / l; nor[v * 3 + 1] = 1 / l; nor[v * 3 + 2] = -gz / l;

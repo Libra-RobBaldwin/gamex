@@ -16,7 +16,7 @@ import { canopy, fringe, type CanopyArrays, type CoverData } from '../ground/can
 import { farmTrack, farmYard } from '../ground/farms';
 import { Occupancy, planHedges, type HedgeTree, type Piece } from '../ground/hedgerows';
 import { hash2 } from '../ground/noise';
-import { lakeRadiusOf, type XZ } from '../region/water';
+import { lakeRadiusOf, type XZ } from './water';
 import { ROUTE_HALF } from './routes';
 import { STYLE_LOOKS } from '../region/styles';
 import { settlementScene, type SceneBuilding, type ScenePlot } from './towns';

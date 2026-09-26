@@ -338,7 +338,7 @@ places' flats are weighed together (w⁴ / (1 − w)), so they meet smoothly.
 Every tunable is in `PARAMS` and `LANDFORM_PARAMS` (`setLandParams`, `setLandformParams`), for OS's
 priors (region/priors.ts) to set.
 
-**Lighting**, in one place (`region/terrain.ts`):
+**Lighting**, in one place (`worldmap/terrain.ts`):
 - `GROUND_LIFT` (3): the hills are lit this many times steeper than they are, on the live ground
   (`game/water.ts`) and the far tiles (`worldmap/tilegen.ts`);
 - `slopeLook()`: the ground shader's `uSlope`, with bare rock from a 1 in 2 slope and moor on the

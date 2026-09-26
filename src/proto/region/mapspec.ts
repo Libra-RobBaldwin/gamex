@@ -3,7 +3,7 @@
 // trees are scattered, the Network's bounds, the camera's limits, and which settlement each new
 // plot belongs to (plots are queued nearest a settlement's centre first). Pure: no three.js.
 import type { Kind, Link, StreetCall, ZoneRule } from './generate';
-import type { WaterSpec, XZ } from './water';
+import type { WaterSpec, XZ } from '../worldmap/water';
 import type { RegionOptions, Relief, Style } from './options';
 import type { WorldPlan } from '../worldmap/plan';
 
@@ -32,7 +32,7 @@ export interface MapSpec {
   line: XZ[]; // the starter bus line: the stops nearest these, in order
   industries: boolean; // library industrial sites on the town's estate (game/industry.ts townWishes)
   trees: { count: number; clear?: number; spots?: XZ[] }; // woodland trees scattered, and the radius mostly kept clear round each centre (else 55% of its radius); a real map's trees stand at `spots`
-  ground?: { x0: number; z0: number; step: number; n: number; h: Float32Array; max: number }; // a real map's hills (real/map.ts): the relief grid itself, for region/terrain.ts
+  ground?: { x0: number; z0: number; step: number; n: number; h: Float32Array; max: number }; // a real map's hills (real/map.ts): the relief grid itself, for worldmap/terrain.ts
   credit?: { text: string; href: string }; // a real map's data credit, shown on the map
   placeBy?: 'edge'; // a spot belongs to the settlement whose edge is nearest, not its centre (a real map: a city's suburbs are the city's, not the next village's)
   style: Style; // how it looks (region/styles.ts): temperate, desert, arctic

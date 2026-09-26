@@ -13,7 +13,7 @@
 import { rng, mix, range, pick, type Rand } from './random';
 import { placeName } from './names';
 import { regionOptions, type RegionOptions } from './options';
-import { MapWater, type LakeSpec, type RiverSpec, type WaterSpec, type XZ } from './water';
+import { MapWater, type LakeSpec, type RiverSpec, type WaterSpec, type XZ } from '../worldmap/water';
 import { GRID_PLAN, PRIORS } from './priors';
 
 export type Kind = 'city' | 'town' | 'village';

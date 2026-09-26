@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { planWorld } from './plan';
 import { PROFILES, planRoutes } from './routes';
-import type { XZ } from '../region/water';
+import type { XZ } from './water';
 
 // The trunk network (off at the start of a game: the player builds it, but the planner is the same)
 // follows the land: motorways within their grade nearly everywhere, railways far flatter than the

@@ -12,15 +12,15 @@ import { TOWN_MAP } from './town';
 import { optionsFromQuery, type RegionOptions } from './options';
 import { STYLE_LOOKS } from './styles';
 import { worldMapSpec } from '../worldmap/spec';
-import { makeRelief } from './terrain';
-import { MapWater } from './water';
+import { makeRelief } from '../worldmap/terrain';
+import { MapWater } from '../worldmap/water';
 import { woodSpots } from './priors';
 import { mix, rng } from './random';
 
 export * from './generate';
 export * from './mapspec';
 export { buildStreets, type StreetNet } from './apply';
-export { MapWater, TOWN_WATER, type WaterSpec, type LakeSpec, type RiverSpec } from './water';
+export { MapWater, TOWN_WATER, type WaterSpec, type LakeSpec, type RiverSpec } from '../worldmap/water';
 export { isRealPlace, placeName, REAL_PLACES } from './names';
 export { TOWN_MAP };
 export * from './options';

@@ -12,7 +12,7 @@
 import { ROADS, halfOf, kerbOf } from '../catalog';
 import { KINDS, layStreets, type Kind, type StreetCall } from '../region/generate';
 import { mix, rng, type Rand } from '../region/random';
-import type { XZ } from '../region/water';
+import type { XZ } from './water';
 import { ROUTE_HALF, type Route, type Rail } from './routes';
 import type { WorldPlan, WorldSettlement } from './plan';
 import { REAL_VERN, paletteOf, placeResolver, type Vern } from '../vernacular';

@@ -7,7 +7,7 @@
 // Pure: no three.js, no DOM.
 
 export type Style = 'temperate' | 'desert' | 'arctic';
-// How hilly the ground is (region/terrain.ts): flat to mountain. Rolling by default.
+// How hilly the ground is (worldmap/terrain.ts): flat to mountain. Rolling by default.
 export type Relief = 'flat' | 'lowland' | 'rolling' | 'upland' | 'mountain';
 // What kind of country a 50 km map is (worldmap/landform.ts), and its islands. Each LANDFORMS entry
 // below is one of the region setup's choices.
