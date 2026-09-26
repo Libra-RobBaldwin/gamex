@@ -3,7 +3,7 @@
 Session: world50, branch `claude/work-world50`. PR #42 is merged into the integration branch and live.
 Written 26 Sep 2026, ~01:20 UTC, after merging the integration branch in (b57164e).
 
-## Status now (26 Sep, ~10:00 UTC)
+## Status now (26 Sep, ~12:30 UTC)
 
 This section wins over the tables below, which are the brief as first written.
 
@@ -16,9 +16,14 @@ locally" means it isn't live yet.
   - The live area's trees are lighter from mid zoom out, and places come to life a few streets a frame.
   - Checked on screenshots: the start town, a far town, the docks, the steelworks and a village.
 
-### Done locally, waiting on PR #51 (open)
-- **The first view frames the start town's centre** again. Checked on a screenshot.
-- **Roundabouts are rare on 50 km maps.** The start town went from 14 minis and 4 roundabouts to 1 roundabout, 2 sets of signals and 24 give-ways, and a village's 3 minis became crossroads. Checked on screenshots.
+- **The first view frames the start town's centre** (#51, merged). Checked on a screenshot.
+- **Roundabouts are rare on 50 km maps** (#51, merged). The start town went from 14 minis and 4 roundabouts to 1 roundabout, 2 sets of signals and 24 give-ways. Checked on screenshots.
+
+### Urgent fix, in its own PR (branch `claude/work-world50-sky`)
+- **The start view sometimes went all sky blue** (the coordinator saw about 1 start in 4). Cause: the automatic quality tier resized the canvas *after* a frame had drawn. Resizing clears the canvas, so the page showed its sky-blue background until the next frame; after a shadows change that frame recompiles every shader (seconds under SwiftShader, a one-frame flash on a phone at every tier step).
+- Fix: a tier step is applied at the start of the next frame, before it draws.
+- New `e2e/firstview.e2e.mjs`: N cold starts at DPR 2, shot through the first 20 s. Blank before the fix in 2 of 4 starts; after, 0 of 6.
+- Not live until that PR merges.
 
 ### In progress: one map (PLAN.md, top section)
 Local commits, which go up once #51 has merged.
@@ -34,16 +39,18 @@ Local commits, which go up once #51 has merged.
 - `focusOn` aimed at height 0, so on the hills every "go to" framed the wrong spot.
 - The underground view crashed on 50 km maps: the scenery tiles free their vertex arrays, and the view needed their bounding boxes.
 
+**Found while running the gate:** in a long stations run on the region (about 23 min under SwiftShader) the page grew to 13 GB and the machine thrashed. Not yet looked into: a leak to find.
+
 **e2e suites on `proto.html?map=region&seed=42`:**
 
 | Suite | State |
 |---|---|
 | loop | passes |
 | lines | passes |
-| stations | being fixed: the underground stations had to move clear of the start town's streets, 450 m apart, and the train needs longer |
+| stations | builds all four stations and the line; the train run then ran out of memory (above), so it hasn't passed yet |
 | save | not run yet |
 | rail | not run yet |
-| menu | not rewritten yet |
+| menu | rewritten (New game > Region, the guide, gone links, the DPR 2 first view); not run yet |
 
 **Not started:**
 - Deleting the dead code: the 6 km parts of `region/generate.ts`, `interchange/region.ts`, `rail/region.ts`, `region/town.ts` (the town map), `places.html` and `osm/` (unless OS uses them).
