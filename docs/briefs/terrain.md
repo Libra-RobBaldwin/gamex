@@ -46,17 +46,15 @@ or of a local build of the named commit.
 - The 6 km hill generator is deleted. `makeRelief` now only wraps a real map's own heights.
 - `game/corridors.ts` never reached the integration branch, so there was nothing to delete.
 - Checked: the region still loads and looks the same (412×915, coast seed 7).
-
-## On the branch, not yet pushed
-
-**The last second generator: `terrain/procedural.ts` and `water/coast.ts` are deleted.**
-- The terrain and water libraries' own tests, benchmarks and demo now run on the 50 km land, through
-  `worldmap/land.ts` (`landSource`). Its ground is the game's (heightAt plus bed).
-- The water system's hooks for the old generator (`RiverTerrain`: its river trench and snapping) are gone. The
-  game never used them: it passes a plain height function, so its water is unchanged.
-- The benchmarks keep their budgets. The coast one moved to a tile where a river meets the sea, (4, 14) on seed 7.
-- The water demo's four places are on the land (coast, a dale, a mountain lake and a mountain valley). Its camera
-  now stands far enough back for ground over 1 km high. Checked at 412×915.
+- **The last second generator: `terrain/procedural.ts` and `water/coast.ts` are deleted too** (25fce73).
+  - The terrain and water libraries' own tests, benchmarks and demo now run on the 50 km land, through
+    `worldmap/land.ts` (`landSource`). Its ground is the game's (heightAt plus bed).
+  - The water system's hooks for the old generator (`RiverTerrain`: its river trench and snapping) are gone.
+    The game never used them: it passes a plain height function, so its water is unchanged.
+  - The benchmarks keep their budgets. The coast one moved to a tile where a river meets the sea, (4, 14) on
+    seed 7.
+  - The water demo's four places are on the land (coast, a dale, a mountain lake and a mountain valley). Its
+    camera now stands far enough back for ground over 1 km high. Checked at 412×915.
 - **Found:** where the land's fine detail crosses one of the water system's own streams, the water system can
   cut a canyon through it, up to 110 m deep in the mountains. It does this because its river surfaces may never
   climb downstream. The game doesn't draw those streams: it asks the water system for standing water only
