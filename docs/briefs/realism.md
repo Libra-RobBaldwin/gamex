@@ -96,7 +96,7 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 |---|---|
 | Exits measured, priors written | done locally |
 | Spokes and stems | done locally; checked on 1600×900 and 412×915 shots of seed 42 (the lanes continue the town's streets and fork outside it); tsc clean, full vitest green, all six phone suites green (rail and save with their positions moved, listed in the PR); not live |
-| PR open | being opened |
+| PR open | #65, open, subscribed |
 | Radials, edge, T-junctions, closes, village shapes measured | not started |
 | Generator: town grown along its radials | not started |
 | Lane grades and density | not started |
