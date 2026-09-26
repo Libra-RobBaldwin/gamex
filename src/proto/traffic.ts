@@ -104,6 +104,7 @@ const BMAX = 9; // emergency stop
 const E_IN = 10, E_OUT = 10; // how far either side of a junction its paths are followed
 const E_PRE = 16; // how far back up the approach its courses run
 const BUSLANE = 8, BAYLANE = 9;
+const BEHIND = 4; // a bus still calls at a stop it comes to rest this far past (out of a junction whose exit reaches to the stand)
 const LONGEST = 10; // the furthest any vehicle reaches in front of or behind its centre (an 18.5 m bendy bus)
 const WIDEST = 1.3; // half the widest vehicle's width (2.55 m buses and trailers, as game/fleet.ts rounds it)
 const GIVE_UP = 90; // seconds stood still before a driver gives up and goes another way
@@ -216,6 +217,13 @@ export class Traffic {
   constructor(net: Network, scene: THREE.Scene, rand: () => number) {
     this.net = net;
     this.rand = rand;
+    // where a bus can stand on a road clear of the junctions at its ends (planStop asks)
+    net.stopRange = (segId, side) => {
+      const s = net.segs.get(segId);
+      if (!s) return null;
+      const from = side === 1 ? s.a : s.b, L = this.len(s), lo = this.startGuard(s, from) + 1, hi = this.endGuard(s, from) - 1;
+      return side === 1 ? [lo, hi] : [L - hi, L - lo];
+    };
     this.fleet = new Fleet(net);
     this.fleet.formAt = (node) => this.junctions.get(node)?.form;
     scene.add(this.fleet.group);
@@ -697,7 +705,7 @@ export class Traffic {
     for (const st of c.seg.stops) {
       if (st.side !== side || st.id === c.served || (call && !call.stops.includes(st))) continue;
       const at = side === 1 ? st.s : L - st.s;
-      if (at > c.s - 1 && (!best || at < best.at)) best = { st, at };
+      if (at > c.s - BEHIND && (!best || at < best.at)) best = { st, at };
     }
     return best;
   }
@@ -734,7 +742,7 @@ export class Traffic {
     for (let tries = 0; tries < q.length; tries++) {
       let call = this.callOf(c);
       // (a call still ahead on this road is made before the junction: route on to the one after)
-      const ahead = call && call.seg === c.seg && call.stops.some((st) => st.side === dir && st.id !== c.served && (dir === 1 ? st.s : L0 - st.s) > c.s - 1);
+      const ahead = call && call.seg === c.seg && call.stops.some((st) => st.side === dir && st.id !== c.served && (dir === 1 ? st.s : L0 - st.s) > c.s - BEHIND);
       if (ahead) call = this.place(q[((c.leg ?? 0) + 1) % q.length]);
       if (call) {
         const key = `${at}:${c.seg.id}:${call.key}`;
@@ -1780,8 +1788,12 @@ export class Traffic {
     this.laneChoice(c, this.planOf(c), now);
     const pl = this.planOf(c);
     // nowhere to go from here (a bus pulled into a lay-by has no way through the junction until it
-    // pulls out again, which isn't the same thing: without this it vanished at its first lay-by)
-    if (!last && this.jdata(at) && !pl && !c.inBay) { this.strand(c, now); return; }
+    // pulls out again, which isn't the same thing: without this it vanished at its first lay-by).
+    // A bus whose only way on is back (a street ending at a junction whose other legs are a
+    // motorway's) turns round at the junction's mouth as it would at a dead end, never gives up.
+    const back = !!c.bus && !pl && !c.inBay && this.nextOf(c, at) === c.seg;
+    if (!last && this.jdata(at) && !pl && !c.inBay && !back) { this.strand(c, now); return; }
+    const turnAt = back && this.jdata(at) ? this.endGuard(c.seg, c.from) : L - 1;
     // commit to the junction ahead when it's our turn; don't go in without room beyond
     let admitted = !!pl && c.admNode === pl.node, hold = false;
     if (pl && pl.path.lineS - c.s <= this.sphere(c)) {
@@ -1844,7 +1856,7 @@ export class Traffic {
       if (this.laneIdx(c) !== BUSLANE) { const sp = this.span(c.seg, c.from, c.lane); if (sp[1] < L - 0.5) ob(sp[1] - c.s - c.front, 0, 0.3); }
       if (hold && pl) ob(Math.min(pl.path.lineS - c.front, this.holdAt(pl, c)) - c.s, 0, 0.3);
       if (c.merge !== undefined && c.mergeBy !== undefined) ob(c.mergeBy - 0.5 - c.s, 0, 0.3);
-      if (c.bus && !pl && this.nextOf(c, at) === c.seg) ob(L - 1 - c.s - c.front, 0, 0.3);
+      if (c.bus && !pl && this.nextOf(c, at) === c.seg) ob(turnAt - c.s - c.front, 0, 0.3);
       for (const u of c.uref) this.junctionLimits(u, ob);
       if (last && !c.away) ob(c.goal - c.s + 0.3, 0, 0.3);
     }
@@ -1866,7 +1878,7 @@ export class Traffic {
     }
     if (pl) { if (admitted && c.s >= pl.path.lineS) this.enter(c, pl); return; }
     // (a lane change never leaves us past where our new way through the junction starts: see roomIn)
-    if (c.bus && this.nextOf(c, at) === c.seg) { if (c.s >= L - 1.5 - c.front) this.uTurn(c, at); return; }
+    if (c.bus && this.nextOf(c, at) === c.seg) { if (c.s >= turnAt - 1.5 - c.front) this.uTurn(c, at); return; }
     if (c.s >= L && !last) this.crossJoin(c, at, now);
   }
 
