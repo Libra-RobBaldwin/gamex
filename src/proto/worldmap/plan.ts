@@ -237,7 +237,7 @@ function makeWater(r: Rand, H: number, o: RegionOptions): WorldWaterSpec {
 function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: RegionOptions): WorldSettlement[] {
   // (automatic counts: as many as real Britain has on this much land, region/priors.ts, somewhere
   // between the Exe's coast and the Teme's inland valley; no fewer than the old figures' lower ends)
-  const t = r(), land = landKm2(w, H), S = PRIORS.settlements.perThousandKm2;
+  const t = r(), land = landKm2(w, H) * (RUGGED[o.relief] ?? 1), S = PRIORS.settlements.perThousandKm2;
   const nTowns = o.towns === -1 ? Math.max(AUTO.towns[0], Math.round((between(S.cityOrTown, t) * land) / 1000) - (o.city ? 2 : 0)) : o.towns;
   const nVillages = o.villages === -1 ? Math.max(AUTO.villages[0], Math.round((between(S.village, t) * land) / 1000)) : o.villages;
   const kinds: Kind[] = [...(o.city ? ['city' as const, 'city' as const] : []), ...Array<Kind>(nTowns).fill('town'), ...Array<Kind>(nVillages).fill('village')];
@@ -301,7 +301,7 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
       return { x: range(r, -lim, lim), z: range(r, -lim, lim) };
     });
   });
-  fillSquares(r, H, w, out, (kind, n, at) => place(kind, n, at, 400, false), kinds.length);
+  fillSquares(r, H, w, out, (kind, n, at) => place(kind, n, at, 400, false), kinds.length, RUGGED[o.relief] ?? 1);
   return out;
 }
 // the map's land (km²): all of it bar the sea, on a 1 km lattice
@@ -315,8 +315,10 @@ function landKm2(w: WorldWater, H: number) {
 // is left empty but the open sea), and a coast gets villages along it. After the main placement,
 // from the same stream, so the places it made stay where they were.
 export const SQUARE = 10000;
-export function squareQuota(land: number, coast: boolean) { return land < 0.08 ? 0 : Math.max(coast ? 2 : 1, Math.round(land * 7)); }
-function fillSquares(r: Rand, H: number, w: WorldWater, out: WorldSettlement[], place: (kind: Kind, n: number, at: (R: number) => XZ | null) => boolean, n0: number) {
+export function squareQuota(land: number, coast: boolean, rugged = 1) { return land < 0.08 ? 0 : Math.max(coast ? 2 : 1, Math.round(land * 7 * rugged)); }
+// (fewer places in the hills: until terrain's heights are known before places are, by the map's relief)
+const RUGGED: Record<string, number> = { flat: 1, lowland: 1, rolling: 1, upland: 0.7, mountain: 0.45 };
+function fillSquares(r: Rand, H: number, w: WorldWater, out: WorldSettlement[], place: (kind: Kind, n: number, at: (R: number) => XZ | null) => boolean, n0: number, rugged: number) {
   let n = n0 + 1;
   const m = Math.ceil((2 * H) / SQUARE), S = 20;
   for (let j = 0; j < m; j++) for (let i = 0; i < m; i++) {
@@ -327,7 +329,7 @@ function fillSquares(r: Rand, H: number, w: WorldWater, out: WorldSettlement[], 
       if (d > 0 && !w.wet({ x, z }, 0)) land++;
       if (d > 300 && d < 2200) shore++;
     }
-    const coast = shore > 0 && w.world.sea !== null, want = squareQuota(land / (S * S), coast);
+    const coast = shore > 0 && w.world.sea !== null, want = squareQuota(land / (S * S), coast, rugged);
     const inside = (s: WorldSettlement) => s.x >= x0 && s.x < x1 && s.z >= z0 && s.z < z1;
     let have = out.filter(inside).length, coastal = out.filter((s) => inside(s) && w.seaDistance(s.x, s.z, 2500) < 2200).length;
     for (let k = 0; k < 12 && (have < want || (coast && coastal < 1)); k++) {
