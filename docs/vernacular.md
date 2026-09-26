@@ -65,6 +65,14 @@ frame and a fanlight. Garden walls are textured in the local walling, hedges lea
 weathered, and garden trees fork into layered crowns. None of
 it adds a material; it adds a few dozen triangles a house.
 
+**On a slope** (`setGround`, `standLevel`): the drape lifts every vertex by the ground under it, which
+shears a building on a hill (floors, windows and roof all tilt). Given the ground's height, a
+building stands level at the highest ground under its walls instead: everything from 15 cm up is
+lifted level, while wall feet, the plinth's foot, paving and the yard follow the ground. The plinth
+then fills the downhill side like a basement course. The ground drop under a building is capped at
+3 m (a steeper plot digs into the hill instead). Four looks at the plot's corners skip the work on
+level ground, which is where places mostly stand, so loading costs the same.
+
 ## Seeing it
 
 - `/buildings-demo.html?vern=cotswold`: one tradition, a street per era plus the civic buildings;

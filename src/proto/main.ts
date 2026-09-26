@@ -11,7 +11,7 @@ import { Traffic, rushLabel, type Places } from './traffic';
 import { MODEL, purchaseList, type Offer } from './vehicles';
 import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
+import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setGround, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
 import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
 import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops
 import { placeResolver, REAL_VERN, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
@@ -170,6 +170,7 @@ gameGround.setStyle(LOOK);
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
 ground.userData.noDrape = true; // (the hills are in its heights already)
 const drape = RELIEF ? new Drape(RELIEF) : null;
+setGround(RELIEF ? RELIEF.heightAt : null); // (buildings stand level on the hills, on plinths: buildgen.ts)
 if (RELIEF) nav.setGround(RELIEF.heightAt, [-1, RELIEF.max + 1]); // (the camera and taps find the ground on the hills)
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;

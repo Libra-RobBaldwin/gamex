@@ -2652,6 +2652,24 @@ export const USE: Record<Lot['kind'], { label: string; pop: number; unit: string
 // Unset (the town map), every building is built as it always was.
 let placeAt: ((x: number, z: number) => Place) | null = null;
 export function setPlaces(f: ((x: number, z: number) => Place) | null) { placeAt = f; }
+// The hills (drape.ts lifts every vertex by the ground under it, which shears a building on a slope:
+// its floors, windows and roof tilt with the hill). Given the ground's height, a building stands
+// level at the highest ground under it instead, its plinth and wall feet reaching down the slope.
+let groundAt: ((x: number, z: number) => number) | null = null;
+export function setGround(f: ((x: number, z: number) => number) | null) { groundAt = f; }
+const LEVEL_FROM = 0.15; // (below this, paving, kerbs, wall feet and the plinth's foot follow the ground)
+function standLevel(k: Kit, upto: Map<THREE.Material, number>, l: Lot) {
+  if (!groundAt) return;
+  const c = Math.cos(l.rot), sn = Math.sin(l.rot), H = (x: number, z: number) => groundAt!(l.x + x * c - z * sn, l.z + x * sn + z * c);
+  // (most plots stand on a place's levelled ground: four looks at the plot's corners say so)
+  const hw = (l.pw ?? l.w) / 2 + 1, hd = l.d / 2 + (l.back ?? 0) + 1, cs = [H(-hw, -hd), H(hw, -hd), H(hw, hd), H(-hw, hd)];
+  if (Math.max(...cs) - Math.min(...cs) <= 0.04) return;
+  let lo = Infinity, hi = -Infinity;
+  for (const [m, g] of k.byMat) for (let i = 0, n = upto.get(m) ?? 0; i < n; i += 3) if (g.p[i + 1] < LEVEL_FROM) { const h = H(g.p[i], g.p[i + 2]); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+  if (!(hi - lo > 0.04)) return; // (flat enough: nothing to see)
+  const h0 = Math.min(hi, lo + 3); // (a steep plot digs into the hill rather than standing on stilts)
+  for (const [m, g] of k.byMat) for (let i = 0, n = upto.get(m) ?? 0; i < n; i += 3) if (g.p[i + 1] >= LEVEL_FROM) g.p[i + 1] += h0 - H(g.p[i], g.p[i + 2]);
+}
 export const placeOf = (x: number, z: number) => placeAt?.(x, z) ?? null;
 
 export function makeBuilding(l: Lot): BuiltShape {
@@ -2664,7 +2682,9 @@ export function makeBuilding(l: Lot): BuiltShape {
   const complex = l.kind === 'shop' && isComplex(l.arch);
   const d = complex ? complexBuild(k, l, r, P) : (P && vBuild(k, l, r, rr, P)) || (l.kind === 'house' ? house(k, l, r, rr) : l.kind === 'terrace' ? terrace(k, l, r, rr) : l.kind === 'shop' ? shop(k, l, r) : l.kind === 'flats' ? flats(k, l, r) : l.kind === 'office' ? office(k, l, r) : l.kind === 'industry' ? industry(k, l, r) : l.kind === 'civic' ? civic(k, l, r) : tower(k, l, r));
   const height = k.top;
+  const upto = new Map([...k.byMat].map(([m, g]) => [m, g.p.length])); // (the building itself, before its yard)
   const y = complex ? [] : yard(k, l, r, rr, P); // (a complex lays out its own ground)
+  standLevel(k, upto, l);
   treeStyle = 'broad'; factoryWall = null;
   const group = k.build();
   group.position.set(l.x, 0, l.z);
