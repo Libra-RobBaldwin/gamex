@@ -138,8 +138,9 @@ export function planFrom(src: WorldSource): WorldPlan {
     const links = suggestLinks(settlements, water).filter((l) => !crossesSea(water, settlements[l.a], settlements[l.b]));
     routes = { links, ...planRoutes({ seed, half, settlements, links, water, grid, heightAt: terrain.heightAt }) };
   }
-  // (the ground eased along the trunk routes and railways: their cuttings and embankments, terrain.ts)
-  terrain.ease?.([...routes.roads.filter((r) => r.kind !== 'B').map((r) => ({ path: r.path, grade: PROFILES[r.kind].grade, half: ROUTE_HALF[r.kind] })), ...routes.rails.map((r) => ({ path: r.path, grade: PROFILES.rail.grade, half: ROUTE_HALF.rail }))]);
+  // (the ground eased along the roads and railways: their cuttings and embankments, terrain.ts; the
+  // live area's roads are laid from these, and need ground they can climb)
+  terrain.ease?.([...routes.roads.map((r) => ({ path: r.path, grade: PROFILES[r.kind].grade, half: ROUTE_HALF[r.kind] })), ...routes.rails.map((r) => ({ path: r.path, grade: PROFILES.rail.grade, half: ROUTE_HALF.rail }))]);
   // the industries (the source's, or placed on the land that suits each), each with a lane in
   const industries = src.industries ?? placeIndustries({ seed, half, settlements, water, grid, heightAt: terrain.heightAt, roads: routes.roads });
   const roads = [...routes.roads, ...spurs({ seed, half, settlements, links: routes.links, water, grid, heightAt: terrain.heightAt }, routes.roads, industries)];

@@ -368,6 +368,19 @@ function makeLand(o: LandOptions, half: number): CoarseLand {
     }
   }
 
+  // (the carving is cell by cell: a light blur over the land takes out its steps along the grid,
+  // which from the game's camera read as stripes)
+  {
+    const tmp = new Float32Array(h);
+    for (let pass = 0; pass < 1; pass++) {
+      for (let j = 1; j < n - 1; j++) for (let i = 1; i < n - 1; i++) {
+        const k = j * n + i;
+        if (outlet[k]) continue;
+        tmp[k] = (4 * h[k] + 2 * (h[k - 1] + h[k + 1] + h[k - n] + h[k + n]) + h[k - n - 1] + h[k - n + 1] + h[k + n - 1] + h[k + n + 1]) / 16;
+      }
+      for (let k = 0; k < NN; k++) if (!outlet[k]) h[k] = Math.max(0.5, tmp[k]);
+    }
+  }
   // ---- 5. the sea rises; lakes ----
   const drown = (F.drown || P.drown * (seaShare > 0 ? 1 : 0)) * (seaShare > 0 ? 1 : 0);
   if (drown > 0) {
