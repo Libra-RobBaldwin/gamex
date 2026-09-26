@@ -166,8 +166,7 @@ export class Dresser {
     g.updateMatrixWorld(true);
     for (const o of g.children) {
       const m = o as THREE.Mesh;
-      const geo = m.geometry.clone().applyMatrix4(m.matrixWorld);
-      m.geometry.dispose();
+      const geo = m.geometry.applyMatrix4(m.matrixWorld); // (in place: the building's own meshes go straight into the pile)
       let l = d.parts.get(m.material as THREE.Material);
       if (!l) d.parts.set(m.material as THREE.Material, (l = []));
       l.push(geo);
