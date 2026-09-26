@@ -23,6 +23,8 @@ locally" means it isn't live yet.
 - **The start view sometimes went all sky blue** (the coordinator saw about 1 start in 4). Cause: the automatic quality tier resized the canvas *after* a frame had drawn. Resizing clears the canvas, so the page showed its sky-blue background until the next frame; after a shadows change that frame recompiles every shader (seconds under SwiftShader, a one-frame flash on a phone at every tier step).
 - Fix: a tier step is applied at the start of the next frame, before it draws.
 - New `e2e/firstview.e2e.mjs`: N cold starts at DPR 2, shot through the first 20 s. Blank before the fix in 2 of 4 starts; after, 0 of 6.
+- **The region's page leaked memory**, about 1 GB of heap every 30 s under SwiftShader (13 GB in a stations run), and only 4 scenery tiles were ever shown. Cause (worldmap/view.ts): a tile's pending mark was cleared when its data arrived, not when it was built, so the view asked for it again every frame while it waited, and the data piled up. Fixed in the same PR: 208 tiles, each asked for once, about 1.2 GB RSS. firstview checks each tile is asked for once (it fails on the old code).
+- Still high: the live area's heap settles at about 800 MB on the region against about 180 MB for the old town. Worth measuring on a phone next.
 - Not live until that PR merges.
 
 ### In progress: one map (PLAN.md, top section)
@@ -39,15 +41,13 @@ Local commits, which go up once #51 has merged.
 - `focusOn` aimed at height 0, so on the hills every "go to" framed the wrong spot.
 - The underground view crashed on 50 km maps: the scenery tiles free their vertex arrays, and the view needed their bounding boxes.
 
-**Found while running the gate:** in a long stations run on the region (about 23 min under SwiftShader) the page grew to 13 GB and the machine thrashed. Not yet looked into: a leak to find.
-
 **e2e suites on `proto.html?map=region&seed=42`:**
 
 | Suite | State |
 |---|---|
 | loop | passes |
 | lines | passes |
-| stations | builds all four stations and the line; the train run then ran out of memory (above), so it hasn't passed yet |
+| stations | builds all four stations and the line; the train run ran out of memory (the leak above, now fixed), rerun pending |
 | save | not run yet |
 | rail | not run yet |
 | menu | rewritten (New game > Region, the guide, gone links, the DPR 2 first view); not run yet |
