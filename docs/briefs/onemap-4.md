@@ -103,12 +103,15 @@ into it as one line (`joinStems`); the existing `forks` makes two lanes on one s
 | 2. Leaflet out, lockfile by `npm install` | done locally |
 | 3. Docs | done locally (commit 7212d4c) |
 | 4. Hero pictures from the region | done locally; checked in the e2e shots (below) |
-| Phone e2es (lines, loop, rail, save, stations, menu) on the region | running |
-| PR open into the integration branch | not yet |
+| Phone e2es (lines, loop, rail, save, stations, menu) on the region | loop, rail, save, stations and menu passed on the deletion commit (1d750f3); lines was killed twice by the dev server reloading the page when I wrote files mid-run, then passed; being rerun with the full suite on this head, results on the PR |
+| PR open into the integration branch | #61, open, subscribed; check-in at 22:26 UTC |
 | Live (merged) | no |
 
 ## Checks
 - `npx tsc --noEmit`: clean.
 - `npx vitest run --no-file-parallelism`: all pass but `economy.test.ts` "a well-served town grows and gets
   denser" (the coordinator's known failure). `bridges/perf.review.test.ts` passed on this run.
-- Phone e2es: see State.
+- Phone e2es: see State. The home screen with the new picture (menu e2e `1-home.png`), the setup summary and the region start were checked at 412×915.
+
+## Realism
+The user's next ask (roads at the edge of towns, from OS data) is its own stream: branch `claude/work-realism`, brief `docs/briefs/realism.md`.
