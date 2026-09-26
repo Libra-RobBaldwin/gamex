@@ -1,12 +1,13 @@
-// The region's farmland: fields laid out as English enclosure fields are, in blocks that follow the
-// lanes, the rivers and the lie of the land, and what each field is (docs/ground.md, "Fields on a
-// region").
+// The map's farmland: fields laid out as English enclosure fields are, in blocks that follow the
+// lanes, the rivers and the lie of the land, and what each field is (docs/ground.md). The one field
+// generator: the ground's field source everywhere (worldmap/country.ts countryFor).
 //
-//   const plan = layFields({ seed, box, settlements, lanes, waterDist, heightAt });  // a box at once
-//   const c = new Countryside({ seed, bounds, settlements, lanes, ... }); c.near(tileBox)  // lazily, a tile at a time
-//   plan.fields   // convex polygons: arable (with a crop), grass, wood or rough grazing
-//   plan.lines    // the boundaries between them, each once: hedged, or not (along a lane, which
-//                 // has hedges of its own)
+//   const c = new Countryside({ seed, bounds, settlements, lanes, ... });
+//   c.blocksNear(tileBox)  // every farm block touching a box, whole, each with:
+//     .fields  // convex polygons: arable (with a crop), grass, wood or rough grazing
+//     .lines   // the boundaries between them, each once: hedged, or not (along a lane, which
+//              // has hedges of its own)
+//   c.farmsNear(box)       // the farmsteads whose yard is in the blocks touching a box
 //
 // How: the country is cut into farm blocks (the Voronoi cells of seeds about 650 m apart). Each
 // block has one direction its fields are laid out in: along the nearest lane or river if there's
@@ -39,10 +40,11 @@ export interface Field {
 export interface Line { a: XZ; b: XZ; hedge: boolean }
 // a farmstead: a house and its barns round a yard, beside a lane (x, z its middle, a the lane's direction)
 export interface Farm { x: number; z: number; a: number; side: number; seed: number; track?: XZ[] } // (side: which side of the lane, looking along a; track: its drive to the road, if it stands back from it)
-export interface FieldPlan { fields: Field[]; lines: Line[]; farms: Farm[] }
-export interface FieldsInput {
+export interface CountryInput {
   seed: number;
-  box: { x0: number; z0: number; x1: number; z1: number }; // the land to lay out
+  bounds?: { x0: number; z0: number; x1: number; z1: number }; // the map's edge: blocks are clipped to it
+  hMax?: number; // the map's highest ground (m): the top of it is rough grazing and plantations
+  heightRank?: (h: number) => number; // how high a height is among the map's land, 0 (its lowest) to 1 (its highest): the high ground is the top of that (else a share of hMax)
   settlements: { x: number; z: number; r: number; reach: number; kind: string }[]; // reach: how far its streets and estates go
   lanes: XZ[][]; // country roads and railways (centre lines): blocks follow them, and they split fields
   farmLanes?: XZ[][]; // the roads farms stand beside or have their tracks to (not motorways or railways): else none
@@ -141,13 +143,12 @@ export interface BlockPlan { id: number; i: number; j: number; box: { x0: number
 
 // The countryside, laid out lazily a farm block at a time: each block depends only on the seed,
 // its place, and the roads, water, hills and settlements near it, so any tile anywhere can be laid
-// out on its own, in any order, and agrees with its neighbours at the border. `near(box)` is
-// everything touching a box (a tile: a few milliseconds for a kilometre); `tileCover` a far tile's
-// cheap look. Blocks are remembered (and can be forgotten: `forget`).
+// out on its own, in any order, and agrees with its neighbours at the border. `blocksNear(box)` is
+// every block touching a box (a kilometre tile: a few milliseconds). Blocks are remembered.
 export class Countryside {
   private lanes: Lines; private farmLanes: Lines; private rivers: Lines;
   private nz: (x: number, z: number, s: number) => number;
-  private towns: Map<number, FieldsInput['settlements']> = new Map();
+  private towns: Map<number, CountryInput['settlements']> = new Map();
   private blocks = new Map<number, BlockPlan | null>();
   private hMax: number;
   constructor(readonly inp: CountryInput) {
@@ -164,6 +165,8 @@ export class Countryside {
     }
     this.hMax = inp.hMax ?? 0;
   }
+  // how high a spot is among the map's land (0 to 1; 0 on a flat map)
+  private high(h: number) { return this.inp.heightRank ? this.inp.heightRank(h) : this.hMax > 35 ? h / this.hMax : 0; }
   private slopeAt(x: number, z: number) { const H = this.inp.heightAt; return H ? Math.hypot(H(x + 20, z) - H(x - 20, z), H(x, z + 20) - H(x, z - 20)) / 40 : 0; }
   // metres to the nearest settlement's edge (Infinity past 800 m of every one)
   private townD(x: number, z: number) {
@@ -174,17 +177,6 @@ export class Countryside {
   private water(x: number, z: number) { return this.inp.waterDist ? this.inp.waterDist(x, z) : 1e4; }
   private seedAt(i: number, j: number) { const r = rng(mix(this.inp.seed, 61, i, j)); return { x: (i + 0.15 + r() * 0.7) * C.block, z: (j + 0.15 + r() * 0.7) * C.block }; }
 
-  // Everything touching a box: whole blocks (so fields cross tile borders whole), in a fixed order.
-  near(box: { x0: number; z0: number; x1: number; z1: number }, farms = true): FieldPlan {
-    const B = C.block, out: FieldPlan = { fields: [], lines: [], farms: [] };
-    for (let i = Math.floor(box.x0 / B) - 2; i <= Math.floor(box.x1 / B) + 1; i++) for (let j = Math.floor(box.z0 / B) - 2; j <= Math.floor(box.z1 / B) + 1; j++) {
-      const b = this.block(i, j);
-      if (!b || b.box.x1 < box.x0 || b.box.x0 > box.x1 || b.box.z1 < box.z0 || b.box.z0 > box.z1) continue;
-      out.fields.push(...b.fields); out.lines.push(...b.lines);
-      if (farms) out.farms.push(...this.farmsOf(b));
-    }
-    return out;
-  }
   // every block touching a box, whole (a field source for the ground: ground/plan.ts)
   blocksNear(box: { x0: number; z0: number; x1: number; z1: number }): BlockPlan[] {
     const B = C.block, out: BlockPlan[] = [];
@@ -196,34 +188,6 @@ export class Countryside {
   }
   // a block's farmsteads (laid out on first asking)
   farmsNear(box: { x0: number; z0: number; x1: number; z1: number }): Farm[] { const out: Farm[] = []; for (const b of this.blocksNear(box)) out.push(...this.farmsOf(b)); return out; }
-  forget(box: { x0: number; z0: number; x1: number; z1: number }) { for (const [k, b] of this.blocks) if (b && b.box.x1 >= box.x0 && b.box.x0 <= box.x1 && b.box.z1 >= box.z0 && b.box.z0 <= box.z1) this.blocks.delete(k); }
-
-  // A far tile's look: n × n RGBA texels over the box, a colour a field (COUNTRYSIDE.far), dark
-  // hedge lines where a texel is fine enough to show them. Reads as the patchwork and its woods from high up.
-  tileCover(box: { x0: number; z0: number; x1: number; z1: number }, n: number): Uint8Array {
-    const px = new Uint8Array(n * n * 4), t = (box.x1 - box.x0) / n, P = this.near(box, false), col = (hex: string) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
-    const pal = Object.fromEntries(Object.entries(C.far).map(([k, v]) => [k, col(v)])) as Record<keyof typeof C.far, number[]>;
-    for (let k = 0; k < n * n; k++) px.set([...pal.none, 255], k * 4);
-    for (const f of P.fields) {
-      const c = f.kind === 'wood' ? (f.conifer ? pal.conifer : pal.wood) : f.kind === 'rough' ? pal.rough : f.kind === 'arable' ? pal[f.crop] : f.crop === 'ley' ? pal.ley : pal.grass;
-      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-      for (const q of f.poly) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
-      for (let j = Math.max(0, Math.floor((z0 - box.z0) / t)); j < Math.min(n, Math.ceil((z1 - box.z0) / t)); j++) for (let i = Math.max(0, Math.floor((x0 - box.x0) / t)); i < Math.min(n, Math.ceil((x1 - box.x0) / t)); i++) {
-        if (inPoly(box.x0 + (i + 0.5) * t, box.z0 + (j + 0.5) * t, f.poly)) px.set(c, (j * n + i) * 4);
-      }
-    }
-    if (t <= 12) for (const l of P.lines) {
-      if (!l.hedge) continue;
-      const L = Math.hypot(l.b.x - l.a.x, l.b.z - l.a.z), steps = Math.ceil(L / (t * 0.7));
-      for (let s = 0; s <= steps; s++) {
-        const x = l.a.x + (l.b.x - l.a.x) * s / steps, z = l.a.z + (l.b.z - l.a.z) * s / steps, i = Math.floor((x - box.x0) / t), j = Math.floor((z - box.z0) / t);
-        if (i < 0 || j < 0 || i >= n || j >= n) continue;
-        const o = (j * n + i) * 4, h = pal.hedge, k = t < 6 ? 0.8 : 0.5;
-        for (let q = 0; q < 3; q++) px[o + q] = px[o + q] * (1 - k) + h[q] * k;
-      }
-    }
-    return px;
-  }
 
   // One farm block: its fields (and what each is) and its boundaries, from its seed and what's near it.
   block(i: number, j: number): BlockPlan | null {
@@ -326,7 +290,7 @@ export class Countryside {
       // rows along the field's long side (the block's direction or square to it)
       const dir = (((u1 - u0 >= v1 - v0 ? theta : theta + Math.PI / 2) % Math.PI) + Math.PI) % Math.PI;
       fields.push({ poly: lf.poly, kind: 'grass', crop: 'grass', dir, block, belt: lf.belt || undefined });
-      sites.push({ x: m.x, z: m.z, area: area(lf.poly), slope: this.slopeAt(m.x, m.z), height: H ? H(m.x, m.z) : 0, hMax: this.hMax, water: this.water(m.x, m.z), town: this.townD(m.x, m.z), belt: lf.belt, arable, block, rand: r() });
+      sites.push({ x: m.x, z: m.z, area: area(lf.poly), slope: this.slopeAt(m.x, m.z), high: H ? this.high(H(m.x, m.z)) : 0, water: this.water(m.x, m.z), town: this.townD(m.x, m.z), belt: lf.belt, arable, block, rand: r() });
     }
   }
   // where the first lane to cross a field enters and leaves it
@@ -364,7 +328,7 @@ export class Countryside {
     for (let k = 0; k < fields.length; k++) {
       const f = fields[k], s = sites[k], w = woods[k], q = kr();
       if (w) { f.kind = 'wood'; f.conifer = w === 'conifer' || undefined; continue; }
-      const high = s.hMax > 35 && s.height > s.hMax * Rg.high;
+      const high = s.high > Rg.high;
       if ((high && q < Rg.highChance) || (s.water < Rg.water && q < Rg.waterChance) || (s.slope > Rg.steep && q < Rg.steepChance)) { f.kind = 'rough'; continue; }
       // arable where its block is ploughed (not too near the villages, the water or on a slope)
       const pa = s.arable * (s.slope > 0.08 ? 0.2 : 1) * (s.water < 60 ? 0.2 : 1) * (s.town < 80 ? 0.4 : 1);
@@ -419,18 +383,6 @@ export class Countryside {
     }
     return (b.farms = farms);
   }
-}
-export interface CountryInput extends Omit<FieldsInput, 'box'> {
-  bounds?: { x0: number; z0: number; x1: number; z1: number }; // the map's edge: blocks are clipped to it
-  hMax?: number; // the map's highest ground (m): the top of it is rough grazing and plantations
-}
-
-// The whole of a box at once (the 6 km region lays out its painted ground in one go).
-export function layFields(inp: FieldsInput & { hMax?: number }): FieldPlan {
-  let hMax = inp.hMax ?? 0;
-  const H = inp.heightAt, box = inp.box;
-  if (H && inp.hMax === undefined) for (let x = box.x0; x <= box.x1; x += 200) for (let z = box.z0; z <= box.z1; z += 200) hMax = Math.max(hMax, H(x, z));
-  return new Countryside({ ...inp, bounds: box, hMax }).near(box);
 }
 function inPoly(x: number, z: number, p: XZ[]) {
   let inside = false;
