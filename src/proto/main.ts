@@ -2708,11 +2708,15 @@ function setTier(t: number) {
   setGroundQuality(tier >= 3 ? 'low' : tier >= 1 ? 'medium' : 'high');
   people.setTier(tier); // fewer, simpler figures on the lower tiers, and no shadows from them
 }
+// (a step is taken at the start of the next frame, before it draws: resizing the canvas clears it, and
+// cleared after a frame's drawing the page would show that blank, the sky blue behind it, until the next
+// frame is drawn, which after a shadows change recompiles every shader and can take seconds)
+let tierNext = -1;
 function judgeFrames(now: number) {
   if (!tierAuto) return;
   const avg = perf.frameMs / Math.max(1, perf.frames);
-  if (avg > 26 && tier < TIERS.length - 1) { setTier(tier + 1); tierHeldUntil = now + 30000; }
-  else if (avg < 17.5 && tier > 0 && now > tierHeldUntil) { setTier(tier - 1); tierHeldUntil = now + 8000; }
+  if (avg > 26 && tier < TIERS.length - 1) { tierNext = tier + 1; tierHeldUntil = now + 30000; }
+  else if (avg < 17.5 && tier > 0 && now > tierHeldUntil) { tierNext = tier - 1; tierHeldUntil = now + 8000; }
 }
 function togglePerf() { perfOn = !perfOn; shell.setPerf(perfOn); }
 
@@ -2722,6 +2726,7 @@ function frame(now: number) {
   const rawMs = now - last;
   const dt = Math.min(0.1, rawMs / 1000);
   last = now;
+  if (tierNext >= 0) { if (tierAuto) setTier(tierNext); tierNext = -1; }
   const t0 = performance.now();
   perf.frames++; perf.frameMs += rawMs; perf.worst = Math.max(perf.worst, rawMs);
   nav.update(dt, now);
