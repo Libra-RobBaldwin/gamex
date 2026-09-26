@@ -352,3 +352,17 @@ station deleted its line and trains (now they wait until the track is back).
   steps across at the terminus.
 - There's no freight, and no timetables beyond "call at each station in turn".
 - A station can't be moved or resized, only demolished and rebuilt.
+
+## Rebuilds
+
+The game calls `Railway.rebuild()` after every change to the network (roads, stops or track). It
+does its work only when something the railway is made from changed: every railway segment (ends,
+type, path, bridges), the stations, and the roads near a station (a viaduct's columns keep off
+them), hashed into one number. A road built across the line on the level adds a level crossing
+without touching the track: that alone updates the crossings. So drawing a street across town
+leaves the railway, and every train on it, exactly as it was.
+
+When the track did change, `RailSim.rebuild` puts every train back on it. A train whose track is
+the same as before (the pieces its body, its way ahead and its held blocks are on, blocked the same
+way) keeps its speed, its route and its reservations, only re-numbered. Anywhere else it's put back
+on the nearest track, stopped, and plans afresh; one that no longer fits waits in its depot.
