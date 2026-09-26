@@ -46,7 +46,7 @@ import { STD } from './standards';
 import { Loading } from './loading';
 import { Drape } from './drape';
 import { PlaceLabels, openPlaces } from './game/places';
-import { makeRelief, slopeLook } from './region/terrain';
+import { LIGHT_HILLS, makeRelief, slopeLook, SUN_HILLS, SWELL_AMP } from './region/terrain';
 import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; // a big map streamed in tiles (docs/region.md R4)
 import { mapById as menuMap } from './maps';
 import { WorldGame } from './worldmap/game'; // a 50 km map: streamed scenery round a live play area (docs/streaming.md)
@@ -131,8 +131,8 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(LOOK.sky);
 
-scene.add(new THREE.HemisphereLight('#e8f3ff', '#5d7040', 1.25));
-const sun = new THREE.DirectionalLight('#fff3dc', 2.3);
+scene.add(new THREE.HemisphereLight('#e8f3ff', '#5d7040', WORLD ? LIGHT_HILLS.hemi : 1.25)); // (a 50 km map: less sky light, more sun, so the hills' slopes show: region/terrain.ts)
+const sun = new THREE.DirectionalLight('#fff3dc', WORLD ? LIGHT_HILLS.sun : 2.3);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.bias = -0.0004;
@@ -153,7 +153,7 @@ const nav = new NavRig(cam, canvas, {
   view: { ...MAP.view, ...HOME },
   distance: 1200 * SCALE,
   limits: { hMin: 35, hMax: 900 * SCALE, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -CAM, maxX: CAM, minZ: -CAM, maxZ: CAM } },
-  shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
+  shadow: new SunFollow(sun, { dir: WORLD ? SUN_HILLS : { x: -160, y: 260, z: 110 } }), // (a 50 km map's sun lower in the south-west, so its hills show: region/terrain.ts)
 });
 const view = nav.view;
 // (and its depth range follows the zoom, so depth stays as fine as the town's)
@@ -172,9 +172,10 @@ gameGround.setStyle(LOOK);
 if (WORLD) gameGround.ground.uniforms.uSlope.value.set(...slopeLook()); // (the hills' rock and moor: region/terrain.ts, as the far tiles have it)
 if (WORLD?.terrain.geologyAt) setGeology(WORLD.terrain.geologyAt); // (the buildings' stone from the rock under them: worldmap/landform.ts)
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
-const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
+const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined, WORLD ? SWELL_AMP : 0), gameGround.ground.material); // (a 50 km map's ground swells for the light: region/terrain.ts)
 ground.userData.noDrape = true; // (the hills are in its heights already)
 const drape = RELIEF ? new Drape(RELIEF) : null;
+if (drape && WORLD) drape.uniforms.uSwell.value = SWELL_AMP; // (and the fields drawn over it)
 if (RELIEF) nav.setGround(RELIEF.heightAt, [-1, RELIEF.max + 1]); // (the camera and taps find the ground on the hills)
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;

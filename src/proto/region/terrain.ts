@@ -22,9 +22,33 @@ export const STEP = 25; // m between grid points
 // reads as flat. `litSlope` is what a true slope (rise over run) reads as in the ground shader's
 // 1 − normal.y, and `slopeLook` the shader's uSlope for a map with hills (ground/material.ts: bare
 // rock from a 1 in 2 slope, all rock by 1 in 1.1; heather on the tops from 300 m, all moor by 420).
-export const GROUND_LIFT = 3;
+export const GROUND_LIFT = 4.5;
 export const litSlope = (s: number) => 1 - 1 / Math.hypot(1, GROUND_LIFT * s);
 export const slopeLook = (): [number, number, number, number] => [litSlope(0.55), litSlope(0.9), 300, 420];
+// and the sun for a map with hills: from the south-west, about 32° up (low enough that slopes facing
+// away from it fall into shade, high enough that valleys aren't lost in it)
+export const SUN_HILLS = { x: -190, y: 160, z: 170 };
+// and the light's balance: less from the sky all round, more from the sun, so a slope's facing shows
+export const LIGHT_HILLS = { hemi: 0.75, sun: 3.1 };
+// The ground's small swells and dells, for the light only: at the game's zoom a whole hillside is one
+// even slope, evenly lit, and reads as flat; what shows the land's shape is the rise and fall of the
+// ground field by field. They're a sum of waves (the same in JS and GLSL, so the live ground, the far
+// tiles and the fields drawn over the ground agree), a few hundred metres long, tilting the normal
+// as if the ground rose and fell `amp` metres; heights are untouched, so nothing built on it moves.
+const WAVES: [number, number, number, number][] = [[182, 0.3, 1.1, 1], [247, 1.9, 4.2, 0.9], [311, 2.8, 2.3, 0.8], [389, 4.1, 5.9, 0.7], [463, 0.95, 0.4, 0.6], [587, 5.3, 3.7, 0.5]]
+  .map(([L, a, ph, w]) => [(Math.cos(a) * 2 * Math.PI) / L, (Math.sin(a) * 2 * Math.PI) / L, ph, w]);
+const WSUM = WAVES.reduce((t, w) => t + w[3], 0);
+// the swells' slope at a point (rise over run, x and z) for swells `amp` metres high
+export function swellSlope(x: number, z: number, amp: number): [number, number] {
+  let gx = 0, gz = 0;
+  for (const [kx, kz, ph, w] of WAVES) { const c = (w / WSUM) * Math.cos(kx * x + kz * z + ph); gx += c * kx; gz += c * kz; }
+  return [gx * amp, gz * amp];
+}
+export const SWELL_GLSL = `vec2 swellSlope( vec2 p, float amp ) { vec2 g = vec2( 0.0 ); float c;
+${WAVES.map(([kx, kz, ph, w]) => `  c = ${(w / WSUM).toFixed(6)} * cos( ${kx.toFixed(8)} * p.x + ${kz.toFixed(8)} * p.y + ${ph.toFixed(4)} ); g += c * vec2( ${kx.toFixed(8)}, ${kz.toFixed(8)} );`).join('\n')}
+  return g * amp; }`;
+// how high the swells are lit as, on a 50 km map (0 elsewhere)
+export const SWELL_AMP = 30;
 // the hills' height (m) above the valley floors for each relief
 export const RELIEF_HEIGHT: Record<Relief, number> = { flat: 0, lowland: 10, rolling: 32, upland: 60, mountain: 110 };
 

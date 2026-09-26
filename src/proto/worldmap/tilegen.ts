@@ -16,7 +16,7 @@
 // of trunk road by each piece's middle), so nothing is drawn twice and tiles meet without a seam.
 // Pure: no three.js.
 import { LEVEL } from '../region/water';
-import { GROUND_LIFT } from '../region/terrain';
+import { GROUND_LIFT, SWELL_AMP, swellSlope } from '../region/terrain';
 import { industryScene } from './industry';
 import { settlementScene, WALLS, ROOFS, type SceneBuilding } from './towns';
 import { canopyIn, clipPath, countryInput, farmsIn, hedges, paintCover, woodTrees, type Box } from './country';
@@ -371,14 +371,16 @@ function groundGrid(plan: WorldPlan, b: Box, step: number, hole: Box | null = nu
   const nx = Math.round((b.x1 - b.x0) / step) + 1, nz = Math.round((b.z1 - b.z0) / step) + 1;
   const T = plan.terrain, pos: number[] = [], nor: number[] = [], idx: number[] = [];
   const e = Math.min(12, step / 2);
+  const swellAmp = SWELL_AMP * Math.max(0, Math.min(1, (160 - step) / 100)); // (the swells only where the grid is fine enough to show them)
   const ht = (x: number, z: number) => T.heightAt(x, z) + T.bed(x, z);
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     const x = Math.min(b.x1, b.x0 + i * step), z = Math.min(b.z1, b.z0 + j * step);
     pos.push(x, T.bed(x, z), z);
     // (the hills lit steeper than they are, as the live ground is: region/terrain.ts GROUND_LIFT)
     const dx = (ht(x + e, z) - ht(x - e, z)) / (2 * e) + (GROUND_LIFT - 1) * (T.heightAt(x + e, z) - T.heightAt(x - e, z)) / (2 * e);
-    const dz = (ht(x, z + e) - ht(x, z - e)) / (2 * e) + (GROUND_LIFT - 1) * (T.heightAt(x, z + e) - T.heightAt(x, z - e)) / (2 * e), l = Math.hypot(dx, 1, dz);
-    nor.push(-dx / l, 1 / l, -dz / l);
+    const dz = (ht(x, z + e) - ht(x, z - e)) / (2 * e) + (GROUND_LIFT - 1) * (T.heightAt(x, z + e) - T.heightAt(x, z - e)) / (2 * e);
+    const [sx, sz] = swellSlope(x, z, swellAmp), l = Math.hypot(dx + sx, 1, dz + sz); // (and the ground's swells, for the light: region/terrain.ts)
+    nor.push(-(dx + sx) / l, 1 / l, -(dz + sz) / l);
   }
   // (split along the (i+1, j)–(i, j+1) diagonal, as the drape field's triangles are)
   // (a hole where the live play area is, if the tile reaches it: its ground is the game's own)

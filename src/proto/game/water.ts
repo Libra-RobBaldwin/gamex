@@ -22,7 +22,7 @@ import { TILE } from '../terrain/height';
 import { KIND_CODE, WaterSystem, claimWater, navLimits, pierBans, reedSpots, shoreColours, waterClaims, waterSurface, type Crossing, type WaterMesh, type WaterTile } from '../water';
 import { WATER_LIGHT, patchGroundMaterial, reedGeometry, reedMaterial, reedMesh, rippleTexture, setWaterLight, waterGeometry, waterMaterial, type WaterLight } from '../water/material';
 import type { Land } from '../land';
-import { GROUND_LIFT } from '../region/terrain';
+import { GROUND_LIFT, swellSlope } from '../region/terrain';
 import { DROP, LEVEL, MapWater, RIM, TOWN_LAKE, TOWN_WATER, WATER_LEVEL, lakeBox, lakeGroundOf, lakeRadiusOf, riverReach, type LakeSpec, type WaterSpec } from '../region/water';
 
 export interface XZ { x: number; z: number }
@@ -149,7 +149,7 @@ export class GameWater {
   // On a map with hills (`relief`, region/terrain.ts), the grid is the hills' own (25 m), the lakes'
   // boxes are snapped out onto it, and every vertex carries the hills' height: the mesh is then
   // exactly the surface everything else is draped on (drape.ts).
-  groundGeometry(size: number, relief?: { step: number; heightAt: (x: number, z: number) => number }) {
+  groundGeometry(size: number, relief?: { step: number; heightAt: (x: number, z: number) => number }, swell = 0) {
     const h = size / 2, lakes = this.shapes.spec.lakes, xyz: number[] = [], tris: number[] = [];
     const cell = relief?.step ?? GRID, snap = (v: number, up: boolean) => (relief ? -h + (up ? Math.ceil : Math.floor)((v + h) / cell) * cell : v);
     const boxes = lakes.map(lakeBox).map((B) => ({ x0: snap(B.x0, false), z0: snap(B.z0, false), x1: snap(B.x1, true), z1: snap(B.z1, true) }));
@@ -175,7 +175,7 @@ export class GameWater {
     lakes.forEach((L, li) => this.bowl(L, boxes[li], xs, zs, xyz, tris, vert));
     // (shore colours only round the lakes: a river's are on its strip, and on the flat ground's big
     // cells they'd smear out across 100 m)
-    return this.finish(xyz, tris, G, (x, z) => boxes.some((B) => x >= B.x0 - 1e-6 && x <= B.x1 + 1e-6 && z >= B.z0 - 1e-6 && z <= B.z1 + 1e-6), H, cell);
+    return this.finish(xyz, tris, G, (x, z) => boxes.some((B) => x >= B.x0 - 1e-6 && x <= B.x1 + 1e-6 && z >= B.z0 - 1e-6 && z <= B.z1 + 1e-6), H, cell, swell);
   }
   // One lake's bank ring, bed and box in the ground mesh.
   private bowl(L: LakeSpec, B: { x0: number; z0: number; x1: number; z1: number }, xs: number[], zs: number[], xyz: number[], tris: number[], vert: (x: number, z: number) => number) {
@@ -213,7 +213,7 @@ export class GameWater {
   // Triangles facing up, normals from the ground, shore colours from the water's tiles, in the
   // plane's frame.
   // (`H`: hills already in the heights, for the normals: sloped over a cell's width, so they're smooth)
-  private finish(xyz: number[], tris: number[], G: (x: number, z: number) => number, shore: (x: number, z: number) => boolean = () => true, H?: (x: number, z: number) => number, eH = 25) {
+  private finish(xyz: number[], tris: number[], G: (x: number, z: number) => number, shore: (x: number, z: number) => boolean = () => true, H?: (x: number, z: number) => number, eH = 25, swell = 0) {
     // every triangle facing up
     for (let t = 0; t < tris.length; t += 3) {
       const a = tris[t], b = tris[t + 1], c = tris[t + 2];
@@ -225,6 +225,7 @@ export class GameWater {
       const x = pos[v * 3], z = pos[v * 3 + 2];
       let gx = (G(x + e, z) - G(x - e, z)) / (2 * e), gz = (G(x, z + e) - G(x, z - e)) / (2 * e);
       if (H) { gx += GROUND_LIFT * (H(x + eH, z) - H(x - eH, z)) / (2 * eH); gz += GROUND_LIFT * (H(x, z + eH) - H(x, z - eH)) / (2 * eH); } // (lit steeper than it is: region/terrain.ts)
+      if (swell) { const [sx, sz] = swellSlope(x, z, swell); gx += sx; gz += sz; } // (and its swells, for the light only)
       const l = Math.hypot(gx, 1, gz);
       nor[v * 3] = -gx / l; nor[v * 3 + 1] = 1 / l; nor[v * 3 + 2] = -gz / l;
     }

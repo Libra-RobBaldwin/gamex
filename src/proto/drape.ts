@@ -12,11 +12,13 @@
 // turned, which is what you want on gentle hills; the towns stand on the flat anyway.) Materials
 // get their own program ('|drape'), and shadows a draped depth material, so they fall on the hills.
 import * as THREE from 'three';
-import type { ReliefField } from './region/terrain';
+import { GROUND_LIFT, SWELL_GLSL, type ReliefField } from './region/terrain';
 
 const GLSL = /* glsl */`
 uniform sampler2D uTerrain;
 uniform vec4 uTerrainGrid; // x0, z0, step, n
+uniform float uSwell; // (the ground's swells for the light, m: region/terrain.ts)
+${SWELL_GLSL}
 float terrainH( vec2 p ) {
   float top = uTerrainGrid.w - 1.0 - 1e-4;
   vec2 g = clamp( ( p - uTerrainGrid.xy ) / uTerrainGrid.z, vec2( 0.0 ), vec2( top ) );
@@ -74,9 +76,30 @@ export function drapeShader(src: string): { src: string; ok: boolean } {
   return { src, ok };
 }
 
+// Ground drawn over the ground (the fields and verges of the countryside, grass, lawns: ground
+// materials, ground/material.ts) is flat, its normals straight up; draped, it would be lit as if
+// the hills weren't there. Its normal is the hills' own instead, from the field, lit GROUND_LIFT
+// times as steep as the live ground's mesh is (region/terrain.ts).
+const GROUND_NORMAL = /* glsl */`
+#include <beginnormal_vertex>
+#if !defined( USE_INSTANCING ) && !defined( USE_BATCHING )
+{
+  vec3 dN = normalize( mat3( modelMatrix ) * objectNormal );
+  if ( dN.y > 0.9999 ) {
+    vec2 dP = ( modelMatrix * vec4( position, 1.0 ) ).xz;
+    float dE = uTerrainGrid.z;
+    float dHx = terrainH( dP + vec2( dE, 0.0 ) ) - terrainH( dP - vec2( dE, 0.0 ) ), dHz = terrainH( dP + vec2( 0.0, dE ) ) - terrainH( dP - vec2( 0.0, dE ) );
+    vec2 dS = swellSlope( dP, uSwell );
+    vec3 dT = normalize( vec3( -dHx * ${GROUND_LIFT.toFixed(3)} / ( 2.0 * dE ) - dS.x, 1.0, -dHz * ${GROUND_LIFT.toFixed(3)} / ( 2.0 * dE ) - dS.y ) );
+    objectNormal = transpose( mat3( modelMatrix ) ) * dT;
+  }
+}
+#endif
+`;
+
 export class Drape {
   readonly texture: THREE.DataTexture;
-  readonly uniforms: { uTerrain: { value: THREE.Texture }; uTerrainGrid: { value: THREE.Vector4 } };
+  readonly uniforms: { uTerrain: { value: THREE.Texture }; uTerrainGrid: { value: THREE.Vector4 }; uSwell: { value: number } };
   private seen = new WeakSet<object>();
   private depth: THREE.MeshDepthMaterial;
   constructor(readonly field: ReliefField) {
@@ -84,7 +107,7 @@ export class Drape {
     this.texture.minFilter = this.texture.magFilter = THREE.NearestFilter;
     this.texture.generateMipmaps = false;
     this.texture.needsUpdate = true;
-    this.uniforms = { uTerrain: { value: this.texture }, uTerrainGrid: { value: new THREE.Vector4(field.x0, field.z0, field.step, field.n) } };
+    this.uniforms = { uTerrain: { value: this.texture }, uTerrainGrid: { value: new THREE.Vector4(field.x0, field.z0, field.step, field.n) }, uSwell: { value: 0 } };
     this.depth = this.patch(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }));
   }
   heightAt = (x: number, z: number) => this.field.heightAt(x, z);
@@ -93,15 +116,15 @@ export class Drape {
   patch<M extends THREE.Material>(m: M): M {
     if (this.seen.has(m)) return m;
     this.seen.add(m);
-    const prev = m.onBeforeCompile, prevKey = m.customProgramCacheKey, u = this.uniforms;
+    const prev = m.onBeforeCompile, prevKey = m.customProgramCacheKey, u = this.uniforms, ground = !!m.userData.ground;
     m.onBeforeCompile = (sh, r) => {
       prev?.call(m, sh, r);
       const d = drapeShader(sh.vertexShader);
       if (!d.ok) return;
-      sh.vertexShader = d.src;
+      sh.vertexShader = ground ? d.src.replace('#include <beginnormal_vertex>', GROUND_NORMAL) : d.src;
       Object.assign(sh.uniforms, u);
     };
-    m.customProgramCacheKey = () => `${prevKey.call(m)}|drape`;
+    m.customProgramCacheKey = () => `${prevKey.call(m)}|drape${ground ? '|gn' : ''}`;
     m.needsUpdate = true;
     return m;
   }
