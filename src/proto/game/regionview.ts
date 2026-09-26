@@ -211,12 +211,12 @@ export class RegionView {
       // (placed as main.ts always placed them)
       make(geos[0], G.mats[0], oaks, (x) => { v.set(x.x, 5.6 * x.s, x.z); sc.set(x.s, x.s * 1.1, x.s); });
       make(geos[1], G.mats[1], pines, (x) => { v.set(x.x, 7 * x.s, x.z); sc.set(x.s, x.s, x.s); });
-      make(geos[2], G.mats[2], list, (x) => { v.set(x.x, 1.75 * x.s, x.z); sc.set(x.s, x.s, x.s); });
+      if (level === 'full') make(geos[2], G.mats[2], list, (x) => { v.set(x.x, 1.75 * x.s, x.z); sc.set(x.s, x.s, x.s); }); // (no trunks on the low trees: from mid zoom out a trunk is under a pixel)
     }
     this.showTrees(t);
   }
   private showTrees(t: Tile) {
-    const low = t.shown === 'far', off = this.treesOff;
+    const low = t.shown === 'far' || t.shown === 'mid', off = this.treesOff; // (full trees only up close)
     for (const m of t.trees.full) m.visible = t.shown !== null && !low && !off;
     for (const m of t.trees.low) m.visible = t.shown !== null && low && !off;
   }
