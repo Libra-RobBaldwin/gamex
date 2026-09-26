@@ -15,6 +15,16 @@ import { MapWater, lakeBox, type WaterSpec } from './water';
 import type { Relief } from './options';
 
 export const STEP = 25; // m between grid points
+
+// ---- the hills' lighting, in one place ----
+// The ground is lit as if GROUND_LIFT times as steep as it is (the live ground: game/water.ts; the
+// 50 km map's far tiles: worldmap/tilegen.ts): from the game's height, gentle country otherwise
+// reads as flat. `litSlope` is what a true slope (rise over run) reads as in the ground shader's
+// 1 − normal.y, and `slopeLook` the shader's uSlope for a map with hills (ground/material.ts: bare
+// rock from a 1 in 2 slope, all rock by 1 in 1.1; heather on the tops from 300 m, all moor by 420).
+export const GROUND_LIFT = 3;
+export const litSlope = (s: number) => 1 - 1 / Math.hypot(1, GROUND_LIFT * s);
+export const slopeLook = (): [number, number, number, number] => [litSlope(0.55), litSlope(0.9), 300, 420];
 // the hills' height (m) above the valley floors for each relief
 export const RELIEF_HEIGHT: Record<Relief, number> = { flat: 0, lowland: 10, rolling: 32, upland: 60, mountain: 110 };
 

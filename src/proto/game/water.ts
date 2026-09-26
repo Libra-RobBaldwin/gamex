@@ -22,6 +22,7 @@ import { TILE } from '../terrain/height';
 import { KIND_CODE, WaterSystem, claimWater, navLimits, pierBans, reedSpots, shoreColours, waterClaims, waterSurface, type Crossing, type WaterMesh, type WaterTile } from '../water';
 import { WATER_LIGHT, patchGroundMaterial, reedGeometry, reedMaterial, reedMesh, rippleTexture, setWaterLight, waterGeometry, waterMaterial, type WaterLight } from '../water/material';
 import type { Land } from '../land';
+import { GROUND_LIFT } from '../region/terrain';
 import { DROP, LEVEL, MapWater, RIM, TOWN_LAKE, TOWN_WATER, WATER_LEVEL, lakeBox, lakeGroundOf, lakeRadiusOf, riverReach, type LakeSpec, type WaterSpec } from '../region/water';
 
 export interface XZ { x: number; z: number }
@@ -80,7 +81,7 @@ export class GameWater {
     // drainage is arbitrary, and the water system would start streams across it). Small regions,
     // as there's no catchment to follow: 2 km with 200 m of margin builds in a few ms, not 200.
     // (A river is a channel in the ground, filled to the level like a lake: still water for now.)
-    this.water = new WaterSystem(new FnHeight(W.ground, () => WATER_LEVEL), { riverArea: 1e9, basinArea: 1e9, sea: null, region: 2000, margin: 200 });
+    this.water = new WaterSystem(new FnHeight(W.ground, () => WATER_LEVEL), { riverArea: 1e9, basinArea: 1e9, sea: null, region: 2000, margin: 200 }, 100000); // (every tile with water is kept for the game's life: its cache must hold them all, or at its default 24 it builds them again and again)
     this.material = waterMaterial(rippleTexture(), WATER_LIGHT.day, { still: true }); // (still water: no current)
     const t0 = Math.floor(-half / TILE), t1 = Math.floor(half / TILE);
     for (let ti = t0; ti <= t1; ti++) for (let tj = t0; tj <= t1; tj++) {
@@ -223,7 +224,7 @@ export class GameWater {
     for (let v = 0; v < V; v++) {
       const x = pos[v * 3], z = pos[v * 3 + 2];
       let gx = (G(x + e, z) - G(x - e, z)) / (2 * e), gz = (G(x, z + e) - G(x, z - e)) / (2 * e);
-      if (H) { gx += (H(x + eH, z) - H(x - eH, z)) / (2 * eH); gz += (H(x, z + eH) - H(x, z - eH)) / (2 * eH); }
+      if (H) { gx += GROUND_LIFT * (H(x + eH, z) - H(x - eH, z)) / (2 * eH); gz += GROUND_LIFT * (H(x, z + eH) - H(x, z - eH)) / (2 * eH); } // (lit steeper than it is: region/terrain.ts)
       const l = Math.hypot(gx, 1, gz);
       nor[v * 3] = -gx / l; nor[v * 3 + 1] = 1 / l; nor[v * 3 + 2] = -gz / l;
     }

@@ -9,6 +9,10 @@
 export type Style = 'temperate' | 'desert' | 'arctic';
 // How hilly the ground is (region/terrain.ts): flat to mountain. Rolling by default.
 export type Relief = 'flat' | 'lowland' | 'rolling' | 'upland' | 'mountain';
+// What kind of country a 50 km map is (worldmap/landform.ts), and its islands. Each LANDFORMS entry
+// below is one of the region setup's choices.
+export type Landform = 'vale' | 'downs' | 'estuary' | 'uplands' | 'mountains' | 'coast' | 'islands';
+export type Islands = 'none' | 'few' | 'archipelago' | 'one';
 export interface RegionOptions {
   seed: number;
   rivers: number; // 0–3, each right across the map
@@ -20,9 +24,29 @@ export interface RegionOptions {
   relief: Relief;
   size: number; // km across: 50 is the standard map (worldmap/, streamed), 6 the first region (made whole)
   sea: boolean; // a coast along one edge, with the sea beyond (50 km maps)
+  // (50 km maps: the land, worldmap/landform.ts)
+  landform: Landform;
+  islands: Islands; // none, a few offshore, an archipelago, or the map as one big island
+  hills: number; // how hilly, 0–100 (50: the landform as it is; −1 the same)
+  water: number; // how wet: rivers and lakes, 0–100 (50 as it is; −1 the same)
+  woods: number; // how wooded, 0–100 (50 as it is; −1 the same: the countryside's to read)
 }
 
 export const STYLES: readonly Style[] = ['temperate', 'desert', 'arctic'];
+export const LANDFORM_IDS: readonly Landform[] = ['vale', 'downs', 'estuary', 'uplands', 'mountains', 'coast', 'islands'];
+export const ISLANDS: readonly Islands[] = ['none', 'few', 'archipelago', 'one'];
+// The region setup's kinds of place (the coordinator's wizard shows these): each a real kind of
+// British country, and the options it sets.
+export interface LandformPreset { id: Landform; name: string; note: string; options: Partial<RegionOptions> }
+export const LANDFORMS: readonly LandformPreset[] = [
+  { id: 'vale', name: 'Lowland vale', note: 'Broad clay farmland, slow rivers winding through it, low ridges either side', options: { landform: 'vale', relief: 'lowland', sea: false, islands: 'none' } },
+  { id: 'downs', name: 'Chalk downs', note: 'Rolling chalk hills with steep scarps, dry valleys and white cliffs to the sea', options: { landform: 'downs', relief: 'rolling', sea: true, islands: 'none' } },
+  { id: 'estuary', name: 'River estuary', note: 'A wide river mouth reaching far inland, creeks and marsh, hills behind', options: { landform: 'estuary', relief: 'rolling', sea: true, islands: 'none' } },
+  { id: 'uplands', name: 'Uplands and dales', note: 'High moorland cut by deep green dales, limestone and gritstone', options: { landform: 'uplands', relief: 'upland', sea: false, islands: 'none' } },
+  { id: 'mountains', name: 'Mountains and lakes', note: 'Peaks, U-shaped valleys and long lakes in them, as in the Lake District', options: { landform: 'mountains', relief: 'mountain', sea: false, islands: 'none' } },
+  { id: 'coast', name: 'Coast', note: 'Farmland and hills meeting the sea: headlands and cliffs, bays and beaches', options: { landform: 'coast', relief: 'rolling', sea: true, islands: 'none' } },
+  { id: 'islands', name: 'Islands', note: 'An archipelago: islands big and small in a sheltered sea', options: { landform: 'islands', relief: 'rolling', sea: true, islands: 'archipelago' } },
+];
 export const RELIEFS: readonly Relief[] = ['flat', 'lowland', 'rolling', 'upland', 'mountain'];
 export const LIMITS = { rivers: [0, 3], lakes: [0, 4], towns: [0, 6], villages: [0, 12] } as const;
 // A 50 km map holds far more (docs/streaming.md): about as many places as a real 50 km square of England.
@@ -31,7 +55,7 @@ export const WORLD_LIMITS = { rivers: [0, 4], lakes: [0, 12], towns: [0, 30], vi
 export const limitsFor = (size: number) => (size > 6 ? WORLD_LIMITS : LIMITS);
 
 // The defaults: the region as it was first made (one river, one or two lakes, a city, three towns, six to eight villages).
-export const DEFAULT_OPTIONS: RegionOptions = { seed: 7, rivers: 1, lakes: -1, city: true, towns: 3, villages: -1, style: 'temperate', relief: 'rolling', size: 50, sea: true };
+export const DEFAULT_OPTIONS: RegionOptions = { seed: 7, rivers: 1, lakes: -1, city: true, towns: 3, villages: -1, style: 'temperate', relief: 'rolling', size: 50, sea: true, landform: 'coast', islands: 'none', hills: -1, water: -1, woods: -1 };
 // (a 50 km map's own defaults where they differ: two rivers, and the seed decides the towns)
 const WORLD_DEFAULTS: Partial<RegionOptions> = { rivers: 2, towns: -1 };
 // (−1: let the seed decide: one or two lakes, six to eight villages)
@@ -54,6 +78,11 @@ export function regionOptions(o: Partial<RegionOptions> = {}): RegionOptions {
     relief: RELIEFS.includes(d.relief) ? d.relief : 'rolling',
     size,
     sea: d.sea !== false,
+    landform: LANDFORM_IDS.includes(d.landform) ? d.landform : DEFAULT_OPTIONS.landform,
+    islands: ISLANDS.includes(d.islands) ? d.islands : 'none',
+    hills: d.hills === -1 ? -1 : clampInt(Number.isFinite(d.hills) ? d.hills : 50, [0, 100]),
+    water: d.water === -1 ? -1 : clampInt(Number.isFinite(d.water) ? d.water : 50, [0, 100]),
+    woods: d.woods === -1 ? -1 : clampInt(Number.isFinite(d.woods) ? d.woods : 50, [0, 100]),
   };
   // (a map needs somewhere to start: with nothing asked for, one village)
   if (!out.city && out.towns === 0 && out.villages === 0) out.villages = 1;
@@ -64,7 +93,9 @@ export function regionOptions(o: Partial<RegionOptions> = {}): RegionOptions {
 export function optionsFromQuery(q: URLSearchParams): RegionOptions {
   const num = (k: string) => (q.has(k) && q.get(k) !== '' ? Number(q.get(k)) : undefined);
   const o: Partial<RegionOptions> = {};
-  for (const k of ['seed', 'rivers', 'lakes', 'towns', 'villages', 'size'] as const) { const v = num(k); if (v !== undefined) o[k] = v; }
+  for (const k of ['seed', 'rivers', 'lakes', 'towns', 'villages', 'size', 'hills', 'water', 'woods'] as const) { const v = num(k); if (v !== undefined) o[k] = v; }
+  if (q.has('landform')) o.landform = q.get('landform') as Landform;
+  if (q.has('islands')) o.islands = q.get('islands') as Islands;
   if (q.has('city')) o.city = q.get('city') !== '0' && q.get('city') !== 'false';
   if (q.has('sea')) o.sea = q.get('sea') !== '0' && q.get('sea') !== 'false';
   if (q.has('style')) o.style = q.get('style') as Style;

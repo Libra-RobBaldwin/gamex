@@ -16,6 +16,7 @@
 // of trunk road by each piece's middle), so nothing is drawn twice and tiles meet without a seam.
 // Pure: no three.js.
 import { LEVEL } from '../region/water';
+import { GROUND_LIFT } from '../region/terrain';
 import { STYLE_LOOKS } from '../region/styles';
 import { settlementScene, WALLS, ROOFS, type SceneBuilding } from './towns';
 import { clipPath, countryInput, farmsIn, hedges, paintCover, woodTrees, type Box } from './country';
@@ -362,7 +363,9 @@ function groundGrid(plan: WorldPlan, b: Box, step: number, hole: Box | null = nu
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     const x = Math.min(b.x1, b.x0 + i * step), z = Math.min(b.z1, b.z0 + j * step);
     pos.push(x, T.bed(x, z), z);
-    const dx = (ht(x + e, z) - ht(x - e, z)) / (2 * e), dz = (ht(x, z + e) - ht(x, z - e)) / (2 * e), l = Math.hypot(dx, 1, dz);
+    // (the hills lit steeper than they are, as the live ground is: region/terrain.ts GROUND_LIFT)
+    const dx = (ht(x + e, z) - ht(x - e, z)) / (2 * e) + (GROUND_LIFT - 1) * (T.heightAt(x + e, z) - T.heightAt(x - e, z)) / (2 * e);
+    const dz = (ht(x, z + e) - ht(x, z - e)) / (2 * e) + (GROUND_LIFT - 1) * (T.heightAt(x, z + e) - T.heightAt(x, z - e)) / (2 * e), l = Math.hypot(dx, 1, dz);
     nor.push(-dx / l, 1 / l, -dz / l);
   }
   // (split along the (i+1, j)–(i, j+1) diagonal, as the drape field's triangles are)

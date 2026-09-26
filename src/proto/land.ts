@@ -18,7 +18,34 @@ function boxOf(polys: XZ[][]): [number, number, number, number] {
   return [x0, z0, x1, z1];
 }
 
+// (a big polygon, a river's bank, is thousands of edges: its edges are bucketed by the band of z
+// they span, so a point only looks at those that can cross its ray; the same answer, quicker)
+const BAND = 16, bands = new WeakMap<XZ[], { z0: number; edges: number[][] }>();
+function bandsOf(poly: XZ[]) {
+  let b = bands.get(poly);
+  if (b) return b;
+  let z0 = Infinity, z1 = -Infinity;
+  for (const q of poly) { if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z; }
+  const edges: number[][] = Array.from({ length: Math.floor((z1 - z0) / BAND) + 1 }, () => []);
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const lo = Math.min(poly[i].z, poly[j].z), hi = Math.max(poly[i].z, poly[j].z);
+    for (let k = Math.floor((lo - z0) / BAND); k <= Math.floor((hi - z0) / BAND); k++) edges[k].push(i);
+  }
+  b = { z0, edges };
+  bands.set(poly, b);
+  return b;
+}
 export function pointInPoly(p: XZ, poly: XZ[]) {
+  if (poly.length > 96) {
+    const B = bandsOf(poly), k = Math.floor((p.z - B.z0) / BAND);
+    if (k < 0 || k >= B.edges.length) return false;
+    let inside = false;
+    for (const i of B.edges[k]) {
+      const a = poly[i], b = poly[i === 0 ? poly.length - 1 : i - 1];
+      if ((a.z > p.z) !== (b.z > p.z) && p.x < ((b.x - a.x) * (p.z - a.z)) / (b.z - a.z) + a.x) inside = !inside;
+    }
+    return inside;
+  }
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const a = poly[i], b = poly[j];
@@ -32,9 +59,40 @@ function segsCross(a: XZ, b: XZ, c: XZ, d: XZ) {
   return d1 * d2 < 0 && d3 * d4 < 0;
 }
 // Do two simple polygons (convex or not) overlap?
+// (a big one, a river's bank, is thousands of edges: only those whose box meets the other's are tried)
 export function polysTouch(A: XZ[], B: XZ[]) {
-  for (let i = 0; i < A.length; i++) for (let j = 0; j < B.length; j++) if (segsCross(A[i], A[(i + 1) % A.length], B[j], B[(j + 1) % B.length])) return true;
+  if (A.length > B.length) [A, B] = [B, A];
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const q of A) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z; }
+  const tryEdge = (j: number) => {
+    const c = B[j], d = B[(j + 1) % B.length];
+    if ((c.x < x0 && d.x < x0) || (c.x > x1 && d.x > x1) || (c.z < z0 && d.z < z0) || (c.z > z1 && d.z > z1)) return false;
+    for (let i = 0; i < A.length; i++) if (segsCross(A[i], A[(i + 1) % A.length], c, d)) return true;
+    return false;
+  };
+  if (B.length > 96) {
+    const G = gridOf(B), seen = new Set<number>();
+    for (let i = Math.floor(x0 / EDGE_CELL); i <= Math.floor(x1 / EDGE_CELL); i++) for (let j = Math.floor(z0 / EDGE_CELL); j <= Math.floor(z1 / EDGE_CELL); j++) {
+      for (const e of G.get((i + 32768) * 65536 + (j + 32768)) ?? []) { if (seen.has(e)) continue; seen.add(e); if (tryEdge(e)) return true; }
+    }
+  } else for (let j = 0; j < B.length; j++) if (tryEdge(j)) return true;
   return pointInPoly(A[0], B) || pointInPoly(B[0], A);
+}
+// (a big polygon's edges, bucketed by the cells their boxes cover)
+const EDGE_CELL = 24, grids = new WeakMap<XZ[], Map<number, number[]>>();
+function gridOf(B: XZ[]) {
+  let G = grids.get(B);
+  if (G) return G;
+  G = new Map();
+  for (let j = 0; j < B.length; j++) {
+    const c = B[j], d = B[(j + 1) % B.length];
+    for (let i = Math.floor(Math.min(c.x, d.x) / EDGE_CELL); i <= Math.floor(Math.max(c.x, d.x) / EDGE_CELL); i++) for (let k = Math.floor(Math.min(c.z, d.z) / EDGE_CELL); k <= Math.floor(Math.max(c.z, d.z) / EDGE_CELL); k++) {
+      const key = (i + 32768) * 65536 + (k + 32768), l = G.get(key);
+      if (l) l.push(j); else G.set(key, [j]);
+    }
+  }
+  grids.set(B, G);
+  return G;
 }
 export function circlePoly(c: XZ, r: number, n = 24): XZ[] {
   const out: XZ[] = [];

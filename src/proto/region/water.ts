@@ -9,9 +9,11 @@
 export interface XZ { x: number; z: number }
 // a lake: centre, rough radius (its shore wobbles by up to ±13% round it), and the phases of the
 // three slow waves that give the shore its bays and headlands
-export interface LakeSpec { x: number; z: number; r: number; waves?: [number, number, number] }
+// (`level`: its water's height, on a map with hills whose lakes lie at different heights: worldmap/water.ts)
+export interface LakeSpec { x: number; z: number; r: number; waves?: [number, number, number]; level?: number }
 // a river: its centre line (smooth: points a few tens of metres apart) and its width at the waterline
-export interface RiverSpec { path: XZ[]; width: number }
+// (`widths`: its width at each point of its path, when it widens downstream; `width` is then the widest)
+export interface RiverSpec { path: XZ[]; width: number; widths?: number[] }
 export interface WaterSpec { lakes: LakeSpec[]; rivers: RiverSpec[] }
 
 // The water's surface as drawn (a little under the flat map, so its banks shelve down to it). The
@@ -48,8 +50,10 @@ function bank(u: number, R: number, shelf: number, deep: number) {
 }
 // The ground in and round one lake (0 away from it).
 export function lakeGroundOf(L: LakeSpec, x: number, z: number) {
-  const dx = x - L.x, dz = z - L.z, d = Math.hypot(dx, dz);
-  if (d > L.r * 1.35) return 0;
+  const dx = x - L.x, dz = z - L.z, m = L.r * 1.35;
+  if (dx > m || dx < -m || dz > m || dz < -m) return 0; // (outside its box: most asks, quickly)
+  const d = Math.hypot(dx, dz);
+  if (d > m) return 0;
   const R = lakeRadiusOf(L, Math.atan2(dz, dx));
   return bank(R - d, R, SHELF, DEEP);
 }
@@ -60,6 +64,10 @@ export const lakeBox = (L: LakeSpec) => ({ x0: L.x - L.r * 1.35, z0: L.z - L.r *
 // metres long; the water system asks about millions of points).
 export class LineIndex {
   private cells = new Map<number, number[]>();
+  private near1 = new Set<number>(); // (the cells with a piece of the line in them or beside them)
+  // the nearest point's segment (its end's index) and how far along it, from the last near()
+  seg = 0;
+  along = 0;
   constructor(readonly path: XZ[], readonly cell = 64) {
     for (let i = 1; i < path.length; i++) {
       const a = path[i - 1], b = path[i];
@@ -72,41 +80,48 @@ export class LineIndex {
         l.push(i);
       }
     }
+    for (const k of this.cells.keys()) { const ci = Math.floor(k / 65536) - 32768, cj = (k % 65536) - 32768; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) this.near1.add(key(ci + a, cj + b)); }
   }
   // distance to the line, or Infinity when it's further than `max`
   near(x: number, z: number, max: number) {
     const c = this.cell, r = Math.ceil(max / c), ci = Math.floor(x / c), cj = Math.floor(z / c), P = this.path;
+    if (r <= 1 && !this.near1.has(key(ci, cj))) return Infinity; // (nothing of it within a cell: the usual answer, quickly)
     let best = Infinity;
     // (far enough that the buckets would cost more than the line: just walk it)
     if ((2 * r + 1) ** 2 > P.length) {
-      for (let i = 1; i < P.length; i++) best = Math.min(best, segDist(x, z, P[i - 1], P[i]));
+      for (let i = 1; i < P.length; i++) { const d = segDist(x, z, P[i - 1], P[i]); if (d < best) { best = d; this.seg = i; this.along = segT; } }
       return best <= max ? best : Infinity;
     }
     for (let di = -r; di <= r; di++) for (let dj = -r; dj <= r; dj++) {
       const l = this.cells.get(key(ci + di, cj + dj));
       if (!l) continue;
-      for (const i of l) { const d = segDist(x, z, P[i - 1], P[i]); if (d < best) best = d; }
+      for (const i of l) { const d = segDist(x, z, P[i - 1], P[i]); if (d < best) { best = d; this.seg = i; this.along = segT; } }
     }
     return best <= max ? best : Infinity;
   }
+  // a value given at each point (a width, a level), where the last near() found the line
+  at(v: ArrayLike<number>) { return v[this.seg - 1] + (v[this.seg] - v[this.seg - 1]) * this.along; }
 }
+let segT = 0; // (segDist's last share along its segment)
 function segDist(x: number, z: number, a: XZ, b: XZ) {
   const ux = b.x - a.x, uz = b.z - a.z, L2 = ux * ux + uz * uz || 1;
-  const t = Math.max(0, Math.min(1, ((x - a.x) * ux + (z - a.z) * uz) / L2));
+  const t = (segT = Math.max(0, Math.min(1, ((x - a.x) * ux + (z - a.z) * uz) / L2)));
   return Math.hypot(x - a.x - ux * t, z - a.z - uz * t);
 }
 const key = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
 
 // how far either side of a river's centre line its ground dips (the water and the beach)
 export const riverReach = (r: RiverSpec) => r.width / 2 + RIM;
+// its half-width at each point
+export const riverHalves = (r: RiverSpec) => (r.widths ?? r.path.map(() => r.width)).map((w) => w / 2);
 
 // A map's water, ready to ask about: the ground (for the water system and the ground mesh), and
 // quick tests for "is there water anywhere near here?".
 export class MapWater {
-  readonly rivers: { spec: RiverSpec; index: LineIndex; half: number }[];
+  readonly rivers: { spec: RiverSpec; index: LineIndex; half: number; halves: number[] }[];
   readonly boxes: { x0: number; z0: number; x1: number; z1: number }[];
   constructor(readonly spec: WaterSpec) {
-    this.rivers = spec.rivers.map((r) => ({ spec: r, index: new LineIndex(r.path), half: r.width / 2 }));
+    this.rivers = spec.rivers.map((r) => ({ spec: r, index: new LineIndex(r.path), half: r.width / 2, halves: riverHalves(r) }));
     this.boxes = [...spec.lakes.map(lakeBox), ...spec.rivers.map((r) => {
       const m = riverReach(r);
       return { x0: Math.min(...r.path.map((p) => p.x)) - m, z0: Math.min(...r.path.map((p) => p.z)) - m, x1: Math.max(...r.path.map((p) => p.x)) + m, z1: Math.max(...r.path.map((p) => p.z)) + m };
@@ -124,7 +139,9 @@ export class MapWater {
     for (const r of this.rivers) {
       const d = r.index.near(x, z, r.half + RIM);
       if (d === Infinity) continue;
-      const g = bank(r.half - d, r.half, RIVER_SHELF, RIVER_DEEP);
+      const half = r.spec.widths ? r.index.at(r.halves) : r.half;
+      if (d > half + RIM) continue;
+      const g = bank(half - d, half, RIVER_SHELF, r.spec.widths ? RIVER_DEEP * Math.min(1, 0.5 + half / 16) : RIVER_DEEP);
       if (g < h) h = g;
     }
     return h;
@@ -146,7 +163,7 @@ export class MapWater {
     }
     for (const r of this.rivers) {
       const d = r.index.near(p.x, p.z, cap + r.half);
-      if (d !== Infinity) best = Math.min(best, d - r.half);
+      if (d !== Infinity) best = Math.min(best, d - (r.spec.widths ? r.index.at(r.halves) : r.half));
     }
     return best;
   }

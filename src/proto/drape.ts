@@ -120,12 +120,52 @@ export class Drape {
       if (g && !this.seen.has(g)) {
         this.seen.add(g);
         if (!g.boundingSphere) g.computeBoundingSphere();
-        if (g.boundingSphere) g.boundingSphere.radius += this.field.max;
+        if (g.boundingSphere) this.lift(mesh, g);
       }
       // (instanced meshes are drawn uncut, their instances could be anywhere; unless their maker set
-      // `userData.cull` with their bounds worked out, which are then widened by the hills' height)
+      // `userData.cull` with their bounds worked out, which are then lifted by the hills under them)
       const im = mesh as unknown as THREE.InstancedMesh;
-      if (im.isInstancedMesh) { if (o.userData.cull && im.boundingSphere) im.boundingSphere.radius += this.field.max; else im.frustumCulled = false; }
+      if (im.isInstancedMesh) { if (o.userData.cull && im.boundingSphere) this.liftSphere(im, im.boundingSphere); else im.frustumCulled = false; }
     });
   }
+  // A geometry's bounds, lifted by the hills under it: for one placed in the world as it is (no
+  // move, turn or scale on it or its parents), its box raised by the least and most of the ground
+  // under it (the field's grid points over the cells it covers bound every height in them: they're
+  // planar between). Anything else is widened by the highest hill, as the hills may be anywhere
+  // under it. (Tight bounds matter: widened by the highest hill everywhere, on a map with mountains
+  // meshes kilometres off screen were drawn.)
+  private lift(o: THREE.Object3D, g: THREE.BufferGeometry) {
+    const S = g.boundingSphere!;
+    if (!placedAsIs(o)) { S.radius += this.field.max; return; }
+    if (!g.boundingBox) g.computeBoundingBox();
+    const B = g.boundingBox!;
+    if (!Number.isFinite(B.min.x)) { S.radius += this.field.max; return; }
+    const [lo, hi] = this.range(B.min.x, B.min.z, B.max.x, B.max.z), box = B.clone();
+    box.min.y += lo - 0.5; box.max.y += hi + 0.5;
+    box.getBoundingSphere(S);
+  }
+  // (an instanced mesh's own sphere, in its frame: lifted by the ground under the box round it)
+  private liftSphere(o: THREE.Object3D, S: THREE.Sphere) {
+    if (!placedAsIs(o)) { S.radius += this.field.max; return; }
+    const c = S.center, r = S.radius, [lo, hi] = this.range(c.x - r, c.z - r, c.x + r, c.z + r);
+    const box = new THREE.Box3(new THREE.Vector3(c.x - r, c.y - r + lo - 0.5, c.z - r), new THREE.Vector3(c.x + r, c.y + r + hi + 0.5, c.z + r));
+    box.getBoundingSphere(S);
+  }
+  // the least and the most of the ground over a box (from the field's grid points over the cells it covers)
+  private range(x0: number, z0: number, x1: number, z1: number): [number, number] {
+    const F = this.field;
+    const i0 = Math.max(0, Math.floor((x0 - F.x0) / F.step)), i1 = Math.min(F.n - 1, Math.ceil((x1 - F.x0) / F.step));
+    const j0 = Math.max(0, Math.floor((z0 - F.z0) / F.step)), j1 = Math.min(F.n - 1, Math.ceil((z1 - F.z0) / F.step));
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) > 250000) return [0, F.max]; // (a box over most of the map: no need to look)
+    let lo = Infinity, hi = -Infinity;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const v = F.h[j * F.n + i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+    return hi >= lo ? [lo, hi] : [0, F.max];
+  }
+}
+// (it and its parents have no move, turn or scale: its geometry is where it's drawn, before the hills)
+function placedAsIs(o: THREE.Object3D) {
+  for (let p: THREE.Object3D | null = o; p && p.parent; p = p.parent) {
+    if (p.position.lengthSq() > 1e-12 || Math.abs(p.quaternion.w) < 1 - 1e-12 || Math.abs(p.scale.x - 1) + Math.abs(p.scale.y - 1) + Math.abs(p.scale.z - 1) > 1e-9) return false;
+  }
+  return true;
 }

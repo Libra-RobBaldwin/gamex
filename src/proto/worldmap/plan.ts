@@ -3,10 +3,10 @@
 //
 //   const plan = planWorld({ seed: 7, size: 50 });
 //   plan.settlements   // every place on the map: the start town at (0, 0), cities, towns, villages
-//   plan.water         // the sea beyond the coast, rivers down to it, lakes (worldmap/water.ts)
+//   plan.water         // the sea and its coast, rivers down to it, lakes (worldmap/water.ts, from landform.ts)
 //   plan.roads         // the trunk network: motorways, A roads, B roads (routes.ts)
 //   plan.rails         // main lines and branches, with the places they call at
-//   plan.terrain       // the hills, as a function of x, z (terrain.ts)
+//   plan.terrain       // the hills, as a function of x, z (terrain.ts, from landform.ts)
 //
 // Everything finer (streets, plots, buildings, fields, hedges, woods, trees, farms) is made a tile
 // at a time as the camera nears it, from the plan and the tile alone (tilegen.ts), in a worker.
@@ -18,8 +18,9 @@ import { KINDS, layStreets, reach, suggestLinks, type Kind, type Link, type Sett
 import { placeName } from '../region/names';
 import { mix, range, rng, type Rand } from '../region/random';
 import { regionOptions, type RegionOptions } from '../region/options';
-import type { LakeSpec, XZ } from '../region/water';
-import { WorldWater, type Sea, type WorldRiver, type WorldWaterSpec } from './water';
+import type { XZ } from '../region/water';
+import { WorldWater, waterFromLand } from './water';
+import { coarseLand } from './landform';
 import { planRoutes, type Rail, type Route } from './routes';
 import { WorldTerrain } from './terrain';
 
@@ -93,11 +94,12 @@ export function planWorld(opts: Partial<RegionOptions> = {}): WorldPlan {
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   const o = regionOptions({ ...opts, size: opts.size ?? 50 }), seed = o.seed;
   const half = (o.size * 1000) / 2;
-  const spec = makeWater(rng(mix(seed, 202)), half, o);
-  const water = new WorldWater(spec);
+  // the lie of the land (landform.ts: made in its own worker when it can be, and kept), and the water it leaves
+  const land = coarseLand(o, half);
+  const water = new WorldWater(waterFromLand(land, seed, o), land);
   const settlements = placeSettlements(rng(mix(seed, 203)), seed, half, water, o);
   const grid = new SettlementGrid(settlements);
-  const terrain = new WorldTerrain({ seed, relief: o.relief, half, water, grid });
+  const terrain = new WorldTerrain({ seed, relief: o.relief, half, water, grid, land });
   // (exact gates for the places the roads meet: the ends of their high streets, from their own street layout)
   for (const s of settlements) layStreets(s, water, half);
   const links = suggestLinks(settlements, water).filter((l) => !crossesSea(water, settlements[l.a], settlements[l.b]));
@@ -111,85 +113,6 @@ function crossesSea(w: WorldWater, a: XZ, b: XZ) {
   const L = Math.hypot(b.x - a.x, b.z - a.z);
   for (let t = 0; t <= L; t += 100) if (w.seaDistance(a.x + ((b.x - a.x) * t) / L, a.z + ((b.z - a.z) * t) / L, 200) < 50) return true;
   return false;
-}
-
-// ---------------- water ----------------
-// The sea beyond a coast along one edge (3–7 km in, with bays and headlands); rivers from the far
-// edge (or a side) down to the sea, widening as they go, or right across the map with no sea;
-// lakes. None comes near the middle, where the start town stands.
-const SIDES = ['n', 'e', 's', 'w'] as const;
-function makeWater(r: Rand, H: number, o: RegionOptions): WorldWaterSpec {
-  const small = H < 5000; // (a small map: no sea, no inland lakes' margins)
-  let sea: Sea | null = null;
-  const side = SIDES[Math.floor(r() * 4)];
-  // a point on the map from (t along the coast's edge, c: distance in from that edge)
-  const at = (s: Sea['side'], t: number, c: number): XZ => (s === 's' ? { x: t, z: H - c } : s === 'n' ? { x: t, z: -H + c } : s === 'e' ? { x: H - c, z: t } : { x: -H + c, z: t });
-  if (o.sea && !small) {
-    const d0 = range(r, 0.14, 0.26) * H * 2, a1 = range(r, 900, 1800), w1 = range(r, 9000, 16000), p1 = range(r, 0, 6.28);
-    const a2 = range(r, 250, 600), w2 = range(r, 2500, 4500), p2 = range(r, 0, 6.28), a3 = range(r, 60, 160), w3 = range(r, 600, 1100), p3 = range(r, 0, 6.28);
-    const coast: XZ[] = [];
-    for (let t = -H * 1.1; t <= H * 1.1 + 1e-6; t += 50) {
-      const c = d0 + a1 * Math.sin((t / w1) * 6.2832 + p1) + a2 * Math.sin((t / w2) * 6.2832 + p2) + a3 * Math.sin((t / w3) * 6.2832 + p3);
-      coast.push(at(side, t, c));
-    }
-    sea = { coast, side };
-  }
-  const probe = new WorldWater({ sea, rivers: [], lakes: [] });
-  // rivers: from the edge opposite the sea (or a side edge) to the coast, a little past it
-  const rivers: WorldRiver[] = [];
-  const n = small ? o.rivers : Math.max(0, o.rivers);
-  const opposite = { n: 's', s: 'n', e: 'w', w: 'e' } as const;
-  for (let k = 0, tries = 0; k < n && tries < 60; tries++) {
-    const from = sea ? opposite[sea.side] : side;
-    // (each river in its own band across the map, so they don't cross)
-    const band = (2 * H * 0.8) / n, base = -H * 0.8 + band * (k + 0.5) + range(r, -0.2, 0.2) * band;
-    const a1 = range(r, 700, 1600), w1 = range(r, 7000, 12000), p1 = range(r, 0, 6.28), a2 = range(r, 150, 380), w2 = range(r, 1500, 2600), p2 = range(r, 0, 6.28);
-    const drift = range(r, -0.15, 0.15);
-    const path: XZ[] = [], widths: number[] = [];
-    const end = sea ? 2 * H : 2.1 * H; // (to past the coast, or right across)
-    for (let c = -0.05 * H; c <= end + 1e-6; c += 25) {
-      const t = base + drift * c + a1 * Math.sin((c / w1) * 6.2832 + p1) + a2 * Math.sin((c / w2) * 6.2832 + p2);
-      const p = at(from, t, c);
-      path.push(p);
-      if (sea && probe.seaDistance(p.x, p.z, 400) < -300) break;
-    }
-    // (it widens down the valley: a brook's width where it rises, a broad river at the mouth)
-    const w0 = range(r, 14, 20), w9 = range(r, 38, 60);
-    for (let i = 0; i < path.length; i++) widths.push(Math.round(w0 + (w9 - w0) * (i / (path.length - 1)) ** 0.8));
-    // (keep well clear of the middle, where the start town is)
-    if (path.some((p) => Math.hypot(p.x, p.z) < 1800 + widths[0])) continue;
-    rivers.push({ path, widths });
-    k++;
-  }
-  const withRivers = new WorldWater({ sea, rivers, lakes: [] });
-  // Lakes: never circles. Each is a chain of overlapping bowls of different sizes along a wandering
-  // line (the water is where any of them is), so its shore has lobes, bays and narrows, long one way
-  // as a lake in a valley is. They keep out of the live play area (its water is one bowl a lake).
-  const lakes: LakeSpec[] = [], clusters: { x: number; z: number; R: number }[] = [];
-  const want = o.lakes === -1 ? (small ? 1 : AUTO.lakes[0] + Math.floor(r() * (AUTO.lakes[1] - AUTO.lakes[0] + 1))) : o.lakes;
-  for (let tries = 0; tries < 3000 && clusters.length < want; tries++) {
-    const x = range(r, -H + 1800, H - 1800), z = range(r, -H + 1800, H - 1800), size = range(r, 220, 700) * (r() < 0.25 ? 1.5 : 1);
-    const n = 4 + Math.floor(r() * 5), parts: LakeSpec[] = [];
-    let a = range(r, 0, 6.28), px = x, pz = z;
-    for (let k = 0; k < n; k++) {
-      const rr = Math.round(size * range(r, 0.22, k === 0 ? 0.6 : 0.5));
-      parts.push({ x: px, z: pz, r: rr, waves: [range(r, 0, 6.28), range(r, 0, 6.28), range(r, 0, 6.28)] });
-      a += range(r, -1.1, 1.1);
-      const step = rr * range(r, 0.7, 1.4);
-      // (and now and then a bay off to one side)
-      if (r() < 0.35) { const b = a + (r() < 0.5 ? 1.6 : -1.6), br = rr * range(r, 0.4, 0.7); parts.push({ x: px + Math.cos(b) * rr * 0.9, z: pz + Math.sin(b) * rr * 0.9, r: Math.round(br), waves: [range(r, 0, 6.28), range(r, 0, 6.28), range(r, 0, 6.28)] }); }
-      px += Math.cos(a) * step; pz += Math.sin(a) * step;
-    }
-    const cx = parts.reduce((t, p) => t + p.x, 0) / parts.length, cz = parts.reduce((t, p) => t + p.z, 0) / parts.length;
-    const R = Math.max(...parts.map((p) => Math.hypot(p.x - cx, p.z - cz) + p.r * 1.35));
-    if (Math.max(Math.abs(cx), Math.abs(cz)) < LIVE_HALF + R + 800) continue;
-    if (Math.abs(cx) > H - R - 600 || Math.abs(cz) > H - R - 600) continue;
-    if (parts.some((p) => withRivers.edgeDistance(p, 4000) < p.r * 1.35 + 450)) continue;
-    if (clusters.some((q) => Math.hypot(q.x - cx, q.z - cz) < q.R + R + 2500)) continue;
-    clusters.push({ x: cx, z: cz, R });
-    lakes.push(...parts);
-  }
-  return { sea, rivers, lakes };
 }
 
 // ---------------- settlements ----------------
