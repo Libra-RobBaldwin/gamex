@@ -11,7 +11,7 @@
 // `woodTrees`, `canopyIn`, `farmsIn`, `hedges`). Owned by the countryside session. Pure: no three.js.
 import { CoverMap } from '../ground/paint';
 import { Layout, type GroundInput } from '../ground/layout';
-import { Countryside, type CountryInput } from '../region/fields';
+import { Countryside } from '../region/fields';
 import { canopy, fringe, type CanopyArrays, type CoverData } from '../ground/canopy';
 import { farmTrack, farmYard } from '../ground/farms';
 import { Occupancy, planHedges, type HedgeTree, type Piece } from '../ground/hedgerows';
@@ -32,26 +32,12 @@ export const GROUND_SEED = 12;
 const sources = new WeakMap<WorldPlan, Countryside>();
 export function countryFor(plan: WorldPlan): Countryside {
   let c = sources.get(plan);
-  if (!c) sources.set(plan, (c = new Countryside(countryInputOf(plan))));
-  return c;
-}
-// what the map's countryside is laid out from (its roads, rivers, hills and places)
-export function countryInputOf(plan: WorldPlan): CountryInput {
+  if (c) return c;
   const H = plan.half, heightAt = plan.terrain.heightAt;
-  // (the land's heights, from a kilometre grid: what counts as its high ground is the top of them,
-  // whatever the map's lie: a plateau cut by valleys as much as a plain with a few hills)
-  const land: number[] = [];
-  for (let x = -H + 500; x < H; x += 1000) for (let z = -H + 500; z < H; z += 1000) if (!plan.water.wet({ x, z }, 0)) land.push(heightAt(x, z));
-  land.sort((a, b) => a - b);
-  const hMax = land.length ? land[land.length - 1] : 0, flat = !land.length || hMax - land[0] < 35;
-  const heightRank = (h: number) => {
-    if (flat) return 0;
-    let lo = 0, hi = land.length;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (land[m] < h) lo = m + 1; else hi = m; }
-    return lo / land.length;
-  };
+  let hMax = 0;
+  for (let x = -H; x <= H; x += 2000) for (let z = -H; z <= H; z += 2000) hMax = Math.max(hMax, heightAt(x, z));
   const look = STYLE_LOOKS[plan.options.style];
-  return {
+  c = new Countryside({
     seed: GROUND_SEED,
     bounds: { x0: -H, z0: -H, x1: H, z1: H },
     settlements: plan.settlements.map((s) => ({ x: s.x, z: s.z, r: s.r, reach: s.reach, kind: s.kind })),
@@ -61,10 +47,11 @@ export function countryInputOf(plan: WorldPlan): CountryInput {
     waterDist: (x, z) => plan.water.edgeDistance({ x, z }, 400),
     heightAt,
     hMax,
-    heightRank,
-    woods: look.trees.density * (plan.options.woods >= 0 ? plan.options.woods / 50 : 1), // (the setup's woods: 50 as the style has them)
+    woods: look.trees.density,
     pines: look.trees.pines,
-  };
+  });
+  sources.set(plan, c);
+  return c;
 }
 
 // A band round a centre line, as a polygon (left side out, right side back).

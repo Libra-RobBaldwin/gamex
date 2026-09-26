@@ -52,11 +52,10 @@ The region is rolling by default (`relief=rolling`). `relief` goes from `flat` t
   - vehicles and buildings are sheared by the slope rather than turned (right for gentle hills; towns are flat);
   - traffic's grade speeds ignore the hills.
 
-## Farmland and woods (`fields.ts`, `woods.ts`, `lanes.ts`, `countryside.ts`)
+## Farmland and woods (`fields.ts`, `woods.ts`, `game/country.ts`)
 
-The one field, wood and farm generator. The 50 km map's countryside comes from it, through
-`worldmap/country.ts` `countryFor(plan)`, which gives it the plan's roads and railways, rivers,
-lakes and sea, and terrain. It's the ground's field source everywhere (docs/ground.md):
+The region lays out its own countryside, after its roads are built (the ground's field plan,
+docs/ground.md):
 
 - **Farm blocks:** Voronoi cells of seeds about 650 m apart. Each block's fields run one way: along
   the nearest road or river within 380 m, else along the contour where there's a slope, else as
@@ -65,35 +64,47 @@ lakes and sea, and terrain. It's the ground's field source everywhere (docs/grou
   are the size that land has: 4 to 11.5 ha where it's ploughed, less round the villages (down to
   60%) and on slopes. So they're mostly four-sided with right angles, and meet the block's edge at
   whatever angle it takes. A road through a field splits it (along its chord). One cut in ten on a
-  big block is a shelter belt, a strip of trees 16 to 24 m wide.
+  big block is a shelter belt, a strip of trees 16 to 24 m wide. Median field about 3 ha, 6 ha far
+  from the villages.
 - **What each is:** woods first (`woods.ts`: old woods in clumps a kilometre or so apart, hanging
   woods on the steepest slopes, wet woodland on small fields by the water, the odd copse, the
   belts, conifer plantations a farm block at a time on the high ground). Then rough grazing on the
-  high ground, steep slopes and by the water, then arable where the block is ploughed (flat land
-  away from the villages and the water), else pasture. Each farm grows two main crops, so
-  neighbouring fields are often the same. No woods or hedges on fields under the sea or a lake.
-- **The high ground** is ranked among the map's own land (`heightRank`, from a kilometre grid of
-  its heights): the top 15% is rough grazing, the top tenth has more woods, the top fifth
-  plantations. (Not a share of the highest point: a 50 km map is a plateau cut by valleys, and
-  over half of it stood above 62% of its peak.) On seeds 7, 42 and 99, over the whole map: 9 to 11%
-  wood (plus 2 to 4% plantations), 11 to 13% rough, 30 to 42% arable, the rest pasture. Round the
-  start town the woods are more (about a fifth), as its valley sides are steep.
-- **Farmsteads:** about one a farm block, beside a road or out in the fields with a track to one
-  (routed with `laneRoute`), 380 m or more apart, out of the villages, the water and the woods.
-- **Lazily, a tile at a time:** `new Countryside({ seed, bounds, settlements, lanes, waterDist,
-  heightAt, heightRank, woods, pines })`, then `blocksNear(box)`: every farm block touching a box,
-  whole, so fields cross tile borders and neighbouring tiles agree. `farmsNear(box)` is the farms in
-  them. Each block depends only on the seed, its place and what's near it (no whole-map pass;
-  blocks are remembered): a few milliseconds a kilometre tile. No DOM or three.js, so it runs in
-  the tile workers.
-- **Farm tracks (`lanes.ts` `laneRoute`):** the cheapest way over a grid in a corridor round the
-  straight line. Each step costs its length times how unwelcome the ground is: steep ground (so
-  they go round hills, along the contours), water (crossed square on), the old woods, villages,
-  running beside a big road, and a slow noise so they wander; then smoothed to a minimum radius.
-  The map's roads and lanes are the world plan's own (`worldmap/routes.ts`).
-- **Tuning:** every number (block size, field sizes, crop shares, woodland rules, farms, the
-  tracks' costs) is in `region/countryside.ts` (`COUNTRYSIDE`), for the OS import to fit to real
-  data. The setup's woods (0 to 100, 50 as the style has them) scale the woods.
+  high ground and steep slopes of a hilly map and by the water, then arable where the block is
+  ploughed (flat land away from the villages and the water), else pasture. Each farm grows two
+  main crops, so neighbouring fields are often the same. On the default map: about 12% wood, 57%
+  grass, 30% arable, with rape in flower under 2%.
+- **Farmsteads:** about one a farm block (33 on the default map), beside a road or out in the
+  fields with a track to one, 380 m or more apart, out of the villages, the water and the woods.
+- **Lazily, a tile at a time (for 50 km maps):** `new Countryside({ seed, bounds, settlements,
+  lanes, waterDist, heightAt, hMax })`, then `near(tileBox)`: every farm block touching the tile,
+  whole, so fields cross tile borders and neighbouring tiles agree. Each block depends only on the
+  seed, its place and what's near it (no whole-map pass; blocks are remembered, `forget(box)` drops
+  them), about 1.5 ms a 1 km tile once warm. No DOM or three.js, so it can run in a worker.
+  `tileCover(box, n)` is a far tile's cheap look: n × n RGBA, a colour a field and dark hedge lines
+  (about 13 ms for 128²). `layFields(inp)` is the same over a whole box at once (the 6 km region).
+  `blocksNear(box)` is the ground's field source (a `Layout` over any cover map, docs/ground.md),
+  and `farmsNear(box)` the farms whose yard is in a box. The 50 km map's source is
+  `worldmap/country.ts` `countryFor(plan)`: its roads and railways to follow, its rivers and lakes
+  as water and its terrain for height. Farm tracks are routed with `laneRoute` (below).
+- **Winding roads (`lanes.ts`):** B roads, and a lane from each village to the nearest place it has
+  no road to yet (`minorLinks`, `rural-40`), follow `laneRoute(a, b, ctx, { minR })`: the cheapest
+  way over a 40 m grid in a corridor round the straight line. Each step costs its length times how
+  unwelcome the ground is: steep ground (so they go round hills, along the contours), water
+  (crossed square on), the old woods, other villages, running beside a motorway or A road, and a
+  slow noise so they wander where nothing else makes them; running beside a stream draws them.
+  Then smoothed until no bend is tighter than the road type allows (80 m for a B road, 40 m for a
+  lane). On flat ground the B roads come out about 10% longer than straight, the lanes 13%. It's
+  deterministic from the seed and the two ends and looks only at the corridor, so a route can be
+  made on its own, a tile at a time. `interchange/region.ts` builds each as one road along that
+  path (`opts.path`), straight if that way can't be built. The motorway and the A roads are
+  unchanged (the 50 km world session owns the trunk network). Houses aren't strung along the lanes,
+  and along a B road only within 350 m of a place (`queuePlots` in main.ts, big maps only); hedges
+  run along both sides of both.
+- **Tuning:** every number (block size, field sizes, crop shares, woodland rules, farms, the far
+  palette) is in `region/countryside.ts` (`COUNTRYSIDE`), for the OS import to fit to real data.
+- **Reacting to the land:** `countryPlan` takes the height field (`heightAt`), the water's
+  distance (`MapWater.edgeDistance`: the one place to add a sea's) and the roads as built. It's
+  pure and quick (about 50 ms for the 6 km map).
 
 ## Finding your way (`game/places.ts`)
 

@@ -1,7 +1,7 @@
 // Winding country lanes (lanes.ts): from end to end, never tighter than the road allows, round
 // hills and woods rather than over them, across water square on, and the same every time.
 import { describe, expect, it } from 'vitest';
-import { laneRoute, tightest } from './lanes';
+import { laneRoute, minorLinks, tightest } from './lanes';
 import { budget, cpuMs } from '../test/speed';
 
 const len = (p: { x: number; z: number }[]) => p.reduce((s, q, k) => (k ? s + Math.hypot(q.x - p[k - 1].x, q.z - p[k - 1].z) : 0), 0);
@@ -41,5 +41,11 @@ describe('a winding lane', () => {
 
   it('is quick', () => {
     expect(cpuMs(() => laneRoute(a, b, { seed: 9 }, { minR: 80 }))).toBeLessThan(budget(60));
+  });
+
+  it('gives a village a lane to its nearest place it has no road to', () => {
+    const S = [{ id: 0, x: 0, z: 0, kind: 'town' }, { id: 1, x: 1500, z: 0, kind: 'village' }, { id: 2, x: 1500, z: 1400, kind: 'village' }];
+    const m = minorLinks(S, [{ a: 0, b: 1 }, { a: 0, b: 2 }]);
+    expect(m).toEqual([{ a: 1, b: 2, road: 'lane' }]);
   });
 });

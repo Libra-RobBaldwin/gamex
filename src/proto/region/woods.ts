@@ -13,7 +13,7 @@ import { COUNTRYSIDE } from './countryside';
 
 export interface WoodSite {
   x: number; z: number; area: number; // the field's middle and size (m²)
-  slope: number; high: number; // the ground there: rise over run, and how high it is among the map's land (0 to 1)
+  slope: number; height: number; hMax: number; // the ground there (rise over run), and the highest point on the map
   water: number; town: number; // metres to the water's edge and to the nearest settlement's edge
   belt: boolean; block: number; rand: number;
 }
@@ -42,7 +42,7 @@ export function chooseWoods(sites: WoodSite[], o: { seed: number; woods: number;
   return sites.map((s) => {
     if (s.town < 40) return null; // (the village's own land: its gardens and paddocks)
     if (s.water < -5) return null; // (under a lake or the sea: no trees standing out of the water)
-    const r = s.rand, high = s.high;
+    const r = s.rand, high = s.hMax > 25 ? s.height / s.hMax : 0;
     // how likely this field is wood, from each reason there'd be one
     let p = 0;
     const clump = n(s.x, s.z, W.clump.scale) * 0.75 + n2(s.x, s.z, W.clump.fine) * 0.25; // (where the old woods are)

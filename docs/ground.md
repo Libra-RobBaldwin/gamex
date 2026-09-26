@@ -114,9 +114,7 @@ A line's seed comes from its own coordinates, so two tiles that share it plant t
 low-poly, flat-shaded surface, with vertex colours: crowns (domes on a jittered grid, spires in a
 conifer plantation) with dark gaps, going down steeply into the ground at the wood's edge. Its
 outline is the cover map's woodland weight, so it follows the painted wood, and a road or the town
-cuts it. The grid points just outside a wood are moved onto its edge (bisected on the layout), so
-it meets the ground along the wood's own straight outline rather than in grid-square steps, even on
-a far tile's 24 m grid.
+cuts it.
 
 - On a 50 km map's tiles (`worldmap/tilegen.ts`) it is built in the worker, into the tile's one
   solid mesh, so it costs no extra draw call. The grid is 5 m near, 10 m mid, 24 m far, 64 m vast.

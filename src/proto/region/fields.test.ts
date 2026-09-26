@@ -1,52 +1,46 @@
-// The map's farmland (fields.ts, woods.ts), laid out on a 50 km map as the game does
-// (worldmap/country.ts): fields of believable sizes, four-sided and square cornered, in blocks
-// that follow the roads; about an eighth woodland, most on the slopes and by the water; farms
-// beside the roads; the same whatever order its tiles are asked for in.
+// The region's farmland (fields.ts, woods.ts): fields of believable sizes, four-sided and square
+// cornered, in blocks that follow the lanes; about an eighth woodland, most on the slopes and by
+// the water; farms beside the roads.
 import { describe, expect, it } from 'vitest';
-import { area, centroidOf, Countryside, type Field, type Farm, type Line } from './fields';
+import { area, centroidOf, Countryside, layFields, type FieldsInput } from './fields';
 import { budget, cpuMs } from '../test/speed';
-import { planWorld, type WorldPlan } from '../worldmap/plan';
-import { countryInputOf } from '../worldmap/country';
+import { makeRelief } from './terrain';
+import { generateRegion, reach } from './generate';
+import { MapWater } from './water';
 
-type Box = { x0: number; z0: number; x1: number; z1: number };
-const box: Box = { x0: -3000, z0: -3000, x1: 3000, z1: 3000 };
-const make = (plan: WorldPlan) => new Countryside(countryInputOf(plan));
-// every block touching a box, whole (as the ground asks for them), and the farms in them
-function lay(c: Countryside, b: Box) {
-  const fields: Field[] = [], lines: Line[] = [];
-  for (const k of c.blocksNear(b)) { fields.push(...k.fields); lines.push(...k.lines); }
-  return { fields, lines, farms: c.farmsNear(b) as Farm[] };
+const box = { x0: -3000, z0: -3000, x1: 3000, z1: 3000 };
+function input(seed = 7, relief: 'flat' | 'rolling' | 'upland' = 'rolling'): FieldsInput {
+  const g = generateRegion({ seed, relief });
+  const mw = new MapWater(g.water), rel = makeRelief({ relief, seed, water: g.water, settlements: g.settlements }, 3000);
+  // (the lanes: the straight links between places, as a stand-in for the roads the game builds)
+  const lanes = g.links.map((l) => { const a = g.settlements[l.a], b = g.settlements[l.b]; return [{ x: a.x, z: a.z }, { x: b.x, z: b.z }]; });
+  return {
+    seed, box, lanes, farmLanes: lanes,
+    settlements: g.settlements.map((s) => ({ x: s.x, z: s.z, r: s.r, kind: s.kind, reach: reach(s.kind, s.r) })),
+    rivers: g.water.rivers.map((r) => r.path),
+    waterDist: (x, z) => mw.edgeDistance({ x, z }, 400),
+    heightAt: rel?.heightAt,
+  };
 }
-const inside = (f: Field, b: Box) => { const c = centroidOf(f.poly); return c.x > b.x0 && c.x < b.x1 && c.z > b.z0 && c.z < b.z1; };
-const inConvex = (x: number, z: number, q: { x: number; z: number }[]) => {
-  let sign = 0;
-  for (let k = 0; k < q.length; k++) { const a = q[k], b = q[(k + 1) % q.length], c = (b.x - a.x) * (z - a.z) - (b.z - a.z) * (x - a.x); if (!c) continue; const s = c > 0 ? 1 : -1; if (!sign) sign = s; else if (s !== sign) return false; }
-  return true;
-};
 const angle = (a: { x: number; z: number }, b: { x: number; z: number }, c: { x: number; z: number }) => {
   const ux = a.x - b.x, uz = a.z - b.z, vx = c.x - b.x, vz = c.z - b.z;
   return Math.acos(Math.max(-1, Math.min(1, (ux * vx + uz * vz) / (Math.hypot(ux, uz) * Math.hypot(vx, vz)))));
 };
-const slopeOf = (H: (x: number, z: number) => number) => (x: number, z: number) => Math.hypot(H(x + 20, z) - H(x - 20, z), H(x, z + 20) - H(x, z - 20)) / 40;
 
-describe('the map lays out its farmland', () => {
-  const world = planWorld({ seed: 7 }), inp = countryInputOf(world), all = lay(make(world), box);
-  const fields = all.fields.filter((f) => inside(f, box)), farmland = fields.filter((f) => f.kind !== 'wood' && !f.belt);
+describe('the region lays out its farmland', () => {
+  const inp = input(), plan = layFields(inp);
+  const farmland = plan.fields.filter((f) => f.kind !== 'wood' && !f.belt);
 
   it('is the same every time', () => {
-    const again = lay(make(world), box).fields.filter((f) => inside(f, box));
-    expect(again.length).toBe(fields.length);
-    expect(JSON.stringify(again.slice(0, 50))).toBe(JSON.stringify(fields.slice(0, 50)));
+    const again = layFields(input());
+    expect(again.fields.length).toBe(plan.fields.length);
+    expect(JSON.stringify(again.fields.slice(0, 50))).toBe(JSON.stringify(plan.fields.slice(0, 50)));
   });
 
-  it('covers the land once: convex fields with no gaps or overlaps', () => {
-    for (const f of all.fields) expect(area(f.poly)).toBeGreaterThan(0);
-    let once = 0, n = 0;
-    for (let x = box.x0 + 25; x < box.x1; x += 97) for (let z = box.z0 + 25; z < box.z1; z += 97) {
-      n++;
-      if (all.fields.filter((f) => inConvex(x, z, f.poly)).length === 1) once++;
-    }
-    expect(once / n).toBeGreaterThan(0.995); // (a point exactly on a boundary may count twice)
+  it('covers the land once: convex fields that add up to the box', () => {
+    let sum = 0;
+    for (const f of plan.fields) { const a = area(f.poly); expect(a).toBeGreaterThan(0); sum += a; }
+    expect(sum / ((box.x1 - box.x0) * (box.z1 - box.z0))).toBeCloseTo(1, 2);
   });
 
   it('has fields of believable size: mostly 2 to 10 ha, bigger where they are ploughed', () => {
@@ -72,89 +66,84 @@ describe('the map lays out its farmland', () => {
   });
 
   it('is about an eighth woodland, and pasture and arable in plausible shares (not a harlequin)', () => {
-    const tot = fields.reduce((a, f) => a + area(f.poly), 0), share = (p: (f: Field) => boolean) => fields.filter(p).reduce((a, f) => a + area(f.poly), 0) / tot;
-    // (woodland over the whole map, from kilometre tiles all over it: round the start town it's
-    // more, as its valley sides are steep and hung with woods)
-    const c = make(world);
-    let wood = 0, land = 0;
-    for (let k = 0; k < 30; k++) {
-      const x = ((k * 7919) % 44) * 1000 - 22000, z = ((k * 104729) % 44) * 1000 - 22000, t = { x0: x, z0: z, x1: x + 1000, z1: z + 1000 };
-      for (const f of lay(c, t).fields) if (inside(f, t)) { const a = area(f.poly); land += a; if (f.kind === 'wood') wood += a; }
-    }
-    expect(wood / land).toBeGreaterThan(0.08);
-    expect(wood / land).toBeLessThan(0.18);
+    const tot = plan.fields.reduce((a, f) => a + area(f.poly), 0), share = (p: (f: (typeof plan.fields)[number]) => boolean) => plan.fields.filter(p).reduce((a, f) => a + area(f.poly), 0) / tot;
+    expect(share((f) => f.kind === 'wood')).toBeGreaterThan(0.07);
+    expect(share((f) => f.kind === 'wood')).toBeLessThan(0.2);
     expect(share((f) => f.kind === 'grass')).toBeGreaterThan(0.3);
     expect(share((f) => f.kind === 'arable')).toBeGreaterThan(0.2);
     // rape in flower is the odd bright field, not a fifth of the land
     expect(share((f) => f.crop === 'rape')).toBeLessThan(0.06);
     // neighbouring fields often grow the same (each farm has two or three crops at a time)
-    const arable = fields.filter((f) => f.kind === 'arable');
+    const arable = plan.fields.filter((f) => f.kind === 'arable');
     let same = 0, pairs = 0;
     for (let i = 0; i < arable.length; i++) for (let j = i + 1; j < arable.length; j++) if (arable[i].block === arable[j].block) { pairs++; if (arable[i].crop === arable[j].crop) same++; }
     expect(same / pairs).toBeGreaterThan(0.3);
   });
 
   it('puts woods on the slopes and by the water rather than anywhere', () => {
-    const woodsBy = (l: Field[], p: (x: number, z: number) => boolean) => { const m = l.filter((f) => { const c = centroidOf(f.poly); return p(c.x, c.z); }); return m.filter((f) => f.kind === 'wood').length / Math.max(1, m.length); };
-    const W = inp.waterDist!, slope = slopeOf(inp.heightAt!);
-    // (by the water: the whole 50 km, so there's water enough to judge by)
-    const wide = { x0: -12000, z0: -12000, x1: 12000, z1: 12000 }, more = lay(make(world), wide).fields;
-    expect(woodsBy(more, (x, z) => W(x, z) < 50 && W(x, z) > 0)).toBeGreaterThan(woodsBy(more, (x, z) => W(x, z) > 300 && slope(x, z) < 0.03) * 0.8);
-    const steep = planWorld({ seed: 7, relief: 'upland' }), sslope = slopeOf(steep.terrain.heightAt);
-    const onSteep = lay(make(steep), wide).fields.filter((f) => { const c = centroidOf(f.poly); return sslope(c.x, c.z) > 0.12; });
+    const woodsBy = (p: (x: number, z: number) => boolean) => { const l = plan.fields.filter((f) => { const c = centroidOf(f.poly); return p(c.x, c.z); }); return l.filter((f) => f.kind === 'wood').length / Math.max(1, l.length); };
+    const H = inp.heightAt!, slope = (x: number, z: number) => Math.hypot(H(x + 20, z) - H(x - 20, z), H(x, z + 20) - H(x, z - 20)) / 40;
+    const steep = input(7, 'upland'), sp = layFields(steep), SH = steep.heightAt!, sslope = (x: number, z: number) => Math.hypot(SH(x + 20, z) - SH(x - 20, z), SH(x, z + 20) - SH(x, z - 20)) / 40;
+    const onSteep = sp.fields.filter((f) => { const c = centroidOf(f.poly); return sslope(c.x, c.z) > 0.12; });
     if (onSteep.length > 5) expect(onSteep.filter((f) => f.kind === 'wood' || f.kind === 'rough').length / onSteep.length).toBeGreaterThan(0.4);
-  }, 60000);
+    expect(woodsBy((x, z) => inp.waterDist!(x, z) < 50 && inp.waterDist!(x, z) > 0)).toBeGreaterThan(woodsBy((x, z) => inp.waterDist!(x, z) > 300 && slope(x, z) < 0.03) * 0.8);
+  });
 
-  it('lines each block up with the road beside it', () => {
-    // (a field's rows run with its block: along the road or square to it)
-    const off: number[] = [];
-    for (const f of farmland) {
-      const c = centroidOf(f.poly);
-      let best = 150, a = 0;
-      for (const r of inp.lanes) for (let k = 1; k < r.length; k++) {
-        const p = r[k - 1], q = r[k], ex = q.x - p.x, ez = q.z - p.z, L = Math.hypot(ex, ez);
-        if (L < 1) continue;
-        const t = ((c.x - p.x) * ex + (c.z - p.z) * ez) / (L * L);
-        if (t < 0 || t > 1) continue;
-        const d = Math.abs(((c.x - p.x) * ez - (c.z - p.z) * ex) / L);
-        if (d < best) { best = d; a = Math.atan2(ez, ex); }
-      }
-      if (best >= 150) continue;
-      const d = Math.abs(((f.dir - a) % (Math.PI / 2) + Math.PI / 2) % (Math.PI / 2));
-      off.push(Math.min(d, Math.PI / 2 - d));
-    }
-    expect(off.length).toBeGreaterThan(3);
+  it('lines each block up with the lane beside it', () => {
+    const lane = inp.lanes[0], a = Math.atan2(lane[1].z - lane[0].z, lane[1].x - lane[0].x);
+    const near = plan.fields.filter((f) => {
+      const c = centroidOf(f.poly), ex = lane[1].x - lane[0].x, ez = lane[1].z - lane[0].z, L = Math.hypot(ex, ez), t = ((c.x - lane[0].x) * ex + (c.z - lane[0].z) * ez) / (L * L);
+      return t > 0.2 && t < 0.8 && Math.abs(((c.x - lane[0].x) * ez - (c.z - lane[0].z) * ex) / L) < 150;
+    });
+    // (a field's rows run with its block: along the lane or square to it)
+    const off = near.map((f) => { const d = Math.abs(((f.dir - a) % (Math.PI / 2) + Math.PI / 2) % (Math.PI / 2)); return Math.min(d, Math.PI / 2 - d); });
+    expect(near.length).toBeGreaterThan(3);
     expect(off.filter((d) => d < 0.15).length / off.length).toBeGreaterThan(0.6);
   });
 
   it('has boundaries once each, and farms beside the roads, clear of the villages', () => {
-    const key = (l: Line) => [l.a, l.b].map((p) => `${Math.round(p.x)},${Math.round(p.z)}`).sort().join('|');
-    const keys = all.lines.map(key);
+    const key = (l: { a: { x: number; z: number }; b: { x: number; z: number } }) => [l.a, l.b].map((p) => `${Math.round(p.x)},${Math.round(p.z)}`).sort().join('|');
+    const keys = plan.lines.map(key);
     expect(new Set(keys).size / keys.length).toBeGreaterThan(0.98);
-    expect(all.farms.length).toBeGreaterThan(5);
-    for (const f of all.farms) for (const s of inp.settlements) expect(Math.hypot(f.x - s.x, f.z - s.z)).toBeGreaterThan(s.reach + 150);
+    expect(plan.farms.length).toBeGreaterThan(5);
+    for (const f of plan.farms) for (const s of inp.settlements) expect(Math.hypot(f.x - s.x, f.z - s.z)).toBeGreaterThan(s.reach + 150);
+  });
+
+  it('is quick', () => {
+    const t0 = performance.now();
+    layFields(inp);
+    expect(performance.now() - t0).toBeLessThan(400);
   });
 });
 
-describe('the countryside laid out lazily, a tile at a time', () => {
-  const world = planWorld({ seed: 7 });
+describe('the countryside laid out lazily, a tile at a time (for maps of any size)', () => {
+  const inp = input(), bounds = { x0: -3000, z0: -3000, x1: 3000, z1: 3000 };
+  const make = () => new Countryside({ ...inp, bounds, hMax: 32 });
   const tile = (i: number, j: number) => ({ x0: i * 1000, z0: j * 1000, x1: (i + 1) * 1000, z1: (j + 1) * 1000 });
-  const sig = (l: Field[]) => JSON.stringify(l.map((f) => [f.block, f.kind, f.crop, f.poly.map((q) => [Math.round(q.x * 100), Math.round(q.z * 100)])]));
+  const sig = (p: ReturnType<Countryside['near']>) => JSON.stringify(p.fields.map((f) => [f.block, f.kind, f.crop, f.poly.map((q) => [Math.round(q.x * 100), Math.round(q.z * 100)])]));
 
   it('gives a tile the same fields whatever was laid out before it, so tiles meet seamlessly', () => {
-    const a = make(world), b = make(world);
-    for (let i = -3; i < 3; i++) for (let j = -3; j < 3; j++) lay(a, tile(i, j));
-    expect(sig(lay(b, tile(1, 0)).fields)).toBe(sig(lay(a, tile(1, 0)).fields));
+    const a = make(), b = make();
+    for (let i = -3; i < 3; i++) for (let j = -3; j < 3; j++) a.near(tile(i, j));
+    expect(sig(b.near(tile(1, 0)))).toBe(sig(a.near(tile(1, 0))));
     // (neighbouring tiles share the fields that cross their border, whole)
-    const l = new Set(lay(a, tile(0, 0)).fields), across = lay(a, tile(1, 0)).fields.filter((f) => f.poly.some((q) => q.x < 999) && f.poly.some((q) => q.x > 1001) && f.poly.some((q) => q.z > 0 && q.z < 1000));
+    const l = new Set(a.near(tile(0, 0)).fields), across = a.near(tile(1, 0)).fields.filter((f) => f.poly.some((q) => q.x < 999) && f.poly.some((q) => q.x > 1001) && f.poly.some((q) => q.z > 0 && q.z < 1000));
     expect(across.length).toBeGreaterThan(0);
     for (const f of across) expect(l.has(f)).toBe(true);
   });
 
   it('lays a kilometre tile out in a few milliseconds', () => {
     const times: number[] = [];
-    for (let k = 0; k < 5; k++) { const c = make(world); times.push(cpuMs(() => c.blocksNear(tile(k * 3 - 7, 4)))); }
+    for (let k = 0; k < 5; k++) { const c = make(); times.push(cpuMs(() => c.near(tile(k - 3, 1)))); }
     times.sort((a, b) => a - b);
     expect(times[2]).toBeLessThan(budget(25));
+  });
+
+  it('gives a far tile a cheap look that still shows the patchwork and its woods', () => {
+    const c = make(), n = 128, px = c.tileCover(tile(1, 0), n), cols = new Set<string>();
+    let dark = 0;
+    for (let k = 0; k < n * n; k++) { cols.add(`${px[k * 4]},${px[k * 4 + 1]},${px[k * 4 + 2]}`); if (px[k * 4 + 1] < 100) dark++; }
+    expect(cols.size).toBeGreaterThan(5);
+    expect(dark).toBeGreaterThan(0); // (woods and hedges)
   });
 });
