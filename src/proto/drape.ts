@@ -1,5 +1,5 @@
 // Hills for everything drawn: every mesh in the scene follows the map's height field
-// (region/terrain.ts) in its vertex shader, so roads, junctions, bridges, vehicles, trains, people,
+// (worldmap/terrain.ts) in its vertex shader, so roads, junctions, bridges, vehicles, trains, people,
 // trees, water and markers all ride on the ground with no change to their own code, which goes on
 // working on a flat map at height 0. The ground mesh itself is built with the heights in it (and
 // real normals, so the hills are lit), and is left out.
@@ -12,12 +12,12 @@
 // turned, which is what you want on gentle hills; the towns stand on the flat anyway.) Materials
 // get their own program ('|drape'), and shadows a draped depth material, so they fall on the hills.
 import * as THREE from 'three';
-import { GROUND_LIFT, SWELL_GLSL, type ReliefField } from './region/terrain';
+import { GROUND_LIFT, SWELL_GLSL, type ReliefField } from './worldmap/terrain';
 
 const GLSL = /* glsl */`
 uniform sampler2D uTerrain;
 uniform vec4 uTerrainGrid; // x0, z0, step, n
-uniform float uSwell; // (the ground's swells for the light, m: region/terrain.ts)
+uniform float uSwell; // (the ground's swells for the light, m: worldmap/terrain.ts)
 ${SWELL_GLSL}
 float terrainH( vec2 p ) {
   float top = uTerrainGrid.w - 1.0 - 1e-4;
@@ -79,7 +79,7 @@ export function drapeShader(src: string): { src: string; ok: boolean } {
 // Ground drawn over the ground (the fields and verges of the countryside, grass, lawns: ground
 // materials, ground/material.ts) is flat, its normals straight up; draped, it would be lit as if
 // the hills weren't there. Its normal is the hills' own instead, from the field, lit GROUND_LIFT
-// times as steep as the live ground's mesh is (region/terrain.ts).
+// times as steep as the live ground's mesh is (worldmap/terrain.ts).
 const GROUND_NORMAL = /* glsl */`
 #include <beginnormal_vertex>
 #if !defined( USE_INSTANCING ) && !defined( USE_BATCHING )

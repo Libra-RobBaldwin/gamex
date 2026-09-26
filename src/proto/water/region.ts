@@ -18,15 +18,6 @@ import { accumulate, label, priorityFlood } from './flood';
 import { BANK_HEIGHT, CLASS_CODE, SPILL, chaikin, resample, type Reach } from './rivers';
 import { NAV, type WaterParams } from './types';
 
-// What the water system asks of a procedural terrain (see ProceduralTerrain.sampleBase).
-export interface RiverTerrain extends HeightSource {
-  sampleBase(g: GridSpec, out?: Float32Array, water?: Float32Array, river?: Float32Array): Float32Array;
-  baseAt(x: number, z: number): { h: number; water: number | null };
-  riverField(x: number, z: number): { v: number; lam: number; floor: number; half: number; mask: number } | null;
-  readonly p: { seed: number; sea: number | null; rivers: number };
-}
-export const isRiverTerrain = (s: HeightSource): s is RiverTerrain => typeof (s as Partial<RiverTerrain>).sampleBase === 'function';
-
 export interface Region {
   rx: number; rz: number;
   box: [number, number, number, number]; // interior, world metres
@@ -59,25 +50,12 @@ export function buildRegion(src: HeightSource, P: WaterParams, rx: number, rz: n
   const route = new Float32Array(N);
   // a little noise on the routing surface only (not the ground), so drainage across flats wanders
   // as streams do instead of running in grid-straight lines to the outlet
-  const wn = new Noise2(hash32(isRiverTerrain(src) ? src.p.seed : 0, 0x77a1)), wander = (x: number, z: number) => 0.6 * wn.fbm(x / 160, z / 160, 2);
-  const rt = isRiverTerrain(src) ? src : null;
-  if (rt) {
-    const rv = new Float32Array(N);
-    rt.sampleBase(g, ground, srcWater, rv);
-    const f = rt.riverField(g.x0, g.z0), lam = f ? f.lam : 0, w = 1.5 * C;
-    for (let k = 0; k < N; k++) {
-      const s = srcWater[k] === srcWater[k] ? Math.max(ground[k], srcWater[k]) : ground[k];
-      // score a trench along the terrain's river lines so drainage follows its valleys
-      const d = f ? (Math.abs(rv[k]) * lam) / 1.1 : Infinity;
-      route[k] = (d < w ? s - 4 * (1 - d / w) : s) + wander(g.x0 + (k % n) * C, g.z0 + Math.floor(k / n) * C);
-    }
-  } else {
-    src.sample(g, ground);
-    for (let j = 0, k = 0; j < n; j++) for (let i = 0; i < n; i++, k++) {
-      const w = src.waterLevel(g.x0 + i * C, g.z0 + j * C);
-      if (w !== null && w > ground[k]) srcWater[k] = w;
-      route[k] = (srcWater[k] === srcWater[k] ? srcWater[k] : ground[k]) + wander(g.x0 + i * C, g.z0 + j * C);
-    }
+  const wn = new Noise2(hash32(0, 0x77a1)), wander = (x: number, z: number) => 0.6 * wn.fbm(x / 160, z / 160, 2);
+  src.sample(g, ground);
+  for (let j = 0, k = 0; j < n; j++) for (let i = 0; i < n; i++, k++) {
+    const w = src.waterLevel(g.x0 + i * C, g.z0 + j * C);
+    if (w !== null && w > ground[k]) srcWater[k] = w;
+    route[k] = (srcWater[k] === srcWater[k] ? srcWater[k] : ground[k]) + wander(g.x0 + i * C, g.z0 + j * C);
   }
   const seaLevel = P.sea;
   // ---- the sea: below sea level and connected to open water ----
@@ -120,7 +98,7 @@ export function buildRegion(src: HeightSource, P: WaterParams, rx: number, rz: n
     rx, rz, box: [rx * P.region, rz * P.region, (rx + 1) * P.region, (rz + 1) * P.region], g, ground, srcWater,
     filled: fl.filled, acc, parent: fl.parent, sea, basin, basinLevel, basinArea, seaNear, lakeNear, reaches: [], ms: 0,
   };
-  R.reaches = extractRivers(R, rt, P);
+  R.reaches = extractRivers(R, P);
   R.ms = performance.now() - t0;
   return R;
 }
@@ -169,7 +147,7 @@ export const MARGIN_DEPTH = 0.6;
 export const marginDepth = (sh: number) => Math.max(0, 0.5 - sh) * 2 * MARGIN_DEPTH;
 
 // ---- rivers ----
-function extractRivers(R: Region, rt: RiverTerrain | null, P: WaterParams): Reach[] {
+function extractRivers(R: Region, P: WaterParams): Reach[] {
   const g = R.g, n = g.nx, N = n * n, { acc, parent, sea } = R;
   const isRiver = (k: number) => acc[k] >= P.riverArea && !sea[k];
   const kids = new Uint8Array(N);
@@ -195,32 +173,18 @@ function extractRivers(R: Region, rt: RiverTerrain | null, P: WaterParams): Reac
   raws.forEach((r, i) => { if (startAt.has(r.start)) startAt.set(r.start, i); });
   const X = (k: number) => g.x0 + (k % n) * g.step, Z = (k: number) => g.z0 + Math.floor(k / n) * g.step;
 
-  // snap a point onto the procedural terrain's river line, if it's near one (Newton on the field)
-  const snap = (x: number, z: number): [number, number] | null => {
-    if (!rt) return null;
-    let px = x, pz = z;
-    for (let it = 0; it < 3; it++) {
-      const f = rt.riverField(px, pz);
-      if (!f) return null;
-      const e = 2, fx = rt.riverField(px + e, pz)!, fz = rt.riverField(px, pz + e)!;
-      const gx = (fx.v - f.v) / e, gz = (fz.v - f.v) / e, g2 = gx * gx + gz * gz;
-      if (g2 < 1e-14) return null;
-      px -= (f.v * gx) / g2; pz -= (f.v * gz) / g2;
-    }
-    return Math.hypot(px - x, pz - z) < 1.5 * P.cell ? [px, pz] : null;
-  };
-  const noise = new Noise2(hash32(rt?.p.seed ?? 0, 0x3a7e));
+  const noise = new Noise2(hash32(0, 0x3a7e));
   const reaches: Reach[] = raws.map((raw, id) => {
-    // cell centres, snapped, with any backtracking step dropped, then smoothed and resampled
+    // cell centres, with any backtracking step dropped, then smoothed and resampled
     let xs: number[] = [], zs: number[] = [], as: number[] = [];
     const pin: boolean[] = [];
     raw.cells.forEach((c, q) => {
-      const sp = snap(X(c), Z(c)), [x, z] = sp ?? [X(c), Z(c)], m = xs.length;
+      const x = X(c), z = Z(c), m = xs.length;
       if (m >= 2 && q < raw.cells.length - 1) {
         const ux = xs[m - 1] - xs[m - 2], uz = zs[m - 1] - zs[m - 2], vx = x - xs[m - 1], vz = z - zs[m - 1];
         if (ux * vx + uz * vz <= 0 || Math.hypot(vx, vz) < 4) return;
       }
-      xs.push(x); zs.push(z); pin.push(sp !== null);
+      xs.push(x); zs.push(z); pin.push(false);
       // the sea (or confluence) cell collects everything draining into it: carry the last value on
       as.push(q === raw.cells.length - 1 && raw.mouth !== 'join' && q > 0 ? acc[raw.cells[q - 1]] : acc[c]);
     });
@@ -276,12 +240,12 @@ function extractRivers(R: Region, rt: RiverTerrain | null, P: WaterParams): Reac
     };
   });
   raws.forEach((raw, i) => { if (raw.mouth === 'join') { const d = startAt.get(raw.end)!; reaches[i].down = d; if (d >= 0) reaches[d].up.push(i); } });
-  profiles(R, rt, P, reaches);
+  profiles(R, P, reaches);
   return reaches;
 }
 
 // Water levels, estuaries, classes and speeds, in downstream order.
-function profiles(R: Region, rt: RiverTerrain | null, P: WaterParams, reaches: Reach[]) {
+function profiles(R: Region, P: WaterParams, reaches: Reach[]) {
   const seaLevel = P.sea;
   // topological order: a reach after everything flowing into it
   const indeg = reaches.map((r) => r.up.length), order: number[] = [];
@@ -313,7 +277,6 @@ function profiles(R: Region, rt: RiverTerrain | null, P: WaterParams, reaches: R
       const x = r.x[k], z = r.z[k], k0 = Math.max(0, k - 1), k1 = Math.min(m - 1, k + 1);
       const tx = r.x[k1] - r.x[k0], tz = r.z[k1] - r.z[k0], tl = Math.hypot(tx, tz) || 1, nx = -tz / tl, nz = tx / tl, o = r.hw[k] + SPILL_CHECK;
       let low = Math.min(lowAt(x, z), lowAt(x + nx * o, z + nz * o), lowAt(x - nx * o, z - nz * o));
-      if (rt) { const f = rt.riverField(x, z); if (f && (Math.abs(f.v) * f.lam) / 1.1 < f.half) low = Math.min(low, f.floor); }
       const lake = lakeAt(x, z);
       let target = Math.max(low - fb(k), lake);
       if (seaLevel !== null) target = Math.max(target, seaLevel);

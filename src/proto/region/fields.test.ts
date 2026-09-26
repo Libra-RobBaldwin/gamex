@@ -4,14 +4,15 @@
 import { describe, expect, it } from 'vitest';
 import { area, centroidOf, Countryside, layFields, type FieldsInput } from './fields';
 import { budget, cpuMs } from '../test/speed';
-import { makeRelief } from './terrain';
 import { generateRegion, reach } from './generate';
-import { MapWater } from './water';
+import { MapWater } from '../worldmap/water';
 
 const box = { x0: -3000, z0: -3000, x1: 3000, z1: 3000 };
 function input(seed = 7, relief: 'flat' | 'rolling' | 'upland' = 'rolling'): FieldsInput {
   const g = generateRegion({ seed, relief });
-  const mw = new MapWater(g.water), rel = makeRelief({ relief, seed, water: g.water, settlements: g.settlements }, 3000);
+  // (rolling hills for the fields to lie on: a few slow waves, as high as the old region's relief was)
+  const amp = { flat: 0, rolling: 32, upland: 60 }[relief], mw = new MapWater(g.water);
+  const rel = amp ? { heightAt: (x: number, z: number) => amp * (0.5 + 0.3 * Math.sin(x / 420 + seed) * Math.cos(z / 510 - seed * 0.7) + 0.2 * Math.sin((x + z) / 300 + seed * 0.3)) } : null;
   // (the lanes: the straight links between places, as a stand-in for the roads the game builds)
   const lanes = g.links.map((l) => { const a = g.settlements[l.a], b = g.settlements[l.b]; return [{ x: a.x, z: a.z }, { x: b.x, z: b.z }]; });
   return {

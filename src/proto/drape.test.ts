@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { Drape, drapeShader } from './drape';
-import { field } from './region/terrain';
+import { field } from './worldmap/terrain';
 import { waterMaterial, rippleTexture } from './water/material';
 
 describe('drape: everything drawn follows the hills', () => {

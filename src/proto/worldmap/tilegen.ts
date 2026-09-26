@@ -15,13 +15,13 @@
 // Everything belongs to exactly one tile (a building by its centre, a street by its middle, a stretch
 // of trunk road by each piece's middle), so nothing is drawn twice and tiles meet without a seam.
 // Pure: no three.js.
-import { LEVEL } from '../region/water';
-import { GROUND_LIFT, SWELL_AMP, swellSlope } from '../region/terrain';
+import { LEVEL } from './water';
+import { GROUND_LIFT, SWELL_AMP, swellSlope } from './terrain';
 import { industryScene } from './industry';
 import { settlementScene, WALLS, ROOFS, type SceneBuilding } from './towns';
 import { canopyIn, clipPath, countryInput, farmsIn, hedges, paintCover, woodTrees, type Box } from './country';
 import { LIVE_HALF, type WorldPlan } from './plan';
-import type { XZ } from '../region/water';
+import type { XZ } from './water';
 import { Occupancy } from '../ground/hedgerows';
 
 export type Detail = 'near' | 'mid' | 'far' | 'vast';
@@ -377,10 +377,10 @@ function groundGrid(plan: WorldPlan, b: Box, step: number, hole: Box | null = nu
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     const x = Math.min(b.x1, b.x0 + i * step), z = Math.min(b.z1, b.z0 + j * step);
     pos.push(x, T.bed(x, z), z);
-    // (the hills lit steeper than they are, as the live ground is: region/terrain.ts GROUND_LIFT)
+    // (the hills lit steeper than they are, as the live ground is: worldmap/terrain.ts GROUND_LIFT)
     const dx = (ht(x + e, z) - ht(x - e, z)) / (2 * e) + (GROUND_LIFT - 1) * (T.heightAt(x + e, z) - T.heightAt(x - e, z)) / (2 * e);
     const dz = (ht(x, z + e) - ht(x, z - e)) / (2 * e) + (GROUND_LIFT - 1) * (T.heightAt(x, z + e) - T.heightAt(x, z - e)) / (2 * e);
-    const [sx, sz] = swellSlope(x, z, swellAmp), l = Math.hypot(dx + sx, 1, dz + sz); // (and the ground's swells, for the light: region/terrain.ts)
+    const [sx, sz] = swellSlope(x, z, swellAmp), l = Math.hypot(dx + sx, 1, dz + sz); // (and the ground's swells, for the light: worldmap/terrain.ts)
     nor.push(-(dx + sx) / l, 1 / l, -(dz + sz) / l);
   }
   // (split along the (i+1, j)–(i, j+1) diagonal, as the drape field's triangles are)

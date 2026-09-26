@@ -4,9 +4,9 @@
 // other work doesn't count.
 import { expect, it } from 'vitest';
 import { budget, cpuMs } from '../test/speed';
-import { ProceduralTerrain, TERRAIN_PRESETS, tileGrid, tileMesh, type HeightSource } from '../terrain';
+import { tileGrid, tileMesh, type HeightSource } from '../terrain';
+import { landSource } from '../worldmap/land';
 import { waterClaims } from './claims';
-import { Coastal } from './coast';
 import { reedSpots, shoreColours, waterSurface } from './surface';
 import { WaterSystem } from './water';
 
@@ -21,28 +21,32 @@ const ms = (v: number) => `${v.toFixed(1)} ms`;
 
 it('performance', () => {
   const out: string[] = [];
-  const places: [string, () => HeightSource, [number, number]][] = [
-    ['rolling', () => new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }), [4, 3]],
-    ['upland', () => new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 7 }), [6, 3]],
-    ['coast', () => new Coastal(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 11, lakes: 0 }), { dir: [1, 0.3], at: 0, width: 3000, fall: 45, deep: 60 }), [1, 5]],
+  // places on the 50 km land (worldmap/land.ts; each land made once, before any timing), and the
+  // water parameters for each: a tile with a river through it on the uplands and in the
+  // mountains, and one on the coast where a river meets the sea
+  const land = (landform: 'uplands' | 'mountains' | 'coast') => { const src = landSource({ landform, seed: 7 }).source; return () => src; };
+  const places: [string, () => HeightSource, [number, number], { sea?: number }][] = [
+    ['uplands', land('uplands'), [4, 3], {}],
+    ['mountains', land('mountains'), [3, 4], {}],
+    ['coast', land('coast'), [4, 14], { sea: 0 }],
   ];
   new WaterSystem(places[0][1]()).tile(0, 0); // JIT warm-up
   let worstWarm = 0;
-  for (const [name, make, [ti, tj]] of places) {
-    const region = time(() => new WaterSystem(make()).region(0, 0), 3);
-    // a tile of ground nobody has asked about before (so the terrain's own lattice is built too),
-    // in a region already worked out, as when tiles stream in (another tile is built first, so
+  for (const [name, make, [ti, tj], wp] of places) {
+    const rx = Math.floor(ti / 8), rz = Math.floor(tj / 8);
+    const region = time(() => new WaterSystem(make(), wp).region(rx, rz), 3);
+    // a tile of ground nobody has asked about before, in a region already worked out, as when tiles stream in (another tile is built first, so
     // this one doesn't pay for collecting the region's garbage); and the very first tile of a
     // region, straight after it
     const colds: number[] = [], firsts: number[] = [];
     for (let r = 0; r < 3; r++) {
-      const w2 = new WaterSystem(make());
-      w2.region(0, 0);
+      const w2 = new WaterSystem(make(), wp);
+      w2.region(rx, rz);
       let a = performance.now(); w2.tile(ti, tj + 1); firsts.push(performance.now() - a);
       a = performance.now(); w2.tile(ti, tj); colds.push(performance.now() - a);
     }
     const coldTile = colds.sort((a, b) => a - b)[1], firstTile = firsts.sort((a, b) => a - b)[1];
-    const w = new WaterSystem(make());
+    const w = new WaterSystem(make(), wp);
     w.tile(ti, tj);
     const warm = time(() => { w.forget(); w.tile(ti, tj); });
     worstWarm = Math.max(worstWarm, warm);

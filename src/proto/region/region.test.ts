@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { generateRegion, KINDS, REGION_BOUND, type Region } from './generate';
 import { buildStreets } from './apply';
-import { MapWater, TOWN_LAKE, lakeGroundOf, lakeRadiusOf } from './water';
+import { MapWater, TOWN_LAKE, lakeGroundOf, lakeRadiusOf } from '../worldmap/water';
 import { isRealPlace, REAL_PLACES } from './names';
 import { centrality, mapFromQuery, mapOfRegion, optionsFromQuery, optionsQuery, plotCentre, regionMap, regionOptions, STYLE_LOOKS, STYLES } from './index';
 import { CROP_NAMES, PALETTE } from '../ground/covers';

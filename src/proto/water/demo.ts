@@ -1,5 +1,5 @@
-// Water demo (water-demo.html): a phone-sized view from the game's isometric camera over three
-// procedural places, with day and dusk lighting. Everything drawn comes from the water system:
+// Water demo (water-demo.html): a phone-sized view from the game's isometric camera over four
+// places on the 50 km land (worldmap/land.ts), with day and dusk lighting. Everything drawn comes from the water system:
 // the ground (river channels cut into it) with its shore colours, one water mesh per tile, and
 // one instanced mesh of reeds per tile. "Measure" times frames with and without the water.
 //
@@ -8,8 +8,9 @@
 
 import * as THREE from 'three';
 import { Ground, groundTile } from '../ground';
-import { CachedHeight, ProceduralTerrain, TERRAIN_PRESETS, tileMesh, type HeightSource } from '../terrain';
-import { Coastal } from './coast';
+import { CachedHeight, tileMesh, type HeightSource } from '../terrain';
+import { landSource } from '../worldmap/land';
+import type { WaterParams } from './types';
 import { patchGroundMaterial, reedGeometry, reedMaterial, reedMesh, rippleTexture, setWaterLight, waterGeometry, waterMaterial, WATER_LIGHT, type WaterLight } from './material';
 import { reedSpots, shoreColours, waterSurface } from './surface';
 import { WaterSystem } from './water';
@@ -18,29 +19,29 @@ import { NavRig, mountNavControls } from '../kit/camera';
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 const Q = new URLSearchParams(location.search);
 
-interface Place { name: string; desc: string; make: () => HeightSource; at: [number, number]; h: number; az: number }
-// The seeds and spots were picked from maps of each region; change a parameter and the
+interface Place { name: string; desc: string; make: () => HeightSource; water?: Partial<WaterParams>; at: [number, number]; h: number; az: number }
+// The spots were picked from maps of each land (seed 7); change a landform's parameters and the
 // interesting places move.
 const PLACES: Record<string, Place> = {
   coast: {
-    name: 'Coast with an estuary', desc: 'Rolling country falling to the sea: beaches, a headland, a drowned valley and a river mouth',
-    make: () => new Coastal(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 11, lakes: 0 }), { dir: [1, 0.3], at: 0, width: 3000, fall: 45, deep: 60 }),
-    at: [2050, 5550], h: 900, az: Math.PI / 4,
+    name: 'Coast', desc: 'Farmland and hills meeting the sea: beaches, headlands and a river mouth',
+    make: () => landSource({ landform: 'coast', seed: 7 }).source, water: { sea: 0 },
+    at: [4500, 14500], h: 900, az: Math.PI / 4,
   },
   valley: {
-    name: 'River valley', desc: 'Rivers meandering on their floodplains, streams joining them',
-    make: () => new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }),
-    at: [5300, 3650], h: 700, az: Math.PI / 4,
+    name: 'River valley', desc: 'A river winding along the floor of a dale',
+    make: () => landSource({ landform: 'uplands', seed: 7 }).source,
+    at: [2500, 6500], h: 700, az: Math.PI / 4,
   },
   lake: {
-    name: 'Lake in a hollow', desc: 'A river running into a lake that fills a hollow to its spill level',
-    make: () => new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }),
-    at: [1500, 5800], h: 650, az: Math.PI / 4,
+    name: 'Lake in a hollow', desc: 'A lake in a mountain valley, filling its hollow to its spill level',
+    make: () => landSource({ landform: 'mountains', seed: 7 }).source,
+    at: [-8800, -2250], h: 650, az: Math.PI / 4,
   },
   uplands: {
-    name: 'Uplands', desc: 'A tarn in the fells, with a stream tumbling out of it',
-    make: () => new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 7 }),
-    at: [7050, 4050], h: 520, az: Math.PI / 4,
+    name: 'Mountains', desc: 'A river on a mountain valley floor, and a stream joining it',
+    make: () => landSource({ landform: 'mountains', seed: 7 }).source,
+    at: [2500, 6500], h: 520, az: Math.PI / 4,
   },
 };
 
@@ -52,12 +53,12 @@ const scene = new THREE.Scene();
 const hemi = new THREE.HemisphereLight('#e8f3ff', '#5d7040', 1.25);
 const sun = new THREE.DirectionalLight('#fff3dc', 2.3);
 scene.add(hemi, sun, sun.target);
-const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 5000);
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 12000);
 // the shared camera (kit/camera.ts): the game's gestures, on the terrain
 const nav = new NavRig(cam, canvas, {
   view: { x: 0, z: 0, h: 300, az: Math.PI / 4, el: 0.6 },
   limits: { hMin: 60, hMax: 1400 },
-  distance: 1500,
+  distance: 5000, // (far enough back that a fell rising up the screen stays in front of the camera)
   // what's under the pointer (desktop): the water system's answers at that spot
   onHover: (p) => showProbe(p.ground),
 });
@@ -90,7 +91,7 @@ function build(key: string) {
   scene.add(world);
   const at = (Q.get('at')?.split(',').map(Number) as [number, number] | undefined) ?? P.at;
   let t0 = performance.now();
-  water = new WaterSystem(P.make());
+  water = new WaterSystem(P.make(), P.water);
   water.region(Math.floor(at[0] / water.P.region), Math.floor(at[1] / water.P.region));
   timings.region = performance.now() - t0;
   ground = new CachedHeight(water.terrain);
@@ -120,10 +121,10 @@ function build(key: string) {
     world.add(...trees(ti, tj));
   }
   timings.tiles = tiles.length; timings.wet = wetTiles;
-  nav.setGround((x, z) => ground.heightAt(x, z), [-120, 700]);
+  nav.setGround((x, z) => ground.heightAt(x, z), [-40, 1800]); // (the 50 km land's mountains reach well over 1 km)
   // (the old place's bounds would hold the view back from the new place)
   nav.setLimits({ bounds: null });
-  nav.setView({ x: at[0], z: at[1], h: Number(Q.get('h')) || P.h, az: Q.has('az') ? Number(Q.get('az')) : P.az });
+  nav.setView({ x: at[0], z: at[1], y: ground.heightAt(at[0], at[1]), h: Number(Q.get('h')) || P.h, az: Q.has('az') ? Number(Q.get('az')) : P.az });
   // keep the camera over the tiles that were built
   nav.setLimits({ bounds: { minX: at[0] - 700, maxX: at[0] + 700, minZ: at[1] - 700, maxZ: at[1] + 700 } });
   $('#title').textContent = P.name; $('#desc').textContent = P.desc;

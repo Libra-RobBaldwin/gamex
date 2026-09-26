@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { CachedHeight, FlatHeight, FnHeight, tileGrid, tileOf } from './height';
-import { ProceduralTerrain, TERRAIN_PRESETS } from './procedural';
+import { landSource } from '../worldmap/land';
 import { GridHeight, LocalFrame, Mosaic, TerrariumHeight, decodeTerrarium, encodeTerrarium, mercatorPixel, parseAsciiGrid, tileFor } from './raster';
 
-const range = (a: Float32Array) => { let lo = Infinity, hi = -Infinity; for (const v of a) { lo = Math.min(lo, v); hi = Math.max(hi, v); } return hi - lo; };
 
 describe('height sources', () => {
   it('slopes and normals from any height function', () => {
@@ -21,7 +20,7 @@ describe('height sources', () => {
   });
 
   it('the cache reads back what the source says, a tile at a time', () => {
-    const src = new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 5 });
+    const src = landSource({ landform: 'uplands', seed: 7 }).source;
     const c = new CachedHeight(src, 250, 2);
     let worst = 0;
     for (let k = 0; k < 400; k++) {
@@ -34,70 +33,6 @@ describe('height sources', () => {
     for (let k = 0; k < 50; k++) c.heightAt(10 + k, 10); // consecutive reads in one tile don't even touch the map
     expect(c.hits + c.misses).toBe(before + 1);
     expect(tileOf(-1, 1001)).toEqual([-1, 1]);
-  });
-});
-
-describe('procedural terrain', () => {
-  it('is deterministic: same seed, same ground, whatever order it is asked in', () => {
-    const a = new ProceduralTerrain({ seed: 42 }), b = new ProceduralTerrain({ seed: 42 }), c = new ProceduralTerrain({ seed: 43 });
-    b.sample(tileGrid(3, -2, 50)); // warm b's caches somewhere else first
-    const ga = a.sample(tileGrid(0, 0, 64)), gb = b.sample(tileGrid(0, 0, 64)), gc = c.sample(tileGrid(0, 0, 64));
-    expect(ga).toEqual(gb);
-    expect(ga).not.toEqual(gc);
-  });
-
-  it('whole-grid sampling agrees with point queries, and tiles meet exactly at their edges', () => {
-    const t = new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 9 });
-    // fine grids interpolate the lattice separably; coarse ones on lattice points evaluate it
-    // directly; coarse ones off the lattice are within millimetres
-    for (const [n, tol] of [[400, 3], [64, 3], [50, 1]]) {
-      const g = tileGrid(1, 1, n), d = t.sample(g);
-      for (const [i, j] of [[0, 0], [7, 31], [n, n], [23, 4]]) expect(d[j * g.nx + i]).toBeCloseTo(t.heightAt(g.x0 + i * g.step, g.z0 + j * g.step), tol);
-      const west = t.sample(tileGrid(0, 1, n)), south = t.sample(tileGrid(1, 2, n)), m = n + 1;
-      for (let j = 0; j <= n; j++) expect(west[j * m + n]).toBe(d[j * m]);
-      for (let i = 0; i <= n; i++) expect(south[i]).toBe(d[n * m + i]);
-    }
-  });
-
-  it('the presets run from nearly flat to mountainous', () => {
-    const relief = (k: keyof typeof TERRAIN_PRESETS) => {
-      const t = new ProceduralTerrain({ ...TERRAIN_PRESETS[k], seed: 2 });
-      return range(t.sample({ x0: -8000, z0: -8000, step: 100, nx: 161, nz: 161 }));
-    };
-    const flat = relief('flat'), low = relief('lowland'), roll = relief('rolling'), up = relief('upland'), mtn = relief('mountain');
-    expect(flat).toBeLessThan(0.01);
-    expect(low).toBeLessThan(roll);
-    expect(roll).toBeLessThan(up);
-    expect(up).toBeLessThan(mtn);
-    expect(low).toBeLessThan(40);
-    expect(mtn).toBeGreaterThan(300);
-  });
-
-  it('has rivers in valleys and lakes with level surfaces', () => {
-    const t = new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 4, lakes: 0.6 });
-    const g = { x0: -6000, z0: -6000, step: 20, nx: 601, nz: 601 };
-    const w = t.sampleWater(g), h = t.sample(g);
-    let wet = 0;
-    const levels = new Map<number, number>();
-    for (let k = 0; k < w.length; k++) if (w[k] === w[k]) { wet++; expect(w[k]).toBeGreaterThan(h[k]); const q = Math.round(w[k]); levels.set(q, (levels.get(q) ?? 0) + 1); }
-    expect(wet / w.length).toBeGreaterThan(0.005);
-    expect(wet / w.length).toBeLessThan(0.3);
-    // lakes are flat: a handful of surface levels hold most of the lake area
-    const top = [...levels.values()].sort((a, b) => b - a).slice(0, 8).reduce((a, b) => a + b, 0);
-    expect(top / wet).toBeGreaterThan(0.4);
-    // and water sits low: wet points are well below the average ground
-    let mean = 0, wetMean = 0;
-    for (let k = 0; k < h.length; k++) { mean += h[k]; if (w[k] === w[k]) wetMean += h[k]; }
-    expect(wetMean / wet).toBeLessThan(mean / h.length);
-    const k = w.findIndex((v) => v === v), x = g.x0 + (k % g.nx) * g.step, z = g.z0 + Math.floor(k / g.nx) * g.step;
-    expect(t.isWater(x, z)).toBe(true);
-    expect(t.waterLevel(x, z)).toBeCloseTo(w[k], 3);
-  });
-
-  it('can have a sea', () => {
-    const t = new ProceduralTerrain({ ...TERRAIN_PRESETS.lowland, seed: 8, sea: 10, rivers: 0, lakes: 0 });
-    const g = { x0: -5000, z0: -5000, step: 50, nx: 201, nz: 201 }, h = t.sample(g), w = t.sampleWater(g);
-    for (let k = 0; k < h.length; k++) expect(w[k] === w[k]).toBe(h[k] < 10);
   });
 });
 
