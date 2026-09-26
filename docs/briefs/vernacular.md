@@ -1,53 +1,58 @@
 # Brief: vernacular (buildings)
 
-Session https://claude.ai/code/session_013W364Qf7cmYt1ejuVbvaHq · branch `claude/work-vernacular` · PR #45 merged.
+Session https://claude.ai/code/session_013W364Qf7cmYt1ejuVbvaHq · branch `claude/work-vernacular` · updated 26 Sep 08:40 UTC.
 
-## (a) What was asked, and where it stands
+PRs:
+- merged: #45 (regional styles, parking), #48 (shopping complexes);
+- open: #50 (scenery dressed up close, save on hide, level on slopes).
 
-From the coordinator (task, 25 Sep):
-1. **Regional vernacular in Britain (temperate): walls and roofs from local geology and landform** (Cotswold limestone, Pennine gritstone and slate, Cornish and Scottish granite with harling and crow steps, flint and brick on the chalk, Midland red brick and tile, Wealden and Marches timber frame, slate in Wales and the north). **Done** (`vernacular.ts`, `buildgen.ts`).
-2. **Era by distance from the centre** (medieval core, Georgian, Victorian terraces, interwar semis, post-war estates, modern). **Done.**
-3. **Use the terrain session's per-point geology query when it lands, with a fallback until then.** **Partly done:** the hook `setGeology((x, z) => rock)` and a seeded fallback are in, but nothing calls the hook yet (terrain has no branch).
-4. **Climates beyond Britain for the other styles:** arctic/Nordic, dry/Mediterranean or desert, and tropical if cheap. Churches, pubs, stations, shops and industry follow the same family; street furniture and gardens too if cheap. **Done** for Nordic, desert and Mediterranean, including civic buildings, factories, garden walls and trees. **Tropical: not started** (there's no tropical style option).
-5. **Performance the same or better:** shared materials, no more draw calls per chunk, the generator kept pure and worker-friendly, deterministic from the seed. **Done** for draw calls (fewer) and determinism; triangles are about 4% higher. **Partly done** for purity: `vernacular.ts` is pure, but `buildgen.ts` still uses DOM canvases for its textures, as it always has.
-6. **The town map byte-identical unless a style is chosen.** **Done** for the vernacular work (hash-verified). The later finish and parking changes alter the town map on purpose, at the user's request.
-7. **Screenshot villages and towns in each region type and climate at 412x915, judge them, iterate; PR into the integration branch.** **Done** (PR #45).
+**Honesty rule:** "done" below means live on the integration branch and checked on a 412×915 close-zoom screenshot. "In PR" means pushed and checked here, but not merged yet.
 
-From the user directly (25 Sep):
-8. "All the buildings do look a bit shit at the moment... Could we increase the quality at all?" **Partly done:** roof edges, ridges, plinths, ambient occlusion, window reveals.
-9. "Cars should actually park in spaces if they need to - at the moment they are just badly drawn boxes... Car parks should actually be used." **Done:** `game/parking.ts`, with real fleet models, drive-in and pull-out.
-10. "Doors look to be in the outside of houses - not on houses..." **Done:** doors are let into their walls.
-11. "Still looks a bit juvenile to me." **Partly done:** textured walls and hedges, weathered roofs, trees. More is needed (see the plan below).
+## Now (ONE MAP, PLAN.md 07:40)
 
-From the coordinator (resume, 26 Sep 01:15):
-12. **Finish every request the user made, starting with less ugly buildings.** Review the live buildings on phone screenshots (?map=town, ?map=region, ?map=exe): proportions, roofs, windows, colour variety, how they meet the ground, how a street reads. Fix the worst first. **Not started.**
-13. **NEW (user): shopping complexes of variable size** (small parade, high-street arcade, retail park, covered centre). Each is one coherent building on its plot: continuous walls, a roof that suits it (flat with parapets, glazed atrium, sawtooth or pitched sections), shopfronts, entrances, signage bands, loading at the back, parking where it fits, and the town's vernacular. No overlapping or clumped buildings anywhere. Sized by the town's size and demand, with the economy's shop and job counts unchanged; within phone budgets. **Not started.**
-14. **No flicker or z-fighting; tsc, vitest and phone e2es; a new PR with before/after screenshots; hourly check-ins.** Ongoing.
+1. **Urgent: the phone's plain grey boxes that don't improve on zoom.** **In PR #50.**
+   - Cause: on the 50 km map, towns outside the live play area, and places in it not yet live, are world50's scenery boxes at every zoom.
+   - Fix: `game/dress.ts` rebuilds them with buildgen below a 700 m view and hides the boxes in the same frame.
+   - Checked at 412×915 on `?map=region&seed=42`: a town 7 km out and a city (screenshots in `docs/reports/dress/`).
+   - Not yet checked on the user's phone.
+   - Known limits:
+     - A tile appears only once it's all built: a few seconds on a phone, about a minute under SwiftShader.
+     - Streets in dressed places are still world50's plain ribbons (no kerbs, lamps or markings).
+     - Between 700 m and 1000 m a near tile shows the boxes.
+2. **One building generator** (towns.ts scenery uses buildgen, or a cheap LOD of it). **In progress.**
+   - The seam was proposed to world50 at 08:45: towns.ts plans the plots, buildgen builds every building, and tilegen's `building()` becomes only the far LOD box and roof in buildgen's palette.
+   - Next (mine, once world50 agrees): strip the windows, doors and chimneys from tilegen's `building()`, so no second style of building exists.
+   - Not done until the near scenery is always buildgen and the far boxes match in colour.
+3. **Keep this brief honest.** Ongoing.
 
-## (b) Files I own or expect to change
-- **Own:**
-  - `src/proto/buildgen.ts`: the generator, regional recipes, finish, and the shopping complex recipes to come.
-  - `src/proto/vernacular.ts` and `vernacular.test.ts`.
-  - `src/proto/game/parking.ts`.
-  - `src/proto/vernacular-demo.ts` and `buildings-demo.html` (the gallery).
-  - `src/proto/region/styles.ts`.
-  - `docs/vernacular.md` and `docs/parking.md`.
-- **Expect to change, in small ways, once the ownership map says so:**
-  - `src/proto/roads.ts` (Network lot planning): how centre frontage becomes shop lots. Complexes need one large `shop` lot or a new `mall` kind in place of many small overlapping ones, and the no-overlap rule for lots.
-  - `src/proto/infill.ts`, if centre gaps get filled with small shops.
-  - `src/proto/game/econ.ts` and `crowdsites.ts` (`USE`): a complex's unit count, so shop and job totals stay the same.
-  - `main.ts`: one or two lines at most, after the map arrives.
+## Earlier asks, where they stand
+- **Regional vernacular from geology, era by distance, the Nordic, desert and Mediterranean climates.** Done (#45). Tropical was dropped by the plan.
+- **Terrain's geology query.** Done: the integration branch calls `setGeology(WORLD.terrain.geologyAt)`. Dressed scenery uses it too, now that the resolver sees every place on the map (in #50).
+- **"Buildings look a bit shit / juvenile."**
+  - Partly done: roof edges, ridges, plinths, ambient occlusion, textured walls, doors let into walls (#45).
+  - In PR #50: buildings level on slopes.
+  - Not started:
+    - window depth up close;
+    - street trees in dressed places;
+    - more colour variety within a street.
+- **Cars park in spaces; car parks used.** Done (#45), for live towns only; dressed scenery has no cars.
+- **Shopping complexes** (parade, arcade, retail park, covered centre). Done (#48) on the live town map. On the 50 km map:
+  - live places: not yet checked at close zoom;
+  - dressed scenery: runs of shops become parades (in #50).
+- **No overlapping buildings.**
+  - Done for live-town shop runs (#48).
+  - Real maps: `real/lay.ts` still allows about 0.6 m of overlap. That's OS's file, now being folded into WORLD.
+- **Save e2e on CI** ("hiding the page did not save"): in PR #50. Root cause: long SwiftShader GPU stalls. Hide saves no longer queue behind autosaves, and hidden pages don't draw.
 
-## (c) Overlaps with other sessions
-- **OS / real regions** (`real/lay.ts`, `osm/buildings.ts`) builds real footprints as lots and has already edited `buildgen.ts` (big churches, whole cathedrals, priors). Shopping complexes on real maps have to agree with how OS footprints become lots: a big retail footprint should use the complex recipe.
-- **world50** (the `WORLD` pipeline, tiles built lazily, maybe in workers): the generator must stay deterministic and should move towards being worker-safe. Parking registers bays per building in `main.ts`, so check that WORLD tiles feed bays too.
-- **Terrain:** `setGeology` is waiting for its rock query. Buildings sit at y = 0 inside a lot; plots on slopes need terrain's height (plinths could take up the slope).
-- **Countryside:** farm buildings and field boundaries. My garden walls and hedges follow the vernacular; farmsteads should match (a shared `boundaryMat`?).
-- **Edge:** none known.
+## Files
+- **Mine:** `buildgen.ts`, `vernacular.ts`, `complexes.ts`, `game/parking.ts`, `game/dress.ts`, `region/styles.ts`, the gallery, `docs/vernacular.md`, `docs/parking.md`, `docs/shopping.md`.
+- **Small hunks in others' files (listed in each PR):**
+  - `main.ts`;
+  - `roads.ts` `lotSpec`;
+  - `game/econ.ts` and `crowdsites.ts` (units);
+  - `traffic.ts` (parking hooks);
+  - `worldmap/tilegen.ts`, `tile.worker.ts` and `view.ts` (the `bld` mesh and dressing API, #50).
 
-## (d) Open questions
-1. Who owns `roads.ts` lot planning? Shopping complexes need to change how shop lots are cut from centre frontage, and overlapping lots are a planning problem, not a drawing one.
-2. Should a complex be a new `LotKind` (`mall`) or a large `shop` lot with a `units` count? A new kind touches the economy, the save format and the places UI.
-3. Where do overlapping or on-top-of-each-other buildings come from today: `roads.ts` lots, `infill.ts`, or OS footprints on real maps? I'll find out; the fix may land outside my files.
-4. Tropical: add a `tropical` style option (`region/options.ts`, the region session's) or drop it?
-5. Real windows with depth would help the "juvenile" look but cost triangles. Is a near-view-only level of detail acceptable?
+## Open questions
+1. Does world50 agree the seam above?
+2. Should dressing reach the whole near range (1000 m), at more draw calls, or stay at 700 m?
