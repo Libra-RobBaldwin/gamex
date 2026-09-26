@@ -57,6 +57,15 @@ Local commits, which go up once #51 has merged.
 - The cover-map scratch memory (205 MB, countryside's `ground/paint.ts`).
 - Scenery houses from `buildgen.ts` (with vernacular).
 
+### Agreed with vernacular (PR #50): one building generator
+- `worldmap/towns.ts` is the layout planner: `SceneBuilding` carries the footprint, height, kind and place. `buildgen.ts` alone decides how a building looks.
+- `tilegen`'s `building()` is only the cheap far version of the same buildings: a box and roof in the place's palette, with no windows, doors or chimneys of its own. Vernacular strips those in its next PR.
+- I keep their hunks in my files: `TileData.bld` in tilegen, and its transfer in `tile.worker.ts`. In `view.ts` that's the `bld` mesh, `nearShown()` and `setDressed()`.
+- In `main.ts`'s WORLD path I keep:
+  - the Dresser;
+  - `setPlaces(placeResolver(...MAP.world?.settlements ?? MAP.settlements...))`;
+  - `setGround(RELIEF...)`.
+
 ### Finding for the economy
 On the region's start town, the loop e2e shows the town turning to declining once its line is withdrawn. But within 8 to 16 days its people and jobs don't always fall below where they stood with the line: they did on one run and not on another. On the old starter town they fell every time. The suite now checks for the turn to declining, and logs the numbers.
 
