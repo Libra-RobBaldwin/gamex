@@ -83,7 +83,7 @@ interface Car {
   pose?: Pose; axles?: Axles; // where it was last drawn, and where its axles are (footprint.steered)
 }
 interface Train { def: TrainDef; seg: RSeg; from: number; s: number; v: number; trail: { seg: RSeg; from: number }[]; dress: Dress; gone?: boolean }
-interface Access { seg: RSeg; s: number; lot?: Lot } // (lot: the building it's the way in to)
+export interface Access { seg: RSeg; s: number; lot?: Lot } // (lot: the building it's the way in to)
 // A bus line: the stops its buses call at, in order, over and over (A, B, C, B for A-B-C and
 // back). Each call is at the stop or at any stop facing it across the road, whichever side the
 // bus arrives on.
@@ -193,6 +193,9 @@ export class Traffic {
   private lineC = new Map<string, number>(); // a line bus's next road, by junction, road and call (-1: no way)
   private tables = new Map<number, Map<number, { a: View; b: View }>>(); // by the two courses, then the two bodies
   private edgeList: [Access[], Access[]] | null = null;
+  // Where trips to and from elsewhere start and end (`to`: as where a trip ends). By default the
+  // dead ends out of town; a map with ways off it (game/portals.ts) says which, and when.
+  edgesFor?: (to: boolean) => Access[];
   private buckets = new Map<number, Entry[]>();
   private users = new Map<number, User[]>();
   private committed = new Map<number, Car[]>();
@@ -334,6 +337,7 @@ export class Traffic {
   // dead ends out at the edge of town count as roads to elsewhere
   // (`to`: as where a trip ends; a one-way road off the map is only the one or the other)
   private edges(to = false): Access[] {
+    if (this.edgesFor) return this.edgesFor(to);
     if (this.edgeList) return to ? this.edgeList[1] : this.edgeList[0];
     const from: Access[] = [], into: Access[] = [];
     for (const [id, list] of this.adj()) {
@@ -506,6 +510,19 @@ export class Traffic {
     for (const l of list) { x -= w(l); if (x <= 0) return l; }
     return list[list.length - 1];
   }
+
+  // A trip from one point on the roads to another, started now if there's room on the road (and
+  // under the cap): the ways on and off the map send their traffic this way (game/portals.ts).
+  // (`moving`: it's already under way at the road's pace, coming in from off the map)
+  trip(o: Access, d: Access, lorry: boolean, moving = false) {
+    let live = 0;
+    for (const c of this.cars) if (c.gone === undefined) live++;
+    const ok = live < MAX - 20 && !(o.seg.id === d.seg.id && Math.abs(o.s - d.s) < 8) && this.spawn(o, d, lorry, this.clock);
+    if (ok && moving) { const c = this.cars[this.cars.length - 1]; c.v = Math.min(c.vmax, this.net.def(c.seg).speed * 0.9); }
+    return ok;
+  }
+  // how long a road is, as the traffic drives it
+  roadLength(seg: RSeg) { return this.len(seg); }
 
   // Start trips to keep the roads as busy as the time of day and the city's size call for.
   generate(places: Places, hour: number, level: number, now: number) {

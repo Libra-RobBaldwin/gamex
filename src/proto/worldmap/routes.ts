@@ -27,7 +27,8 @@ export interface Route {
   id: number;
   kind: RouteKind;
   path: XZ[]; // the centre line, points STEP metres apart
-  a: number | null; b: number | null; // the settlements at its ends (null: off the map's edge)
+  a: number | null; b: number | null; // the settlements at its ends (null: off the map's edge, or an industry's lane)
+  site?: number; // an industry's lane in: which (worldmap/industry.ts), from the road nearest it
 }
 export interface Station { settlement: number; x: number; z: number; ux: number; uz: number } // where it stands, and the line's direction there
 export interface Rail { id: number; kind: 'main' | 'branch'; path: XZ[]; stations: Station[] }
@@ -35,6 +36,19 @@ export interface Rail { id: number; kind: 'main' | 'branch'; path: XZ[]; station
 export const STEP = 25;
 // half-widths of the ground each takes (carriageways and verges; the track bed), for keeping clear
 export const ROUTE_HALF: Record<RouteKind | 'rail', number> = { motorway: 17, A: 6, B: 4.5, rail: 5 };
+
+// How each kind of route takes the land (the lanes as before): the steepest gradient it's built to,
+// how much it wanders, what a river bridge costs it, how far it keeps from the places it passes and
+// how long its bends are (the smoothing, in 25 m steps). Steeper than its grade, it has to cut or
+// tunnel, at `dig` times the cost a metre, so it goes round a hill unless going through pays. And
+// turning costs it (`turn`: a railway or a motorway can't take a tight bend), so it keeps a line.
+export interface Profile { grade: number; wander: number; bridge: number; keep: number; smooth: number; dig: number; live: boolean; turn: number }
+export const PROFILES: Record<RouteKind | 'rail', Profile> = {
+  B: { grade: 0.05, wander: 1, bridge: 900, keep: 60, smooth: 7, dig: 0, live: false, turn: 0 },
+  A: { grade: 0.06, wander: 0.7, bridge: 1600, keep: 150, smooth: 12, dig: 14, live: false, turn: 0.5 },
+  motorway: { grade: 0.04, wander: 0.25, bridge: 2500, keep: 350, smooth: 22, dig: 10, live: true, turn: 2 },
+  rail: { grade: 0.02, wander: 0.15, bridge: 2500, keep: 120, smooth: 14, dig: 30, live: false, turn: 3 },
+};
 
 interface Ctx { seed: number; half: number; settlements: WorldSettlement[]; links: Link[]; water: WorldWater; grid: SettlementGrid; heightAt: (x: number, z: number) => number }
 const dist = (a: XZ, b: XZ) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -46,20 +60,40 @@ const dist = (a: XZ, b: XZ) => Math.hypot(a.x - b.x, a.z - b.z);
 export function planRoutes(c: Ctx, full = false): { roads: Route[]; rails: Rail[] } {
   const roads: Route[] = [], r = rng(mix(c.seed, 301));
   const add = (kind: RouteKind, path: XZ[] | null, a: number | null, b: number | null) => { if (path && path.length > 1) roads.push({ id: roads.length, kind, path, a, b }); };
-  if (full) for (const line of motorwayLines(c, r)) add('motorway', settle(c, line, r, 'motorway', []), null, null);
   const L = new LaneFinder(c);
+  if (full) for (const line of motorwayLines(c, r)) add('motorway', L.through(line, [], 'motorway'), null, null);
   for (const l of [...c.links].sort((p, q) => p.length - q.length)) {
-    const A = c.settlements[l.a], B = c.settlements[l.b];
-    add(full ? l.road : 'B', L.find(endOf(A, B), endOf(B, A), [A.id, B.id]), A.id, B.id);
+    const A = c.settlements[l.a], B = c.settlements[l.b], kind = full ? l.road : 'B';
+    add(kind, L.find(endOf(A, B), endOf(B, A), [A.id, B.id], kind), A.id, B.id);
   }
   for (const e of edgeExits(c, r)) {
     // (found to just inside the edge, then straight on off it)
     const H = c.half - 60, inner = { x: Math.max(-H, Math.min(H, e.to.x)), z: Math.max(-H, Math.min(H, e.to.z)) };
-    const p = L.find(endOf(e.from, e.to), inner, [e.from.id]);
+    const p = L.find(endOf(e.from, e.to), inner, [e.from.id], full ? 'A' : 'B');
     add(full ? 'A' : 'B', p ? resample([...p, e.to], STEP) : null, e.from.id, null);
   }
   forks(roads);
-  return { roads, rails: full ? planRails(c, r) : [] };
+  return { roads, rails: full ? planRails(c, r, L) : [] };
+}
+
+// A lane in to each industry from the nearest road (found over the land like any lane, from the
+// site's frontage), unless it's more than 3 km off; none inside the live play area.
+export function spurs(c: Ctx, roads: Route[], sites: { id: number; x: number; z: number; rot: number; d: number; settlement: number }[]): Route[] {
+  const out: Route[] = [], L = new LaneFinder(c);
+  const pts: { p: XZ; r: Route }[] = [];
+  for (const r of roads) for (let i = 0; i < r.path.length; i += 4) pts.push({ p: r.path[i], r });
+  for (const s of sites) {
+    const front = { x: s.x + Math.sin(s.rot) * (s.d / 2 + 10), z: s.z - Math.cos(s.rot) * (s.d / 2 + 10) };
+    let best: XZ | null = null, bd = 3000;
+    for (const q of pts) { const d = dist(q.p, front); if (d < bd) { bd = d; best = q.p; } }
+    if (!best) continue;
+    // (it may run through the places whose roads it joins)
+    const serves = c.grid.near(best.x, best.z).filter((p) => dist(p, best!) < p.reach + 200).map((p) => p.id);
+    const path = bd < 60 ? resample([front, best], STEP) : L.find(front, best, serves, 'B');
+    if (!path || path.length < 2 || path.some((p) => Math.max(Math.abs(p.x), Math.abs(p.z)) < LIVE_HALF + 100)) continue;
+    out.push({ id: roads.length + out.length, kind: 'B', path, a: null, b: null, site: s.id });
+  }
+  return out;
 }
 
 // Two lanes into a place by the same street end would meet it side by side, all but parallel (a
@@ -121,8 +155,27 @@ class LaneFinder {
     if (Number.isNaN(v)) v = this.h[k] = this.c.heightAt(this.x0 + i * LaneFinder.C, this.x0 + j * LaneFinder.C);
     return v;
   }
-  find(a: XZ, b: XZ, serves: number[]): XZ[] | null {
-    const C = LaneFinder.C, n = this.n, x0 = this.x0, c = this.c;
+  // A route through waypoints (off the map at its ends: it's found to just inside the edge, then
+  // runs straight on off it), one piece at a time, then smoothed as one.
+  through(pts: XZ[], serves: number[], kind: RouteKind | 'rail'): XZ[] | null {
+    const H = this.c.half - 60, E = this.c.half + 20, inside = (p: XZ) => ({ x: Math.max(-H, Math.min(H, p.x)), z: Math.max(-H, Math.min(H, p.z)) });
+    const off = (p: XZ) => Math.abs(p.x) > H || Math.abs(p.z) > H;
+    const way = pts.map(inside), cells: XZ[] = [];
+    for (let k = 1; k < way.length; k++) {
+      const piece = this.find(way[k - 1], way[k], serves, kind, true);
+      if (!piece) return null;
+      cells.push(...(k === 1 ? piece : piece.slice(1)));
+    }
+    if (cells.length < 2) return null;
+    const P = PROFILES[kind];
+    let p = smooth(resample(cells, STEP), P.smooth, 2);
+    const clip = (q: XZ) => ({ x: Math.max(-E, Math.min(E, q.x)), z: Math.max(-E, Math.min(E, q.z)) });
+    if (off(pts[0])) p = [...resample([clip(pts[0]), p[0]], STEP).slice(0, -1), ...p];
+    if (off(pts[pts.length - 1])) p = [...p, ...resample([p[p.length - 1], clip(pts[pts.length - 1])], STEP).slice(1)];
+    return resample(chaikin(chaikin(p)), STEP);
+  }
+  find(a: XZ, b: XZ, serves: number[], kind: RouteKind | 'rail' = 'B', raw = false): XZ[] | null {
+    const C = LaneFinder.C, n = this.n, x0 = this.x0, c = this.c, P = PROFILES[kind];
     const gi = (x: number) => Math.max(0, Math.min(n - 1, Math.round((x - x0) / C)));
     const si = gi(a.x), sj = gi(a.z), ti = gi(b.x), tj = gi(b.z);
     const L = Math.hypot(b.x - a.x, b.z - a.z), m = Math.max(8, Math.ceil((0.3 * L + 900) / C));
@@ -134,7 +187,9 @@ class LaneFinder {
       if (bad[k]) return bad[k] < 0;
       const x = x0 + i * C, z = x0 + j * C;
       let no = Math.abs(x) > c.half - 20 && !(i === ti && j === tj) || this.water(i, j) < 0;
-      if (!no) for (const s of c.grid.near(x, z)) if (!serves.includes(s.id) && Math.hypot(x - s.x, z - s.z) < s.reach + 60) { no = true; break; }
+      if (!no) for (const s of c.grid.near(x, z)) if (!serves.includes(s.id) && Math.hypot(x - s.x, z - s.z) < s.reach + P.keep) { no = true; break; }
+      // (motorways keep out of the live play area round the start town: its roads are the player's to join them to)
+      if (!no && P.live && Math.max(Math.abs(x), Math.abs(z)) < LIVE_HALF + 500) no = true;
       if (!no && Math.abs(z) > c.half - 20 && !(i === ti && j === tj)) no = true;
       bad[k] = no ? -1 : 1;
       return no;
@@ -162,33 +217,52 @@ class LaneFinder {
         const len = C * Math.hypot(di, dj);
         // (a knight's move jumps a cell: it mustn't jump a lake or a place)
         if (Math.abs(di) + Math.abs(dj) === 3 && blocked(i + Math.sign(di) * (Math.abs(di) > 1 ? 1 : 0), j + Math.sign(dj) * (Math.abs(dj) > 1 ? 1 : 0)) && nk !== t0) continue;
-        const slope = Math.abs(this.height(ni, nj) - h0) / len;
-        let w = len * (1 + 2 * (slope / 0.05) ** 2) * this.wander(ni, nj);
-        if (this.water(ni, nj) === 2 && this.water(i, j) !== 2) w += 900; // (a bridge: only where it must)
+        let slope = Math.abs(this.height(ni, nj) - h0) / len;
+        // (a knight's move or a diagonal passes over the cells beside it: a crest there counts too)
+        if (P.dig && di && dj) {
+          const mi = i + Math.sign(di) * (Math.abs(di) > 1 ? 1 : 0), mj = j + Math.sign(dj) * (Math.abs(dj) > 1 ? 1 : 0);
+          const a = Math.abs(di) > 1 || Math.abs(dj) > 1 ? this.height(mi, mj) : (this.height(i + di, j) + this.height(i, j + dj)) / 2, h1 = this.height(ni, nj);
+          slope = Math.max(slope, Math.abs(a - h0) / (len / 2), Math.abs(h1 - a) / (len / 2));
+        }
+        const wf = 1 + (this.wander(ni, nj) - 1) * P.wander;
+        // (a lane just climbs, dearer the steeper; a bigger road steeper than its grade cuts or tunnels)
+        let w = !P.dig ? len * (1 + 2 * (slope / 0.05) ** 2) * wf
+          : len * (1 + 2 * (Math.min(slope, P.grade) / 0.05) ** 2) * wf + (slope > P.grade ? len * P.dig * (1 + (slope - P.grade) / P.grade) : 0);
+        if (this.water(ni, nj) === 2 && this.water(i, j) !== 2) w += P.bridge; // (a bridge: only where it must)
+        if (P.turn && from[k] >= 0) {
+          // (against the way it came into this cell: straight on is free, a right angle dear)
+          const pi = (from[k] % W) + i0, pj = Math.floor(from[k] / W) + j0, ux = i - pi, uz = j - pj;
+          const cos = (ux * di + uz * dj) / (Math.hypot(ux, uz) * Math.hypot(di, dj));
+          w += len * P.turn * (1 - cos);
+        }
         const gg = g[k] + w;
         if (gg < g[nk]) { g[nk] = gg; from[nk] = k; push(gg + est(ni, nj), nk); }
       }
     }
-    if (from[t0] < 0) return settle(c, [a, b], rng(mix(c.seed, si, sj, ti, tj)), 'B', serves); // (boxed in: the old way)
+    if (from[t0] < 0) return raw ? [{ ...a }, { ...b }] : settle(c, [a, b], rng(mix(c.seed, si, sj, ti, tj)), kind, serves); // (boxed in: the old way)
     const cells: XZ[] = [];
     for (let k = t0; k >= 0; k = from[k]) cells.push({ x: x0 + ((k % W) + i0) * C, z: x0 + (Math.floor(k / W) + j0) * C });
     cells.reverse();
     cells[0] = { ...a }; cells[cells.length - 1] = { ...b };
-    // (smoothed into flowing bends: evenly spaced, averaged over about 350 m so the grid's kinks go
-    // but the lane's own wandering stays, then corner-cut; its ends stay where they are)
-    let p = resample(cells, STEP);
-    for (let pass = 0; pass < 2; pass++) {
-      const K = 7, q = p.map((pt, i) => {
-        if (i < 2 || i > p.length - 3) return pt;
-        const k = Math.min(K, i, p.length - 1 - i);
-        let x = 0, z = 0;
-        for (let d = -k; d <= k; d++) { x += p[i + d].x; z += p[i + d].z; }
-        return { x: x / (2 * k + 1), z: z / (2 * k + 1) };
-      });
-      p = q;
-    }
-    return resample(chaikin(chaikin(p)), STEP);
+    if (raw) return cells;
+    return resample(chaikin(chaikin(smooth(resample(cells, STEP), P.smooth, 2))), STEP);
   }
+}
+// Smoothed into flowing bends: evenly spaced points averaged over K either side (7: about 350 m, so
+// the grid's kinks go but a lane's own wandering stays; longer for the bigger roads' sweeping bends),
+// then corner-cut; its ends stay where they are.
+function smooth(p: XZ[], K: number, passes: number): XZ[] {
+  for (let pass = 0; pass < passes; pass++) {
+    const q = p.map((pt, i) => {
+      if (i < 2 || i > p.length - 3) return pt;
+      const k = Math.min(K, i, p.length - 1 - i);
+      let x = 0, z = 0;
+      for (let d = -k; d <= k; d++) { x += p[i + d].x; z += p[i + d].z; }
+      return { x: x / (2 * k + 1), z: z / (2 * k + 1) };
+    });
+    p = q;
+  }
+  return p;
 }
 
 // where a road from place A towards B leaves A: the end of its high street nearer B (towns and
@@ -359,7 +433,7 @@ function edgeExits(c: Ctx, r: Rand) {
 }
 
 // ---------------- railways ----------------
-function planRails(c: Ctx, r: Rand): Rail[] {
+function planRails(c: Ctx, r: Rand, L: LaneFinder): Rail[] {
   const start = c.settlements[0], big = c.settlements.filter((s) => s.kind !== 'village');
   if (big.length < 2) return [];
   const H = c.half, sea = c.water.world.sea;
@@ -369,7 +443,8 @@ function planRails(c: Ctx, r: Rand): Rail[] {
   // calling at the start town, and at every city and town within 3.5 km of that line (their stations
   // a little off their middles, so the line runs along the edge of the centre)
   const calls = big.filter((s) => Math.abs(s.x * n.x + s.z * n.z) < (s.id === 0 ? 1 : 3500) + (s.kind === 'city' ? 2500 : 0)).sort((a, b) => (a.x * u.x + a.z * u.z) - (b.x * u.x + b.z * u.z));
-  const stationAt = (s: WorldSettlement): XZ => { const k = s.id === 0 ? 0.55 : 0.35; return { x: s.x + n.x * s.r * k, z: s.z + n.z * s.r * k }; };
+  // (on the side of the town facing the line, so it doesn't loop round the town to call)
+  const stationAt = (s: WorldSettlement): XZ => { const q = s.x * n.x + s.z * n.z, k = (s.id === 0 ? 0.55 : 0.35) * (s.id === 0 || q <= 0 ? 1 : -1); return { x: s.x + n.x * s.r * k, z: s.z + n.z * s.r * k }; };
   const ends = (sgn: number) => { const last = sgn > 0 ? calls[calls.length - 1] : calls[0], t = H * 1.15; return { x: last.x + u.x * sgn * t, z: last.z + u.z * sgn * t }; };
   const pts = [ends(-1), ...calls.map(stationAt), ends(1)];
   // (a line that would run into the sea stops at its last station short of it)
@@ -377,7 +452,7 @@ function planRails(c: Ctx, r: Rand): Rail[] {
   if (!dry(pts[0])) pts.shift();
   if (!dry(pts[pts.length - 1])) pts.pop();
   const rails: Rail[] = [];
-  const main = settle(c, pts, r, 'rail', calls.map((s) => s.id));
+  const main = L.through(pts, calls.map((s) => s.id), 'rail');
   if (main) rails.push({ id: 0, kind: 'main', path: main, stations: stationsOn(main, calls) });
   // a branch or two: from a main-line town to the nearest towns off it, 5 km or more away
   const on = new Set(calls.map((s) => s.id));
@@ -386,7 +461,7 @@ function planRails(c: Ctx, r: Rand): Rail[] {
     const t = off.splice(Math.floor(r() * Math.min(3, off.length)), 1)[0];
     const from = calls.filter((s) => s.id !== 0).sort((a, b) => dist(a, t) - dist(b, t))[0];
     if (!from || dist(from, t) < 5000 || dist(from, t) > 22000) continue;
-    const path = settle(c, [stationAt(from), stationAt(t)], r, 'rail', [from.id, t.id]);
+    const path = L.through([stationAt(from), stationAt(t)], [from.id, t.id], 'rail');
     if (path) rails.push({ id: rails.length, kind: 'branch', path, stations: stationsOn(path, [from, t]) });
   }
   return rails;

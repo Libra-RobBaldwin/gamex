@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import './proto.css';
 import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
 import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
-import { PRESETS, RAIL_PRESETS, filterRoads, isSlip, type RoadFilter } from './catalog';
+import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, isSlip, type RoadFilter } from './catalog';
 import { DEEP, GRADES } from './grade';
 import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, GRASS_MATS, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
 import { GRADE_STEPS } from './grade';
@@ -12,8 +12,9 @@ import { MODEL, purchaseList, type Offer } from './vehicles';
 import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
-import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
-import { placeResolver, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
+import { Parking } from './game/parking';
+import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops // drives and car parks in use (the traffic's own cars park in them)
+import { placeResolver, REAL_VERN, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
@@ -36,10 +37,11 @@ import { buildSlip, planCloverleaf, planJunction, planSlip, roadCrossed, type Ix
 import { Railway } from './rail/railway'; // stations, signalling and rail lines (docs/rail.md)
 import { UnderView } from './game/underview';
 import { RailDraw } from './rail/draw';
-import { RailGame } from './rail/game';
+import { RAIL_ID, RailGame } from './rail/game';
 import { layRegionRail, planRegionRail } from './rail/region';
 import { layRegionRoads } from './interchange/region';
-import { edgeCrossings, edgeMesh } from './game/edge';
+import { EdgeFace, edgeCrossings, edgeDepth, edgeMesh, farCountry } from './game/edge';
+import { PortalSigns, PortalTraffic, edgePlanes, findPortals, offMapPoint, openPortal, outsidePlaces, perDay, portalCrossings, portalStation, worldPortals, type Portal } from './game/portals';
 import { STD } from './standards';
 import { Loading } from './loading';
 import { Drape } from './drape';
@@ -88,7 +90,8 @@ const WORLD = MAP.world ?? null; // (a 50 km map's plan: MAP is its live play ar
 // (a generated map builds in its places' traditions; ?vern=cotswold, nordic, … sets one on any map)
 const VERN = new URLSearchParams(MAP_QUERY).get('vern') as Vern | null, vernForced = VERN && VERNS.includes(VERN) ? VERN : undefined;
 setParkedCars(false); // (parked cars are real ones: game/parking.ts)
-if (MAP.generated || vernForced) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.settlements }, vernForced));
+const vernReal = REAL ? REAL_VERN[(MAP as RealMap).real.region] : undefined; // (a real map: its region's tradition)
+if (MAP.generated || vernForced || vernReal) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.settlements }, vernForced ?? vernReal));
 // the loading screen, while the map is built (it goes once the first frame is drawn)
 const loading = new Loading(MAP.name, mapLine());
 function mapLine() {
@@ -183,21 +186,27 @@ scene.add(gameGround.ground.hedges);
 scene.add(ground);
 // the cut face round the edge of the map (the roads running off it are added once they're built)
 // (a big map's is cut into tiles, so only the stretch in view is drawn)
-const edgeOf = (m: THREE.Mesh): THREE.Object3D => (BIG ? splitByTile(m) : m);
-let mapEdge: THREE.Object3D = WORLD ? new THREE.Group() : edgeOf(edgeMesh(EDGE, [], gameWater.shapes.ground, WATER_LEVEL)); // (a 50 km map's live area has the rest of the map round it, not an edge)
+// The cut face round the map: a big map's follows its hills, goes deeper, is built a stretch at a
+// time where the camera can see it, and has the far country round it (game/edge.ts). A 50 km
+// map's stands at its real rim, reading the whole map's height field (made in a worker: it's built
+// once that's in, worldGame.view.ready); the live area inside has the rest of the map round it.
+const RIM = WORLD ? WORLD.half : EDGE;
+const surfaceAt = WORLD ? (x: number, z: number) => RELIEF?.heightAt(x, z) ?? 0 : (x: number, z: number) => gameWater.shapes.ground(x, z) + (RELIEF?.heightAt(x, z) ?? 0);
+const edgeFace = BIG ? new EdgeFace(RIM, surfaceAt, { base: -edgeDepth(RIM), step: RELIEF?.step ?? 25, level: WATER_LEVEL, out: WORLD ? 0.4 : 0 }) : null; // (a 50 km map's clear of its scenery tiles' skirts at the rim)
+let mapEdge: THREE.Object3D = edgeFace ? edgeFace.group : edgeMesh(EDGE, [], gameWater.shapes.ground, WATER_LEVEL);
 scene.add(mapEdge);
-let edgeSig = '';
+const far = BIG ? farCountry(RIM, -edgeDepth(RIM), [LOOK.palette.pasture ?? '#6f9150', LOOK.palette.wood ?? '#4f7338', LOOK.crops.wheat?.a ?? '#a3a064', LOOK.palette.rough ?? '#7d9657', LOOK.palette.pastureCool ?? '#5f8448'], MAP.seed, { mode: PARAMS.get('far') === 'level' ? 'level' : 'lowland', ground: surfaceAt }) : null; // (?far=level: the country carried on at the map's height)
+if (far) scene.add(far.mesh);
 function refreshEdge() {
-  if (WORLD) return;
-  if (BIG) { const sig = JSON.stringify(edgeCrossings(net, EDGE)); if (sig === edgeSig) return; edgeSig = sig; } // (a big map's only when the roads off it changed)
-  scene.remove(mapEdge); mapEdge.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); mapEdge = edgeOf(edgeMesh(EDGE, edgeCrossings(net, EDGE), gameWater.shapes.ground, WATER_LEVEL)); scene.add(mapEdge); }
+  if (edgeFace) { if (!WORLD) edgeFace.setCrossings(edgeCrossings(net, EDGE)); return; } // (a big map's stretches the roads off it changed, as they come into sight; a 50 km map's roads off it are the plan's)
+  scene.remove(mapEdge); (mapEdge as THREE.Mesh).geometry.dispose(); mapEdge = edgeMesh(EDGE, edgeCrossings(net, EDGE), gameWater.shapes.ground, WATER_LEVEL); scene.add(mapEdge); }
 // the lake (src/proto/game/water.ts): beaches and the bed laid over the ground (chained after the
 // ground's own patch), and the water and reeds on top: two draw calls
 gameWater.patch(gameGround.ground.material);
 scene.add(gameWater.group);
 // the underground view (game/underview.ts): the surface fades so tunnels and underground stations
 // show (the lake's bed and the map's cut edge, under the ground but not built, stay out of it)
-const underView = new UnderView(renderer, () => [gameWater.group, mapEdge, ...waterBeds]);
+const underView = new UnderView(renderer, () => [gameWater.group, mapEdge, ...(far ? [far.mesh] : []), ...waterBeds]);
 const waterBeds: THREE.Object3D[] = [];
 gameWater.light(scene, sun); // (evening light: the sun, sky and water change together)
 // rivers' beds, in a ground material of their own (the flat ground leaves out what they cover)
@@ -633,12 +642,13 @@ function refreshInfillWithin(boxes: Box[]) {
 }
 
 // the centre to lay a road's plots out from: its settlement's, as central as its size says (region/mapspec.ts)
-const centreFor = (a: P, b: P = { x: a.x + 1, z: a.z }) => plotCentre(MAP, a, b);
+const centreFor = (a: P, b: P = { x: a.x + 1, z: a.z }) => ({ ...plotCentre(MAP, a, b), kind: settlementAt(MAP, { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }).kind }); // (kind: towns and cities get retail parks)
 function queuePlots(segs: number[]) {
   for (const id of segs) {
     const sg = net.segs.get(id);
     if (WORLD && sg && ROADS[sg.type]?.family === 'Rural') continue; // (a 50 km map's country lanes run through fields, not houses)
-    const plots = sg ? net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))) : [];
+    // (shops side by side become one shopping complex: complexes.ts)
+    const plots = sg ? groupShops(net.plotsFor(id, centreFor(net.node(sg.a), net.node(sg.b))), { free: (l) => net.lotFree(l) }) : [];
     // denser, taller near the centre; a few gaps elsewhere
     for (const p of plots) if (centrality(MAP, p) < 200 || rand() < 0.75) queue.push(p);
   }
@@ -709,7 +719,7 @@ async function seedTown() {
     if (rail.problems.length + roads.problems.length) console.info('world routes:', [...rail.problems, ...roads.problems].slice(0, 8).join(' · '));
   } else if (MAP.generated) {
     await loading.stage('Laying the railway', 0.03);
-    const plan = planRegionRail(MAP.settlements, { bound: BOUND, isWater });
+    const plan = planRegionRail(MAP.settlements, { bound: BOUND, isWater, edge: EDGE }); // (the main line runs on off the map: game/portals.ts)
     // (track only: stations and lines are the player's to build)
     const made = plan ? layRegionRail(railway, plan, { trackOnly: true }) : null;
     if (made?.problems.length) console.info('railway:', made.problems.join(' · '));
@@ -723,7 +733,7 @@ async function seedTown() {
     // then the roads between them: a motorway across the map with its junctions, A roads between
     // the city and the towns, B roads out to the villages (interchange/region.ts)
     await loading.stage('Building the motorway and the roads between places', 0.04);
-    const roads = layRegionRoads(net, { bound: BOUND, settlements: MAP.settlements, links: MAP.links });
+    const roads = layRegionRoads(net, { bound: BOUND, settlements: MAP.settlements, links: MAP.links, edge: EDGE }); // (and roads off the map: game/portals.ts)
     interchanges.push(...roads.interchanges);
     if (roads.failed.length) console.info('region roads:', roads.failed.join(' · '));
   } else {
@@ -1397,7 +1407,8 @@ function showTown(id?: number) {
       ${lineRows ? `<div class="grp" style="margin-top:12px"><span class="tab">Your lines</span>${lineRows}</div>` : ''}`,
   });
   el.querySelectorAll<HTMLButtonElement>('[data-tt]').forEach((b) => b.addEventListener('click', () => {
-    const t = +b.dataset.tt!, st = MAP.settlements.find((x) => x.id + 1 === t);
+    const t = +b.dataset.tt!, st = MAP.settlements.find((x) => x.id + 1 === t), way = portals.find((p) => p.town === t);
+    if (way && showPortalRef) { focusOn(way.sign, 320); showPortalRef(way); return; } // (a place off the map: its way off)
     if (st) focusOn(st, Math.max(260, st.r * 2.6));
     showTown(t);
   }));
@@ -2098,6 +2109,8 @@ const goTo = (st: SettlementInfo) => { closeSheet(); focusOn(st, Math.max(260, s
 // (a 50 km map: every place on it, those not live yet with the coarse economy's figures: worldmap/econ.ts)
 const PLACES = worldGame ? worldGame.infos : MAP.settlements;
 const countIn = (st: SettlementInfo) => (worldGame && !worldGame.towns.places.some((q) => q.id === st.id && q.live) ? worldGame.people(st.id, clock / 1440) : peopleIn(st));
+// a sign at each way off the map; tapped, what flows through it (game/portals.ts)
+let portalSigns: PortalSigns | null = null, showPortalRef: ((p: Portal) => void) | null = null;
 const placeLabels = PLACES.length > 1 ? new PlaceLabels($('#ui'), PLACES, { toScreen, onPick: goTo, count: countIn }) : null;
 if (placeLabels) shell.addMenuItem({ id: 'places', label: 'Places', icon: 'pin', sub: `${PLACES.length} towns and villages · go to one`, onClick: () => openPlaces(shell, PLACES, view, goTo, countIn) });
 
@@ -2231,6 +2244,14 @@ await loading.stage('Adding bus stops and drawing the roads', 0.1);
 rebuildRoads();
 refreshTrees();
 setMode('look');
+// the ways off the map: the motorway, A roads and railway running out through the cut face (game/portals.ts)
+// (a 50 km map's: where the plan's roads run off its rim, drawn in the scenery; in section in the cut face)
+const portals: Portal[] = WORLD ? worldPortals(WORLD) : BIG && MAP.generated ? findPortals(net, EDGE, { seed: MAP.seed, names: MAP.settlements.map((s) => s.name) }) : [];
+if (WORLD && edgeFace) edgeFace.setCrossings(portalCrossings(portals));
+// (the railway's: a station off the map, past the edge, for lines to end at)
+for (const p of portals) if (p.kind === 'rail') p.station = portalStation(railway, p, EDGE);
+// (and another company's trains through the map between two of them, as a main line has)
+{ const ways = portals.filter((p) => p.station !== undefined); if (ways.length >= 2 && !railway.lines.some((l) => l.other)) railway.addLine([ways[0].station!, ways[1].station!], false, [TRAINS.intercity, TRAINS.intercity], { depot: false, other: 'Another company' }); }
 setKind('straight');
 setType('street');
 resize();
@@ -2271,7 +2292,15 @@ traffic.parking = parking;
 traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
-onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); townRef?.networkChanged(); };
+onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); townRef?.networkChanged(); portalFlows?.refresh(); };
+// traffic in and out through the ways off the map, near the camera; and what drives out through the face is cut off at it
+// (only those on the game's own roads: a 50 km map's, once the live area reaches the rim)
+const portalFlows = portals.some((p) => p.segs.length) ? new PortalTraffic(net, traffic, portals) : null;
+if (portalFlows) {
+  traffic.edgesFor = (to) => portalFlows.near(view, trafficReach() + 1500, to);
+  renderer.localClippingEnabled = true;
+  traffic.fleet.vr.material.clippingPlanes = traffic.fleet.vr.depthMaterial.clippingPlanes = edgePlanes(RIM);
+}
 const lines = new Lines(traffic);
 const markers = new StopMarkers(net, traffic);
 scene.add(markers.group);
@@ -2408,6 +2437,8 @@ const town = new TownEconomy({
   net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, rail: railGame.econ(),
   towns: MAP.settlements.length > 1 ? MAP.settlements : undefined, // (each place a town of its own: docs/region.md R5)
   byEdge: MAP.placeBy === 'edge',
+  // (and each place off the map, at its way off: game/portals.ts; a save from before there were any has none; a 50 km map's go to its coarse economy instead)
+  outside: WORLD || (SAVED && !SAVED.town.econ.towns.some((t) => t.id >= 900)) ? [] : outsidePlaces(portals, EDGE, (id) => railway.station(id)).map((t) => ({ ...t, station: t.station === undefined ? undefined : RAIL_ID + t.station })),
   standing: () => (REAL?.stream ? net.lots.filter((l) => l.id >= 0) : buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot)), // (a real map's town is all its lots, drawn or not yet: real/live.ts)
   free: () => queue,
   build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); regionView?.groundChanged([{ x0: l.x - 40, z0: l.z - 40, x1: l.x + 40, z1: l.z + 40 }]); },
@@ -2415,6 +2446,19 @@ const town = new TownEconomy({
   clear: (l) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; net.lots = net.lots.filter((x) => x !== l); demolish(b); queue.push(l); },
 }, 1, SAVED?.town);
 townRef = town;
+if (portals.length) {
+  // (trips a day between the map's places and the one a way off the map reaches, both ways)
+  const tripsWith = (id: number) => { let all = 0, byLines = 0; for (const t of [...town.towns, { id }]) for (const x of town.trips(t.id)) if (x.town === id || t.id === id) { all += x.all; byLines += x.lines; } return { all, lines: byLines }; };
+  const showPortal = (p: Portal) => openPortal(shell, p, {
+    // (a 50 km map's trips to it are its coarse economy's)
+    perDay: perDay(p, LEVELS[level][1]), trips: worldGame ? { all: worldGame.econ.tripsOff({ ...offMapPoint(p), pop: p.people }, clock / 1440), lines: 0 } : tripsWith(p.town),
+    trains: p.station !== undefined ? railway.trains.filter((t) => t.line?.stops.includes(p.station!)).length : undefined,
+    // (the railway's one thing to do: a line out to it)
+    action: p.station !== undefined ? { label: 'New rail line from here', onClick: () => { closeSheet(); railGame.startLineTool(p.station); } } : undefined,
+  });
+  portalSigns = new PortalSigns($('#ui'), portals, { toScreen, onPick: (p) => { focusOn(p.sign, Math.min(view.h, 700)); showPortal(p); } });
+  showPortalRef = showPortal;
+}
 keepQueue = false;
 people.numbers = town.numbers();
 // The game starts with nothing of the player's, so a card under the status strip says what to
@@ -2423,7 +2467,7 @@ people.numbers = town.numbers();
 let goalDone = false, firstLineAt: number | null = null;
 function updateGoal() {
   if (goalDone) return;
-  const nLines = lines.list.length + railway.lines.length;
+  const nLines = lines.list.length + railway.lines.filter((l) => !l.other).length;
   if (!nLines) {
     firstLineAt = null;
     let stops = 0;
@@ -2454,7 +2498,7 @@ function snapshot(): GameSave {
   const t = town.save(); // (first: a save is a round trip for the economy too, see TownEconomy.save)
   return {
     v: SAVE_VERSION, id: SAVE_ID, name: SAVE_NAME, savedAt: Date.now(), map: { id: MAP.id, query: MAP_QUERY },
-    summary: { residents: Math.round(town.report?.residents ?? 0), balance: Math.round(purse.balance), lines: lines.list.length + railway.lines.length, day: Math.floor(clock / 1440) + 1, time: hhmm(clock) },
+    summary: { residents: Math.round(town.report?.residents ?? 0), balance: Math.round(purse.balance), lines: lines.list.length + railway.lines.filter((l) => !l.other).length, day: Math.floor(clock / 1440) + 1, time: hhmm(clock) },
     clock, speed, rate, rand: rand.state,
     net: saveNetwork(net), queue,
     junctions: [...junctions.values()].filter((j) => !j.auto), interchanges,
@@ -2709,6 +2753,8 @@ function frame(now: number) {
   if (clock >= autoAt) { autoAt = clock + AUTOSAVE_EVERY; void saveGame('auto'); } // (every few game hours)
   const hour = (clock / 60) % 24;
   gameWater.update(now / 1000, hour); // ripples and reeds, and the water's light from the clock
+  if (far && scene.background instanceof THREE.Color) far.update(scene.background); // (the far country's haze is the sky's colour)
+  if (!worldGame || worldGame.view.ready) edgeFace?.update(view, canvas.clientWidth / Math.max(1, canvas.clientHeight)); // (the stretches of the map's edge in sight: a 50 km map's once its whole height field is in)
   // industrial sites: state once a game minute, moving parts at their own low rate, lamps at night;
   // catchment rings for the selected site, or for every site while a stop is placed
   siteT += gdt;
@@ -2728,6 +2774,7 @@ function frame(now: number) {
       simNow += step * 1000;
       traffic.generate(trafficPlaces(), hour, LEVELS[level][1], simNow);
       traffic.generate(trafficPlaces(), hour, LEVELS[level][1], simNow);
+      portalFlows?.step(step, hour, LEVELS[level][1], view, trafficReach(), trafficPlaces());
       railway.update(step);
       traffic.update(step, simNow);
     }
@@ -2738,6 +2785,7 @@ function frame(now: number) {
   markers.frame(cam, canvas.clientHeight);
   drawFlow(now);
   placeLabels?.update(view.h);
+  portalSigns?.update(view.h);
   if (routeShown) routeShown.material.resolution.set(canvas.width, canvas.height);
   // (the readout only changes a few times a second, so it isn't rebuilt every frame)
   if (now - statsAt > 250) {
@@ -2805,7 +2853,7 @@ Object.assign((window as unknown as { proto: object }).proto, { interchanges, bl
 Object.assign((window as unknown as { proto: object }).proto, { railway, railDraw, railGame }); // (rail/)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
-Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, worldGame, footpaths }); // (the map being played, and how long its loading took, stage by stage)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, worldGame, portals, portalFlows, rail: railway, edgeFace, footpaths }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

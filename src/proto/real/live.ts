@@ -11,6 +11,7 @@ import type { RegionKind } from '../buildgen';
 import type { Form } from '../junction';
 import type { MapSpec } from '../region/mapspec';
 import type { FootPath } from '../game/paths';
+import type { ComplexLot } from '../complexes';
 
 export interface LivePack {
   format: 2; region: string; name: string; half: number; tile: number;
@@ -28,7 +29,7 @@ export interface LivePack {
   stations: { name: string; x: number; z: number }[];
   stats: Record<string, number>;
 }
-type LotCols = Record<'id' | 'x' | 'z' | 'rot' | 'w' | 'd' | 'h' | 'front' | 'back' | 'px' | 'pw' | 'kind' | 'arch' | 'seg' | 'seed' | 'row', number[]>;
+type LotCols = Record<'id' | 'x' | 'z' | 'rot' | 'w' | 'd' | 'h' | 'front' | 'back' | 'px' | 'pw' | 'kind' | 'arch' | 'seg' | 'seed' | 'row', number[]> & { units?: number[] }; // (units: a shopping complex's shops, complexes.ts)
 export const packUrl = (base: string, region: string, home: string) => `${base}${region}/live/${home.toLowerCase().replace(/[^a-z]+/g, '-')}.json`;
 
 // The map the pack was made for (its relief decoded).
@@ -73,6 +74,7 @@ function lotsOf(p: LivePack, L: LotCols) {
     const l: Lot = { id: L.id[k], x: L.x[k], z: L.z[k], rot: L.rot[k], w: L.w[k], d: L.d[k], h: L.h[k], kind: p.kinds[L.kind[k]], seg: L.seg[k], seed: L.seed[k], row: L.row[k], front: L.front[k], back: L.back[k], px: L.px[k], pw: L.pw[k] };
     const a = p.archs[L.arch[k]];
     if (a) l.arch = a;
+    if (L.units?.[k]) (l as ComplexLot).units = L.units[k];
     lots.push(l);
   }
   return lots;

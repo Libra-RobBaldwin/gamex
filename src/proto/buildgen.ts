@@ -632,7 +632,9 @@ function cornice(k: Kit, cx: number, cz: number, w: number, d: number, y: number
   k.cap(rect(cx + w / 2 + out / 2, cz, out, d), y + h, m);
 }
 function flatRoof(k: Kit, cx: number, cz: number, w: number, d: number, y: number, edge: THREE.Material, r: () => number, plant = true) {
-  k.cap(rect(cx, cz, w - 0.2, d - 0.2), y + 0.05, plain(GRAVEL));
+  // (not every flat roof is the same grey: felt, gravel or a pale membrane)
+  const felt = ['#5d5e5f', GRAVEL, '#9d9a94', '#6e6a64'][hash(`${w.toFixed(1)}|${d.toFixed(1)}|${y.toFixed(1)}`) % 4];
+  k.cap(rect(cx, cz, w - 0.2, d - 0.2), y + 0.05, plain(felt));
   parapet(k, cx, cz, w, d, y, 0.8, edge);
   if (plant) for (let i = 0; i < 1 + Math.floor(r() * 3); i++) k.box(cx + (r() - 0.5) * w * 0.5, y, cz + (r() - 0.5) * d * 0.5, 1.5 + r() * 2.5, 1 + r() * 1.4, 1.2 + r() * 2, plain(pick(r, ['#a7a9ab', '#9aa0a4', '#c1c3c4'])));
 }
@@ -832,7 +834,13 @@ function shop(k: Kit, l: Lot, r: () => number) {
   k.block(0, 0, W, D, gh, up, fh, cellOf(L.win), fm(L), blank(L), fm(L));
   cornice(k, 0, 0, W, D, gh - 0.1, plain(TRIM), 0.2, 0.3);
   let roofName = 'parapet roof';
-  if (style === 'victorian' && r() < 0.6) { k.gable(0, 0, W, D, top, 3, 0.2, roofM(pick(r, SLATE)[0]), blank(L)); roofName = 'slate roof'; }
+  // (most old high-street shops have pitched roofs, gable or front-gable; the stone and modern ones parapets)
+  const pitchedRoof = style === 'victorian' ? r() < 0.9 : style === 'render' ? r() < 0.7 : false;
+  if (pitchedRoof) {
+    const rc = style === 'victorian' ? pick(r, SLATE)[0] : pick(r, [...TILE, ...SLATE])[0];
+    if (W < 11 && r() < 0.4) { k.at(0, 0, Math.PI / 2, () => k.gable(0, 0, D, W, top, Math.min(4.5, W * 0.45), 0.2, roofM(rc), fm(L))); roofName = 'front gable'; }
+    else { k.gable(0, 0, W, D, top, Math.min(3.6, D * 0.28), 0.25, roofM(rc), blank(L), 0.05); chimney(k, W / 2 - 0.5, -0.4, top + Math.min(3.6, D * 0.28), blank(L)); roofName = style === 'victorian' ? 'slate roof' : 'pitched roof'; }
+  }
   else if (style === 'deco') { flatRoof(k, 0, 0, W, D, top, blank(L), r); k.box(0, top, zf - 0.6, W * 0.3, 2.2, 1.2, blank(L)); extras.push('Deco parapet'); }
   else { cornice(k, 0, 0, W, D, top - 0.3, plain(TRIM), 0.25, 0.35); flatRoof(k, 0, 0, W, D, top, blank(L), r); }
   if (r() < 0.55) { const n = Math.max(1, Math.round(W / 4.5)); for (let i = 0; i < n; i++) awning(k, -W / 2 + (W / n) * (i + 0.5), zf, (W / n) * 0.9, 3.5, fascia); extras.push('striped awning'); }
@@ -883,7 +891,8 @@ function flats(k: Kit, l: Lot, r: () => number) {
   } else if (arch === 'scandi') {
     L = look(r, 'timber', 'picture', '#2d3338');
     k.block(0, 0, W, D, 0, floors, fh, 4, fm(L), fm(L), fm(L));
-    if (r() < 0.5) { k.gable(0, 0, W, D, top, D * 0.35, 0.4, plain(METAL[0]), fm(L)); roofName = METAL[1]; }
+    // (a steep metal roof suits a low block; a tall one keeps its flat top)
+    if (r() < 0.5 && floors <= 6) { k.gable(0, 0, W, D, top, Math.min(4.5, D * 0.3), 0.4, plain(METAL[0]), blank(L)); roofName = METAL[1]; }
     else flatRoof(k, 0, 0, W, D, top, blank(L), r);
     balconies(k, -W / 2, W / 2, zf, 1, floors, fh, 4, 1, plain('#3a3a3a'));
     extras.push('staggered balconies');
@@ -2470,6 +2479,167 @@ function boundary(k: Kit, V: VD, x0: number, x1: number, gaps: [number, number][
 }
 const BOUND_NAME: Record<Bound, string> = { drystone: 'dry-stone wall', flintwall: 'flint wall', brickwall: 'brick garden wall', hedge: 'front hedge', picket: 'picket fence', whitewall: 'white-washed wall', cornish: 'Cornish hedge' };
 
+// ---------------- shopping complexes: one building for many shops ----------------
+// (docs/shopping.md) A town centre's shopping as a few coherent buildings rather than a clump of
+// small ones: a parade of shops under one roof, a high-street arcade round a glazed passage, a
+// retail park of big stores behind their car park, a covered centre with its anchors and atrium.
+// A complex is a 'shop' lot whose `arch` names the kind; it holds `unitsOf(lot)` shops.
+export const COMPLEXES = ['parade', 'arcade', 'retailpark', 'mall'] as const;
+export type Complex = (typeof COMPLEXES)[number];
+export const isComplex = (a?: string): a is Complex => !!a && (COMPLEXES as readonly string[]).includes(a);
+// how many shops a complex holds (each counts as a shop's worth of jobs in the economy)
+export function unitsOf(l: Pick<Lot, 'kind' | 'arch' | 'w' | 'd'> & { units?: number }) {
+  if (l.kind !== 'shop' || !isComplex(l.arch)) return 1;
+  if (l.units) return l.units; // (a complex made from plots holds as many shops as they did: complexes.ts)
+  const W = l.w, D = l.d;
+  return l.arch === 'parade' ? Math.max(2, Math.round(W / 6)) : l.arch === 'arcade' ? Math.max(6, Math.round((W * Math.min(D, 32)) / 110))
+    : l.arch === 'retailpark' ? Math.max(3, Math.round(W / 18)) : Math.max(12, Math.round((W * Math.min(D, 90)) / 320));
+}
+const BRANDS = ['#c9302c', '#1f4f9e', '#2e7d5b', '#e0a526', '#6b2f7a', '#1f6f78', '#e2701f', '#2b2b2b', '#8c2f4f', '#3f7a2e'];
+// the complex's walls: the town's own for the older forms, cladding and render for the newer
+function complexWalls(r: () => number, P: Place | null, modern: boolean): Wall {
+  if (P) {
+    const V = VD[P.vern], era = modern ? (P.era === 'modern' ? 'modern' : 'postwar') : P.era === 'medieval' || P.era === 'georgian' ? 'georgian' : 'victorian';
+    const w = pick(r, wallsOf(V, era));
+    return w.skin === 'frame' || w.skin === 'tilehung' ? { ...w, skin: 'render', wall: ['#efe8da', 'cream render'] } : w;
+  }
+  return modern ? pick(r, [wl('render', '#ecebe4', 'white render', 'ribbon', '#2d3338'), wl('brick', '#b8a08c', 'buff brick', 'picture', '#2d3338'), wl('metal', '#c9cdd0', 'white cladding', 'ribbon', '#2d3338')])
+    : pick(r, [wl('brick', '#9a4b35', 'red brick', 'sash'), wl('stone', '#ddd3bb', 'Portland stone', 'grid'), wl('brick', '#c9a678', 'yellow stock brick', 'sash')]);
+}
+// a row of shopfronts along the front wall: pilasters between the units and a fascia board over
+// each in its own colours, the lettering picked out
+function shopRow(k: Kit, x0: number, x1: number, zf: number, n: number, h: number, pilaster: THREE.Material, r: () => number) {
+  const uw = (x1 - x0) / n;
+  for (let i = 0; i <= n; i++) k.box(x0 + i * uw, 0, zf + 0.1, 0.4, h + 0.3, 0.2, pilaster);
+  for (let i = 0; i < n; i++) {
+    const cx = x0 + (i + 0.5) * uw, col = pick(r, BRANDS);
+    k.box(cx, h - 0.75, zf + 0.12, uw - 0.45, 0.75, 0.16, plain(col));
+    k.box(cx, h - 0.52, zf + 0.21, Math.min(uw - 1.2, 3.2), 0.28, 0.02, plain('#f3ead2'));
+  }
+}
+function complexBuild(k: Kit, l: Lot, r: () => number, P: Place | null) {
+  const a = l.arch as Complex, n = unitsOf(l), extras: string[] = [];
+  const W = l.w, X0 = l.px - l.pw / 2, X1 = l.px + l.pw / 2, F = l.d / 2 + l.front, Bk = -l.d / 2 - l.back;
+  const climate = P ? VD[P.vern].climate : 'uk';
+  if (a === 'parade') {
+    // a terrace of shops under one roof, flats over them, a canopy along the front
+    const D = Math.min(l.d, 15), zf = D / 2, up = l.h > 9 ? 1 : 0, gh = 4.2, top = gh + up * 3;
+    k.foot = { w: W, d: D };
+    const L = complexWalls(r, P, !P || P.era === 'postwar' || P.era === 'modern' || P.era === 'interwar');
+    const fascia = pick(r, FASCIA);
+    k.block(0, 0, W, D, 0, 1, gh, W / n, facade('shop', L.skin, L.wall[0], L.frame, fascia), wb(L), wb(L));
+    if (up) k.block(0, 0, W, D, gh, up, 3, cellW(L.win), wf(L), wb(L), wf(L));
+    shopRow(k, -W / 2, W / 2, zf, n, gh, plain(shade(L.wall[0], 0.9)), r);
+    if (r() < 0.6) { k.box(0, 3.05, zf + 0.9, W, 0.14, 1.8, plain('#e6e4de')); extras.push('canopy'); }
+    if (climate === 'desert') desertTop(k, 0, 0, W, D, top, L, r, false);
+    else if (P && (P.era === 'medieval' || P.era === 'georgian' || P.era === 'victorian')) {
+      const f = pick(r, roofsOf(VD[P.vern], P.era).filter((x) => x.kind !== 'thatch'));
+      const t = vRoof(k, VD[P.vern], f, W, D, top, { end: wb(L), pitch: Math.min(VD[P.vern].pitch, 0.8) || 0.6 });
+      for (let i = 1; i < n; i++) if (i % 2 === 0) chimney(k, -W / 2 + (W * i) / n, 0, Math.min(t, top + 2.6), wb(L));
+    } else flatRoof(k, 0, 0, W, D, top, wb(L), r);
+    // (the service yard behind)
+    flat(k, X0, Bk, X1, -zf, 0.05, tarmacM());
+    for (let i = 0; i < n; i++) k.box(-W / 2 + (W * (i + 0.5)) / n, 0, -zf - 1.2, 1.6, 1.3, 1.1, plain('#3d5a3a'));
+    flat(k, X0, zf, X1, F, 0.05, slabsM());
+    return { name: `Shopping parade · ${plural(n, 'shop')}`, detail: [L.wall[1], 'shopfronts', up ? 'flats above' : 'single storey', ...extras].join(' · ') };
+  }
+  if (a === 'arcade') {
+    // a grand front on the high street, a glazed passage through it lined with small shops
+    const D = Math.min(l.d, 32), zf = D / 2, gh = 4.6, fh = 3.6, up = Math.max(1, Math.min(3, Math.round((l.h - gh) / fh))), top = gh + up * fh;
+    k.foot = { w: W, d: D };
+    const L = complexWalls(r, P, false), fascia = pick(r, FASCIA);
+    k.block(0, 0, W, D, 0, 1, gh, 4.5, facade('shop', L.skin, L.wall[0], L.frame, fascia), wb(L), wb(L));
+    k.block(0, 0, W, D, gh, up, fh, cellW(L.win === 'casement' ? 'sash' : L.win), wf(L, L.win === 'casement' ? 'sash' : L.win), wf(L), wf(L));
+    const ew = Math.min(6, W * 0.2);
+    // (the entrance: a tall opening into the passage)
+    const glass = facade('curtain', 'glass', '#8ea4b8', '#2d3338');
+    if (!k.opening(0, zf, ew, gh + fh * 0.8, 2.5, plain(shade(L.wall[0], 0.85)), glass)) k.box(0, 0, zf + 0.3, ew, gh + fh * 0.8, 0.6, glass);
+    k.at(0, zf + 0.25, 0, () => k.gable(0, 0, ew + 1.6, 0.5, gh + fh * 0.8 + 0.2, 1.6, 0.05, plain(shade(L.wall[0], 1.05)), plain(shade(L.wall[0], 1.05))));
+    shopRow(k, -W / 2, -ew / 2 - 0.2, zf, Math.max(1, Math.round((W / 2 - ew / 2) / 5)), gh, plain(shade(L.wall[0], 0.9)), r);
+    shopRow(k, ew / 2 + 0.2, W / 2, zf, Math.max(1, Math.round((W / 2 - ew / 2) / 5)), gh, plain(shade(L.wall[0], 0.9)), r);
+    cornice(k, 0, 0, W, D, gh - 0.1, plain(TRIM), 0.2, 0.3);
+    cornice(k, 0, 0, W, D, top - 0.4, plain(TRIM), 0.35, 0.45);
+    flatRoof(k, 0, 0, W, D, top, wb(L), r, false);
+    // (the passage's glazed roof, running back from the entrance)
+    k.at(0, 0, Math.PI / 2, () => k.gable(0, 0, D - 1.2, ew + 1, top, 2.2, 0.1, glass, glass));
+    flat(k, X0, zf, X1, F, 0.05, slabsM());
+    flat(k, X0, Bk, X1, -zf, 0.05, tarmacM());
+    return { name: `Shopping arcade · ${plural(n, 'shop')}`, detail: [L.wall[1], 'glazed arcade', 'shopfronts', `${plural(up, 'floor')} above`].join(' · ') };
+  }
+  if (a === 'retailpark') {
+    // big stores in a row at the back, their car park in front
+    const Db = Math.min(38, l.d * 0.5), zb = -l.d / 2 + Db / 2, zf = zb + Db / 2, H = 8.5;
+    k.foot = { w: W, d: l.d };
+    const clad = climate === 'desert' || climate === 'med' ? wl('render', '#ece4d4', 'render', 'none', '#2d3338') : wl('metal', pick(r, ['#8a969e', '#c9cdd0', '#b8bcbf']), 'cladding', 'none', '#2d3338');
+    k.block(0, zb, W, Db, 0, 1, H, 0, wb(clad), wb(clad), wb(clad));
+    flatRoof(k, 0, zb, W, Db, H, wb(clad), r);
+    const uw = W / n;
+    for (let i = 0; i < n; i++) {
+      const cx = -W / 2 + (i + 0.5) * uw, col = pick(r, BRANDS);
+      // each store's glazed entrance, its colours round it, its name board over
+      k.box(cx, 0, zf + 0.6, Math.min(8, uw * 0.45), 6, 1.2, facade('lobby', 'glass', '#8ea4b8', '#2d3338'));
+      k.box(cx, 6, zf + 0.62, Math.min(9, uw * 0.5), 1.2, 1.26, plain(col));
+      k.box(cx, H - 2.2, zf + 0.08, uw - 0.6, 2, 0.14, plain(col));
+      k.box(cx, H - 1.6, zf + 0.16, Math.min(uw - 3, 7), 0.8, 0.03, plain('#f4f2ec'));
+      if (i) k.box(-W / 2 + i * uw, 0, zf + 0.06, 0.3, H, 0.12, plain('#5d6166'));
+    }
+    k.box(0, 0, zf + 2.4, W, 0.05, 0.05, plain('#5d6166'));
+    k.box(0, 3.4, zf + 1.6, W, 0.18, 3.2, plain('#e6e4de')); // (a canopy along the fronts)
+    // the car park: rows of spaces with aisles, trees in islands, the way in from the road
+    const x0 = -W / 2 + 2, x1 = W / 2 - 2;
+    flat(k, X0, zf + 3.2, X1, F, 0.05, tarmacM());
+    let rows = 0;
+    for (let z = zf + 5; z + 5 < F - 4; z += 13) {
+      parkingRow(k, x0, x1, z, r, 0.55, [0, F], z + 9); rows++;
+      for (let x = x0 + 12; x < x1 - 4; x += 24) { k.box(x, 0, z + 11.6, 3, 0.15, 1.6, plain('#b9b3a8')); tree(k, x, z + 11.6, 0.7, r); }
+    }
+    for (let i = 0; i < 3; i++) k.box(-W / 3 + i * W / 3, 0, zf + 4.2, 2.6, 2.2, 1.2, plain('#8a9096')); // (trolley shelters)
+    // (the service road behind)
+    flat(k, X0, Bk, X1, zb - Db / 2, 0.05, tarmacM());
+    extras.push(`car park (${rows} rows)`);
+    return { name: `Retail park · ${plural(n, 'store')}`, detail: [clad.wall[1], 'glazed store fronts', 'canopy', ...extras].join(' · ') };
+  }
+  // a covered shopping centre: anchors at each end, a glazed mall between, entrances off the car park
+  const Dm = Math.min(70, l.d * 0.6), zb = -l.d / 2 + Dm / 2, zf = zb + Dm / 2, H = 12, aw = Math.min(28, W * 0.22);
+  k.foot = { w: W, d: l.d };
+  const L = complexWalls(r, P, true), glass = facade('curtain', 'glass', '#8ea4b8', '#2d3338');
+  const mw = W - 2 * aw;
+  k.block(0, zb, mw, Dm, 0, 1, H - 2, 0, facade('ribbon', L.skin, L.wall[0], '#2d3338'), wb(L), wb(L));
+  flatRoof(k, 0, zb, mw, Dm, H - 2, wb(L), r);
+  // (the mall's glazed roof along its length, a dome where the ways cross)
+  k.gable(0, zb, mw - 4, 10, H - 2, 3.2, 0.2, glass, glass, 0.1);
+  k.prismN(0, zb, 6.5, 16, H - 2, 1.4, wb(L));
+  sphere(k, 0, H - 0.6, zb, 6.3, glass, 14, 7, 0.55);
+  for (const s of [-1, 1]) {
+    const cx = s * (W / 2 - aw / 2), col = pick(r, BRANDS);
+    k.block(cx, zb, aw, Dm, 0, 1, H + 2, 0, wb(L), wb(L), wb(L));
+    flatRoof(k, cx, zb, aw, Dm, H + 2, wb(L), r);
+    k.box(cx, H - 1, zf + 0.1, aw - 2, 2.2, 0.16, plain(col));
+    k.box(cx, H - 0.4, zf + 0.2, Math.min(aw - 6, 12), 1, 0.03, plain('#f4f2ec'));
+    k.box(cx, 0, zf + 0.7, 10, 5.5, 1.4, facade('lobby', 'glass', '#8ea4b8', '#2d3338'));
+  }
+  // (entrances off the car park, glazed, under canopies)
+  for (const x of [-mw / 4, mw / 4]) {
+    k.box(x, 0, zf + 1, 9, 7, 2, glass);
+    k.box(x, 7, zf + 2.5, 12, 0.3, 5, plain('#e6e4de'));
+    for (const s of [-1, 1]) k.box(x + s * 5.6, 0, zf + 4.7, 0.3, 7, 0.3, plain('#8a9096'));
+  }
+  shopRow(k, -mw / 2 + 1, -mw / 4 - 5, zf, Math.max(1, Math.round((mw / 4 - 6) / 7)), 5, plain(shade(L.wall[0], 0.9)), r);
+  shopRow(k, mw / 4 + 5, mw / 2 - 1, zf, Math.max(1, Math.round((mw / 4 - 6) / 7)), 5, plain(shade(L.wall[0], 0.9)), r);
+  // the car park in front, the service yard and its lorry bays behind
+  flat(k, X0, zf + 3, X1, F, 0.05, tarmacM());
+  let rows = 0;
+  for (let z = zf + 8; z + 5 < F - 4; z += 13) { parkingRow(k, -W / 2 + 3, W / 2 - 3, z, r, 0.7, [0, F], z + 9); rows++; }
+  flat(k, X0, Bk, X1, zb - Dm / 2, 0.05, concreteM());
+  const nb = Math.max(2, Math.floor(mw / 14));
+  for (let i = 0; i < nb; i++) {
+    const x = -mw / 2 + (mw * (i + 0.5)) / nb;
+    k.box(x, 0, zb - Dm / 2 - 0.05, 3.4, 4.3, 0.12, plain('#5d6166'));
+    k.bays.push({ x, z: zb - Dm / 2 - 7.5, via: [], heavy: true });
+  }
+  return { name: `Shopping centre · ${plural(n, 'shop')}`, detail: [L.wall[1], 'glazed mall and dome', 'anchor stores', `car park (${rows} rows)`, 'service yard'].join(' · ') };
+}
+
 export const USE: Record<Lot['kind'], { label: string; pop: number; unit: string }> = {
   house: { label: 'Housing · low density', pop: 4, unit: 'residents' },
   terrace: { label: 'Housing · terraced', pop: 5, unit: 'residents' },
@@ -2494,9 +2664,10 @@ export function makeBuilding(l: Lot): BuiltShape {
   const P = placeAt ? placeAt(l.x, l.z) : null;
   treeStyle = P ? TREE_OF[VD[P.vern].climate] : 'broad';
   factoryWall = P ? localFactory(P) : null;
-  const d = (P && vBuild(k, l, r, rr, P)) || (l.kind === 'house' ? house(k, l, r, rr) : l.kind === 'terrace' ? terrace(k, l, r, rr) : l.kind === 'shop' ? shop(k, l, r) : l.kind === 'flats' ? flats(k, l, r) : l.kind === 'office' ? office(k, l, r) : l.kind === 'industry' ? industry(k, l, r) : l.kind === 'civic' ? civic(k, l, r) : tower(k, l, r));
+  const complex = l.kind === 'shop' && isComplex(l.arch);
+  const d = complex ? complexBuild(k, l, r, P) : (P && vBuild(k, l, r, rr, P)) || (l.kind === 'house' ? house(k, l, r, rr) : l.kind === 'terrace' ? terrace(k, l, r, rr) : l.kind === 'shop' ? shop(k, l, r) : l.kind === 'flats' ? flats(k, l, r) : l.kind === 'office' ? office(k, l, r) : l.kind === 'industry' ? industry(k, l, r) : l.kind === 'civic' ? civic(k, l, r) : tower(k, l, r));
   const height = k.top;
-  const y = yard(k, l, r, rr, P);
+  const y = complex ? [] : yard(k, l, r, rr, P); // (a complex lays out its own ground)
   treeStyle = 'broad'; factoryWall = null;
   const group = k.build();
   group.position.set(l.x, 0, l.z);

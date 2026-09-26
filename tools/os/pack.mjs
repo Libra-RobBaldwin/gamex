@@ -22,6 +22,7 @@ import { centrality, centreDistance, plotCentre } from '../../src/proto/region/i
 import { MapWater } from '../../src/proto/region/water.ts';
 import { design, landFits, legsAt } from '../../src/proto/junction.ts';
 import { deadEndPaths } from '../../src/proto/game/paths.ts';
+import { groupShops } from '../../src/proto/complexes.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
@@ -50,10 +51,10 @@ for (const n of net.nodes.values()) {
 }
 lap('junctions');
 // the plots the town grows on, as the game would queue them once the roads are down (main.ts
-// queuePlots): along every road and round each roundabout, then kept clear of the real buildings
+// queuePlots): along every road (shops side by side as one complex: complexes.ts) and round each roundabout, then kept clear of the real buildings
 const rand = rng(map.seed), centreFor = (a, b = { x: a.x + 1, z: a.z }) => plotCentre(map, a, b);
 let queue = [];
-for (const s of net.segs.values()) for (const p of net.plotsFor(s.id, centreFor(net.node(s.a), net.node(s.b)))) if (centrality(map, p) < 200 || rand() < 0.75) queue.push(p);
+for (const s of net.segs.values()) for (const p of groupShops(net.plotsFor(s.id, centreFor(net.node(s.a), net.node(s.b))), { free: (l) => net.lotFree(l) })) if (centrality(map, p) < 200 || rand() < 0.75) queue.push(p);
 for (const j of junctions) {
   if (j.form !== 'roundabout' || !j.shape) continue;
   const legs = legsAt(net, j.node).map((l) => ({ seg: l.seg.id, ang: l.ang, half: net.half(l.seg) }));
@@ -79,7 +80,7 @@ const cols = (ls, tile) => {
   return {
     ...(tile ? { tile: col((l) => tiles.indexOf(tileOf(l.x, l.z))) } : {}), id: col((l) => l.id), x: col((l) => r2(l.x)), z: col((l) => r2(l.z)), rot: col((l) => r3(l.rot)),
   w: col((l) => r2(l.w)), d: col((l) => r2(l.d)), h: col((l) => r2(l.h)), front: col((l) => r2(l.front)), back: col((l) => r2(l.back)), px: col((l) => r2(l.px)), pw: col((l) => r2(l.pw)),
-  kind: col((l) => kinds.indexOf(l.kind)), arch: col((l) => archs.indexOf(l.arch ?? '')), seg: col((l) => l.seg), seed: col((l) => r3(l.seed)), row: col((l) => l.row),
+  kind: col((l) => kinds.indexOf(l.kind)), arch: col((l) => archs.indexOf(l.arch ?? '')), seg: col((l) => l.seg), seed: col((l) => r3(l.seed)), row: col((l) => l.row), units: col((l) => l.units ?? 0),
   };
 };
 const lotCols = cols(net.lots, true);
