@@ -5,24 +5,54 @@
 // so the fields run on seamlessly into the live play area and across every tile border: a field is
 // a field of the world, not of a tile.
 //
-// The countryside session (claude/work-country) owns how fields, hedges and woods are laid out;
-// this is where a tile asks for them (`countryInput`, `paintCover`, `woodTrees`, `farms`, `hedges`).
-// Pure: no three.js.
+// The fields are the countryside's farm blocks (region/fields.ts), laid out a block at a time from
+// the plan (its roads, rivers, hills and places: `countryFor`), so a tile, the worker and the live
+// area's ground all agree. This is where a tile asks for them (`countryInput`, `paintCover`,
+// `woodTrees`, `canopyIn`, `farmsIn`, `hedges`). Owned by the countryside session. Pure: no three.js.
 import { CoverMap } from '../ground/paint';
-import { Layout, STRAIGHT_FIELDS, setParcelStyle, type GroundInput } from '../ground/layout';
+import { Layout, type GroundInput } from '../ground/layout';
+import { Countryside } from '../region/fields';
+import { canopy, fringe, type CanopyArrays, type CoverData } from '../ground/canopy';
+import { farmTrack, farmYard } from '../ground/farms';
 import { Occupancy, planHedges, type HedgeTree, type Piece } from '../ground/hedgerows';
 import { hash2 } from '../ground/noise';
 import { lakeRadiusOf, type XZ } from '../region/water';
 import { ROUTE_HALF } from './routes';
-import { rectPoly, settlementScene, type SceneBuilding, type ScenePlot } from './towns';
+import { STYLE_LOOKS } from '../region/styles';
+import { settlementScene, type SceneBuilding, type ScenePlot } from './towns';
 import type { WorldPlan } from './plan';
 
 export interface Box { x0: number; z0: number; x1: number; z1: number }
-// The fields' layout for a 50 km map: its own seed, with straight-edged, near-square fields (the
-// live area's ground uses the same: main.ts GameGround), set up wherever this module loads (the
-// main thread and the workers alike).
+// The fields' seed for a 50 km map (the live area's ground uses the same: main.ts GameGround).
 export const GROUND_SEED = 12;
-setParcelStyle(GROUND_SEED, STRAIGHT_FIELDS);
+
+// The map's fields, woods and farms: farm blocks that follow its roads, rivers and contours, laid
+// out lazily (region/fields.ts). One per plan, on the main thread and in each worker alike, and the
+// same everywhere, as it depends only on the plan.
+const sources = new WeakMap<WorldPlan, Countryside>();
+export function countryFor(plan: WorldPlan): Countryside {
+  let c = sources.get(plan);
+  if (c) return c;
+  const H = plan.half, heightAt = plan.terrain.heightAt;
+  let hMax = 0;
+  for (let x = -H; x <= H; x += 2000) for (let z = -H; z <= H; z += 2000) hMax = Math.max(hMax, heightAt(x, z));
+  const look = STYLE_LOOKS[plan.options.style];
+  c = new Countryside({
+    seed: GROUND_SEED,
+    bounds: { x0: -H, z0: -H, x1: H, z1: H },
+    settlements: plan.settlements.map((s) => ({ x: s.x, z: s.z, r: s.r, reach: s.reach, kind: s.kind })),
+    lanes: [...plan.roads.map((r) => r.path), ...plan.rails.map((r) => r.path)],
+    farmLanes: plan.roads.filter((r) => r.kind !== 'motorway').map((r) => r.path),
+    rivers: plan.water.world.rivers.map((r) => r.path),
+    waterDist: (x, z) => plan.water.edgeDistance({ x, z }, 400),
+    heightAt,
+    hMax,
+    woods: look.trees.density,
+    pines: look.trees.pines,
+  });
+  sources.set(plan, c);
+  return c;
+}
 
 // A band round a centre line, as a polygon (left side out, right side back).
 export function bandPoly(path: XZ[], half: number): XZ[] {
@@ -87,68 +117,48 @@ export function countryInput(plan: WorldPlan, box: Box, fine: boolean, skip: (se
     const far = 4000, off = sea.side === 's' ? { x: 0, z: far } : sea.side === 'n' ? { x: 0, z: -far } : sea.side === 'e' ? { x: far, z: 0 } : { x: -far, z: 0 };
     water.push([...run, ...[...run].reverse().map((p) => ({ x: p.x + off.x, z: p.z + off.z }))]);
   }
+  // farmsteads: their yards worn, their tracks to the road
   const farms = fine ? farmsIn(plan, B) : [];
-  for (const f of farms) if (f.kind === 'farm') plots.push({ poly: rectPoly(f.x, f.z, 46, 40, f.rot), kind: 'yard' });
+  if (fine) for (const f of countryFor(plan).farmsNear(B)) { plots.push({ poly: farmYard(f), kind: 'yard' }); const t = farmTrack(f); if (t) plots.push({ poly: t, kind: 'track' }); }
   return { seed: GROUND_SEED, blocked, lanes, plots, water, town, industrial, farms };
 }
 
 // Paint a tile's cover (the ground's RGBA cover map: ground/covers.ts) at `texel` metres.
-export function paintCover(input: GroundInput, box: Box, texel: number) {
+export function paintCover(plan: WorldPlan, input: GroundInput, box: Box, texel: number) {
   const size = box.x1 - box.x0, n = Math.round(size / texel);
-  const layout = new Layout(input);
+  const layout = new Layout(input, countryFor(plan));
   const cover = new CoverMap({ x0: box.x0, z0: box.z0, size, n });
   cover.paint(layout);
   return { layout, data: cover.a, n };
 }
 
-// The trees in the woods: a jittered grid over the tile, a tree wherever it lands inside a wood,
-// clear of its edge. x, z, scale, kind (0 broadleaf, 1 conifer) per tree.
-export function woodTrees(layout: Layout, box: Box, spacing: number, pines: number, seed: number): Float32Array {
-  const out: number[] = [], h = { id: 0, cell: layout.parcels.cell(0, 0), edge: 0 };
-  for (let x = box.x0 + spacing / 2; x < box.x1; x += spacing) for (let z = box.z0 + spacing / 2; z < box.z1; z += spacing) {
-    const i = Math.round(x / spacing), j = Math.round(z / spacing);
-    const px = x + (hash2(i, j, seed + 1) - 0.5) * spacing * 0.9, pz = z + (hash2(i, j, seed + 2) - 0.5) * spacing * 0.9;
-    layout.parcels.hit(px, pz, h);
-    if (h.edge < 2.5 || layout.about(h).kind !== 'wood') continue;
-    out.push(px, pz, 0.8 + hash2(i, j, seed + 3) * 0.7, hash2(i, j, seed + 4) < pines ? 1 : 0);
-  }
-  return new Float32Array(out);
+// The trees in the woods: along their edges, where they stand out of the canopy (`canopyIn`), and a
+// few inside it. x, z, scale, kind (0 broadleaf, 1 conifer) per tree.
+export function woodTrees(layout: Layout, cover: CoverData, box: Box, spacing: number): Float32Array {
+  return fringe(layout, cover, box, spacing);
+}
+// The woods' canopy over a tile, on a grid fine enough for its detail (ground/canopy.ts)
+export function canopyIn(plan: WorldPlan, layout: Layout, cover: CoverData, box: Box, g: number, own: (p: XZ) => boolean): CanopyArrays | null {
+  const look = STYLE_LOOKS[plan.options.style];
+  return canopy(layout, cover, box, g, { broadleaf: look.trees.crown, conifer: look.trees.pine }, own);
 }
 
-// Farmsteads: in about a third of the 700 m squares of open country (away from the places and the
-// water), a farmhouse and two or three barns round a yard, facing the same way.
+// Farmsteads (the countryside's: region/fields.ts, a block at a time): a farmhouse, a barn and a
+// shed round a yard, beside a road or down a track to one.
 export function farmsIn(plan: WorldPlan, box: Box): SceneBuilding[] {
-  const C = 700, out: SceneBuilding[] = [], seed = plan.seed;
-  for (let i = Math.floor(box.x0 / C); i <= Math.floor(box.x1 / C); i++) for (let j = Math.floor(box.z0 / C); j <= Math.floor(box.z1 / C); j++) {
-    if (hash2(i, j, seed + 501) > 0.36) continue;
-    const x = (i + 0.2 + hash2(i, j, seed + 502) * 0.6) * C, z = (j + 0.2 + hash2(i, j, seed + 503) * 0.6) * C;
-    if (x < box.x0 || x >= box.x1 || z < box.z0 || z >= box.z1) continue;
-    if (Math.abs(x) > plan.half - 300 || Math.abs(z) > plan.half - 300) continue;
-    if (plan.grid.near(x, z).some((s) => Math.hypot(x - s.x, z - s.z) < s.reach + 250)) continue;
-    if (plan.water.edgeDistance({ x, z }, 120) < 90) continue;
-    if (nearRoute(plan, x, z, 45)) continue;
-    const rot = hash2(i, j, seed + 504) * Math.PI, co = Math.cos(rot), si = Math.sin(rot);
-    const at = (u: number, v: number) => ({ x: x + u * co - v * si, z: z + u * si + v * co });
+  const out: SceneBuilding[] = [];
+  for (const f of countryFor(plan).farmsNear(box)) {
+    if (f.x < box.x0 || f.x >= box.x1 || f.z < box.z0 || f.z >= box.z1) continue;
+    const ux = Math.cos(f.a), uz = Math.sin(f.a), vx = -uz * f.side, vz = ux * f.side, rot = f.a;
+    const at = (u: number, v: number) => ({ x: f.x + u * ux + v * vx, z: f.z + u * uz + v * vz });
+    const r = (k: number) => hash2(f.seed & 0xffff, f.seed >>> 16, k), m = r(1) < 0.5 ? 1 : -1;
     const walls = [0, 1, 7, 5], roofs = [2, 3, 0];
-    const house = at(-12, -8);
-    out.push({ ...house, w: 11, d: 8, rot, h: 5.6, ridge: 3.2, wall: walls[Math.floor(hash2(i, j, seed + 505) * 4)], roof: roofs[Math.floor(hash2(i, j, seed + 506) * 3)], kind: 'farm', settlement: -1 });
-    const b1 = at(9, -6), b2 = at(8, 12);
-    out.push({ ...b1, w: 24, d: 13, rot, h: 6.5, ridge: 2.4, wall: 13, roof: hash2(i, j, seed + 507) < 0.5 ? 5 : 8, kind: 'barn', settlement: -1 });
-    out.push({ ...b2, w: 18, d: 11, rot: rot + Math.PI / 2, h: 5, ridge: 2, wall: 9, roof: 6, kind: 'barn', settlement: -1 });
-    if (hash2(i, j, seed + 508) < 0.5) { const b3 = at(-10, 12); out.push({ ...b3, w: 12, d: 9, rot, h: 4.2, ridge: 1.6, wall: 1, roof: 4, kind: 'barn', settlement: -1 }); }
+    out.push({ ...at(-12 * m, -7), w: 10 + r(2) * 3, d: 7.5, rot, h: 5.6, ridge: 3.1, wall: walls[Math.floor(r(3) * 4)], roof: roofs[Math.floor(r(4) * 3)], kind: 'farm', settlement: -1 });
+    out.push({ ...at(9 * m, 5), w: 22 + r(5) * 8, d: 12 + r(6) * 3, rot, h: 6.3, ridge: 2.6, wall: 13, roof: r(7) < 0.5 ? 5 : 8, kind: 'barn', settlement: -1 });
+    if (r(11) >= 0.3) out.push({ ...at(-8 * m, 13), w: 14 + r(9) * 6, d: 7, rot, h: 4.2, ridge: 1.4, wall: 9, roof: 6, kind: 'barn', settlement: -1 });
   }
   return out;
 }
-function nearRoute(plan: WorldPlan, x: number, z: number, m: number) {
-  for (const r of [...plan.roads, ...plan.rails]) {
-    const P = r.path;
-    for (let i = 0; i < P.length; i += 4) if (Math.abs(P[i].x - x) < m + 100 && Math.abs(P[i].z - z) < m + 100) {
-      for (let k = Math.max(0, i - 4); k < Math.min(P.length, i + 5); k++) if (Math.hypot(P[k].x - x, P[k].z - z) < m) return true;
-    }
-  }
-  return false;
-}
-
 // Hedgerows for a near tile: the ground's own planner, over the tile (pieces whose middles are in it).
 export function hedges(layout: Layout, input: GroundInput, box: Box): { pieces: Piece[]; trees: HedgeTree[] } {
   const occ = new Occupancy(input), pieces: Piece[] = [], trees: HedgeTree[] = [];

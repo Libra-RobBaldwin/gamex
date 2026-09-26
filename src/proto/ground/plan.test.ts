@@ -4,11 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { Ground } from './index';
 import { unpackCover } from './covers';
 import { Occupancy, planHedges } from './hedgerows';
-import { Canopy } from './canopy';
-import type { GroundPlan } from './plan';
+import { canopy } from './canopy';
+import type { FieldSource, PlanField, PlanLine } from './plan';
 
 // three fields side by side along x: wheat, grass, a wood; a hedge between each
-const plan: GroundPlan = {
+const plan: { fields: PlanField[]; lines: PlanLine[] } = {
   fields: [
     { poly: [{ x: -300, z: -100 }, { x: -100, z: -100 }, { x: -100, z: 100 }, { x: -300, z: 100 }], kind: 'arable', crop: 'wheat', dir: 0 },
     { poly: [{ x: -100, z: -100 }, { x: 100, z: -100 }, { x: 100, z: 100 }, { x: -100, z: 100 }], kind: 'grass', crop: 'grass', dir: 0 },
@@ -17,8 +17,8 @@ const plan: GroundPlan = {
   lines: [{ a: { x: -100, z: -100 }, b: { x: -100, z: 100 }, hedge: true }, { a: { x: 100, z: -100 }, b: { x: 100, z: 100 }, hedge: true }],
 };
 function ground() {
-  const g = new Ground({ region: { x0: -320, z0: -120, size: 640 }, texel: 4, hedges: false });
-  g.layout.setPlan(plan);
+  const source: FieldSource = { blocksNear: () => [{ id: 1, ...plan }] };
+  const g = new Ground({ region: { x0: -320, z0: -120, size: 640 }, texel: 4, hedges: false, fields: source });
   g.paint({ seed: 3 });
   return g;
 }
@@ -41,20 +41,11 @@ describe('a field plan', () => {
     expect(pieces.every((p) => Math.abs(p.x + 100) < 1)).toBe(true);
   });
   it('covers its woods with a canopy, and only them', () => {
-    const c = new Canopy(g, { broadleaf: '#4f8a36', conifer: '#2f6b35' }, 640);
-    c.setView({ x: 0, z: 0, h: 500 });
-    c.build();
-    const meshes = c.group.children as import('three').Mesh[];
-    expect(meshes.length).toBeGreaterThan(0);
-    for (const m of meshes) {
-      const p = m.geometry.getAttribute('position');
-      for (let k = 0; k < p.count; k++) if (p.getY(k) > 0) expect(p.getX(k)).toBeGreaterThan(98);
-    }
-    const near = meshes.find((m) => m.visible)!;
-    const p = near.geometry.getAttribute('position');
+    const C = g.cover!, cover = { a: C.a, x0: C.region.x0, z0: C.region.z0, size: C.region.size, n: C.region.n };
+    const m = canopy(g.layout, cover, { x0: -320, z0: -120, x1: 320, z1: 120 }, 5, { broadleaf: '#4f8a36', conifer: '#2f6b35' })!;
+    expect(m.idx.length).toBeGreaterThan(0);
     let top = 0;
-    for (let k = 0; k < p.count; k++) top = Math.max(top, p.getY(k));
+    for (let k = 0; k < m.pos.length; k += 3) { if (m.pos[k + 1] > 0) expect(m.pos[k]).toBeGreaterThan(98); top = Math.max(top, m.pos[k + 1]); }
     expect(top).toBeGreaterThan(8);
-    c.dispose();
   });
 });

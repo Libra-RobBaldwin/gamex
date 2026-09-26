@@ -22,6 +22,7 @@
 import { rng, mix, type Rand } from './random';
 import { chooseWoods, type WoodSite } from './woods';
 import { COUNTRYSIDE } from './countryside';
+import { laneRoute } from './lanes';
 
 export interface XZ { x: number; z: number }
 export type FieldKind = 'arable' | 'grass' | 'wood' | 'rough';
@@ -37,7 +38,7 @@ export interface Field {
 }
 export interface Line { a: XZ; b: XZ; hedge: boolean }
 // a farmstead: a house and its barns round a yard, beside a lane (x, z its middle, a the lane's direction)
-export interface Farm { x: number; z: number; a: number; side: number; seed: number; track?: [XZ, XZ] } // (side: which side of the lane, looking along a; track: its drive to the road, if it stands back from it)
+export interface Farm { x: number; z: number; a: number; side: number; seed: number; track?: XZ[] } // (side: which side of the lane, looking along a; track: its drive to the road, if it stands back from it)
 export interface FieldPlan { fields: Field[]; lines: Line[]; farms: Farm[] }
 export interface FieldsInput {
   seed: number;
@@ -184,6 +185,17 @@ export class Countryside {
     }
     return out;
   }
+  // every block touching a box, whole (a field source for the ground: ground/plan.ts)
+  blocksNear(box: { x0: number; z0: number; x1: number; z1: number }): BlockPlan[] {
+    const B = C.block, out: BlockPlan[] = [];
+    for (let i = Math.floor(box.x0 / B) - 2; i <= Math.floor(box.x1 / B) + 1; i++) for (let j = Math.floor(box.z0 / B) - 2; j <= Math.floor(box.z1 / B) + 1; j++) {
+      const b = this.block(i, j);
+      if (b && b.box.x1 >= box.x0 && b.box.x0 <= box.x1 && b.box.z1 >= box.z0 && b.box.z0 <= box.z1) out.push(b);
+    }
+    return out;
+  }
+  // a block's farmsteads (laid out on first asking)
+  farmsNear(box: { x0: number; z0: number; x1: number; z1: number }): Farm[] { const out: Farm[] = []; for (const b of this.blocksNear(box)) out.push(...this.farmsOf(b)); return out; }
   forget(box: { x0: number; z0: number; x1: number; z1: number }) { for (const [k, b] of this.blocks) if (b && b.box.x1 >= box.x0 && b.box.x0 <= box.x1 && b.box.z1 >= box.z0 && b.box.z0 <= box.z1) this.blocks.delete(k); }
 
   // A far tile's look: n × n RGBA texels over the box, a colour a field (COUNTRYSIDE.far), dark
@@ -389,7 +401,9 @@ export class Countryside {
       } else {
         // (facing its road down the track: the yard's near side towards it)
         const dx = (c.x - lane.x) / lane.d, dz = (c.z - lane.z) / lane.d;
-        farm = { x: c.x, z: c.z, a: Math.atan2(-dx, dz), side: 1, seed: seedF, track: [{ x: c.x - dx * 17, z: c.z - dz * 17 }, { x: lane.x, z: lane.z }] };
+        // (the track winds with the land, as a lane does: lanes.ts)
+        const from = { x: c.x - dx * 17, z: c.z - dz * 17 }, to = { x: lane.x, z: lane.z };
+        farm = { x: c.x, z: c.z, a: Math.atan2(-dx, dz), side: 1, seed: seedF, track: laneRoute(from, to, { seed: seedF, heightAt: this.inp.heightAt, waterDist: this.inp.waterDist }, { minR: 25, step: 10 }) };
         let bad = false;
         for (let t = 10; t < lane.d - 17 && !bad; t += 20) { const x = c.x - dx * (17 + t), z = c.z - dz * (17 + t); bad = W(x, z) < 15 || inWood(x, z); }
         if (bad) continue;
