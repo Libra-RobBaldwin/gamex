@@ -97,8 +97,8 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 | Exits measured, priors written | done locally |
 | Spokes and stems | done locally; checked on 1600×900 and 412×915 shots of seed 42 (the lanes continue the town's streets and fork outside it); tsc clean, full vitest green, all six phone suites green (rail and save with their positions moved, listed in the PR); not live |
 | PR open | #65, open, subscribed |
-| Radials, edge, T-junctions, closes, village shapes measured | not started |
-| Generator: town grown along its radials | not started |
+| Radials, edge, T-junctions, closes, village shapes measured | done locally: `tools/os/towns.mjs`, `PRIORS.towns`, a section in the report |
+| Generator: town grown along its radials | done locally (`layStreets` rewritten); region and worldmap tests pass; the start town checked on a 1600×900 shot (looks like a market town from the air); the six phone suites and the full unit suite running; not at 412×915 yet; not live |
 | Lane grades and density | not started |
 | Side-by-side evidence, compare yardsticks, hero pictures retaken | not started |
 | Review bug 11 (failed tiles asked for for ever) | not started |

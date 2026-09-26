@@ -66,3 +66,18 @@ out along the radials than between them, so the edge follows the roads, ragged, 
 inside, streets branch off the radials as T-junctions every 60 to 80 m in a town (every 120 m in a
 village), one in five of them a close about 100 m long, the rest running on to meet another street. These
 are `PRIORS.towns`.
+
+## The start town grown along its radials (seed 42, the same camera)
+
+`layStreets` now lays a place from `PRIORS.towns`: its radials meet at the middle (the high street's two
+and 2–4 more for a village, 4–6 for a town, none within 30–40° of another), the houses run further out
+along them than between them, cross streets join neighbouring radials part way out, side streets and
+closes branch off at the measured rate, and the city's and the towns' industrial estate is a small grid
+on the end of one radial. Every radial's end is a spoke, so the lanes leave along them.
+
+![the start town grown along its radials](town-radial.jpg)
+
+Still to judge as a player: the centre's towers and the buildings are vernacular's; the ribbons run far
+out along every radial (real towns are linear on one or two roads, not all); the closes end in the
+fields (real ones end in a turning head). The yardsticks (radials per place, junction shares, street
+lengths, orientation order) go into `compare.mjs` next, to show the seeded town within the real ranges.
