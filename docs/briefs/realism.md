@@ -1,7 +1,7 @@
 # Brief: realism (seeded places and roads as real UK ones, from OS data)
 
 Session: https://claude.ai/code/session_01N2xhRAKzQWsSt6RZQH8jdG (the onemap-4 session), branch
-`claude/work-realism` (off `claude/work-onemap-4` until step 4 merges: it carries step 4's commits until then).
+`claude/work-realism` (step 4 is merged, #61; the integration branch is merged in, so this branch carries only its own changes).
 Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU. Its brief came at 20:52 UTC, 26 Sep 2026.
 
 **Rule:** nothing is "done" until it is live (merged into the integration branch) and checked on a 412×915
@@ -95,8 +95,8 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 | Item | State |
 |---|---|
 | Exits measured, priors written | done locally |
-| Spokes and stems | done locally, checked at 1600×900, not at 412×915, not live |
-| PR open | no |
+| Spokes and stems | done locally; checked on 1600×900 and 412×915 shots of seed 42 (the lanes continue the town's streets and fork outside it); tsc clean, full vitest green, all six phone suites green (rail and save with their positions moved, listed in the PR); not live |
+| PR open | being opened |
 | Radials, edge, T-junctions, closes, village shapes measured | not started |
 | Generator: town grown along its radials | not started |
 | Lane grades and density | not started |
