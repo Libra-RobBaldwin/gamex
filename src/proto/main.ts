@@ -753,7 +753,10 @@ async function bringToLife(id: number) {
   if (!WORLD || !worldGame) return;
   const st = WORLD.settlements[id], q = worldGame.towns.places.find((x) => x.id === id)!;
   const t0 = performance.now();
-  q.live = true; // (so the roads to it are built now)
+  // (busy, not live, until it stands: a save taken part way through, say when the phone locks, must
+  // not list it as finished, or the load leaves it half built for ever. The roads to it are built
+  // now all the same, below.)
+  q.busy = true;
   // (its streets a few at a time, a frame between, so the view doesn't stall while a place is laid out)
   const made: number[] = [], streets = MAP.streets.filter((x) => x.settlement === id), begun = new Set<number | undefined>();
   let slice0 = performance.now();
@@ -761,7 +764,7 @@ async function bringToLife(id: number) {
     made.push(...buildStreets(net, streets.slice(k, k + 4), DEFAULT_OPTS, true, begun).made);
     if (performance.now() - slice0 > 8) { await nextFrame(); slice0 = performance.now(); }
   }
-  made.push(...layLiveRoutes(net, WORLD, DEFAULT_OPTS, 'road', (k) => !!worldGame.towns.places.find((x) => x.id === k)?.live, id).made);
+  made.push(...layLiveRoutes(net, WORLD, DEFAULT_OPTS, 'road', (k) => { const x = worldGame.towns.places.find((y) => y.id === k); return !!x && (x.live || x.id === id); }, id).made);
   const t1 = performance.now();
   commitRoads(made);
   const t2 = performance.now();
