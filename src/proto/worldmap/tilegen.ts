@@ -42,6 +42,7 @@ export interface TileData {
   ground: { pos: Float32Array; nor: Float32Array; idx: Uint32Array; cover: Uint8Array; n: number } | null;
   water: { pos: Float32Array; idx: Uint32Array } | null;
   solid: MeshArrays | null;
+  bld: MeshArrays | null; // (near: the places' buildings on their own, so the view can swap them for real ones up close: game/dress.ts)
   trees: Float32Array; // x, z, scale, kind
   hedges: { pieces: Float32Array; trees: Float32Array } | null; // x, z, a, len, h, w · x, z, s, kind
   stats: { ms: number; buildings: number; trees: number; tris: number };
@@ -180,7 +181,7 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
   const { level, i, j, detail } = req, full = tileBox(level, i, j), H = plan.half;
   const box: Box = { x0: Math.max(full.x0, -H), z0: Math.max(full.z0, -H), x1: Math.min(full.x1, H), z1: Math.min(full.z1, H) };
   const key = tileKey(level, i, j);
-  const empty = (): TileData => ({ key, level, i, j, detail, box, ground: null, water: null, solid: null, trees: new Float32Array(0), hedges: null, stats: { ms: 0, buildings: 0, trees: 0, tris: 0 } });
+  const empty = (): TileData => ({ key, level, i, j, detail, box, ground: null, water: null, solid: null, bld: null, trees: new Float32Array(0), hedges: null, stats: { ms: 0, buildings: 0, trees: 0, tris: 0 } });
   if (req.settlement !== undefined) return placeTile(plan, req.settlement, detail);
   if (box.x1 <= box.x0 || box.z1 <= box.z0 || inLive(box)) return empty();
   const fine = detail === 'near' || detail === 'mid';
@@ -196,14 +197,14 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
   const water = waterMesh(plan, box, STEP[detail], detail);
 
   // everything solid
-  const o = new Out();
+  const o = new Out(), ob = detail === 'near' ? new Out() : o;
   let nb = 0;
   const places = plan.grid.inBox(box);
   for (const s of places) {
     if (Math.max(Math.abs(s.x), Math.abs(s.z)) < LIVE_HALF) continue; // (the live play area's are the game's)
     const sc = settlementScene(plan, s);
     if (detail === 'vast' && inTile(s)) patch(o, s.x, s.z, s.r * (s.kind === 'village' ? 0.9 : 1.05), s.seed);
-    for (const b of sc.buildings) if (inTile(b)) { building(o, b, detail); nb++; }
+    for (const b of sc.buildings) if (inTile(b)) { building(ob, b, detail); nb++; }
     if (detail === 'vast') continue;
     const widen = detail === 'far' ? 1.6 : 1;
     for (const st of sc.streets) {
@@ -249,17 +250,17 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
       hedge = { pieces: new Float32Array(ps.flatMap((p) => [p.x, p.z, p.a, p.len, p.h, p.w])), trees: new Float32Array(ts.flatMap((t) => [t.x, t.z, t.s, t.kind])) };
     }
   }
-  const solid = o.arrays();
+  const solid = o.arrays(), bld = ob !== o ? ob.arrays() : null;
   const ms = typeof performance !== 'undefined' ? performance.now() - t0 : 0;
-  return { key, level, i, j, detail, box, ground: { ...ground, cover, n }, water, solid, trees, hedges: hedge, stats: { ms, buildings: nb, trees: trees.length / 4, tris: o.tris + ground.idx.length / 3 } };
+  return { key, level, i, j, detail, box, ground: { ...ground, cover, n }, water, solid, bld, trees, hedges: hedge, stats: { ms, buildings: nb, trees: trees.length / 4, tris: o.tris + (ob !== o ? ob.tris : 0) + ground.idx.length / 3 } };
 }
 
 // One place's buildings, streets and junctions on their own (see TileRequest).
 function placeTile(plan: WorldPlan, id: number, detail: Detail): TileData {
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-  const s = plan.settlements[id], sc = settlementScene(plan, s), o = new Out(), R = s.reach + 200;
+  const s = plan.settlements[id], sc = settlementScene(plan, s), o = new Out(), ob = detail === 'near' ? new Out() : o, R = s.reach + 200;
   const box = { x0: s.x - R, z0: s.z - R, x1: s.x + R, z1: s.z + R };
-  for (const b of sc.buildings) building(o, b, detail);
+  for (const b of sc.buildings) building(ob, b, detail);
   for (const st of sc.streets) {
     const N = normals(st.path);
     strip(o, st.path, N, -st.kerb, st.kerb, 0.06, rgb(COL.asphalt));
@@ -278,7 +279,7 @@ function placeTile(plan: WorldPlan, id: number, detail: Detail): TileData {
     }
   }
   const ms = typeof performance !== 'undefined' ? performance.now() - t0 : 0;
-  return { key: `place:${id}`, level: 0, i: 0, j: 0, detail, box, ground: null, water: null, solid: o.arrays(), trees: new Float32Array(0), hedges: null, stats: { ms, buildings: sc.buildings.length, trees: 0, tris: o.tris } };
+  return { key: `place:${id}`, level: 0, i: 0, j: 0, detail, box, ground: null, water: null, solid: o.arrays(), bld: ob !== o ? ob.arrays() : null, trees: new Float32Array(0), hedges: null, stats: { ms, buildings: sc.buildings.length, trees: 0, tris: o.tris + (ob !== o ? ob.tris : 0) } };
 }
 
 // is a point clear of the roads, railways, plots and water? (as the ground's hedge planner asks it)

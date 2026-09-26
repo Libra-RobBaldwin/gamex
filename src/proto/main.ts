@@ -14,6 +14,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setGround, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
 import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
 import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops
+import { Dresser } from './game/dress'; // the 50 km map's scenery as real buildings up close
 import { placeResolver, REAL_VERN, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
@@ -236,6 +237,7 @@ const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
 for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; m.userData.surface = true; if (!BIG) scene.add(m); } // (a big map draws its woods a tile at a time: regionView; surface: the underground view needn't draw them twice)
 // a 50 km map: the rest of the map beyond the live area, streamed in tiles from workers (worldmap/)
 const worldGame = WORLD ? new WorldGame({ scene, plan: WORLD, field: RELIEF, drape, look: LOOK, trees: { crown: crownGeo, pine: pineGeo, trunk: trunkGeo, crownMat, pineMat, trunkMat }, live: SAVED?.world?.live ?? [WORLD.start] }) : null;
+const dresser = worldGame ? new Dresser({ scene, plan: WORLD!, make: generate, view: worldGame.view }) : null;
 
 // Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
 // registry (a spatial hash, so this looks only at claims near the tree); plots through `lots`.
@@ -2830,6 +2832,7 @@ function frame(now: number) {
     // (a 50 km map: the scenery round the live area for the view; and a place in the live area to bring to life)
     const next = worldGame.frame(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), !activating);
     if (next !== null) void activatePlace(next);
+    dresser?.update(view, loaded ? 5 : 0); // (real buildings for the scenery close under the view: game/dress.ts)
     worldIdle(loaded ? 5 : 0);
     worldGame.liveCanopy(gameGround.ground.uniforms, view.h);
   }
@@ -2869,7 +2872,7 @@ Object.assign((window as unknown as { proto: object }).proto, { interchanges, bl
 Object.assign((window as unknown as { proto: object }).proto, { railway, railDraw, railGame }); // (rail/)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
-Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, worldGame, portals, portalFlows, rail: railway, edgeFace, footpaths }); // (the map being played, and how long its loading took, stage by stage)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, worldGame, dresser, portals, portalFlows, rail: railway, edgeFace, footpaths }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
