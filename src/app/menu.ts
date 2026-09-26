@@ -41,7 +41,10 @@ const artFor = (id: string) => MAP_ART[id];
 const savedMap = (e: SaveEntry) => new URLSearchParams(e.map.query).get('map') ?? e.map.id;
 // a town saved on a map the game no longer has (the starter town, the sandbox, a 6 km region): it can't
 // open, so it's listed as such with Delete, and Continue passes it over
-export const goneSave = (e: SaveEntry) => !!GONE[savedMap(e)] || !!GONE[e.map.id] || (savedMap(e) === 'region' && (new URLSearchParams(e.map.query).get('size') ?? '6') === '6');
+// (and one saved on a real region before real regions were 50 km maps, ?map=exe with no real=, which
+// the game turns away too: real/worldmap.ts isOldRealSave)
+const oldReal = (e: SaveEntry) => { const q = new URLSearchParams(e.map.query); return REAL_REGION_LIST.some((r) => r.id === q.get('map')) && !q.has('real'); };
+export const goneSave = (e: SaveEntry) => !!GONE[savedMap(e)] || !!GONE[e.map.id] || (savedMap(e) === 'region' && (new URLSearchParams(e.map.query).get('size') ?? '6') === '6') || oldReal(e);
 const playable = (h: MenuHost) => h.saves.filter((e) => !goneSave(e));
 
 // the town behind the menu: a tall picture for a phone held upright, a wide one otherwise
