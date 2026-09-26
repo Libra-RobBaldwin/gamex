@@ -951,7 +951,7 @@ function bulldozeTap(p: P) {
   } else {
     const d = net.def(seg), len = pathLength(net.path(seg));
     what = `${d.label.split(' · ')[0]} · ${Math.round(len)} m`;
-    refund = Math.round(price(d.cost * len) / 2);
+    refund = paid.has(seg.id) ? Math.round(price(d.cost * len) / 2) : 0; // (a road the map gave cost nothing, so refunds nothing: the review's bug 4)
     const lined = seg.stops.flatMap((st) => calls(st.id));
     if (buildings.some((b) => !b.dying && b.lot.seg === seg.id)) why = 'Buildings face this road, and it’s their only way in';
     else if (lined.length) why = `Line ${[...new Set(lined.map((l) => l.num))].join(' and ')} calls at a stop on it · withdraw the line first`;
@@ -1661,8 +1661,19 @@ function buildJunctionDraft(d: Draft, pick: { form: IxForm; style: SlipStyle; si
   hint(`Built for ${money(cost)}: the motorway and a ${IX_NAME[pick.form].toLowerCase()}. Tap the junction to see how it's working.`, 'check');
 }
 
+// The roads the player paid for, by segment id: the bulldozer refunds half of these and nothing for
+// a road the map gave. A paid road split by a later one passes it on to its halves (their ids are new).
+const paid = new Set<number>(SAVED?.paid ?? []);
 function buildRoad(a: End, b: End, ctrl: P | undefined, o: RoadOpts) {
+  const before = new Set(net.segs.keys()), paidPaths = [...paid].map((id) => net.segs.get(id)).filter((x): x is RSeg => !!x).map((x) => net.path(x));
   const made = net.build(a, b, ctrl, o);
+  for (const id of made) paid.add(id);
+  for (const [id, sg] of net.segs) {
+    if (before.has(id) || paid.has(id)) continue;
+    const p = net.path(sg), m = p[Math.floor(p.length / 2)];
+    if (paidPaths.some((q) => closestOnPath(m, q).d < 1)) paid.add(id);
+  }
+  for (const id of [...paid]) if (!net.segs.has(id)) paid.delete(id);
   // demolished buildings sink away rather than vanishing
   for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
   for (const l of net.touched) { const x = buildings.find((y) => y.lot === l); if (x && !x.dying) regenerate(x); }
@@ -2492,7 +2503,7 @@ function snapshot(): GameSave {
     clock, speed, rate, rand: rand.state,
     net: saveNetwork(net), queue,
     junctions: [...junctions.values()].filter((j) => !j.auto), interchanges,
-    industries: industries.save(), railway: railway.save(), lines: lines.save(), town: t, purse: purse.save(),
+    industries: industries.save(), railway: railway.save(), lines: lines.save(), town: t, purse: purse.save(), paid: [...paid],
     ...(worldGame ? { world: { live: worldGame.towns.liveIds } } : {}), // (a 50 km map: which places had come to life)
   };
 }
