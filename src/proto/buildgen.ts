@@ -1656,7 +1656,9 @@ function civic(k: Kit, l: Lot, r: () => number) {
 
 // ---------------- leftover land: parks, playgrounds, allotments, car parks, scrub ----------------
 export type RegionKind = 'verge' | 'pocket' | 'playground' | 'allotments' | 'park' | 'carpark' | 'scrub' | 'grounds';
-export interface RegionShape { cells: P3[]; size: number; kind: RegionKind; seed: number; roadEdges: [number, number, number, number][] }
+// (`leafy` scales how thickly its trees, shrubs and beds are planted: 1 unless said, as for the town's
+// small parks; a real map's big park is open lawn with trees dotted about: real/lay.ts parkLeafiness)
+export interface RegionShape { cells: P3[]; size: number; kind: RegionKind; seed: number; roadEdges: [number, number, number, number][]; leafy?: number }
 type P3 = { x: number; z: number };
 const REGION_NAMES: Record<RegionKind, string> = {
   verge: 'Planted verge', pocket: 'Pocket park', playground: 'Playground', allotments: 'Allotments', park: 'Park', carpark: 'Car park', scrub: 'Rough ground', grounds: 'Gardens',
@@ -1690,9 +1692,10 @@ export function makeRegion(reg: RegionShape): BuiltShape {
   const railings = () => { for (const [x0, z0, x1, z1] of reg.roadEdges) k.at((x0 + x1) / 2, (z0 + z1) / 2, -Math.atan2(z1 - z0, x1 - x0), () => k.box(0, 0, 0, Math.hypot(x1 - x0, z1 - z0) + 0.05, 1.1, 0.06, plain('#23262a'))); };
   const keep: { x: number; z: number; r: number }[] = [];
   const clear = (x: number, z: number) => keep.every((o) => Math.hypot(x - o.x, z - o.z) > o.r);
-  const trees = (p: number, s = 0.9) => { let n = 0; for (const c of cells) if (r() < p && clear(c.x, c.z)) { tree(k, c.x + (r() - 0.5) * S * 0.6, c.z + (r() - 0.5) * S * 0.6, s + r() * 0.4, r); n++; } return n; };
+  const L = reg.leafy ?? 1;
+  const trees = (p0: number, s = 0.9) => { const p = p0 * L; let n = 0; for (const c of cells) if (r() < p && clear(c.x, c.z)) { tree(k, c.x + (r() - 0.5) * S * 0.6, c.z + (r() - 0.5) * S * 0.6, s + r() * 0.4, r); n++; } return n; };
   if (reg.kind === 'verge' || reg.kind === 'grounds') {
-    for (const c of cells) if (r() < 0.6) sphere(k, c.x + (r() - 0.5) * 2, 0.6, c.z + (r() - 0.5) * 2, 0.8 + r() * 0.5, plain(pick(r, LEAVES)), 6, 3, 0.8);
+    for (const c of cells) if (r() < 0.6 * L) sphere(k, c.x + (r() - 0.5) * 2, 0.6, c.z + (r() - 0.5) * 2, 0.8 + r() * 0.5, plain(pick(r, LEAVES)), 6, 3, 0.8);
     trees(0.3, 0.8);
     notes.push('shrubs and trees');
   } else if (reg.kind === 'pocket' || reg.kind === 'park') {
@@ -1705,7 +1708,7 @@ export function makeRegion(reg: RegionShape): BuiltShape {
     for (const c of path) alongX ? flat(k, c.x - h, c.z - 1.2, c.x + h, c.z + 1.2, 0.075, gravelM()) : flat(k, c.x - 1.2, c.z - h, c.x + 1.2, c.z + h, 0.075, gravelM());
     path.forEach((c, i) => { if (i % 2 === 1) bench(k, alongX ? c.x : c.x + 2, alongX ? c.z + 2 : c.z, alongX); });
     const tn = trees(reg.kind === 'park' ? 0.3 : 0.4);
-    for (const c of cells) if (r() < 0.12 && clear(c.x, c.z)) flat(k, c.x - 1.5, c.z - 1, c.x + 1.5, c.z + 1, 0.07, bedM());
+    for (const c of cells) if (r() < 0.12 * L && clear(c.x, c.z)) flat(k, c.x - 1.5, c.z - 1, c.x + 1.5, c.z + 1, 0.07, bedM());
     if (reg.kind === 'park' && cells.length > 80 && clear(centre.x, centre.z + S)) { k.prismN(centre.x, centre.z + S, 3.2, 8, 0, 0.6, plain('#c9c2b4')); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; k.box(centre.x + Math.cos(a) * 2.8, 0.6, centre.z + S + Math.sin(a) * 2.8, 0.15, 2.6, 0.15, plain('#2e5a45')); } k.prismN(centre.x, centre.z + S, 3.6, 8, 3.2, 0.2, plain('#2e5a45'), 1.4, plain('#2e5a45')); notes.push('bandstand'); }
     railings();
     notes.push(`${tn} trees`, 'benches', 'railings');

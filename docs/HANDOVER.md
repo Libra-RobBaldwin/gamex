@@ -2,6 +2,13 @@
 
 ## Latest: HUD, start menu and region work (25 Sep 2026)
 
+**Countryside on `WORLD` (26 Sep, `claude/work-country`).** One field style everywhere: the farm
+blocks of `region/fields.ts` on every 50 km tile, the live area and the town (the town's fields
+changed; its world state didn't). The old grid, bend and swirl generator in `ground/layout.ts` is
+deleted. Woods are a canopy mesh (in each tile's one solid mesh, so no extra draw call), farmsteads
+are tile scenery, and farm tracks route over the land. `worldmap/country.ts` is now countryside's.
+`region/lanes.ts` `laneRoute` is on offer to world50 for its B roads and lanes. See docs/ground.md.
+
 **PAUSED 25 Sep ~20:40 UTC for a credit limit. To resume:**
 1. All six region sessions were told to commit and push, write a note on where they stopped and
    stop. Their check-ins were disabled, not deleted: `trig_01AyapkhwsVcMhAMAKQ9caju` (#42),

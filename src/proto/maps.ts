@@ -26,13 +26,15 @@ export interface MapInfo {
   guide?: boolean;
   /** Play opens a setup screen first (the region's seed, style, rivers and towns: region/options.ts) */
   setup?: boolean;
+  /** offered inside New game > Region (a real place from OS maps), not as a card of its own */
+  inRegion?: boolean;
 }
 
 export const MAPS: MapInfo[] = [
   { id: 'town', name: 'Starter town', blurb: 'A small market town by a lake, with a railway, an estate and room to grow.', icon: 'home', ready: true, guide: true },
   { id: 'region', name: 'Region', blurb: 'Fifty kilometres of towns, villages, hills and coast, joined by country lanes: the rest is yours to build.', icon: 'map', ready: true, setup: true },
-  { id: 'exe', name: 'Exeter', blurb: 'The real city and its river, railway and hills, from Ordnance Survey maps. The Exe estuary around it is 50 km of real Devon.', icon: 'building', ready: true },
-  { id: 'teme', name: 'Ludlow', blurb: 'A real market town on the Teme under its castle, from Ordnance Survey maps, in 50 km of the Shropshire Hills and the Welsh Marches.', icon: 'building', ready: true },
+  { id: 'exe', name: 'Exeter', blurb: 'The real city and its river, railway and hills, from Ordnance Survey maps. The Exe estuary around it is 50 km of real Devon.', icon: 'building', ready: true, inRegion: true },
+  { id: 'teme', name: 'Ludlow', blurb: 'A real market town on the Teme under its castle, from Ordnance Survey maps, in 50 km of the Shropshire Hills and the Welsh Marches.', icon: 'building', ready: true, inRegion: true },
   { id: 'place', name: 'Real town', blurb: 'A real UK town from OpenStreetMap, anywhere you pick.', icon: 'pin', ready: false, soon: 'Plans only for now', link: { href: './places.html', label: 'Open Real Town Plans' } },
   { id: 'sandbox', name: 'Sandbox', blurb: 'Empty land by the lake. Build a town from nothing.', icon: 'hammer', ready: true },
 ];

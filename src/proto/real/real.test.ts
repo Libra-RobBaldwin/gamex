@@ -39,15 +39,15 @@ describe('the Exe estuary, round Exeter', () => {
   it('finds Exeter, its river, its railway stations and its roads', () => {
     expect(map.settlements.find((s) => s.name === 'Exeter')?.kind).toBe('city');
     expect(map.water.rivers.some((r) => r.width >= 15)).toBe(true);
-    expect(map.real.overpass.counts.station).toBeGreaterThanOrEqual(5); // (St David's, Central, St Thomas, St James' Park, Polsloe Bridge…)
-    expect(map.real.overpass.counts['road:a']).toBeGreaterThan(50);
+    expect(map.real.overpass!.counts.station).toBeGreaterThanOrEqual(5); // (St David's, Central, St Thomas, St James' Park, Polsloe Bridge…)
+    expect(map.real.overpass!.counts['road:a']).toBeGreaterThan(50);
     expect(map.ground!.max).toBeGreaterThan(60); // (Exeter stands on hills over the Exe)
     expect(map.trees.spots!.length).toBeGreaterThan(1000);
   });
   it('builds into a network: connected roads, a railway, and buildings on lots', () => {
     const w = new MapWater(map.water);
     const net = new Network((p) => w.edgeDistance(p, 20) < 9, map.bound, 1);
-    const laid = layReal(net, map.real.overpass);
+    const laid = layReal(net, map.real.overpass!);
     console.log('laid', laid.stats, Math.round(laid.ms), 'ms', laid.stations.map((s) => s.name).join(', '));
     const roads = [...net.segs.values()].filter((s) => net.def(s).cls === 'road'), rails = [...net.segs.values()].filter((s) => net.def(s).cls === 'rail');
     expect(roads.length).toBeGreaterThan(1500);

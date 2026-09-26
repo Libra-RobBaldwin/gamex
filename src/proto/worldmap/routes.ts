@@ -447,6 +447,21 @@ function planRails(c: Ctx, r: Rand, L: LaneFinder): Rail[] {
   // (on the side of the town facing the line, so it doesn't loop round the town to call)
   const stationAt = (s: WorldSettlement): XZ => { const q = s.x * n.x + s.z * n.z, k = (s.id === 0 ? 0.55 : 0.35) * (s.id === 0 || q <= 0 ? 1 : -1); return { x: s.x + n.x * s.r * k, z: s.z + n.z * s.r * k }; };
   const ends = (sgn: number) => { const last = sgn > 0 ? calls[calls.length - 1] : calls[0], t = H * 1.15; return { x: last.x + u.x * sgn * t, z: last.z + u.z * sgn * t }; };
+  // (a town that would turn the line back on itself to call is left to a branch: no stop may bend
+  // the line through more than 60 degrees)
+  for (let changed = true; changed;) {
+    changed = false;
+    const way = [ends(-1), ...calls.map(stationAt), ends(1)];
+    let worst = -1, wa = 0;
+    for (let k = 1; k < way.length - 1; k++) {
+      if (calls[k - 1].id === 0) continue;
+      const a = way[k - 1], b = way[k], c = way[k + 1];
+      const u1 = Math.atan2(b.z - a.z, b.x - a.x), u2 = Math.atan2(c.z - b.z, c.x - b.x);
+      const turn = Math.abs(Math.atan2(Math.sin(u2 - u1), Math.cos(u2 - u1)));
+      if (turn > Math.PI / 3 && turn > wa) { wa = turn; worst = k - 1; }
+    }
+    if (worst >= 0) { calls.splice(worst, 1); changed = true; }
+  }
   const pts = [ends(-1), ...calls.map(stationAt), ends(1)];
   // (a line that would run into the sea stops at its last station short of it)
   const dry = (p: XZ) => !sea || c.water.seaDistance(p.x, p.z, 500) > 300;

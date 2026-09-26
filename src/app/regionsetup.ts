@@ -4,6 +4,7 @@
 // game reads them from the address (?map=region&seed=…). The last region started is remembered.
 
 import { DEFAULT_OPTIONS, SIZES as MAP_SIZES, STYLES, limitsFor, optionsFromQuery, optionsQuery, regionOptions, type RegionOptions, type Style } from '../proto/region/options';
+import { REAL_REGION_LIST } from '../proto/real/list';
 import { icon } from '../proto/ui/icons';
 import { KEYS, load, save } from './store';
 
@@ -76,7 +77,10 @@ export function regionBody(o: RegionOptions) {
   if (step === 0) return `${dots}<h3 class="q">What kind of place?</h3>
     ${cards(PLACES.map((p) => ({ ...p, on: same(o, p.patch) })), 'data-place')}
     <button class="act wide lib-link" data-surprise>${icon('sparkles')}<span>Surprise me</span></button>
-    ${nav(`<button class="act primary" data-next>${icon('play')}<span>Next</span></button>`)}`;
+    ${nav(`<button class="act primary" data-next>${icon('play')}<span>Next</span></button>`)}
+    <h4 class="or">Or play a real place</h4>
+    <p class="fine">Real towns, roads, rivers and hills from Ordnance Survey maps. Tap one to start.</p>
+    <div class="picks">${REAL_REGION_LIST.map((r) => `<button class="pick real" data-real="${r.id}"><img src="${r.thumb}" alt="" loading="lazy" decoding="async"><span><b>${r.name}</b><small>${r.blurb}</small></span>${icon('play', 'tick')}</button>`).join('')}</div>`;
   if (step === 1) return `${dots}<h3 class="q">What's the climate?</h3>
     ${cards(CLIMATES.map(([id, name, note, ic]) => ({ id, name, note, ic, on: o.style === id })), 'data-climate')}
     ${nav(`<button class="act primary" data-next>${icon('play')}<span>Next</span></button>`)}`;
@@ -132,6 +136,8 @@ export function bindRegion(root: HTMLElement, o0: RegionOptions, redraw: (o: Reg
     o = regionOptions({ ...o, ...PLACES[r(PLACES.length)].patch, ...sz[r(sz.length)].patch, style: CLIMATES[r(CLIMATES.length)][0], seed: r(99999) + 1 });
     go(STEPS.length - 1);
   });
+  // (a real place from OS maps: started as it is, nothing to set up: real/list.ts)
+  on('[data-real]', (el) => start(`map=${el.dataset.real}`));
   on('[data-next]', () => go(step + 1));
   on('[data-prev]', () => go(step - 1));
   on('[data-goto]', (el) => go(Number(el.dataset.goto)));

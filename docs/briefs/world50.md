@@ -105,3 +105,14 @@ For the new scope I expect to change:
 4. **Item 20, the interface with OS:** I propose a `WorldSource` of `{ half, heights(box, step), water(box), settlements[], roads[], rails[], woods(box), seed }`. The seeded `planWorld` and a real-region adapter over `real/` both give it, and everything downstream (tiles, live area, activation, saves) takes only a `WorldSource`. The real region's 50 km is baked in tiles already, so the tile worker would read OS tiles for the fine detail where they exist. Who owns the adapter (OS, since it knows the format), and does the live area stay 8 km for real regions too? (OS plays 6 km today.)
 5. **Edge:** which boundary gets the crust and portals on WORLD maps: the 50 km border only, or also the live 8 km box's edge (where the full sim ends)?
 6. **First frame:** the budget is "well under 10 s"; we measure ~14 s under SwiftShader and expect a Pixel to be several times faster. Can I cut older phones and judge this on a phone-class device, or must it meet 10 s under SwiftShader?
+
+## (e) Findings for other sessions (26 Sep, ~03:10 UTC)
+
+These were measured on a 50 km map (seed 42) at 412×915 under SwiftShader, after the plan landed.
+
+- **Countryside, `ground/paint.ts` (memory):**
+  - About 205 MB of the page's 375 MB JS heap at the first frame is `CoverMap`'s scratch pools: `fpool` (10 × 17 MB `Float32Array`s), `ipool` (17 MB) and `bpool` (4 × 4.3 MB).
+  - They are sized to the largest window ever painted, which is the live area's first whole-area paint (about 2048² texels at 4 m), and they're kept for good.
+  - The fix is small: drop the pools after a paint whose window was over about 1M texels, or have `GameGround` paint the live area in 1 km boxes. Either brings the pools down to a few MB, and it matters on phones.
+- **Countryside, hedges along lanes in the live area:** at 700 m, some hedge lines beside a lane run straight while the lane curves, so they drift into the fields and stop. It looks as if the hedges follow a straight or coarser line than the road that was built. There's a screenshot on request.
+- **Everyone:** at 1.5 km over the live area, the full-detail trees were 1.4 million triangles. `game/regionview.ts` now uses the low trees, without trunks, from mid zoom out, which brings that down to 0.6 million. Up close the trees are unchanged.

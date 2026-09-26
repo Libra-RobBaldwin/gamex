@@ -17,10 +17,9 @@
 // Pure: no three.js.
 import { LEVEL } from '../region/water';
 import { GROUND_LIFT } from '../region/terrain';
-import { STYLE_LOOKS } from '../region/styles';
 import { industryScene } from './industry';
 import { settlementScene, WALLS, ROOFS, type SceneBuilding } from './towns';
-import { clipPath, countryInput, farmsIn, hedges, paintCover, woodTrees, type Box } from './country';
+import { canopyIn, clipPath, countryInput, farmsIn, hedges, paintCover, woodTrees, type Box } from './country';
 import { LIVE_HALF, type WorldPlan } from './plan';
 import type { XZ } from '../region/water';
 import { Occupancy } from '../ground/hedgerows';
@@ -29,6 +28,7 @@ export type Detail = 'near' | 'mid' | 'far' | 'vast';
 export const LEVEL_SIZE = [1000, 4000, 16000] as const; // metres across a tile at each level
 export const LEVEL_OF: Record<Detail, number> = { near: 0, mid: 0, far: 1, vast: 2 };
 const TEXEL: Record<Detail, number> = { near: 4, mid: 8, far: 16, vast: 64 }; // cover metres per texel
+const CANOPY: Record<Detail, number> = { near: 5, mid: 10, far: 24, vast: 64 }; // the woods' canopy's grid (m)
 const STEP: Record<Detail, number> = { near: 25, mid: 50, far: 100, vast: 200 }; // ground grid (the drape field's is 50 m)
 // how much wider trunk roads, railways and rivers are drawn further out, so the network reads as a map
 const WIDEN: Record<Detail, number> = { near: 1, mid: 1.15, far: 1.8, vast: 3.2 };
@@ -122,7 +122,7 @@ const shade = (c: [number, number, number], k: number): [number, number, number]
 function building(o: Out, b: SceneBuilding, detail: Detail) {
   const co = Math.cos(b.rot), si = Math.sin(b.rot), hw = b.w / 2, hd = b.d / 2;
   const at = (u: number, v: number, y: number) => [b.x + u * co - v * si, y, b.z + u * si + v * co];
-  const wall = rgb(WALLS[b.wall] ?? WALLS[0]), roof = rgb(ROOFS[b.roof] ?? ROOFS[0]), foot = shade(wall, 0.72);
+  const wall = rgb(b.wc ?? WALLS[b.wall] ?? WALLS[0]), roof = rgb(b.rc ?? ROOFS[b.roof] ?? ROOFS[0]), foot = shade(wall, 0.72);
   const h = b.h, top = detail === 'near' || detail === 'mid' ? b.ridge : 0;
   if (detail === 'vast') { o.quad(at(-hw, -hd, h), at(-hw, hd, h), at(hw, hd, h), at(hw, -hd, h), UP, roof); return; }
   // walls: -v (front), +u, +v (back), -u
@@ -159,7 +159,7 @@ function building(o: Out, b: SceneBuilding, detail: Detail) {
     if (top && b.kind !== 'shop') {
       const cu = hw - 0.9, ch = h + top + 0.9, cw = 0.35;
       const C = (du: number, dv: number, y: number) => at(cu + du, dv, y);
-      const cc = rgb(WALLS[b.wall] ?? WALLS[0]), cn: [number, number, number][] = [[si, 0, -co], [co, 0, si], [-si, 0, co], [-co, 0, -si]];
+      const cc = rgb(b.wc ?? WALLS[b.wall] ?? WALLS[0]), cn: [number, number, number][] = [[si, 0, -co], [co, 0, si], [-si, 0, co], [-co, 0, -si]];
       const cs: [number, number, number, number][] = [[-cw, -cw, cw, -cw], [cw, -cw, cw, cw], [cw, cw, -cw, cw], [-cw, cw, -cw, -cw]];
       cs.forEach(([u0, v0, u1, v1], k) => o.quad(C(u1, v1, h + top - 0.6), C(u0, v0, h + top - 0.6), C(u0, v0, ch), C(u1, v1, ch), cn[k], shade(cc, 0.85)));
       o.quad(C(-cw, -cw, ch), C(-cw, cw, ch), C(cw, cw, ch), C(cw, -cw, ch), UP, shade(cc, 0.6));
@@ -186,13 +186,13 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
   if (box.x1 <= box.x0 || box.z1 <= box.z0 || inLive(box)) return empty();
   const fine = detail === 'near' || detail === 'mid';
   const inTile = (p: XZ) => p.x >= box.x0 && p.x < box.x1 && p.z >= box.z0 && p.z < box.z1 && !(p.x > LIVE.x0 && p.x < LIVE.x1 && p.z > LIVE.z0 && p.z < LIVE.z1);
-  const look = STYLE_LOOKS[plan.options.style];
 
   // the ground: its cover, and the grid (the beds of lakes and the sea; the heights are the drape's)
   const input = countryInput(plan, box, fine);
   // (the industries' yards are worn ground: no fields, hedges or woods on them)
   for (const ind of plan.industries) if (Math.abs(ind.x - (box.x0 + box.x1) / 2) < (box.x1 - box.x0) / 2 + 200 && Math.abs(ind.z - (box.z0 + box.z1) / 2) < (box.z1 - box.z0) / 2 + 200) (input.plots ??= []).push({ poly: industryScene(ind).yard, kind: 'yard' });
-  const { layout, data: cover, n } = paintCover(input, box, TEXEL[detail]);
+  const { layout, data: cover, n } = paintCover(plan, input, box, TEXEL[detail]);
+  const coverData = { a: cover, x0: box.x0, z0: box.z0, size: box.x1 - box.x0, n };
   const ground = groundGrid(plan, box, STEP[detail], touchesLive(box) ? LIVE : null);
   const water = waterMesh(plan, box, STEP[detail], detail);
 
@@ -232,10 +232,13 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
   }
   // the trunk roads and the railways
   trunk(plan, o, box, detail, inTile);
-  // trees in the woods, hedgerows
+  // the woods' canopy (countryside: ground/canopy.ts), in the solid mesh, so it costs no draw call
+  const cano = canopyIn(plan, layout, coverData, box, CANOPY[detail], inTile);
+  if (cano) { const base = o.pos.length / 3; for (const v of cano.pos) o.pos.push(v); for (const v of cano.nor) o.nor.push(v); for (const v of cano.col) o.col.push(v); for (const k of cano.idx) o.idx.push(k + base); }
+  // trees along the woods' edges, standing out of the canopy; hedgerows
   let trees = new Float32Array(0), hedge: TileData['hedges'] = null;
   if (fine) {
-    const all = woodTrees(layout, box, detail === 'near' ? 16 : 19, look.trees.pines, plan.seed + level * 7 + 3);
+    const all = woodTrees(layout, coverData, box, detail === 'near' ? 14 : 24);
     // (clear of the roads, railways and plots: they're painted as verge and garden, not wood)
     const occ = new OccFree(input);
     const kept: number[] = [];

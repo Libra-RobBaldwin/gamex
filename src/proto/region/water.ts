@@ -128,15 +128,24 @@ export class MapWater {
     })];
   }
   // the ground with only the lakes' bowls in it (rivers' channels are drawn as strips of their own)
+  // (each bowl and channel skipped outright when the spot is outside its box: the same answer, quicker)
   lakesGround = (x: number, z: number) => {
     let h = 0;
-    for (const L of this.spec.lakes) { const g = lakeGroundOf(L, x, z); if (g < h) h = g; }
+    const B = this.boxes;
+    for (let k = 0; k < this.spec.lakes.length; k++) {
+      const b = B[k];
+      if (x < b.x0 || x > b.x1 || z < b.z0 || z > b.z1) continue;
+      const g = lakeGroundOf(this.spec.lakes[k], x, z); if (g < h) h = g;
+    }
     return h;
   };
   // the ground: flat at 0, dipping into each bed
   ground = (x: number, z: number) => {
     let h = this.lakesGround(x, z);
-    for (const r of this.rivers) {
+    const n = this.spec.lakes.length;
+    for (let k = 0; k < this.rivers.length; k++) {
+      const r = this.rivers[k], b = this.boxes[n + k];
+      if (x < b.x0 || x > b.x1 || z < b.z0 || z > b.z1) continue;
       const d = r.index.near(x, z, r.half + RIM);
       if (d === Infinity) continue;
       const half = r.spec.widths ? r.index.at(r.halves) : r.half;
@@ -149,7 +158,12 @@ export class MapWater {
   // Could there be water within `m` metres of this spot? (false means certainly not)
   mayBeNear(p: XZ, m: number) {
     for (const L of this.spec.lakes) { const B = lakeBox(L); if (p.x >= B.x0 - m && p.x <= B.x1 + m && p.z >= B.z0 - m && p.z <= B.z1 + m) return true; }
-    for (const r of this.rivers) if (r.index.near(p.x, p.z, r.half + RIM + m) !== Infinity) return true;
+    const n = this.spec.lakes.length;
+    for (let k = 0; k < this.rivers.length; k++) {
+      const r = this.rivers[k], b = this.boxes[n + k];
+      if (p.x < b.x0 - m || p.x > b.x1 + m || p.z < b.z0 - m || p.z > b.z1 + m) continue;
+      if (r.index.near(p.x, p.z, r.half + RIM + m) !== Infinity) return true;
+    }
     return false;
   }
   // Roughly how far a spot is from the water's edge (negative in the water): from the shapes, not

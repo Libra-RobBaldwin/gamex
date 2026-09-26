@@ -72,7 +72,7 @@ export function placeLots(net: Network, lots: Lot[], why: Record<string, number>
     const poly = rectCorners(l.x, l.z, l.rot, l.w + 0.6, l.d + 0.6);
     if (poly.some((p) => net.isWater(p) || Math.abs(p.x) > net.bound || Math.abs(p.z) > net.bound)) { why.water = (why.water ?? 0) + 1; return null; }
     if (!net.land.free(poly)) { why.land = (why.land ?? 0) + 1; return null; }
-    const foot = rectCorners(l.x, l.z, l.rot, l.w - 1.2, l.d - 1.2); // (a real footprint's rectangle overshoots it a little)
+    const foot = rectCorners(l.x, l.z, l.rot, l.w - 0.2, l.d - 0.2); // (as drawn: neighbours may touch, as a terrace's houses do, but not cross)
     for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (const o of grid.get(`${Math.floor(l.x / C) + di},${Math.floor(l.z / C) + dj}`) ?? []) if (polysOverlap(foot, o)) { why.overlap = (why.overlap ?? 0) + 1; return null; }
     return foot;
   };
@@ -115,6 +115,11 @@ export function clearOf(lots: Lot[], gap = 14) {
 // sites over 40 ha are left to the ground painter.
 export interface Green { c: number; rings: XZ[][]; holes: boolean[] }
 const GREEN_KIND: Record<(typeof GREEN_CLASSES)[number], RegionKind> = { park: 'park', playing: 'park', golf: 'park', allotment: 'allotments', cemetery: 'grounds', religious: 'grounds', play: 'playground', sport: 'park', bowls: 'park', tennis: 'park', other: 'park' };
+// How thickly a real park is planted (buildgen's makeRegion `leafy`): the generator's parks are
+// small gaps between houses, planted as thickly as a garden (a tree on every third 5 m cell); a real
+// park is hectares of open lawn with its trees dotted about and round the edge, so the bigger it
+// is the thinner (a 1 ha park as the generator's; a 14 ha one a tree every 400 m² or so).
+export const parkLeafiness = (cells: number) => Math.min(1, Math.sqrt(400 / Math.max(1, cells)));
 export function greenRegions(net: Network, lots: Lot[], greens: Green[]): Region[] {
   const taken = new Set<string>(), key = (x: number, z: number) => `${Math.round(x / CELL)},${Math.round(z / CELL)}`;
   for (const l of lots) {
