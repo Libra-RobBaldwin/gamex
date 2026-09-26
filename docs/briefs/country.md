@@ -5,7 +5,7 @@ Updated 26 Sep 2026, about 08:30 UTC.
 
 ## Status
 
-**Not finished yet.** The one-map dedup and the 50 km fixes are in a PR, not merged. One deletion
+**Not finished yet.** The one-map dedup and the 50 km fixes are in PR #52, not merged. One deletion
 is waiting on world50 (see "Left to do").
 
 ## Done and live (merged into the integration branch)
