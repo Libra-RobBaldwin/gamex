@@ -110,6 +110,14 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   const q = new URLSearchParams(new URL(page.url()).search);
   check(q.get('map') === 'region' && q.get('seed') === '42' && q.get('size') === '50', `the address names the region and its options (${new URL(page.url()).search})`);
   check(segs > 10, `the region starts with its start town (${segs} roads)`);
+  // the first view shows the start town, not sky: the ground under the middle of the screen and a
+  // quarter of the way down is found, and the middle is in the town
+  const look = await page.evaluate(() => {
+    const P = window.proto, W = innerWidth, H = innerHeight, st = P.map.world.settlements[0];
+    const at = (sx, sy) => { const g = P.nav.screenToGround(sx, sy); return g ? { x: Math.round(g.x), z: Math.round(g.z), d: Math.round(Math.hypot(g.x - st.x, g.z - st.z)) } : null; }; // (null: the ray under that point is sky)
+    return { mid: at(W / 2, H / 2), upper: at(W / 2, H / 4), r: st.reach, dpr: devicePixelRatio };
+  });
+  check(look.dpr === 2 && look.mid && look.upper && look.mid.d < look.r, `the first view at DPR 2 looks at the start town, not the sky (${JSON.stringify(look)})`);
   await page.waitForSelector('#guide', { timeout: 10000 }).catch(() => {});
   check(await page.$('#guide') !== null, 'the guide shows on a first visit, in the start town');
   await page.screenshot({ path: `${shots}/2-region.png` });
