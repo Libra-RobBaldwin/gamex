@@ -18,7 +18,7 @@
 import { mix, range, rng, type Rand } from '../region/random';
 import { worldNoise } from '../ground/noise';
 import { lakeRadiusOf, type XZ } from './water';
-import type { Link } from '../region/generate';
+import type { Link, Spoke } from '../region/generate';
 import type { WorldWater } from './water';
 import { LIVE_HALF, type SettlementGrid, type WorldSettlement } from './plan';
 
@@ -64,12 +64,13 @@ export function planRoutes(c: Ctx, full = false): { roads: Route[]; rails: Rail[
   if (full) for (const line of motorwayLines(c, r)) add('motorway', L.through(line, [], 'motorway'), null, null);
   for (const l of [...c.links].sort((p, q) => p.length - q.length)) {
     const A = c.settlements[l.a], B = c.settlements[l.b], kind = full ? l.road : 'B';
-    add(kind, L.find(endOf(A, B), endOf(B, A), [A.id, B.id], kind), A.id, B.id);
+    const sa = stem(c, A, B), sb = stem(c, B, A);
+    add(kind, joinStems(sa, L.find(sa.end, sb.end, [A.id, B.id], kind, true), sb, kind, () => L.find(sa.end, sb.end, [A.id, B.id], kind)), A.id, B.id);
   }
   for (const e of edgeExits(c, r)) {
     // (found to just inside the edge, then straight on off it)
     const H = c.half - 60, inner = { x: Math.max(-H, Math.min(H, e.to.x)), z: Math.max(-H, Math.min(H, e.to.z)) };
-    const p = L.find(endOf(e.from, e.to), inner, [e.from.id], full ? 'A' : 'B');
+    const k = full ? 'A' : 'B', sa = stem(c, e.from, e.to), p = joinStems(sa, L.find(sa.end, inner, [e.from.id], k, true), null, k, () => L.find(sa.end, inner, [e.from.id], k));
     add(full ? 'A' : 'B', p ? resample([...p, e.to], STEP) : null, e.from.id, null);
   }
   forks(roads);
@@ -270,6 +271,47 @@ function smooth(p: XZ[], K: number, passes: number): XZ[] {
 function endOf(A: WorldSettlement, toward: XZ): XZ {
   if (!A.gates.length) return { x: A.x, z: A.z };
   return A.gates.reduce((g, q) => (dist(q, toward) < dist(g, toward) ? q : g));
+}
+// The way out of a place a road to `toward` takes: the spoke facing that way most nearly (the roads
+// out of a real place leave through its main streets, radially, PRIORS.exits), or, for a place with
+// no spokes (a real region's), the gate nearest it, or its centre.
+export function spokeFor(A: WorldSettlement, toward: XZ): Spoke | null {
+  if (!A.spokes?.length) return null;
+  const score = (s: Spoke) => { const dx = toward.x - s.x, dz = toward.z - s.z, d = Math.hypot(dx, dz) || 1; return (s.ux * dx + s.uz * dz) / d; };
+  return A.spokes.reduce((b, s) => (score(s) > score(b) ? s : b));
+}
+// A road's first stretch out of a place: straight on along its spoke's street, `STEM` metres (real
+// roads run straight out of a place and only then bend: PRIORS.exits.netTurnFirstKmDeg), stopping
+// short of water or the map's edge. `end` is where the road is found from; `pts` the stretch.
+interface Stem { pts: XZ[]; end: XZ }
+export const STEM = 240;
+function stem(c: Ctx, A: WorldSettlement, toward: XZ): Stem {
+  const s = spokeFor(A, toward);
+  if (!s) { const e = endOf(A, toward); return { pts: [e], end: e }; }
+  let L = STEM;
+  const at = (d: number) => ({ x: s.x + s.ux * d, z: s.z + s.uz * d });
+  for (let d = 30; d <= STEM; d += 30) { const p = at(d); if (Math.abs(p.x) > c.half - 80 || Math.abs(p.z) > c.half - 80 || standing(c.water, p) < 60) { L = Math.max(0, d - 30); break; } }
+  const pts: XZ[] = [];
+  for (let d = 0; d <= L + 1e-6; d += STEP) pts.push(at(d));
+  if (pts.length === 1) return { pts, end: pts[0] };
+  return { pts, end: pts[pts.length - 1] };
+}
+// The road as one line: the stem out of the place it leaves, the way found between (the raw cells:
+// smoothed here as one with the stems, so it sweeps out of the stem's line into its course rather
+// than turning a corner where the stem ends), and the stem into the place it reaches (reversed).
+// The first 150 m of each stem stay put, so the road leaves the place straight along its street.
+function joinStems(a: Stem, cells: XZ[] | null, b: Stem | null, kind: RouteKind | 'rail', boxedIn: () => XZ[] | null): XZ[] | null {
+  if (!cells) return null;
+  const P = PROFILES[kind], HOLD = 8; // (points, STEP apart: 150 m straight, and one more for the rounding after)
+  // (boxed in, the finder gives just its two ends: take its own way round, and splice the stems on)
+  const raw = cells.length === 2 && dist(cells[0], cells[1]) > 2 * LaneFinder.C ? boxedIn() : cells;
+  if (!raw || raw.length < 2) return null;
+  const all = [...a.pts, ...raw.slice(a.pts.length > 1 ? 1 : 0, b && b.pts.length > 1 ? -1 : undefined), ...(b ? [...b.pts].reverse() : [])];
+  if (all.length < 2) return null;
+  const r = resample(all, STEP), sm = smooth(r, P.smooth, 2);
+  const holdA = a.pts.length > 1 ? Math.min(HOLD, a.pts.length) : 0, holdB = b && b.pts.length > 1 ? Math.min(HOLD, b.pts.length) : 0;
+  const out = r.map((p, i) => (i < holdA || i >= r.length - holdB ? p : sm[i]));
+  return resample(chaikin(chaikin(out)), STEP);
 }
 
 // ---------------- laying a route over the country ----------------

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { layStreets, suggestLinks, type Settlement } from './generate';
+import { PRIORS } from './priors';
 import { buildStreets } from './apply';
 import { MapWater, type WaterSpec } from '../worldmap/water';
 import { isRealPlace, placeName, REAL_PLACES } from './names';
@@ -79,6 +80,67 @@ describe('a settlement’s streets', () => {
       expect(seen.size).toBe(adj.size);
     }
   }, 60000);
+});
+
+describe('the roads out of a place (PRIORS.exits: as real roads leave real places)', () => {
+  const deg = (r: number) => (r * 180) / Math.PI;
+  const heading = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.atan2(b.z - a.z, b.x - a.x);
+  const norm = (a: number) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+  test('every settlement has four ways out: both ends of its high street and of its main cross street, each facing out', () => {
+    for (const seed of SEEDS) for (const s of plan(seed).settlements) {
+      expect(s.spokes?.length).toBe(4);
+      expect(s.gates).toEqual(s.spokes!.filter((k) => k.along === 'high').map(({ x, z }) => ({ x, z })));
+      for (const k of s.spokes!) {
+        expect(Math.hypot(k.ux, k.uz)).toBeCloseTo(1, 6);
+        // (facing away from the centre: within 45° of the line out from it)
+        const out = Math.atan2(k.z - s.z, k.x - s.x);
+        expect(Math.abs(deg(norm(Math.atan2(k.uz, k.ux) - out)))).toBeLessThan(45);
+      }
+    }
+  });
+  test('each lane leaves by the spoke facing where it goes, straight out along its street, and bends only once clear of the place', () => {
+    const turns: number[] = [];
+    for (const seed of SEEDS) {
+      const p = plan(seed);
+      for (const r of p.roads) {
+        if (r.site !== undefined) continue;
+        for (const [id, other, path] of [[r.a, r.b, r.path], [r.b, r.a, [...r.path].reverse()]] as const) {
+          if (id === null) continue;
+          const A = p.settlements[id], k = A.spokes!.find((q) => Math.hypot(q.x - path[0].x, q.z - path[0].z) < 3);
+          if (!k) {
+            // (a second lane by the same spoke forks off the first outside the place: it starts on that lane)
+            const shared = p.roads.some((o) => o !== r && (o.a === id || o.b === id) && o.path.some((q) => Math.hypot(q.x - path[0].x, q.z - path[0].z) < 3));
+            expect(shared, `${r.kind} road ${r.id} out of ${A.name} starts at no spoke and on no other lane`).toBe(true);
+            continue;
+          }
+          // (straight out along the street for its first 150 m, as real roads are: PRIORS.exits.edgeAngleDeg)
+          let run = 0;
+          for (let i = 1; i < path.length; i++) {
+            run += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
+            if (run > 151) break;
+            expect(Math.abs(deg(norm(heading(path[i - 1], path[i]) - Math.atan2(k!.uz, k!.ux)))), `${r.kind} road ${r.id} out of ${A.name}, ${Math.round(run)} m out`).toBeLessThan(12);
+          }
+          // the spoke faces the place it goes to (or the map's edge it runs off) better than any other spoke does
+          const far = other !== null ? p.settlements[other] : path[path.length - 1], score = (q: { x: number; z: number; ux: number; uz: number }) => { const dx = far.x - q.x, dz = far.z - q.z, d = Math.hypot(dx, dz) || 1; return (q.ux * dx + q.uz * dz) / d; };
+          for (const q of A.spokes!) expect(score(k!)).toBeGreaterThanOrEqual(score(q) - 1e-9);
+          // and its heading a kilometre out, against its heading at the edge
+          let far1 = path.length - 1, s1 = 0;
+          for (let i = 1; i < path.length; i++) { s1 += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z); if (s1 >= 1000) { far1 = i; break; } }
+          if (far1 > 8) turns.push(Math.abs(deg(norm(heading(path[far1 - 1], path[far1]) - heading(path[0], path[1])))));
+        }
+      }
+    }
+    turns.sort((a, b) => a - b);
+    // (real roads out of a village turn 42° in their first kilometre, at the median, and 138° at the 90th percentile)
+    expect(turns[Math.floor(turns.length / 2)]).toBeLessThan(PRIORS.exits.netTurnFirstKmDeg.village[3]);
+    expect(turns[Math.floor(turns.length * 0.9)]).toBeLessThan(160);
+  });
+  test('the priors say what was measured: roads leave radially, and a village has about five ways out', () => {
+    expect(PRIORS.exits.perPlace.village[2]).toBe(5);
+    expect(PRIORS.exits.perPlace.town[2]).toBeGreaterThan(PRIORS.exits.perPlace.village[2]);
+    expect(PRIORS.exits.edgeAngleUnder30.village).toBeGreaterThan(0.5);
+    expect(PRIORS.exits.edgeAngleDeg.village[2]).toBeLessThan(30);
+  });
 });
 
 describe('suggested links', () => {
