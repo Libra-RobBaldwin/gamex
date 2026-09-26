@@ -27,4 +27,15 @@ describe('the world plan (docs/streaming.md)', () => {
       }
     }
   }, 60000);
+  test('industries on the land that suits them, each with a lane in', () => {
+    const I = plan.industries, types = new Set(I.map((i) => i.type));
+    for (const t of ['farm', 'quarry', 'forest', 'goods_factory', 'food_plant'] as const) expect(types.has(t), t).toBe(true);
+    if (plan.water.world.sea) expect(types.has('port')).toBe(true);
+    for (const i of I) {
+      expect(Math.max(Math.abs(i.x), Math.abs(i.z))).toBeGreaterThan(4000); // (the live area's are the game's)
+      for (const s of plan.grid.near(i.x, i.z)) expect(Math.hypot(s.x - i.x, s.z - i.z), `${i.type} ${i.id} in ${s.name}`).toBeGreaterThan(s.reach);
+    }
+    const lanes = new Set(plan.roads.filter((r) => r.site !== undefined).map((r) => r.site));
+    expect(lanes.size).toBeGreaterThan(I.length * 0.9);
+  });
 });

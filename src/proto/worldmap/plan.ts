@@ -20,7 +20,8 @@ import { mix, range, rng, type Rand } from '../region/random';
 import { regionOptions, type RegionOptions } from '../region/options';
 import type { LakeSpec, XZ } from '../region/water';
 import { WorldWater, type Sea, type WorldRiver, type WorldWaterSpec } from './water';
-import { planRoutes, type Rail, type Route } from './routes';
+import { planRoutes, spurs, type Rail, type Route } from './routes';
+import { placeIndustries, type WorldIndustry } from './industry';
 import { WorldTerrain } from './terrain';
 import { realOf, realSource, type Box, type WorldHeights, type WorldSource } from './source';
 
@@ -39,7 +40,8 @@ export interface WorldPlan {
   settlements: WorldSettlement[];
   start: number; // the start town's id (at 0, 0)
   links: Link[]; // which places the A and B roads join
-  roads: Route[];
+  roads: Route[]; // (and a lane in to each industry: `site` says which)
+  industries: WorldIndustry[]; // the industries' sites (worldmap/industry.ts)
   rails: Rail[];
   terrain: WorldHeights;
   woods?: (box: Box) => XZ[][]; // the woods, where the source knows them (a real region's)
@@ -133,8 +135,11 @@ export function planFrom(src: WorldSource): WorldPlan {
     const links = suggestLinks(settlements, water).filter((l) => !crossesSea(water, settlements[l.a], settlements[l.b]));
     routes = { links, ...planRoutes({ seed, half, settlements, links, water, grid, heightAt: terrain.heightAt }) };
   }
+  // the industries (the source's, or placed on the land that suits each), each with a lane in
+  const industries = src.industries ?? placeIndustries({ seed, half, settlements, water, grid, heightAt: terrain.heightAt, roads: routes.roads });
+  const roads = [...routes.roads, ...spurs({ seed, half, settlements, links: routes.links, water, grid, heightAt: terrain.heightAt }, routes.roads, industries)];
   const ms = typeof performance !== 'undefined' ? performance.now() - t0 : 0;
-  return { source: src.kind, id: src.id, seed, options: src.options, size: half * 2, half, water, settlements, start: 0, links: routes.links, roads: routes.roads, rails: routes.rails, terrain, woods: src.woods, grid, ms };
+  return { source: src.kind, id: src.id, seed, options: src.options, size: half * 2, half, water, settlements, start: 0, links: routes.links, roads, industries, rails: routes.rails, terrain, woods: src.woods, grid, ms };
 }
 
 function crossesSea(w: WorldWater, a: XZ, b: XZ) {

@@ -27,7 +27,8 @@ export interface Route {
   id: number;
   kind: RouteKind;
   path: XZ[]; // the centre line, points STEP metres apart
-  a: number | null; b: number | null; // the settlements at its ends (null: off the map's edge)
+  a: number | null; b: number | null; // the settlements at its ends (null: off the map's edge, or an industry's lane)
+  site?: number; // an industry's lane in: which (worldmap/industry.ts), from the road nearest it
 }
 export interface Station { settlement: number; x: number; z: number; ux: number; uz: number } // where it stands, and the line's direction there
 export interface Rail { id: number; kind: 'main' | 'branch'; path: XZ[]; stations: Station[] }
@@ -73,6 +74,26 @@ export function planRoutes(c: Ctx, full = false): { roads: Route[]; rails: Rail[
   }
   forks(roads);
   return { roads, rails: full ? planRails(c, r, L) : [] };
+}
+
+// A lane in to each industry from the nearest road (found over the land like any lane, from the
+// site's frontage), unless it's more than 3 km off; none inside the live play area.
+export function spurs(c: Ctx, roads: Route[], sites: { id: number; x: number; z: number; rot: number; d: number; settlement: number }[]): Route[] {
+  const out: Route[] = [], L = new LaneFinder(c);
+  const pts: { p: XZ; r: Route }[] = [];
+  for (const r of roads) for (let i = 0; i < r.path.length; i += 4) pts.push({ p: r.path[i], r });
+  for (const s of sites) {
+    const front = { x: s.x + Math.sin(s.rot) * (s.d / 2 + 10), z: s.z - Math.cos(s.rot) * (s.d / 2 + 10) };
+    let best: XZ | null = null, bd = 3000;
+    for (const q of pts) { const d = dist(q.p, front); if (d < bd) { bd = d; best = q.p; } }
+    if (!best) continue;
+    // (it may run through the places whose roads it joins)
+    const serves = c.grid.near(best.x, best.z).filter((p) => dist(p, best!) < p.reach + 200).map((p) => p.id);
+    const path = bd < 60 ? resample([front, best], STEP) : L.find(front, best, serves, 'B');
+    if (!path || path.length < 2 || path.some((p) => Math.max(Math.abs(p.x), Math.abs(p.z)) < LIVE_HALF + 100)) continue;
+    out.push({ id: roads.length + out.length, kind: 'B', path, a: null, b: null, site: s.id });
+  }
+  return out;
 }
 
 // Two lanes into a place by the same street end would meet it side by side, all but parallel (a

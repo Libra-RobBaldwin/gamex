@@ -18,6 +18,7 @@ import type { XZ } from '../region/water';
 import type { SettlementGrid, WorldSettlement } from './plan';
 import type { Rail, Route } from './routes';
 import type { WorldWater } from './water';
+import type { WorldIndustry } from './industry';
 
 export interface Box { x0: number; z0: number; x1: number; z1: number }
 
@@ -45,6 +46,9 @@ export interface WorldSource {
   // The roads and railways at the start, if the source has them (a real region's). Without them
   // the plan lays its own: lanes between neighbouring places and off the map's edges (routes.ts).
   routes?(grid: SettlementGrid, heights: WorldHeights): { roads: Route[]; rails: Rail[]; links: Link[] };
+  // The industries, if the source has them (a real region's works, quarries and docks). Without
+  // them the plan places its own on the land that suits each (industry.ts).
+  industries?: WorldIndustry[];
   // The woods in a box, if the source knows them (a real region's, from OS). Without them the
   // countryside paints its own.
   woods?(box: Box): XZ[][];

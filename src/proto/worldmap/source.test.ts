@@ -27,6 +27,7 @@ describe('world sources', () => {
     kind: 'real', id: 'test-shire', seed: 11, options: o, half, water,
     settlements: [place(0, 'Homeford', 'town', 0, 0, 250), place(1, 'Lowbury', 'town', 12000, -3000, 220), place(2, 'Ashby Parva', 'village', -9000, -12000, 110)],
     heights: () => ({ heightAt: h, bed: (x, z) => h(x, z) - 3, field: () => null, partField: () => null }),
+    industries: [], // (a real region gives its own works)
     routes: () => ({ roads: [{ id: 0, kind: 'B', path: resample([{ x: 250, z: 0 }, { x: 6000, z: -2500 }, { x: 11800, z: -3000 }], 25), a: 0, b: 1 }], rails: [], links: [] }),
   };
   test('a real source makes a plan and tiles through the same code', async () => {

@@ -17,6 +17,7 @@
 // Pure: no three.js.
 import { LEVEL } from '../region/water';
 import { STYLE_LOOKS } from '../region/styles';
+import { industryScene } from './industry';
 import { settlementScene, WALLS, ROOFS, type SceneBuilding } from './towns';
 import { clipPath, countryInput, farmsIn, hedges, paintCover, woodTrees, type Box } from './country';
 import { LIVE_HALF, type WorldPlan } from './plan';
@@ -188,6 +189,8 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
 
   // the ground: its cover, and the grid (the beds of lakes and the sea; the heights are the drape's)
   const input = countryInput(plan, box, fine);
+  // (the industries' yards are worn ground: no fields, hedges or woods on them)
+  for (const ind of plan.industries) if (Math.abs(ind.x - (box.x0 + box.x1) / 2) < (box.x1 - box.x0) / 2 + 200 && Math.abs(ind.z - (box.z0 + box.z1) / 2) < (box.z1 - box.z0) / 2 + 200) (input.plots ??= []).push({ poly: industryScene(ind).yard, kind: 'yard' });
   const { layout, data: cover, n } = paintCover(input, box, TEXEL[detail]);
   const ground = groundGrid(plan, box, STEP[detail], touchesLive(box) ? LIVE : null);
   const water = waterMesh(plan, box, STEP[detail], detail);
@@ -220,6 +223,12 @@ export function generateTile(plan: WorldPlan, req: TileRequest): TileData {
   }
   // farmsteads
   for (const f of fine ? input.farms : farmsIn(plan, box)) if (inTile(f)) { building(o, f, detail); nb++; }
+  // the industries: their yards and sheds, chimneys and headframes
+  for (const ind of plan.industries) {
+    if (!inTile(ind)) continue;
+    const sc = industryScene(ind);
+    for (const b of sc.buildings) { building(o, b, detail); nb++; }
+  }
   // the trunk roads and the railways
   trunk(plan, o, box, detail, inTile);
   // trees in the woods, hedgerows
