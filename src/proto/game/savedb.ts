@@ -63,6 +63,14 @@ export async function deleteSave(id: string) {
   await done(t);
 }
 
+// Every save gone (Settings > Delete all saved data).
+export async function deleteAllSaves() {
+  const db = await open(), t = db.transaction(['saves', 'index'], 'readwrite');
+  t.objectStore('saves').clear();
+  t.objectStore('index').clear();
+  await done(t);
+}
+
 // the address a save is played at: its map's own query, and which save
 export function saveSearch(e: Pick<SaveEntry, 'id' | 'map'>) {
   const q = new URLSearchParams(e.map.query);

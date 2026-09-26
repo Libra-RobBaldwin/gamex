@@ -11,11 +11,11 @@ import './app.css';
 import '../proto/ui/fonts';
 import { icon } from '../proto/ui/icons';
 import { mapById, type MapInfo } from '../proto/maps';
-import { deleteSave, listSaves, saveSearch, type SaveEntry } from '../proto/game/savedb';
+import { deleteAllSaves, deleteSave, listSaves, saveSearch, type SaveEntry } from '../proto/game/savedb';
 import type { Shell } from '../proto/ui/shell';
 import { goneSave, loading, render, type MenuHost } from './menu';
 import { gameSearch, route, screenOf, type Screen } from './route';
-import { guideSeen, quality, setQuality } from './store';
+import { forgetSettings, guideSeen, quality, setQuality } from './store';
 
 // a menu entry's depth: 0 for the home screen (or a screen opened by a link), 1 for one opened from it
 type AppState = { app: 'menu'; depth: number } | { app: 'game' };
@@ -60,6 +60,14 @@ const host: MenuHost = {
   },
   remove(e: SaveEntry) {
     deleteSave(e.id).then(readSaves, readSaves);
+  },
+  async wipe() {
+    // every saved town, the menu's settings, and the offline worker and its caches, then a fresh start
+    await deleteAllSaves().catch(() => {});
+    forgetSettings();
+    try { for (const k of await caches.keys()) await caches.delete(k); } catch { /* no caches here */ }
+    try { for (const r of (await navigator.serviceWorker?.getRegistrations()) ?? []) await r.unregister(); } catch { /* no worker */ }
+    location.replace(menuUrl());
   },
 };
 

@@ -250,6 +250,35 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   await ctx.close();
 }
 
+// ---- 8b. Settings > Delete all saved data: every save and setting gone, the app starts afresh ----
+{
+  const { ctx, page } = await phone();
+  await page.goto(BASE + '/');
+  await atMenu(page);
+  // a saved town (its index entry is what the menu lists) and a remembered setting
+  await page.evaluate(() => new Promise((ok, fail) => {
+    const r = indexedDB.open('untitled', 1);
+    r.onupgradeneeded = () => { const db = r.result; db.createObjectStore('saves', { keyPath: 'id' }); db.createObjectStore('index', { keyPath: 'id' }).createIndex('savedAt', 'savedAt'); };
+    r.onsuccess = () => { const t = r.result.transaction('index', 'readwrite'); t.objectStore('index').put({ id: 'wipe-test', name: 'Wipe test', map: { id: 'region', query: 'map=region&size=50' }, savedAt: Date.now(), summary: { residents: 10, balance: 400000, lines: 0, day: 1, time: '07:00' }, v: 2 }); t.oncomplete = () => { r.result.close(); ok(); }; t.onerror = () => fail(t.error); };
+    r.onerror = () => fail(r.error);
+  }));
+  await page.evaluate(() => localStorage.setItem('untitled.quality', '2'));
+  await page.reload(); await atMenu(page);
+  await page.waitForSelector('[data-continue]', { timeout: 5000 }).catch(() => {});
+  check(await page.$('[data-continue]') !== null, 'wipe: a saved town shows Continue before');
+  await page.tap('[data-go="settings"]');
+  await page.waitForSelector('[data-wipe]');
+  await page.tap('[data-wipe]');
+  check(/again/i.test(await page.textContent('[data-wipe]')), 'wipe: the first tap asks to confirm');
+  await Promise.all([page.waitForNavigation({ timeout: 15000 }).catch(() => {}), page.tap('[data-wipe]')]);
+  await atMenu(page);
+  await page.waitForTimeout(800);
+  const after = await page.evaluate(() => ({ cont: !!document.querySelector('[data-continue]'), q: localStorage.getItem('untitled.quality') }));
+  check(!after.cont && after.q === null, 'wipe: after the second tap, no saved town and no remembered settings');
+  noErrors(page, 'wipe');
+  await ctx.close();
+}
+
 // ---- 9. the region: set up, started from the menu with its options, and back to its setup ----
 {
   const { ctx, page } = await phone();

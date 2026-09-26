@@ -255,6 +255,8 @@ export class WorldView {
     // stands on it is lifted clear of where the coarse ground can bulge above the fine, invisible from
     // that far out)
     if (t.solid) { const m = new THREE.Mesh(geo(t.solid.pos, t.solid.idx, t.solid.nor, t.solid.col), this.solidMat); m.castShadow = t.detail === 'near'; m.receiveShadow = true; m.name = 'solid'; m.position.y = lift; group.add(m); }
+    // (the places' buildings up close, hidden once real ones stand in for them: game/dress.ts)
+    if (t.bld) { const m = new THREE.Mesh(geo(t.bld.pos, t.bld.idx, t.bld.nor, t.bld.col), this.solidMat); m.castShadow = true; m.receiveShadow = true; m.name = 'bld'; m.visible = !this.dressed.has(t.key); group.add(m); }
     if (t.trees.length) {
       const T = this.host.trees, n = t.trees.length / 4;
       const oaks: number[] = [], pines: number[] = [];
@@ -295,19 +297,35 @@ export class WorldView {
     };
   }
 
+  // Up close, real buildings stand in for a tile's (or a not-yet-live place's) scenery buildings
+  // (game/dress.ts): the near tiles and places on show, and hiding their plain ones.
+  private dressed = new Set<string>();
+  nearShown(): { key: string; box: Box; place?: number }[] {
+    const out: { key: string; box: Box; place?: number }[] = [];
+    for (const s of this.shown.values()) if (s.detail === 'near') out.push({ key: s.node.key, box: s.node.box });
+    for (const [id, p] of this.places) if (p.built) out.push({ key: `place:${id}`, box: p.box!, place: id });
+    return out;
+  }
+  setDressed(key: string, on: boolean) {
+    if (on) this.dressed.add(key); else this.dressed.delete(key);
+    const pl = key.startsWith('place:') ? this.places.get(+key.slice(6))?.built : this.nodes.get(key)?.built.near;
+    const m = pl?.group.getObjectByName('bld');
+    if (m) m.visible = !on;
+  }
+
   // The places in the live play area that aren't live yet, drawn as scenery on their own (their
   // ground is the live area's own: main.ts gives it their gardens and streets).
-  private places = new Map<number, { built: Built | null; pending: boolean }>();
+  private places = new Map<number, { built: Built | null; pending: boolean; box?: Box }>();
   setPlaces(ids: number[]) {
     for (const [id, p] of this.places) if (!ids.includes(id)) { p.built?.dispose(); this.places.delete(id); }
     for (const id of ids) {
       if (this.places.has(id)) continue;
-      const p = { built: null as Built | null, pending: true };
+      const p: { built: Built | null; pending: boolean; box?: Box } = { built: null, pending: true };
       this.places.set(id, p);
       const L = this.loaders.reduce((a, b) => (b.busy < a.busy ? b : a));
       L.busy++;
       L.load({ level: 0, i: 0, j: 0, detail: 'near', settlement: id, options: this.host.options }, new AbortController().signal)
-        .then((d) => { if (this.places.get(id) !== p) return; p.built = this.build(d as TileData); if (p.built) { this.root.add(p.built.group); p.built.group.visible = true; } })
+        .then((d) => { if (this.places.get(id) !== p) return; p.built = this.build(d as TileData); (p as { box?: Box }).box = (d as TileData).box; if (p.built) { this.root.add(p.built.group); p.built.group.visible = true; } })
         .catch((e) => console.warn('world place', id, e))
         .finally(() => { L.busy--; p.pending = false; this.pump(); });
     }

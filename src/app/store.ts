@@ -42,3 +42,8 @@ export function quality(): number | 'auto' {
 export const setQuality = (q: number | 'auto') => save(KEYS.quality, String(q));
 export const guideSeen = () => load(KEYS.guide) === '1';
 export const setGuideSeen = (seen: boolean) => save(KEYS.guide, seen ? '1' : null);
+
+/** Forget every setting this app keeps in localStorage (Settings > Delete all saved data). */
+export function forgetSettings() {
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('untitled.')) localStorage.removeItem(k); } catch { /* storage blocked: nothing kept */ }
+}
