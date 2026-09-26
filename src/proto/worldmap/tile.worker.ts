@@ -34,6 +34,7 @@ serveLoader<TileData | FieldData>(self_, async (raw: LoadRequest) => {
   if (d.ground) { add(d.ground.pos); add(d.ground.nor); add(d.ground.idx); add(d.ground.cover); }
   if (d.water) { add(d.water.pos); add(d.water.idx); }
   if (d.solid) { add(d.solid.pos); add(d.solid.nor); add(d.solid.col); add(d.solid.idx); }
+  if (d.bld) { add(d.bld.pos); add(d.bld.nor); add(d.bld.col); add(d.bld.idx); }
   add(d.trees);
   if (d.hedges) { add(d.hedges.pieces); add(d.hedges.trees); }
   return t;

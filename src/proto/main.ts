@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import './proto.css';
 import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
-import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
+import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, setRoundabouts, type Form, type Junction } from './junction';
 import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, isSlip, type RoadFilter } from './catalog';
 import { DEEP, GRADES } from './grade';
 import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, GRASS_MATS, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
@@ -11,9 +11,10 @@ import { Traffic, rushLabel, type Places } from './traffic';
 import { MODEL, purchaseList, type Offer } from './vehicles';
 import { gameYear } from './game/era';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
-import { Parking } from './game/parking';
-import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops // drives and car parks in use (the traffic's own cars park in them)
+import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setGround, setParkedCars, setPlaces, USE, type Bay } from './buildgen';
+import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
+import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops
+import { Dresser } from './game/dress'; // the 50 km map's scenery as real buildings up close
 import { placeResolver, REAL_VERN, setGeology, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
@@ -89,11 +90,12 @@ const REAL: { parks: Region[]; forms?: Map<number, { form: Form; slip: boolean }
 const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(MAP_Q); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
 const WORLD = MAP.world ?? null; // (a 50 km map's plan: MAP is its live play area round the start town, the rest streams as scenery)
+if (WORLD) setRoundabouts('rare'); // (roundabouts where big roads meet, not at every lane junction: junction.ts)
 // (a generated map builds in its places' traditions; ?vern=cotswold, nordic, … sets one on any map)
 const VERN = new URLSearchParams(MAP_QUERY).get('vern') as Vern | null, vernForced = VERN && VERNS.includes(VERN) ? VERN : undefined;
 setParkedCars(false); // (parked cars are real ones: game/parking.ts)
 const vernReal = MAP.world?.options.real ? REAL_VERN[MAP.world.options.real] : undefined; // (a real region: its tradition)
-if (MAP.generated || vernForced || vernReal) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.settlements }, vernForced ?? vernReal));
+if (MAP.generated || vernForced || vernReal) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.world?.settlements ?? MAP.settlements }, vernForced ?? vernReal)); // (a 50 km map: every place on it, as its scenery is dressed too: game/dress.ts)
 // the loading screen, while the map is built (it goes once the first frame is drawn)
 const loading = new Loading(MAP.name, mapLine());
 function mapLine() {
@@ -177,6 +179,7 @@ if (WORLD?.terrain.geologyAt) setGeology(WORLD.terrain.geologyAt); // (the build
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
 ground.userData.noDrape = true; // (the hills are in its heights already)
 const drape = RELIEF ? new Drape(RELIEF) : null;
+setGround(RELIEF ? RELIEF.heightAt : null); // (buildings stand level on the hills, on plinths: buildgen.ts)
 if (RELIEF) nav.setGround(RELIEF.heightAt, [-1, RELIEF.max + 1]); // (the camera and taps find the ground on the hills)
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
@@ -239,6 +242,7 @@ const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
 for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; m.userData.surface = true; if (!BIG) scene.add(m); } // (a big map draws its woods a tile at a time: regionView; surface: the underground view needn't draw them twice)
 // a 50 km map: the rest of the map beyond the live area, streamed in tiles from workers (worldmap/)
 const worldGame = WORLD ? new WorldGame({ scene, plan: WORLD, field: RELIEF, drape, look: LOOK, trees: { crown: crownGeo, pine: pineGeo, trunk: trunkGeo, crownMat, pineMat, trunkMat }, live: SAVED?.world?.live ?? (REAL ? WORLD.settlements.filter((st) => Math.max(Math.abs(st.x), Math.abs(st.z)) < LIVE_HALF).map((st) => st.id) : [WORLD.start]) }) : null; // (a real region's live area is all there from the start: its pack)
+const dresser = worldGame ? new Dresser({ scene, plan: WORLD!, make: generate, view: worldGame.view }) : null;
 
 // Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
 // registry (a spatial hash, so this looks only at claims near the tree); plots through `lots`.
@@ -2505,14 +2509,14 @@ function snapshot(): GameSave {
 // Save now (the town is copied as it's written, so play carries straight on). False if it couldn't.
 function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
   if (!canSave) return Promise.resolve(false);
-  // (one at a time: a second asks for the same; but hiding the page mid-save saves again after it,
-  // so what's kept is the town as it was left)
-  if (saving) return why === 'hide' ? saving.then(() => saveGame('hide')) : saving;
+  // (one at a time: a second asks for the same. But hiding the page saves now, even mid-save: storage
+  // writes in the order asked, so what's kept is the town as it was left)
+  if (saving && why !== 'hide') return saving;
   const t0 = performance.now();
   let s: GameSave;
   try { s = snapshot(); } catch (e) { console.warn('save', e); return Promise.resolve(false); }
   const put = putSave(s), ms = performance.now() - t0; // (storage copies the town as it's put: that's in the time too)
-  saving = put.then(() => {
+  const mine: Promise<boolean> = put.then(() => {
     lastSaved = s.savedAt;
     (window as unknown as { __saved: unknown }).__saved = { why, at: s.savedAt, ms, clock: s.clock }; // (for e2e/save.e2e.mjs)
     if (why === 'manual') hint(`Town saved · ${describeSave(s.summary)}`, 'floppy');
@@ -2521,8 +2525,9 @@ function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
     console.warn('save', e);
     if (why !== 'hide') hint('Couldn’t save · this browser isn’t keeping storage for the game', 'alert');
     return false;
-  }).finally(() => { saving = null; });
-  return saving;
+  }).finally(() => { if (saving === mine) saving = null; });
+  saving = mine;
+  return mine;
 }
 if (canSave) {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void saveGame('hide'); });
@@ -2711,6 +2716,8 @@ function judgeFrames(now: number) {
 function togglePerf() { perfOn = !perfOn; shell.setPerf(perfOn); }
 
 function frame(now: number) {
+  // (a hidden page draws nothing and moves nothing, as browsers stop its frames anyway: it has just been saved)
+  if (document.visibilityState === 'hidden') { last = now; requestAnimationFrame(frame); return; }
   const rawMs = now - last;
   const dt = Math.min(0.1, rawMs / 1000);
   last = now;
@@ -2812,6 +2819,7 @@ function frame(now: number) {
     // (a 50 km map: the scenery round the live area for the view; and a place in the live area to bring to life)
     const next = worldGame.frame(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), !activating);
     if (next !== null) void activatePlace(next);
+    dresser?.update(view, loaded ? Math.min(30, Math.max(5, rawMs * 0.2)) : 0); // (real buildings for the scenery close under the view: game/dress.ts)
     worldIdle(loaded ? 5 : 0);
     worldGame.liveCanopy(gameGround.ground.uniforms, view.h);
   }
@@ -2851,7 +2859,7 @@ Object.assign((window as unknown as { proto: object }).proto, { interchanges, bl
 Object.assign((window as unknown as { proto: object }).proto, { railway, railDraw, railGame }); // (rail/)
 Object.assign((window as unknown as { proto: object }).proto, { bridges: bridgeLayer, showBridgeInfo, openBridgeEditor }); // (game/bridges.ts)
 (window as unknown as { proto: Record<string, unknown> }).proto.water = gameWater; // (the lake, for tests)
-Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, worldGame, portals, portalFlows, rail: railway, edgeFace, footpaths }); // (the map being played, and how long its loading took, stage by stage)
+Object.assign((window as unknown as { proto: object }).proto, { map: MAP, loading, regionView, worldGame, dresser, portals, portalFlows, rail: railway, edgeFace, footpaths }); // (the map being played, and how long its loading took, stage by stage)
 
 // the site's offline worker (public/sw.js): the game keeps working with no signal once it has been opened
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

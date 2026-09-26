@@ -273,3 +273,6 @@
 /* the real places (OS maps) under the region's first question */
 #app h4.or { margin: 26px 0 0; font: 700 18px/1.2 var(--a-display); color: var(--a-gold-text); }
 #app .pick.real > img { flex: none; width: 56px; height: 56px; border-radius: 14px; object-fit: cover; background: var(--a-panel); }
+/* Settings > Saved data */
+#app .grp.danger h3 { color: #f0a58f; }
+#app .grp.danger [data-wipe].primary { background: #c8553d; color: #fff; }
