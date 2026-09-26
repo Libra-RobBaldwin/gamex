@@ -1,15 +1,24 @@
 // The start menu's screens: home (Continue, Saved towns, New game, How to play, Settings, About) and one page
 // for each. Plain DOM with no three.js, so it paints at once; the game loads only when a map is
 // picked (main.ts). Brand: docs/hud.md (forest, lime, gold; League Spartan and Archivo; Tabler icons).
+// Like the start screens of the city builders it borrows from, home is the town itself: a picture of
+// the starter town (art/, taken from the game) drifting slowly behind a short stack of choices,
+// with the one that matters most (Continue, or New game) the biggest.
 
 import { MAPS, type MapInfo } from '../proto/maps';
-import { NAME, markSvg, ridgeSvg } from '../proto/ui/brand';
+import { NAME, markSvg } from '../proto/ui/brand';
 import { icon, type Icon } from '../proto/ui/icons';
 import { EXPLORERS, libraryHref } from './library';
 import { bindRegion, lastRegion, regionBody, regionFirst } from './regionsetup';
 import { describe, when } from '../proto/game/save';
 import type { SaveEntry } from '../proto/game/savedb';
 import type { Screen } from './route';
+import heroTall from './art/hero-tall.webp';
+import heroWide from './art/hero-wide.webp';
+import mapTown from './art/map-town.webp';
+import mapRegion from './art/map-region.webp';
+import mapPlace from './art/map-place.webp';
+import mapSandbox from './art/map-sandbox.webp';
 import { TIER_NAMES, TIER_NOTES, guideSeen, quality, setGuideSeen, setQuality } from './store';
 
 export interface MenuHost {
@@ -24,10 +33,20 @@ export interface MenuHost {
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
-const chev = () => icon('chevronDown', 'chev');
 
-function row(id: string, ic: Icon, label: string, sub: string, primary = false) {
-  return `<button class="mrow${primary ? ' primary' : ''}" data-go="${id}">${icon(ic)}<span class="t"><b>${label}</b><small>${sub}</small></span>${chev()}</button>`;
+// a picture of each map, for its card (and a saved town's); a map without one shows its icon
+const MAP_ART: Record<string, string> = { town: mapTown, region: mapRegion, place: mapPlace, sandbox: mapSandbox };
+const artFor = (id: string) => MAP_ART[id];
+// a saved town's map: its query names it (the sandbox is saved on the town's map)
+const savedMap = (e: SaveEntry) => new URLSearchParams(e.map.query).get('map') ?? e.map.id;
+
+// the town behind the menu: a tall picture for a phone held upright, a wide one otherwise
+const hero = (cls: string, src?: string) => src
+  ? `<picture class="${cls}" aria-hidden="true"><img src="${src}" alt="" decoding="async"></picture>`
+  : `<picture class="${cls}" aria-hidden="true"><source media="(min-aspect-ratio: 1/1)" srcset="${heroWide}"><img src="${heroTall}" alt="" decoding="async"></picture>`;
+
+function tile(id: string, ic: Icon, label: string) {
+  return `<button class="tile" data-go="${id}">${icon(ic)}<span>${label}</span></button>`;
 }
 
 function home(h: MenuHost) {
@@ -36,16 +55,21 @@ function home(h: MenuHost) {
     <header class="brand">
       ${markSvg('bigmark')}
       <h1>${NAME}</h1>
-      <p>A transport game. Build the roads, buses and trains a town grows around.</p>
+      <p>Build the roads, buses and trains. Watch the town grow.</p>
     </header>
-    <nav class="rows" aria-label="Start">
-      ${s ? `<button class="mrow primary" data-continue>${icon('play')}<span class="t"><b>Continue</b><small>${esc(s.name)} · ${esc(describe(s.summary))} · saved ${esc(when(s.savedAt))}</small></span>${chev()}</button>` : ''}
-      ${h.saves.length > 1 ? row('saves', 'clock', 'Saved towns', `${h.saves.length} on this device`) : ''}
-      ${row('new', s ? 'plus' : 'play', 'New game', 'Pick a map to start on', !s)}
-      ${row('how', 'finger', 'How to play', 'The controls, and the guided start')}
-      ${row('library', 'layers', 'Library', 'Every vehicle, bridge and building block')}
-      ${row('settings', 'cog', 'Settings', 'Quality, and the guide')}
-      ${row('about', 'info', 'About', 'Credits and licences')}
+    <nav class="dock" aria-label="Start">
+      ${s ? `<button class="cont" data-continue>
+          ${artFor(savedMap(s)) ? `<img class="thumb" src="${artFor(savedMap(s))}" alt="" decoding="async">` : ''}
+          <span class="t"><small>Continue</small><b>${esc(s.name)}</b><em>${esc(describe(s.summary))} · saved ${esc(when(s.savedAt))}</em></span>
+          <i class="playc">${icon('play')}</i></button>` : ''}
+      <button class="newgame${s ? '' : ' primary'}" data-go="new">${icon(s ? 'plus' : 'play')}<span>New game</span></button>
+      <div class="tiles">
+        ${h.saves.length > 1 ? tile('saves', 'clock', 'Saved') : ''}
+        ${tile('how', 'finger', 'How to play')}
+        ${tile('library', 'layers', 'Library')}
+        ${tile('settings', 'cog', 'Settings')}
+        ${tile('about', 'info', 'About')}
+      </div>
     </nav>
   </div>`;
 }
@@ -54,15 +78,17 @@ function home(h: MenuHost) {
 function saves(h: MenuHost) {
   if (!h.saves.length) return `<p class="fine">No saved towns yet. A town saves itself as you play, every few game hours and when you leave it.</p>`;
   return `<ul class="maps saves">${h.saves.map((e, i) => `<li class="map ready">
-      <i class="art">${icon('clock')}</i>
+      ${art({ id: savedMap(e), icon: 'clock', ready: true })}
       <div class="t"><b>${esc(e.name)}</b><small>${esc(describe(e.summary))}</small><small>Saved ${esc(when(e.savedAt))}</small></div>
       <div class="go"><button class="act primary" data-open="${i}">${icon('play')}<span>Open</span></button><button class="act" data-del="${i}" aria-label="Delete ${esc(e.name)}, saved ${esc(when(e.savedAt))}">${icon('trash')}</button></div>
     </li>`).join('')}</ul>
     <p class="fine">Saved towns are kept in this browser on this device.</p>`;
 }
 
-// a map's card art: its icon on a faceted tile, over a strip of the ridge
-const art = (m: MapInfo) => `<i class="art${m.ready ? '' : ' off'}">${icon(m.icon)}</i>`;
+// a map's card art: its picture, or its icon on a tile
+const art = (m: Pick<MapInfo, 'id' | 'icon' | 'ready'>) => artFor(m.id)
+  ? `<i class="art pic${m.ready ? '' : ' off'}"><img src="${artFor(m.id)}" alt="" decoding="async" loading="lazy"></i>`
+  : `<i class="art${m.ready ? '' : ' off'}">${icon(m.icon)}</i>`;
 
 function newGame(notice?: string) {
   return `${notice ? `<p class="notice" role="status">${icon('info')}<span>${esc(notice)}</span></p>` : ''}
@@ -123,6 +149,7 @@ function about() {
       <h3>Credits</h3>
       <ul class="credits">
         <li><b>Map data</b> © OpenStreetMap contributors, under the Open Database Licence (ODbL). Real Town Plans builds its plans from it: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">openstreetmap.org/copyright</a></li>
+        <li><b>Real regions</b> Contains OS data © Crown copyright and database right ${new Date().getFullYear()}: OS OpenMap - Local, Terrain 50, Open Rivers, Open Names and Open Greenspace, under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noopener">Open Government Licence</a></li>
         <li><b>Icons</b> Tabler Icons, MIT licence</li>
         <li><b>Type</b> League Spartan and Archivo, SIL Open Font Licence</li>
         <li><b>3D</b> three.js, MIT licence</li>
@@ -147,9 +174,9 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
   const body = screen === 'home' ? home(h) : screen === 'saves' ? saves(h) : screen === 'new' ? newGame(notice) : screen === 'region' ? regionFirst(lastRegion()) : screen === 'how' ? how() : screen === 'library' ? library() : screen === 'settings' ? settings() : about();
   const [title, ic] = screen === 'home' ? ['', 'home' as Icon] : TITLES[screen];
   root.innerHTML = `<div class="scr scr-${screen}">
+      ${hero(screen === 'home' ? 'hero' : 'hero dim')}
       ${screen === 'home' ? '' : `<header class="bar"><button class="back" data-back aria-label="Back">${icon('arrowLeft')}</button><h2 tabindex="-1">${icon(ic)}<span>${title}</span></h2></header>`}
       <main class="body">${body}</main>
-      <div class="ridge-wrap" aria-hidden="true">${ridgeSvg('ridge')}</div>
     </div>`;
   root.querySelectorAll<HTMLElement>('[data-go]').forEach((b) => b.addEventListener('click', () => h.go(b.dataset.go as Screen)));
   root.querySelector('[data-back]')?.addEventListener('click', () => h.back());
@@ -183,9 +210,20 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
 }
 
 /** The screen shown while the game loads, and if it fails to. */
+const TIPS = [
+  'Stops about a three-minute walk apart catch the most riders.',
+  'Tap a line’s card to see what it earns a day.',
+  'Overlays shows who your stops reach, and where traffic is heavy.',
+  'Busy stops mean a line needs another bus.',
+  'A town that’s well served grows taller and denser.',
+  'Tap anything on the map to see what it is.',
+];
+
 export function loading(root: HTMLElement, map: MapInfo) {
+  const tip = TIPS[Math.floor(Math.random() * TIPS.length)];
   root.innerHTML = `<div class="scr scr-load" role="status" aria-live="polite">
-      <div class="load">${markSvg('bigmark')}<b>${esc(map.name)}</b><span data-load-msg>Building the town…</span><i class="bar-anim"></i></div>
-      <div class="ridge-wrap" aria-hidden="true">${ridgeSvg('ridge')}</div>
+      ${hero('hero loadart', artFor(map.id))}
+      <div class="load">${markSvg('bigmark')}<b>${esc(map.name)}</b><span data-load-msg>Building the town…</span><i class="bar-anim"></i>
+        <p class="tip">${icon('info')}<span>${esc(tip)}</span></p></div>
     </div>`;
 }

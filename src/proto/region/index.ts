@@ -6,11 +6,16 @@
 // For the road and rail sessions: `map.settlements` (centre, size, kind, name), `map.links` (a
 // trimmed Gabriel graph: which places to join, A or B road, and whether it crosses water) and
 // `generateRegion(seed).settlements[i].gates` (where the high streets leave each place).
-import { generateRegion, KINDS, REGION_BOUND, type Region } from './generate';
+import { generateRegion, KINDS, REGION_BOUND, reach, type Region } from './generate';
 import type { MapSpec } from './mapspec';
 import { TOWN_MAP } from './town';
 import { optionsFromQuery, type RegionOptions } from './options';
 import { STYLE_LOOKS } from './styles';
+import { worldMapSpec } from '../worldmap/spec';
+import { makeRelief } from './terrain';
+import { MapWater } from './water';
+import { woodSpots } from './priors';
+import { mix, rng } from './random';
 
 export * from './generate';
 export * from './mapspec';
@@ -33,6 +38,12 @@ export function mapOfRegion(g: Region): MapSpec {
   const at = (u: number, v: number) => ({ x: city.x + u * Math.cos(city.axis) - v * Math.sin(city.axis), z: city.z + u * Math.sin(city.axis) + v * Math.cos(city.axis) });
   // (mid-block, clear of the junctions: the lattice's streets cross every `spacing` metres)
   const S = KINDS[city.kind].spacing, line = [at(-1.5 * S, 0), at(1.5 * S, 0), at(0, -1.5 * S)];
+  // the hills (made here once, and handed to the game as the map's ground), and woods sited on them
+  // as real woods are: real patch sizes, on the steeper ground, along the contours (priors.ts)
+  const relief = makeRelief({ relief: g.options.relief, seed: g.seed, water: g.water, settlements: g.settlements }, g.bound * 1.5);
+  const mw = new MapWater(g.water), B = g.bound - 30;
+  const keep = (p: { x: number; z: number }) => Math.abs(p.x) < B && Math.abs(p.z) < B && !g.settlements.some((s) => Math.hypot(p.x - s.x, p.z - s.z) < reach(s.kind, s.r) + 20) && !mw.mayBeNear(p, 18);
+  const spots = woodSpots(rng(mix(g.seed, 21)), { x0: -g.bound, z0: -g.bound, x1: g.bound, z1: g.bound }, relief?.heightAt ?? null, keep, { cover: STYLE_LOOKS[g.options.style].trees.density, perTree: 900, max: 6000 });
   return {
     id: 'region',
     name: 'Region',
@@ -48,11 +59,11 @@ export function mapOfRegion(g: Region): MapSpec {
     stops: [...line, at(0, 1.5 * S)],
     line,
     industries: false,
-    // woods over the whole map (a fifth of the town's density: it's 33 times the area, and the
-    // ground paints woods too), fewer in a desert
-    trees: { count: Math.round(1400 * (g.bound / 520) ** 2 * 0.07 * STYLE_LOOKS[g.options.style].trees.density) },
+    // woods as real ones are (priors.ts woodSpots), fewer in a desert
+    trees: { count: spots.length, spots },
     style: g.options.style,
     relief: g.options.relief,
+    ...(relief ? { ground: { x0: relief.x0, z0: relief.z0, step: relief.step, n: relief.n, h: relief.h, max: relief.max } } : {}),
     options: g.options,
   };
 }
@@ -60,7 +71,7 @@ export function mapOfRegion(g: Region): MapSpec {
 // The map a URL asks for: ?map=region with its options (?seed=7&rivers=2&style=desert…: options.ts),
 // or the town when there's no map or it isn't known.
 export function mapFromQuery(q: URLSearchParams): MapSpec {
-  if (q.get('map') === 'region') return regionMap(optionsFromQuery(q));
+  if (q.get('map') === 'region') { const o = optionsFromQuery(q); return o.size > 6 ? worldMapSpec(o) : regionMap(o); } // (50 km: streamed, docs/streaming.md)
   return mapById(q.get('map'));
 }
 // the maps the game can open, by ?map= id (the town when there's none, or it isn't known)

@@ -1,5 +1,5 @@
 /* The start menu and the guided start (src/app). The brand of the HUD (docs/hud.md, proto.css):
-   deep forest panels with a faceted corner, lime for the way forward, a thin gold rule, white type;
+   deep forest panels with rounded corners (as the HUD), lime for the way forward, a thin gold rule, white type;
    League Spartan for the wordmark and headings, Archivo for the rest. The menu loads before the
    game's own stylesheet, so it carries the tokens it uses. */
 :root {
@@ -15,8 +15,11 @@
   --a-muted: #b3cbbc;
   --a-faint: rgba(242, 245, 239, 0.12);
   --a-fill: rgba(255, 255, 255, 0.06);
-  --a-cut: 12px;
-  --a-cut-s: 8px;
+  --a-r: 20px;
+  --a-r-s: 14px;
+  --a-glass: rgba(10, 36, 22, 0.82);
+  --a-glass-line: rgba(255, 255, 255, 0.14);
+  --a-lift: 0 10px 30px rgba(0, 0, 0, 0.35);
   --a-display: 'League Spartan', 'Archivo', system-ui, sans-serif;
   --a-ui: 'Archivo', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --a-safe-t: env(safe-area-inset-top, 0px);
@@ -40,46 +43,64 @@
 
 #app .scr { position: relative; min-height: 100%; display: flex; flex-direction: column;
   padding: calc(16px + var(--a-safe-t)) calc(16px + var(--a-safe-r)) calc(16px + var(--a-safe-b)) calc(16px + var(--a-safe-l)); }
-#app .scr > .body { position: relative; z-index: 1; width: 100%; max-width: 560px; margin: 0 auto; flex: 1; padding-bottom: min(22vh, 150px); }
+#app .scr > .body { position: relative; z-index: 1; width: 100%; max-width: 560px; margin: 0 auto; flex: 1; padding-bottom: 32px; }
 #app .scr-home > .body { padding-bottom: 0; }
-#app .ridge-wrap { position: absolute; left: 0; right: 0; bottom: 0; height: 22vh; max-height: 190px; pointer-events: none; z-index: 0; opacity: 0.9; }
-#app .ridge-wrap .ridge { width: 100%; height: 100%; display: block; }
-#app .ridge-wrap .r1 { fill: #1f5e3f; } #app .ridge-wrap .r2 { fill: #174a31; } #app .ridge-wrap .r3 { fill: #133f2a; }
+/* the town behind every screen (menu.ts hero()): drifting slowly on home, still and dimmed elsewhere.
+   One composited layer moving by transform only, so it costs next to nothing; still if motion is reduced. */
+#app .hero { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: var(--a-deep); }
+#app .hero img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.08); animation: a-drift 48s ease-in-out infinite alternate; will-change: transform; }
+#app .hero::after { content: ''; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(8, 30, 19, 0.78) 0%, rgba(8, 30, 19, 0.15) 26%, rgba(8, 30, 19, 0) 42%, rgba(8, 30, 19, 0.55) 62%, rgba(8, 30, 19, 0.94) 82%); }
+#app .hero.dim img { animation: none; transform: scale(1.12); filter: blur(10px) saturate(0.9); opacity: 0.35; will-change: auto; }
+#app .hero.dim::after { background: linear-gradient(180deg, rgba(10, 36, 22, 0.55), rgba(10, 36, 22, 0.9) 55%); }
+@keyframes a-drift { from { transform: scale(1.08) translate3d(-2.5%, 1%, 0); } to { transform: scale(1.08) translate3d(2.5%, -1.5%, 0); } }
+@media (prefers-reduced-motion: reduce) { #app .hero img { animation: none; } }
 
 /* ---- home ---- */
-#app .home { display: flex; flex-direction: column; gap: 28px; min-height: calc(100dvh - 32px - var(--a-safe-t) - var(--a-safe-b)); justify-content: center; padding-bottom: 12vh; }
-#app .brand { text-align: center; }
-#app .bigmark { width: 76px; height: 76px; display: block; margin: 0 auto 12px; filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.35)); }
-#app .brand h1 { font: 700 54px/1 var(--a-display); letter-spacing: 0.01em; margin: 0; }
+#app .home { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: space-between; gap: 24px; max-width: 480px; margin: 0 auto;
+  min-height: calc(100dvh - 32px - var(--a-safe-t) - var(--a-safe-b)); }
+#app .brand { text-align: center; padding-top: 4vh; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); }
+#app .bigmark { width: 64px; height: 64px; display: block; margin: 0 auto 10px; filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.4)); }
+#app .brand h1 { font: 700 56px/1 var(--a-display); letter-spacing: 0.01em; margin: 0; }
 #app .brand h1::after { content: ''; display: block; width: 56px; height: 2px; background: var(--a-gold); margin: 12px auto 0; }
-#app .brand p { margin: 12px auto 0; max-width: 30ch; color: var(--a-muted); }
-#app .rows { display: flex; flex-direction: column; gap: 10px; }
-#app .mrow { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 64px; padding: 10px 14px; text-align: left;
-  background: var(--a-panel); border: 1px solid var(--a-faint);
-  clip-path: polygon(0 0, calc(100% - var(--a-cut)) 0, 100% var(--a-cut), 100% 100%, 0 100%); }
-#app .mrow > .ic { width: 26px; height: 26px; color: var(--a-lime-hi); }
-#app .mrow .t { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-#app .mrow b { font: 700 19px/1.1 var(--a-display); letter-spacing: 0.01em; }
-#app .mrow small { color: var(--a-muted); font-size: 13px; margin-top: 3px; }
-#app .mrow .chev { transform: rotate(-90deg); color: var(--a-muted); }
-#app .mrow.primary { background: var(--a-lime); color: var(--a-ink); border-color: transparent; }
-#app .mrow.primary > .ic, #app .mrow.primary small, #app .mrow.primary .chev { color: var(--a-ink); }
-#app .mrow:active { filter: brightness(1.15); }
+#app .brand p { margin: 12px auto 0; max-width: 28ch; color: var(--a-paper); opacity: 0.9; font-weight: 500; }
+#app .dock { display: flex; flex-direction: column; gap: 12px; }
+/* Continue: the town you were playing, the biggest thing on the screen */
+#app .cont { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; text-align: left;
+  background: var(--a-glass); border: 1px solid var(--a-glass-line); border-radius: 24px; box-shadow: var(--a-lift); }
+#app .cont .thumb { width: 76px; height: 76px; flex: none; object-fit: cover; border-radius: 16px; background: var(--a-panel); }
+#app .cont .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+#app .cont small { color: var(--a-gold-text); font: 700 11px/1.2 var(--a-ui); letter-spacing: 0.1em; text-transform: uppercase; }
+#app .cont b { font: 700 21px/1.1 var(--a-display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#app .cont em { font-style: normal; color: var(--a-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#app .playc { flex: none; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--a-lime); color: var(--a-ink); box-shadow: 0 4px 14px rgba(92, 184, 58, 0.45); }
+#app .playc .ic { width: 28px; height: 28px; }
+#app .newgame { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 58px; border-radius: 999px;
+  font: 700 19px/1 var(--a-display); letter-spacing: 0.02em; background: var(--a-glass); border: 1px solid var(--a-glass-line); box-shadow: var(--a-lift); }
+#app .newgame.primary { min-height: 64px; font-size: 21px; background: var(--a-lime); color: var(--a-ink); border-color: transparent; box-shadow: 0 8px 24px rgba(92, 184, 58, 0.4), var(--a-lift); }
+#app .newgame .ic { width: 24px; height: 24px; }
+/* everything else: a row of small tiles, like a game's secondary menu */
+#app .tiles { display: flex; gap: 8px; }
+#app .tile { flex: 1; min-width: 0; min-height: 72px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 2px;
+  background: var(--a-glass); border: 1px solid var(--a-glass-line); border-radius: 18px; font: 600 12px/1.1 var(--a-ui); color: var(--a-paper); }
+#app .tile .ic { width: 24px; height: 24px; color: var(--a-lime-hi); }
+#app .tile span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#app .cont:active, #app .newgame:active, #app .tile:active { transform: scale(0.98); filter: brightness(1.12); }
 
 /* ---- sub-screens ---- */
 #app .bar { position: sticky; top: calc(-16px - var(--a-safe-t)); z-index: 2; display: flex; align-items: center; gap: 8px; width: 100%; max-width: 560px; margin: calc(-16px - var(--a-safe-t)) auto 8px;
-  padding: calc(10px + var(--a-safe-t)) 0 10px; background: linear-gradient(var(--a-deep) 75%, transparent); }
-#app .bar .back { min-width: 48px; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; margin-left: -8px; }
-#app .bar .back .ic { width: 26px; height: 26px; }
+  padding: calc(10px + var(--a-safe-t)) 0 10px; background: linear-gradient(rgba(10, 36, 22, 0.96) 70%, transparent); }
+#app .bar .back { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--a-glass); border: 1px solid var(--a-glass-line); }
+#app .bar .back .ic { width: 24px; height: 24px; }
 #app .bar h2 { display: flex; align-items: center; gap: 10px; font: 700 26px/1 var(--a-display); margin: 0; }
 #app .bar h2 .ic { color: var(--a-lime-hi); }
 #app .body h3 { font: 700 18px/1.2 var(--a-display); margin: 0 0 6px; color: var(--a-gold-text); letter-spacing: 0.02em; }
 #app .fine { color: var(--a-muted); font-size: 13.5px; margin: 6px 0 10px; }
-#app .grp { background: var(--a-fill); border: 1px solid var(--a-faint); padding: 14px; margin: 0 0 12px;
-  clip-path: polygon(0 0, calc(100% - var(--a-cut)) 0, 100% var(--a-cut), 100% 100%, 0 100%); }
+#app .grp { background: var(--a-glass); border: 1px solid var(--a-glass-line); padding: 14px; margin: 0 0 12px;
+  border-radius: var(--a-r); }
 #app .act { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 16px; font-weight: 700;
   background: var(--a-panel); border: 1px solid var(--a-faint); white-space: nowrap;
-  clip-path: polygon(0 0, calc(100% - var(--a-cut-s)) 0, 100% var(--a-cut-s), 100% 100%, 0 100%); }
+  border-radius: var(--a-r-s); }
 #app .act.primary { background: var(--a-lime); color: var(--a-ink); border-color: transparent; }
 #app .act:disabled { opacity: 0.45; cursor: default; }
 #app .act.wide { width: 100%; }
@@ -97,20 +118,27 @@
 #app .notice { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 12px; padding: 10px 12px; background: rgba(184, 150, 78, 0.16); border-left: 3px solid var(--a-gold); color: var(--a-paper); }
 #app .notice .ic { color: var(--a-gold-text); margin-top: 1px; }
 
-/* new game: one card per map */
-#app .maps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
-#app .map { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: auto auto; gap: 10px 14px; padding: 14px;
-  background: var(--a-panel); border: 1px solid var(--a-faint);
-  clip-path: polygon(0 0, calc(100% - var(--a-cut)) 0, 100% var(--a-cut), 100% 100%, 0 100%); }
-#app .map:not(.ready) { background: rgba(23, 74, 49, 0.55); }
-#app .map .art { grid-row: span 2; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; background: var(--a-lime); color: var(--a-ink);
-  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%); }
-#app .map .art .ic { width: 34px; height: 34px; }
-#app .map .art.off { background: #2b5a42; color: var(--a-muted); }
+/* new game: one card per map, its picture on top (a saved town's and the Library's have an icon at the side) */
+#app .maps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+#app .map { display: grid; grid-template-columns: 56px 1fr; gap: 10px 14px; padding: 14px; overflow: hidden;
+  background: var(--a-glass); border: 1px solid var(--a-glass-line); border-radius: var(--a-r); box-shadow: var(--a-lift); }
+#app .map:not(.ready) { background: rgba(10, 36, 22, 0.6); box-shadow: none; }
+#app .map .art { grid-row: span 2; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(92, 184, 58, 0.18); color: var(--a-lime-hi); border-radius: 16px; }
+#app .map .art .ic { width: 30px; height: 30px; }
+#app .map .art.off { background: var(--a-fill); color: var(--a-muted); }
+#app .map .art.pic { overflow: hidden; background: var(--a-panel); }
+#app .map .art.pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* New game's own cards: the picture across the top */
+#app .scr-new .map { grid-template-columns: 1fr; padding: 0 0 14px; gap: 0; }
+#app .scr-new .map .art { grid-row: auto; width: 100%; height: auto; aspect-ratio: 400 / 190; border-radius: 0; margin-bottom: 12px; position: relative; }
+#app .scr-new .map .art.pic::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgba(10, 36, 22, 0.55)); }
+#app .scr-new .map .art.off img { filter: grayscale(0.85) brightness(0.7); }
+#app .scr-new .map .t, #app .scr-new .map .go { padding: 0 14px; grid-column: 1; }
+#app .scr-new .map .go { margin-top: 12px; }
 #app .map .t { display: flex; flex-direction: column; min-width: 0; }
 #app .map .t b { font: 700 20px/1.1 var(--a-display); }
 #app .map .t small { color: var(--a-muted); font-size: 13.5px; margin-top: 4px; }
-#app .chip { align-self: flex-start; margin-top: 8px; font: 700 11px/1 var(--a-ui); letter-spacing: 0.08em; text-transform: uppercase; font-style: normal; color: var(--a-gold-text); border: 1px solid var(--a-gold); padding: 5px 7px; }
+#app .chip { align-self: flex-start; margin-top: 8px; font: 700 11px/1 var(--a-ui); letter-spacing: 0.08em; text-transform: uppercase; font-style: normal; color: var(--a-gold-text); border: 1px solid var(--a-gold); padding: 5px 8px; border-radius: 999px; }
 #app .map .go { grid-column: 2; display: flex; }
 #app .map .go:empty { display: none; }
 #app .map .go .act { flex: 1; }
@@ -129,7 +157,7 @@
 
 /* settings */
 #app .opts { display: flex; flex-direction: column; gap: 6px; }
-#app .opt { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 12px; background: var(--a-fill); border: 1px solid transparent; cursor: pointer; }
+#app .opt { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 12px; background: var(--a-fill); border: 1px solid transparent; border-radius: 14px; cursor: pointer; }
 #app .opt:has(input:checked) { border-color: var(--a-lime); background: rgba(92, 184, 58, 0.14); }
 #app .opt input { accent-color: var(--a-lime); width: 20px; height: 20px; margin: 0; flex: none; }
 #app .opt span { display: flex; flex-direction: column; }
@@ -149,18 +177,24 @@
 #app .load span { color: var(--a-muted); }
 #app .bar-anim { display: block; width: 180px; height: 4px; background: var(--a-faint); overflow: hidden; position: relative; margin-top: 8px; }
 #app .bar-anim::after { content: ''; position: absolute; inset: 0; width: 40%; background: var(--a-lime); animation: a-slide 1.1s ease-in-out infinite; }
+#app .bar-anim { border-radius: 2px; }
+#app .load .tip { display: flex; gap: 8px; align-items: flex-start; margin: 22px 0 0; padding: 10px 14px; text-align: left; color: var(--a-paper); font-size: 14px;
+  background: var(--a-glass); border: 1px solid var(--a-glass-line); border-radius: 16px; }
+#app .load .tip .ic { color: var(--a-gold-text); margin-top: 1px; }
 @keyframes a-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 @media (prefers-reduced-motion: reduce) { .bar-anim::after { animation: none; width: 100%; opacity: 0.5; } }
 
 /* landscape phones: the brand beside the buttons */
 @media (orientation: landscape) and (max-height: 560px) {
-  #app .home { flex-direction: row; align-items: center; gap: 32px; padding-bottom: 0; max-width: 820px; margin: 0 auto; min-height: calc(100dvh - 32px); }
-  #app .home .brand { flex: 1; }
-  #app .home .rows { flex: 1.2; }
-  #app .bigmark { width: 60px; height: 60px; }
+  #app .home { flex-direction: row; align-items: center; gap: 32px; max-width: 860px; min-height: calc(100dvh - 32px); }
+  #app .home .brand { flex: 1; padding-top: 0; }
+  #app .home .dock { flex: 1.2; }
+  #app .bigmark { width: 52px; height: 52px; }
   #app .brand h1 { font-size: 44px; }
-  #app .mrow { min-height: 54px; padding: 6px 14px; }
-  #app .ridge-wrap { display: none; }
+  #app .cont .thumb { width: 60px; height: 60px; }
+  #app .newgame { min-height: 52px; }
+  #app .tile { min-height: 62px; }
+  #app .hero::after { background: linear-gradient(90deg, rgba(8, 30, 19, 0.35), rgba(8, 30, 19, 0.35) 40%, rgba(8, 30, 19, 0.85)); }
   #app .scr > .body { max-width: 720px; }
 }
 
@@ -170,7 +204,7 @@
   max-width: 420px; padding: 10px 12px 6px; color: var(--a-paper); font: 400 14px/1.4 var(--a-ui);
   background: rgba(15, 51, 34, 0.96); border: 1px solid var(--a-faint); border-top: 2px solid var(--a-gold);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  clip-path: polygon(0 0, calc(100% - var(--a-cut)) 0, 100% var(--a-cut), 100% 100%, 0 100%);
+  border-radius: var(--a-r);
   animation: g-in 0.25s ease-out;
 }
 @keyframes g-in { from { opacity: 0; transform: translateY(-6px); } }
@@ -190,7 +224,7 @@
 #guide .g-dots i.d { background: var(--a-forest); }
 #guide .g-dots i.on { background: var(--a-lime); }
 #guide .g-next { background: var(--a-panel); border: 1px solid var(--a-faint); padding: 0 14px; margin-right: -4px;
-  clip-path: polygon(0 0, calc(100% - var(--a-cut-s)) 0, 100% var(--a-cut-s), 100% 100%, 0 100%); }
+  border-radius: var(--a-r-s); }
 #guide .g-next.primary { background: var(--a-lime); color: var(--a-ink); border-color: transparent; }
 #guide .g-arr { transform: rotate(-90deg); }
 @media (orientation: landscape) and (max-height: 560px) {
@@ -231,3 +265,8 @@
 #app .scr-region .lib-link, #app .scr-region .seedrow .act, #app .scr-region .stepper .act { clip-path: none; border-radius: 14px; }
 #app .scr-region .seedrow input { border-radius: 12px; }
 #app .scr-region .opt { border-radius: 14px; }
+/* loading: the map being built, dimmed, behind the name and a tip */
+#app .hero.loadart img { animation: a-zoom 20s ease-out forwards; filter: saturate(0.9); opacity: 0.55; }
+#app .hero.loadart::after { background: radial-gradient(90% 60% at 50% 45%, rgba(10, 36, 22, 0.55), rgba(10, 36, 22, 0.92)); }
+@keyframes a-zoom { from { transform: scale(1.15); } to { transform: scale(1.3); } }
+@media (prefers-reduced-motion: reduce) { #app .hero.loadart img { animation: none; transform: scale(1.15); } }

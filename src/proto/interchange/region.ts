@@ -7,12 +7,12 @@ import { DEFAULT_OPTS, closestOnPath, type End, type Network, type P } from '../
 import { buildJunction, buildPair, type Interchange, type IxForm, type SlipStyle } from './build';
 
 export interface RegionPlace { id: number; name?: string; kind: 'city' | 'town' | 'village'; x: number; z: number; r: number; gates?: P[] }
-export interface RegionLink { a: number; b: number; road: 'A' | 'B' | 'lane' }
+export interface RegionLink { a: number; b: number; road: 'A' | 'B' }
 export interface RegionIn { bound: number; settlements: RegionPlace[]; links: RegionLink[] }
-export interface RegionRoads { motorway: P[]; interchanges: Interchange[]; aRoads: number[]; bRoads: number[]; lanes: number[]; failed: string[] }
+export interface RegionRoads { motorway: P[]; interchanges: Interchange[]; aRoads: number[]; bRoads: number[]; failed: string[] }
 
 // Road types: the catalogue's rural roads (their speed limits come with them)
-export const REGION_ROADS = { motorway: 'motorway', A: 'rural-60', B: 'rural-50', lane: 'rural-40', link: 'dual' };
+export const REGION_ROADS = { motorway: 'motorway', A: 'rural-60', B: 'rural-50', link: 'dual' };
 const SIZE = { city: 3, town: 2, village: 1 };
 const dist = (a: P, b: P) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -50,9 +50,8 @@ export function motorwayLine(region: RegionIn, clear = 300): P[] {
 // Lay out the region's roads on the network. Junctions are dumbbells (or `form`), each with a link
 // road from its roundabout nearer the place it serves; anything that can't be built is left out and
 // said why in `failed`.
-// (`route`: the winding way a B road or lane takes between its ends, region/lanes.ts; straight without it)
-export function layRegionRoads(net: Network, region: RegionIn, opts: { form?: IxForm; style?: SlipStyle; junctions?: number; route?: (a: P, b: P, road: 'B' | 'lane') => P[] } = {}): RegionRoads {
-  const out: RegionRoads = { motorway: [], interchanges: [], aRoads: [], bRoads: [], lanes: [], failed: [] };
+export function layRegionRoads(net: Network, region: RegionIn, opts: { form?: IxForm; style?: SlipStyle; junctions?: number } = {}): RegionRoads {
+  const out: RegionRoads = { motorway: [], interchanges: [], aRoads: [], bRoads: [], failed: [] };
   const mw = motorwayLine(region), L = dist(mw[0], mw[1]);
   out.motorway = mw;
   const pair = buildPair(net, mw, REGION_ROADS.motorway);
@@ -89,19 +88,15 @@ export function layRegionRoads(net: Network, region: RegionIn, opts: { form?: Ix
   // A roads between the city and the towns, B roads out to the villages (crossing the motorway on a
   // bridge where they cross it: the network grade-separates anything that crosses a motorway)
   const byId = new Map(region.settlements.map((s) => [s.id, s]));
-  const rank = { A: 0, B: 1, lane: 2 };
-  for (const link of [...region.links].sort((x, y) => rank[x.road] - rank[y.road])) {
+  for (const link of [...region.links].sort((x, y) => (x.road === y.road ? 0 : x.road === 'A' ? -1 : 1))) {
     const pa = byId.get(link.a), pb = byId.get(link.b);
     if (!pa || !pb) continue;
-    const type = REGION_ROADS[link.road];
+    const type = link.road === 'A' ? REGION_ROADS.A : REGION_ROADS.B;
     const a = ends(pa, pb), b = ends(pb, pa);
-    // (B roads and lanes wind, if given a way: straight if that way can't be built)
-    const path = link.road !== 'A' ? opts.route?.(a, b, link.road) : undefined;
-    let o: typeof DEFAULT_OPTS = { ...DEFAULT_OPTS, type, ...(path && path.length > 2 ? { path } : {}) };
-    let c = net.check(a, b, undefined, o);
-    if (!c.ok && o.path) { o = { ...DEFAULT_OPTS, type }; c = net.check(a, b, undefined, o); }
+    const o = { ...DEFAULT_OPTS, type };
+    const c = net.check(a, b, undefined, o);
     if (!c.ok) { out.failed.push(`The ${link.road} road ${pa.name ?? pa.id}–${pb.name ?? pb.id}: ${c.reason}`); continue; }
-    (link.road === 'A' ? out.aRoads : link.road === 'B' ? out.bRoads : out.lanes).push(...net.build(a, b, undefined, o));
+    (link.road === 'A' ? out.aRoads : out.bRoads).push(...net.build(a, b, undefined, o));
   }
   return out;
 }

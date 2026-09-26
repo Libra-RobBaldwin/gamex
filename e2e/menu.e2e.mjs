@@ -63,7 +63,8 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   check(t.fcp > 0 && t.fcp < 1000, `the menu's first frame arrives in under 1 s (${Math.round(t.fcp)} ms)`);
   if (!process.env.BASE) check(t.js < 200_000, `the menu loads under 200 kB of script (${Math.round(t.js / 1000)} kB)`);
   check(await page.$('[data-continue]') === null, 'no Continue while nothing is saved');
-  check((await page.$$('.mrow')).length === 5, 'New game, How to play, Library, Settings and About');
+  check((await page.$$('.scr-home [data-go]')).length === 5, 'New game, How to play, Library, Settings and About');
+  check(await page.$eval('.hero img', (i) => i.complete && i.naturalWidth > 0).catch(() => false) || await page.waitForFunction(() => document.querySelector('.hero img')?.naturalWidth > 0, null, { timeout: 5000 }).then(() => true, () => false), 'the town picture behind the menu loads');
   await page.screenshot({ path: `${shots}/1-home.png` });
   for (const s of ['how', 'library', 'settings', 'about', 'new']) {
     await page.tap(`[data-go="${s}"]`);
@@ -234,7 +235,7 @@ for (const id of ['town', 'sandbox']) {
   const { ctx, page } = await phone({ landscape: true });
   await page.goto(BASE + '/');
   await atMenu(page);
-  const fits = await page.evaluate(() => [...document.querySelectorAll('.mrow')].every((b) => { const r = b.getBoundingClientRect(); return r.bottom <= innerHeight && r.right <= innerWidth; }));
+  const fits = await page.evaluate(() => [...document.querySelectorAll('.scr-home [data-go]')].every((b) => { const r = b.getBoundingClientRect(); return r.bottom <= innerHeight && r.right <= innerWidth; }));
   check(fits, 'landscape: every menu button is on screen');
   await page.screenshot({ path: `${shots}/7-landscape.png` });
   await page.tap('[data-go="new"]');
@@ -265,15 +266,16 @@ for (const id of ['town', 'sandbox']) {
   check(/Rolling country/.test(await page.textContent('.summary')) && /Cold/.test(await page.textContent('.summary')), 'region setup: the summary shows what was picked');
   // the finer settings are folded away under More options
   await page.tap('details.more summary');
+  const rivers0 = Number(await page.textContent('[data-count="rivers"] output'));
   await page.tap('[data-count="rivers"] [data-step="1"]');
   await page.fill('#rg-seed', '42');
   await page.dispatchEvent('#rg-seed', 'change');
-  check(await page.textContent('[data-count="rivers"] output') === '2', 'region setup: the steppers change the counts');
+  check(await page.textContent('[data-count="rivers"] output') === String(rivers0 + 1), 'region setup: the steppers change the counts');
   await page.screenshot({ path: `${shots}/9-region-setup.png`, fullPage: true });
   await page.tap('[data-start]');
   await inGame(page, 300000).catch(() => {}); // (a 6 km map is slow to build under software rendering)
   const q = new URLSearchParams(new URL(page.url()).search);
-  check(q.get('map') === 'region' && q.get('seed') === '42' && q.get('rivers') === '2' && q.get('style') === 'arctic', `the region starts from the menu with its options (${new URL(page.url()).search})`);
+  check(q.get('map') === 'region' && q.get('seed') === '42' && q.get('rivers') === String(rivers0 + 1) && q.get('style') === 'arctic', `the region starts from the menu with its options (${new URL(page.url()).search})`);
   check(await page.evaluate(() => !!window.proto?.shell && document.body.dataset.app === 'game'), 'the region loads');
   // a finger dragged over the map moves it (the place names' layer once caught every touch)
   {

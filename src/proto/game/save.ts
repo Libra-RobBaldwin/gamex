@@ -23,7 +23,7 @@ import type { LinesSave } from './lines';
 import type { TownSave } from './econ';
 import type { PurseSave } from './money';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 // the network as data: its nodes, roads (with their stops, bridges and one-way carriageways),
 // the plots with buildings on, the land claimed (bar the water's, which the map makes again, and
@@ -53,6 +53,10 @@ export interface GameSave {
   lines: LinesSave;
   town: TownSave;
   purse: PurseSave;
+  // A 50 km map (worldmap/): the save is what differs from what the seed makes. The map itself,
+  // its scenery and the places not yet live are made again from the query; this says which places
+  // of the live play area had come to life, and the network above holds everything built there.
+  world?: { live: number[] };
 }
 
 export function saveNetwork(net: Network): NetSave {
@@ -77,7 +81,14 @@ export function restoreNetwork(net: Network, s: NetSave) {
 // MIGRATIONS[v] takes a save of version v to version v + 1. Add one whenever the format changes,
 // and bump SAVE_VERSION: old saves then load through every step since.
 export type Migration = (s: Record<string, unknown>) => Record<string, unknown>;
-export const MIGRATIONS: Record<number, Migration> = {};
+export const MIGRATIONS: Record<number, Migration> = {
+  // 1 → 2: a region with no size in its query was the 6 km one (50 km is the standard map now)
+  1: (s) => {
+    const m = s.map as { id: string; query: string } | undefined;
+    if (m?.id === 'region') { const q = new URLSearchParams(m.query); if (!q.has('size')) { q.set('size', '6'); s.map = { ...m, query: q.toString() }; } }
+    return s;
+  },
+};
 
 export class SaveError extends Error {}
 // A save as read back, brought up to this version of the game (a copy: the stored one is left alone).
