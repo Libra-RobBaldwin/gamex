@@ -5,6 +5,7 @@
 import type { Kind, Link, StreetCall, ZoneRule } from './generate';
 import type { WaterSpec, XZ } from './water';
 import type { RegionOptions, Relief, Style } from './options';
+import type { WorldPlan } from '../worldmap/plan';
 
 export interface SettlementInfo { id: number; name: string; kind: Kind; x: number; z: number; r: number; gates?: XZ[] } // (gates: where its high street leaves it)
 // A street as the map describes it: the region's calls, plus the few options the town's
@@ -37,6 +38,7 @@ export interface MapSpec {
   style: Style; // how it looks (region/styles.ts): temperate, desert, arctic
   relief: Relief; // how hilly (not drawn yet: docs/regiongen.md, "Hills")
   options?: RegionOptions; // a generated map's options: they make it again
+  world?: WorldPlan; // a 50 km map's plan (worldmap/): this spec is its live play area, the rest is streamed scenery
 }
 
 const inPoly = (p: XZ, poly: XZ[]) => {

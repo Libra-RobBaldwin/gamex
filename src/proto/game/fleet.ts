@@ -92,6 +92,7 @@ export interface Dressed { kind: Kind; heavy: boolean; cls: number; front: numbe
 export interface Driven {
   id: number; v: number; s: number; lane: number; oldLane?: number; merge?: number; bus?: boolean; dwell?: number; inBay?: boolean;
   served?: number; bay?: { id: number }; gone?: number;
+  parked?: boolean; // (standing in a parking space: no lamps lit)
   plan?: { node: number; path: { move: string; lineS: number } };
   turn?: { node: number; t: number; path: { move: string; ext1: number } };
   dress?: Dress;
@@ -368,10 +369,10 @@ export class Fleet {
     if (c.bus && dt > 0) this.doors.setDoors(c.id, c.dwell !== undefined && c.dwell > doorSeconds(lead) + 0.2 && c.gone === undefined ? 1 : 0, 'left', { model: lead });
     // (off screen: nothing more to work out)
     if (!r0 || !this.seen(r0.x, y, r0.z, d.length)) return;
-    let f = (d.brake > 0 ? FLAGS.brake : 0) | this.indicators(c);
-    if (dark(this.hour, d.lampAt)) f |= FLAGS.lights | (lead.category === 'bus' ? FLAGS.interior : 0);
-    if (d.beacons) f |= FLAGS.beacons;
-    if (d.sign) f |= FLAGS.sign;
+    let f = c.parked ? 0 : (d.brake > 0 ? FLAGS.brake : 0) | this.indicators(c);
+    if (!c.parked && dark(this.hour, d.lampAt)) f |= FLAGS.lights | (lead.category === 'bus' ? FLAGS.interior : 0);
+    if (d.beacons && !c.parked) f |= FLAGS.beacons;
+    if (d.sign && !c.parked) f |= FLAGS.sign;
     const dl = c.bus ? this.doors.get(c.id)[0] : 0;
     for (let i = 0; i < d.chain.length && i < parts.length; i++) {
       const r = parts[i];

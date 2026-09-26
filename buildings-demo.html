@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f3322" />
+    <title>Buildings gallery</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0f3322; font: 13px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; color: #e9edf3; }
+      #c { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+      #top { position: fixed; top: 0; left: 0; right: 0; padding: 8px 12px; background: linear-gradient(#0f3322e0, #0f332200); pointer-events: none; }
+      #top b { font-size: 15px; }
+      #top small { display: block; opacity: 0.8; }
+      #panel { position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); background: #0f3322e8; border-top: 1px solid #1f5e3f; }
+      .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+      button { background: #1f5e3f; color: #e9edf3; border: 1px solid #5cb83a55; border-radius: 8px; padding: 6px 10px; font: inherit; min-height: 32px; }
+      #name { flex: 1; text-align: center; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="top"><b id="title">Buildings</b><small id="detail"></small></div>
+    <div id="panel"><div class="row"><button id="prev">&lsaquo;</button><div id="name"></div><button id="next">&rsaquo;</button></div></div>
+    <script type="module" src="/src/proto/vernacular-demo.ts"></script>
+  </body>
+</html>

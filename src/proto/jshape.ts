@@ -136,7 +136,8 @@ const originOf = (n: XZ, l: ShapeLeg) => (l as ShapeLeg & { o?: XZ }).o ?? n;
 // metre apart, and at each corner of the centreline, so a curving kerb is followed
 function run(n: XZ, l: ShapeLeg, a0: number, a1: number, b: number): XZ[] {
   if (!curved(l) || Math.abs(a1 - a0) < 0.05) return [];
-  const at = new Set<number>(), lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+  // (a mouth kilometres out is a degenerate meeting, two roads all but parallel: never sample past 2 km)
+  const at = new Set<number>(), lo = Math.max(-2000, Math.min(a0, a1)), hi = Math.min(2000, Math.max(a0, a1));
   for (let a = Math.ceil(lo) ; a < hi; a += 1) at.add(a);
   let acc = 0;
   const p = l.path!;

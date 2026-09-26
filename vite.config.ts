@@ -13,6 +13,7 @@ export default defineConfig({
         ground: resolve(__dirname, 'ground-demo.html'),
         bridges: resolve(__dirname, 'bridges-demo.html'),
         industries: resolve(__dirname, 'industries-demo.html'),
+        buildings: resolve(__dirname, 'buildings-demo.html'),
         people: resolve(__dirname, 'people-demo.html'),
         vehicles: resolve(__dirname, 'vehicles-demo.html'),
         water: resolve(__dirname, 'water-demo.html'),
