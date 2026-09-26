@@ -638,7 +638,6 @@ export class Traffic {
   addBus(offer?: string, line?: BusLine, leg = 0): Car | undefined {
     if (line?.seq.length) leg %= line.seq.length;
     const bd = this.fleet.dressBus(offer);
-    bd.dress.lampAt = (this.rand() - 0.5) * 0.7;
     const c: Car = {
       id: this.ids++, kind: 'bus', front: bd.front, back: bd.back, seg: this.anyRoad(line, leg), from: 0, s: 0, v: 0, vmax: 11, route: [], goal: Infinity, lorry: false, bus: true,
       heading: 0, born: this.clock, wait: 0, lane: 0, off: 0, uref: [], cls: bd.cls, hw: bd.hw, dress: bd.dress,
@@ -673,6 +672,7 @@ export class Traffic {
       if (hi < lo) continue;
       const s = lo + this.rand() * (hi - lo), lane = this.net.def(seg).bus ? BUSLANE : 0;
       if (!this.canPlace(seg, from, s, lane, bd)) continue;
+      if (c.dress) c.dress.lampAt = (this.rand() - 0.5) * 0.7; // (after the placing draws: the same random stream as before the depot)
       this.offRoad(c);
       c.seg = seg; c.from = from; c.s = s; c.lane = 0; c.off = this.laneOff(seg, from, s, lane); c.gone = undefined;
       this.cars.push(c);

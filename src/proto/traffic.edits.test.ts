@@ -97,8 +97,10 @@ describe('a line’s buses when their road goes', () => {
   it('a road bulldozed under a bus sends it to the depot, and it comes back at its next call', () => {
     const { net, traffic, lines, near, run } = setup(6);
     const l = lines.add([near({ x: -85, z: 0 }), near({ x: 120, z: 0 })], false, 2);
-    run(60);
-    const bus = cars(traffic).find((c) => c.bus && c.gone === undefined && !c.turn && !c.seg.a && false) ?? cars(traffic).find((c) => c.bus && c.gone === undefined && !c.turn && !net.segs.get(c.seg.id)!.stops.length);
+    run(30);
+    // a bus on a road with no stops (the bulldozer refuses a road with a stop a line calls at)
+    let bus: CarView | undefined;
+    run(240, () => !!(bus = cars(traffic).find((c) => c.bus && c.gone === undefined && !c.turn && !net.segs.get(c.seg.id)!.stops.length && net.segs.get(c.seg.id)!.stops !== undefined)));
     expect(bus, 'a bus on a road with no stops').toBeTruthy();
     net.removeSeg(bus!.seg.id);
     traffic.invalidate(); lines.prune();
