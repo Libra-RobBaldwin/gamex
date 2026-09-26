@@ -1511,24 +1511,14 @@ function arrowTap(sx: number, sy: number) {
 }
 
 // what a road would knock down, in words
-// The stops a blueprint takes away: a road joined onto another where a stop stands splits it there,
-// and the stop (and the one facing it) can't straddle the join (roads.ts split). Its line loses the
-// call, and a two-stop line goes with its buses: said on the card before Build (the review's bug 2).
-function stopsLost(d: Draft) {
-  const out: { seg: RSeg; stop: Stop }[] = [];
-  for (const e of [d.a, d.b]) {
-    const seg = e.seg !== undefined ? net.segs.get(e.seg) : undefined;
-    if (!seg || !seg.stops.length) continue;
-    const c = closestOnPath(e, net.path(seg));
-    for (const st of seg.stops) { const [s0, s1] = stopSpan(st); if (s1 >= c.s - 1 && s0 <= c.s + 1 && !out.some((x) => x.stop.id === st.id)) out.push({ seg, stop: st }); }
-  }
-  return out;
-}
-function stopsLostNote(lost: { seg: RSeg; stop: Stop }[]) {
+// The stops a blueprint takes away (Network.check reports the ones the new road lands on; a stop the
+// road merely joins beside is kept across the split since PR #64). Its line loses the call, and a
+// two-stop line goes with its buses: said on the card before Build (the review's bug 2).
+function stopsLostNote(lost: Stop[]) {
   if (!lost.length) return '';
-  const names = [...new Set(lost.map((x) => lines.name(x.stop.id)))];
-  const on = lines.list.filter((l) => lost.some((x) => l.stops.some((id) => lines.same(id, x.stop.id))));
-  const gone = on.filter((l) => l.stops.filter((id) => !lost.some((x) => lines.same(id, x.stop.id))).length < 2);
+  const names = [...new Set(lost.map((x) => lines.name(x.id)))];
+  const on = lines.list.filter((l) => lost.some((x) => l.stops.some((id) => lines.same(id, x.id))));
+  const gone = on.filter((l) => l.stops.filter((id) => !lost.some((x) => lines.same(id, x.id))).length < 2);
   const lineText = on.length ? ` Line ${on.map((l) => l.num).join(' and ')} ${on.length > 1 ? 'call' : 'calls'} there${gone.length ? `: ${gone.length > 1 ? 'they go' : `line ${gone[0].num} goes`}, and ${gone.length > 1 ? 'their' : 'its'} buses are sold back` : ' and would skip it'}.` : '';
   return `<div class="demo">${icon('alert')}<div><b>This road joins where the ${esc(names.join(' and '))} stop${names.length > 1 ? 's stand' : ' stands'}</b>: the stop goes.${esc(lineText)}</div></div>`;
 }
@@ -1585,7 +1575,7 @@ function renderBar() {
     tool.setPrimary({ label: 'Build', title: 'Build the motorway and its junction', icon: nd ? 'bulldozer' : 'check', kind: nd ? 'danger' : 'primary', disabled: !(p.ok && !dragging && purse.can(price(p.cost))), onClick: buildDraft });
     return;
   }
-  const cost = price(c.cost), afford = purse.can(cost), lost = stopsLost(draft);
+  const cost = price(c.cost), afford = purse.can(cost), lost = c.stops;
   tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(cost)}</b></span></div>
     ${ix}
     ${afford ? '' : `<div class="bad">${icon('alert')}<span>${short(cost)}</span></div>`}
