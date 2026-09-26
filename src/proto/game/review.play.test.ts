@@ -3,7 +3,7 @@
 // without the drawing (the harness save.test.ts uses). Each test captured something seen wrong.
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { DEFAULT_OPTS, rng, subPath, type Lot } from '../roads';
+import { DEFAULT_OPTS, pointAt, rng, subPath, type Lot } from '../roads';
 import { Traffic } from '../traffic';
 import { SCENARIOS, town } from '../trafficsim';
 import { starterStops } from './crowdsites';
@@ -72,12 +72,12 @@ describe('riders a day', () => {
 // ---------- money ----------
 
 describe('stops as the economy sees them', () => {
-  it.fails('stand within a few metres of where they are on the road', () => {
+  it('stand within a few metres of where they are on the road', () => {
     const w = world({ lines: 'none' });
     let worst = 0, at = '';
     for (const seg of w.net.segs.values()) for (const st of seg.stops) {
       const p = w.net.path(seg), L = Math.max(1, w.net.length(seg));
-      const q = p[Math.min(p.length - 1, Math.max(0, Math.round((st.s / L) * (p.length - 1))))];
+      const q = pointAt(p, st.s); // (as game/econ.ts stopList places it now)
       const t = subPath(p, Math.max(0, st.s - 0.5), st.s + 0.5)[0];
       const d = Math.hypot(q.x - t.x, q.z - t.z);
       if (d > worst) { worst = d; at = `stop ${st.id} on seg ${seg.id} (${p.length} points, ${Math.round(L)} m)`; }
@@ -93,7 +93,7 @@ describe('stops as the economy sees them', () => {
 // tool (Lines.same), so a player who builds a pair at one spot is sent to draw a line that can't
 // be drawn.
 describe('the goal card', () => {
-  it.fails('asks for a line only when there are two places a line could join', () => {
+  it('asks for a line only when there are two places a line could join', () => {
     const made = town({ ...SC, buses: 0 });
     const net = made.net;
     starterStops(net, [{ x: -85, z: 0 }]); // (one point: a stop on each side of the road, as the stop tool builds them one tap each)
@@ -104,7 +104,8 @@ describe('the goal card', () => {
     const ids = [...net.segs.values()].flatMap((s) => s.stops.map((st) => st.id));
     const places = new Set(ids.map((id) => Math.min(...traffic.place(id)!.stops.map((s) => s.id))));
     log('goal stops', stops, 'places', places.size, 'same', lines.same(ids[0], ids[1]));
-    const goalSaysDrawALine = stops >= 2;
+    // (main.ts updateGoal counts places now, each stop keyed to the lowest id of its place, as here)
+    const goalSaysDrawALine = places.size >= 2;
     const aLineCanBeDrawn = places.size >= 2 && !lines.same(ids[0], ids[1]);
     expect(goalSaysDrawALine).toBe(aLineCanBeDrawn);
   });
@@ -114,13 +115,13 @@ describe('the goal card', () => {
 // (main.ts drawCoverage) rings the stop where it is (markers.places(), by subPath); the economy
 // counts homes within STOP_WALK_M of the index-approximated point.
 describe('stop catchments', () => {
-  it.fails('count the same homes the coverage overlay rings', () => {
+  it('count the same homes the coverage overlay rings', () => {
     const w = world({ lines: 'none' });
     const homes = w.net.lots.filter((l) => l.kind === 'house' || l.kind === 'terrace' || l.kind === 'flats' || l.kind === 'tower');
     let differ = 0, worstStop = '';
     for (const seg of w.net.segs.values()) for (const st of seg.stops) {
-      const p = w.net.path(seg), L = Math.max(1, w.net.length(seg));
-      const q = p[Math.min(p.length - 1, Math.max(0, Math.round((st.s / L) * (p.length - 1))))];
+      const p = w.net.path(seg);
+      const q = pointAt(p, st.s); // (as game/econ.ts stopList places it now)
       const t = subPath(p, Math.max(0, st.s - 0.5), st.s + 0.5)[0];
       const inQ = homes.filter((l) => Math.hypot(l.x - q.x, l.z - q.z) <= STOP_WALK_M).length;
       const inT = homes.filter((l) => Math.hypot(l.x - t.x, l.z - t.z) <= STOP_WALK_M).length;
