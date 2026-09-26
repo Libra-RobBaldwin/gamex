@@ -139,15 +139,16 @@ purchase list is a `render` in the `buy` Transport tab.
   measured by sampling what's under every other pixel. They cover 13.9% at 360×780 and 9.0% in
   landscape at 915×412.
 - **Build.** Roads (the four presets and "More road types", which opens the road picker and
-  filters in the sheet), Rail (the five presets) and Stops (a working bus stop; bus station,
-  railway station and lorry depot are locked with "Not in the game yet"). Freight, Bulldoze and
-  Landscape have a locked card each, with the reason.
+  filters in the sheet), Rail (the five presets), Stops (the bus stop and the railway station) and
+  Bulldoze, which takes away a road, a railway or a bus stop: half of what the player paid for a
+  road comes back, a road the map gave refunds nothing, and it refuses with the reason where
+  buildings face the road, a line calls at a stop on it or a station stands on the track.
 - **Tool strip.** The options are Straight, Curve and Smooth; Height; Gradient; Join, Over and
-  Under. A blueprint shows as a card above the strip: length, cost, demolition warning, lift
-  and the long section. The strip's Done button turns into Build, which goes red with a
-  bulldozer icon when the road would demolish buildings. Undo steps back through the blueprint
-  and the curve's taps. The old HUD had no way to undo a road once it was built, and the network
-  can't remove one yet, so Undo doesn't go further back than that.
+  Under (for rail, Join gives a level crossing over a road). A blueprint shows as a card above the
+  strip: length, cost, demolition warning, lift and the long section. The strip's Done button
+  turns into Build, which goes red with a bulldozer icon when the road would demolish buildings
+  or take away a bus stop where it joins another road (the card names the stop and the line
+  that calls there). Undo steps back through the blueprint and the curve's taps.
 - **While drawing.** The bar is hidden, so a round View button under the compass cycles 3D, Low
   and Plan. The blueprint card moves across if it would cover the road's ends: to the other side
   in landscape, or under the status strip in portrait. A new blueprint closes any sheet the tool

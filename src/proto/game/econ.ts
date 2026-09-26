@@ -10,7 +10,7 @@
 import { Economy, type EconomySave } from '../economy';
 import { BUILDINGS, VEHICLES, type Action, type BuildingKind, type EconEvent, type LineIn, type Oracles, type StopIn, type TownReport, type VehicleKind, type ZoneIn } from '../econdefs';
 import { USE, unitsOf } from '../buildgen';
-import type { Lot, LotKind, Network, P } from '../roads';
+import { pointAt, type Lot, type LotKind, type Network, type P } from '../roads';
 import type { Traffic } from '../traffic';
 import type { Lines } from './lines';
 import { TownNumbers, type CrowdNumbers } from './crowds';
@@ -174,7 +174,7 @@ export class TownEconomy {
       const k = this.key(st.id);
       if (seen.has(k)) continue;
       seen.add(k);
-      const p = this.h.net.path(seg), q = p[Math.min(p.length - 1, Math.max(0, Math.round((st.s / Math.max(1, this.h.net.length(seg))) * (p.length - 1))))];
+      const q = pointAt(this.h.net.path(seg), st.s); // (where it stands along the road, not the path point nearest by index: the review's bug 7)
       out.push({ id: k, kind: 'bus_stop', x: q.x, z: q.z, name: this.h.lines.name(k), radius: STOP_WALK_M });
     }
     // (a station at a way off the map stands, for the economy, in the place it leads to)
