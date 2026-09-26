@@ -229,6 +229,16 @@ function fitsRoundabout(legs: Leg[], R: number) { return legs.every((l) => l.len
 const ringFree = (net: Network, node: number, R: number, geo: Geometry) => geo.fits([ringFootprint(net.node(node), R)]);
 
 // Design a junction from scratch: pick the form and lane use with the most spare capacity.
+// How readily junctions become roundabouts. 'often' (the town map, as it always was): any junction
+// with a 50 mph road, and crossroads where a ring fits. 'rare' (a 50 km map: an English market
+// town has one or two): only a motorway's end or where two big roads meet (dual carriageways,
+// arterials, boulevards); lanes, streets and villages meet at give-way T-junctions and crossroads.
+// The player can still choose a roundabout for any junction.
+export type RoundaboutPolicy = 'often' | 'rare';
+let policy: RoundaboutPolicy = 'often';
+export function setRoundabouts(p: RoundaboutPolicy) { policy = p; }
+const BIG = new Set(['Dual', 'Arterial', 'Boulevard']);
+
 export function design(net: Network, node: number, geo: Geometry, seen?: Map<string, number>, prefer?: { form?: Form; slip?: boolean }): Junction | null {
   const legs = legsAt(net, node);
   if (legs.length < 2) return null;
@@ -289,8 +299,9 @@ export function design(net: Network, node: number, geo: Geometry, seen?: Map<str
   const options: Junction[] = [];
   if (prefer?.form) return make(prefer.form, prefer.slip ?? true);
   // fast roads (and the end of a motorway) meet others at a roundabout, never a side-road T
-  const quick = fast.length > 0 || legs.some((l) => net.def(l.seg).mph >= 50);
-  const ringOk = (r: number) => !raised && fitsRoundabout(legs, r) && ringFree(net, node, r, geo);
+  const rare = policy === 'rare', bigMeet = legs.filter((l) => BIG.has(net.def(l.seg).family)).length >= 2;
+  const quick = fast.length > 0 || (rare ? bigMeet : legs.some((l) => net.def(l.seg).mph >= 50));
+  const ringOk = (r: number) => !raised && fitsRoundabout(legs, r) && ringFree(net, node, r, geo) && (!rare || fast.length > 0 || bigMeet);
   if (quick && ringOk(R)) {
     const rb = make('roundabout', false);
     if (fast.length || rb.score.dos < 0.95) return rb;
@@ -306,7 +317,7 @@ export function design(net: Network, node: number, geo: Geometry, seen?: Map<str
     // mini-roundabouts suit four quiet streets at most; five or more roads want a full one
     if (ringOk(small && legs.length > 4 ? 16 : small ? 7 : R)) options.push(make(small && legs.length <= 4 ? 'mini' : 'roundabout', false));
     options.push(make('signals', legs.length === 4));
-    if (small && legs.length === 4) options.push(make('priority', false));
+    if ((small || rare) && legs.length === 4) options.push(make('priority', false)); // (a country crossroads gives way too)
   }
   // prefer the simplest form that copes; otherwise the one with most spare capacity
   const simple: Form[] = ['priority', 'mini', 'roundabout', 'signals'];
@@ -315,7 +326,7 @@ export function design(net: Network, node: number, geo: Geometry, seen?: Map<str
     return ok(x) - ok(y) || (ok(x) === 0 ? (legs.length === 3 ? (x.slip ? 0 : 1) - (y.slip ? 0 : 1) || simple.indexOf(x.form) - simple.indexOf(y.form) : simple.indexOf(x.form) - simple.indexOf(y.form)) : x.score.dos - y.score.dos);
   });
   // four-way junctions on the flat take roundabouts where they fit, as the player asked
-  if (legs.length >= 4) { const rb = options.find((o) => o.form === 'mini' || o.form === 'roundabout'); if (rb && rb.score.dos < 1.2) return rb; }
+  if (legs.length >= 4 && !rare) { const rb = options.find((o) => o.form === 'mini' || o.form === 'roundabout'); if (rb && rb.score.dos < 1.2) return rb; }
   return options[0];
 }
 
