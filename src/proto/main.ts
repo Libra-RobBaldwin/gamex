@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import './proto.css';
 import { DEFAULT_OPTS, Network, ROADS, kerbOf, rectCorners, rng, closestOnPath, pointAt, stopSpan, subPath, pathLength, type Check, type End, type Lot, type P, type RSeg, type RoadDef, type RoadOpts, type RoadType, type Stop, type StopPlan } from './roads';
-import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, type Form, type Junction } from './junction';
+import { FORM_NAME, design, landFits, laneOptions, legsAt, moveOf, rescore, setRoundabouts, type Form, type Junction } from './junction';
 import { PRESETS, RAIL_PRESETS, TRAINS, filterRoads, isSlip, type RoadFilter } from './catalog';
 import { DEEP, GRADES } from './grade';
 import { Flat, Solid, drawRoads, halfOfType, laneCentre, structures, GRASS_MATS, LAMP_OFF, LAMP_ON, type Lamp } from './roaddraw';
@@ -88,6 +88,7 @@ const REAL: { parks: Region[]; forms?: Map<number, { form: Form; slip: boolean }
 const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(PARAMS); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
 const WORLD = MAP.world ?? null; // (a 50 km map's plan: MAP is its live play area round the start town, the rest streams as scenery)
+if (WORLD) setRoundabouts('rare'); // (roundabouts where big roads meet, not at every lane junction: junction.ts)
 // (a generated map builds in its places' traditions; ?vern=cotswold, nordic, … sets one on any map)
 const VERN = new URLSearchParams(MAP_QUERY).get('vern') as Vern | null, vernForced = VERN && VERNS.includes(VERN) ? VERN : undefined;
 setParkedCars(false); // (parked cars are real ones: game/parking.ts)
