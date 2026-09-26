@@ -2444,7 +2444,9 @@ function snapshot(): GameSave {
 // Save now (the town is copied as it's written, so play carries straight on). False if it couldn't.
 function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
   if (!canSave) return Promise.resolve(false);
-  if (saving) return saving; // (one at a time: a second asks for the same)
+  // (one at a time: a second asks for the same; but hiding the page mid-save saves again after it,
+  // so what's kept is the town as it was left)
+  if (saving) return why === 'hide' ? saving.then(() => saveGame('hide')) : saving;
   const t0 = performance.now();
   let s: GameSave;
   try { s = snapshot(); } catch (e) { console.warn('save', e); return Promise.resolve(false); }
