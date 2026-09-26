@@ -60,6 +60,15 @@ function build() {
     road.position.set(0, 0.02, z + 4.6);
     street.add(road);
   });
+  // shopping complexes, one of each, in a row of their own
+  {
+    let cx = -140;
+    const zc = rowZ(8) + 30;
+    for (const [arch, w, d, front] of [['parade', 36, 15, 6], ['arcade', 40, 30, 6], ['retailpark', 110, 80, 4], ['mall', 150, 120, 4]] as const) {
+      lots.push(lot('shop', cx + w / 2, zc, w, d, { arch, front, back: 12, h: 12, pw: w + 4 }));
+      cx += w + 16;
+    }
+  }
   let x = -110;
   const z = rowZ(6) + 10;
   for (const arch of ['church', 'pub', 'station', 'hall', 'cornershop', 'surgery'] as const) {

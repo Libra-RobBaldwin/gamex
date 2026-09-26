@@ -7,7 +7,7 @@
 import { closestOnPath, kerbOf, pathLength, pointAt, type Lot, type Network, type P, type RSeg, type Stop } from '../roads';
 import { legsAt, type Junction } from '../junction';
 import { CELL, type Region } from '../infill';
-import { USE } from '../buildgen';
+import { USE, unitsOf } from '../buildgen';
 import { crossingAt } from '../jshape';
 import { pedCrossingsOn, type PedXKind } from '../pedx';
 import { courseOf, type Course } from '../xsection';
@@ -189,12 +189,12 @@ export function frontage(net: Network, sites: Sites) {
   for (const s of sites.stops) { s.residents = s.jobs = 0; }
   const segs = net.segs;
   for (const l of net.lots) {
-    const u = USE[l.kind], s = segs.get(l.seg);
-    const res = u.unit === 'jobs' ? 0 : u.pop, jobs = u.unit === 'residents' ? 0 : u.pop;
+    const u = USE[l.kind], s = segs.get(l.seg), n = unitsOf(l); // (a shopping complex holds several shops)
+    const res = u.unit === 'jobs' ? 0 : u.pop * n, jobs = u.unit === 'residents' ? 0 : u.pop * n;
     if (s) {
       const key = `${s.id}:${net.sideOf(s, l)}`;
       const t = tot.get(key) ?? { residents: 0, jobs: 0, shops: 0 };
-      t.residents += res; t.jobs += jobs; if (l.kind === 'shop' || l.arch === 'cornershop') t.shops++;
+      t.residents += res; t.jobs += jobs; if (l.kind === 'shop' || l.arch === 'cornershop') t.shops += n;
       tot.set(key, t);
     }
     // a stop serves everyone within about 300 m (four minutes' walk)

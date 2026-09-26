@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { makeBuilding } from '../buildgen';
 import { RAIL_MATS, setBoxSkip, setDeckSkip, setTrackSkip } from '../roaddraw';
 import { setBridgeSkip } from '../game/bridges';
+import { beyondEdge } from '../game/edge';
 import { kerbOf } from '../catalog';
 import { doorPositions as doorPositionsOf, platformSide } from '../vehicles/doors';
 import type { Fleet, Dress } from '../game/fleet';
@@ -121,6 +122,9 @@ export class RailDraw {
   private skips(s: RSeg): [XZ, XZ][] {
     const out: [XZ, XZ][] = [];
     const rw = this.rw, tracks = rw.net.def(s).tracks === 2 ? 2 : 1;
+    // (the track off the map, past the ground's edge, isn't drawn: game/edge.ts beyondEdge)
+    const path = rw.net.path(s);
+    if (beyondEdge(rw.net.edge, path)) return [[path[0], path[path.length - 1]]];
     for (const w of rw.works()) {
       if (w.seg !== s.id || rw.graph.broken.has(w.id)) continue;
       const r = stationTracks(w, tracks).ramp;
@@ -141,6 +145,7 @@ export class RailDraw {
     // the track stations lay: loops, the tracks round islands, depot sidings
     for (const p of g.pieces) {
       if (!p.curvy && !p.laid && p.depot === undefined) continue;
+      if (beyondEdge(rw.net.edge, p.pts)) continue; // (off the map)
       const bal = p.depot !== undefined ? G.sidingBallast : G.ballast, yb = p.depot !== undefined ? 0.18 : 0.2;
       G.ballast === bal ? bal.band(p.pts, 2.4, -2.4, yb) : bal.band(p.pts, 2.2, -2.2, yb);
       track(G.sleeper, G.rail, p);
@@ -148,7 +153,7 @@ export class RailDraw {
     // the stations
     for (const [id, sh] of rw.shapes) {
       const st = rw.station(id);
-      if (!st) continue;
+      if (!st || beyondEdge(rw.net.edge, [st])) continue; // (a station off the map: trains go there, nobody sees it)
       const deep = sh.structure === 'underground', raised = sh.structure === 'viaduct';
       for (const pl of sh.platforms) platform(G, pl.edge, pl.back, pl.y, pl.twoFaced, sh.canopy && sh.style !== 'halt', sh.style === 'halt' && !deep);
       // where the footbridge (or the subway, or a viaduct's stairs down) meets each platform: its stairs go up (or down) there
@@ -195,6 +200,7 @@ export class RailDraw {
       // (the left of the way the train is going; a double line's signals stand outside its tracks)
       const lx = hz, lz = -hx, o = 2.9;
       const x = q.x + lx * o, z = q.z + lz * o;
+      if (beyondEdge(rw.net.edge, [{ x, z }])) continue; // (off the map)
       this.sig.push({ key: s.piece * 2 + (s.dir === 1 ? 1 : 0), x, y: q.y, z, rot: Math.atan2(hz, hx) });
       G.post.box(x, q.y, z, 0.16, 4.2, 0.16, 0);
       // the head faces the train coming towards it
