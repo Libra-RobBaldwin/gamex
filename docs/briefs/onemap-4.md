@@ -66,7 +66,33 @@ integration head efce852. Coordinator: https://claude.ai/code/session_01NoR4Fo84
 - `package.json`, `package-lock.json` (Leaflet out).
 - README.md and docs/ (see the docs commit).
 
-## State
+## New direction from the user (26 Sep, 20:40 UTC): roads at the edge of towns
+
+The user, on the region's start town: "Roads going off at deeply weird angles at the edge of the towns...
+Not realistic at all... I really wanted you to look at a load of real maps from OS and come up with seed
+rules that reflect reality... Tell coordinator session this is what you are doing." The coordinator was
+told at 20:41 (a message into its session).
+
+**Measured** (`tools/os/exits.mjs`, over the two OS bakes: 31 market towns and 330 villages; `--svg` draws
+each town to look at): a place's roads leave radially through its main streets, within 30° of straight out
+6 times in 10, and turn only about 40° in their first kilometre outside; a village has about 5 ways out, a
+town about 11; two roads wanting the same way out share it and fork outside. The numbers are `PRIORS.exits`
+(`region/priors.ts`), with a row in docs/real.md.
+
+**Applied** (small hunks): `region/generate.ts` `layStreets` gives every settlement four spokes (both ends
+of its high street and its main cross street, each facing out); `worldmap/routes.ts` picks the spoke facing
+a lane's destination (`spokeFor`), runs the lane straight along it for 240 m (`stem`) and smooths the rest
+into it as one line (`joinStems`); the existing `forks` makes two lanes on one spoke fork outside.
+`region.test.ts` checks every lane leaves by the best-facing spoke, straight, and bends as the priors say.
+
+| Item | State |
+|---|---|
+| Measurement and pictures of real towns | done (scratch: exits.json, an SVG per town); the script is in tools/os |
+| Spokes, spoke choice, stems | done locally; the start town's lanes now leave along its streets (checked on a shot of seed 42) |
+| Tests | being finished (the "straight out" check) |
+| Checked at 412×915 on the region, before/after in the PR | not yet |
+
+## State (step 4)
 
 | Item | State |
 |---|---|
