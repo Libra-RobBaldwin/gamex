@@ -142,6 +142,32 @@ See 6. If the month stays, "Riders a month" is the honest label.
 - The home screen's picture is the old starter town, which no longer exists (`01-home.png`). Owner:
   world50, ONE MAP step 4.
 
+### 12. Ponds and diagonal paths in every green a road encloses (the user, 21:50; fixed in this PR)
+
+`113-fields-road-before.png`, `114-fields-road-before-close.png`: four streets round a field beside the start
+town made 219 cells of park, a playground, allotments and three round ponds with sand rims and diagonal gravel
+paths. Cause: `infill.ts` counted the plots a new road plans along itself as town, so the land between them
+was a gap to fill; `crowdsites.ts` and `makeRegion` gave every park a fixed disc pond on the first free 4×4
+block and a path along a grid row, which reads as a diagonal on a rotated town. Fixed: only land within a few
+metres of buildings that stand is town (`113-fields-road-after.png`: the field stays grass; the countryside's
+own field pattern inside the square is the ground painter's, countryside's); no park has a pond; paths run
+from the gates (`parkplan.ts`). Tests in `infill.test.ts` and `parkplan.test.ts`.
+
+**Ponds and the water rules** (the user, 21:58): a park pond must be a level surface in a hollow with an
+irregular outline, never a circle. The water system (`src/proto/water`, `docs/water.md`) derives its lakes from
+the ground and has no way to take a small hollow the park makes, and the region's terrain is the terrain
+owner's, so ponds are off until it can: none is drawn or placed. Owner for the hollow: terrain and water.
+
+### 13. Parks need walls and gates (the user, 21:58; fixed in this PR)
+
+`115-town-park-before.png` → `115-town-park-after.png`: a park's edge along its roads is now a wall in the
+town's tradition (the garden walls' materials from `vernacular.ts`: dry stone, flint, brick, white-washed,
+Cornish hedge) with railings on it, or a hedge, open at each gate with a pier either side; a playground gets
+a green fence and a gate, allotments posts and wire. Paths run gate to gate. All in the park's one merged
+shape, so no extra draw calls. Shared file: `buildgen.ts` (`makeRegion` only). The wall reads as a thin dark
+line at the phone's usual zoom; if the user wants it bolder, the wall's height and the railings' weight are
+one line each in `makeRegion`.
+
 ### 11. Bulldoze refuses a road with a reason (fine)
 
 `58-bulldoze-road-preview.png`: "Buildings face this road, and it's their only way in", Remove disabled.
@@ -152,8 +178,12 @@ See 6. If the month stays, "Riders a month" is the honest label.
 - Done in this PR, each its own commit: 1 (building tap, with a lines e2e step), 2 (line framing), 2b (stop
   badges), 3 (one guide, with menu e2e checks), 5 (rail Join), 9 (loading counts). Each is checked on a
   screenshot named above; "live" once the PR is merged and the integration branch is deployed.
+- Done in this PR too: 12 (fields stay fields, no ponds, paths from the gates), 13 (park walls and gates).
 - Reported for their owners, not done: 4 (a short bridge is refused), 6 (money), 7 (real regions decline),
-  8 (riders label), 10 (buildings and scenery), the `/assets/regions` fetch.
+  8 (riders label), 10 (buildings and scenery), the `/assets/regions` fetch, a pond in a real hollow (12).
+- Next, from the logic review (`docs/reports/review-2026-09-26.md`): riders a day ×30 and the milestones,
+  map roads refunded when bulldozed, a road joined at a stop, a village half built at a hide-save, then the
+  rest of the play rows. Their tests are in the branch as `it.fails` until each lands.
 
 ## Test results
 
