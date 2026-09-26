@@ -10,7 +10,8 @@
 // wood exactly. Grids: crowns on a 4 m grid close in; smoother lumps on coarser grids further out.
 // Heights are above the ground: the drape (drape.ts) puts them on the hills like everything else.
 // Where the canopy meets the ground it goes down steeply into it (the points just outside a wood
-// are sunk a metre and more), so the two cross at an angle and never fight.
+// are sunk a metre and more, and moved onto the wood's edge), so the two cross at an angle, along
+// the wood's outline, and never fight.
 //
 // Pure: no three.js, no DOM (it runs in the tile workers).
 import type { Layout, XZ } from './layout';
@@ -108,6 +109,27 @@ export function canopy(layout: Layout, cover: CoverData, box: Box, g: number, lo
     hgt[q] = SUNK + (top - SUNK) * e;
     shade[q] = s * e; // (the wood's edge, going down into the ground, in the shade under the crowns)
   }
+  // Where the grid points are: on the grid, but those just outside a wood moved onto its edge
+  // (where it crosses to the wooded points beside them), so the canopy meets the ground along the
+  // wood's own outline rather than in grid-square steps. (From the world's layout alone: tiles agree.)
+  const atX = new Float32Array(N), atZ = new Float32Array(N), woody = new Map<number, boolean>();
+  const inWood = (x: number, z: number) => { const f = P.fieldAt(x, z); if (f < 0) return false; let w = woody.get(f); if (w === undefined) woody.set(f, (w = layout.about(f).kind === 'wood')); return w; };
+  for (let q = 0; q < N; q++) {
+    const i = q % nx, j = Math.floor(q / nx), x = X0 + i * g, z = Z0 + j * g;
+    atX[q] = x; atZ[q] = z;
+    if (kind[q]) continue;
+    let sx = 0, sz = 0, k = 0;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ii = i + di, jj = j + dj;
+      if (ii < 0 || jj < 0 || ii >= nx || jj >= nz || hgt[jj * nx + ii] <= 0) continue;
+      // (bisected between the wooded point, t = 0, and this one, t = 1)
+      let lo = 0, hi = 1;
+      for (let it = 0; it < 5; it++) { const t = (lo + hi) / 2; if (inWood(x + di * g * (1 - t), z + dj * g * (1 - t))) lo = t; else hi = t; }
+      const t = (lo + hi) / 2;
+      sx += x + di * g * (1 - t); sz += z + dj * g * (1 - t); k++;
+    }
+    if (k) { atX[q] = sx / k; atZ[q] = sz / k; }
+  }
   // the triangles, each with its own face normal and colour (flat shaded): each grid square with a
   // corner up in the canopy (its sunk corners take it into the ground)
   const pos: number[] = [], nor: number[] = [], col: number[] = [], idx: number[] = [];
@@ -116,7 +138,7 @@ export function canopy(layout: Layout, cover: CoverData, box: Box, g: number, lo
     return [c[0] * k, c[1] * k, c[2] * k];
   };
   const tri = (a: number, b: number, c: number) => {
-    const P3 = [a, b, c].map((q) => [X0 + (q % nx) * g, hgt[q], Z0 + Math.floor(q / nx) * g]);
+    const P3 = [a, b, c].map((q) => [atX[q], hgt[q], atZ[q]]);
     const ux = P3[1][0] - P3[0][0], uy = P3[1][1] - P3[0][1], uz = P3[1][2] - P3[0][2], vx = P3[2][0] - P3[0][0], vy = P3[2][1] - P3[0][1], vz = P3[2][2] - P3[0][2];
     let n0 = uy * vz - uz * vy, n1 = uz * vx - ux * vz, n2 = ux * vy - uy * vx;
     const L = Math.hypot(n0, n1, n2) || 1; n0 /= L; n1 /= L; n2 /= L;
