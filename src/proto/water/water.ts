@@ -1,7 +1,7 @@
 // The water system: sea, lakes, rivers and canals derived from a height source, and the answers
 // the rest of the game needs about them.
 //
-//   const water = new WaterSystem(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }));
+//   const water = new WaterSystem(new FnHeight(plan.terrain.heightAt), { sea: 0 });
 //   const ground = new CachedHeight(water.terrain);   // the ground with river channels cut, and its water
 //   water.isWater(x, z), water.depthAt(x, z), water.flowAt(x, z), water.watercourseAt(x, z)…
 //
@@ -11,7 +11,7 @@
 
 import { BaseHeight, TILE, type GridSpec, type HeightSource } from '../terrain/height';
 import { edt } from './flood';
-import { MARGIN_DEPTH, buildRegion, cellOf, isRiverTerrain, marginDepth, share, type Region, type RiverTerrain } from './region';
+import { MARGIN_DEPTH, buildRegion, cellOf, marginDepth, share, type Region } from './region';
 import { CLASS_OF, ReachIndex, SPILL, capsuleRows, channelY, lerpAt, type Hit, type Reach } from './rivers';
 import { DEFAULT_WATER, KIND_CODE, KIND_OF, NAV, type Flow, type WaterKind, type WaterParams, type WaterPoint, type Watercourse } from './types';
 
@@ -43,15 +43,13 @@ let queue = new Int32Array(0); // kept between tiles (see flood.ts edt)
 export class WaterSystem {
   readonly P: WaterParams;
   readonly terrain: WaterTerrain;
-  private rt: RiverTerrain | null;
   private regions = new Map<number, { R: Region; index: ReachIndex }>();
   private tiles = new Map<string, WaterTile>();
   private extra: ReachIndex | null = null; // canals and other made watercourses
   private extraReaches: Reach[] = [];
   private hits: Hit[] = [];
   constructor(readonly src: HeightSource, params: Partial<WaterParams> = {}, readonly maxTiles = 24) {
-    this.rt = isRiverTerrain(src) ? src : null;
-    this.P = { ...DEFAULT_WATER, sea: this.rt ? this.rt.p.sea : null, ...params };
+    this.P = { ...DEFAULT_WATER, sea: null, ...params };
     this.terrain = new WaterTerrain(this);
   }
 
@@ -83,7 +81,6 @@ export class WaterSystem {
 
   // ---------- the ground and water at a point ----------
   private base(x: number, z: number): { h: number; water: number | null } {
-    if (this.rt) return this.rt.baseAt(x, z);
     const h = this.src.heightAt(x, z), w = this.src.waterLevel(x, z);
     return { h, water: w !== null && w > h ? w : null };
   }
@@ -224,11 +221,8 @@ export class WaterSystem {
   // The ground (channels cut) on any grid, fast: base heights in one go, then each river segment
   // stamped onto the points it reaches. Hits per point match near() exactly.
   sampleGround(g: GridSpec, out = new Float32Array(g.nx * g.nz), water?: Float32Array) {
-    if (this.rt) this.rt.sampleBase(g, out, water);
-    else {
-      this.src.sample(g, out);
-      if (water) for (let j = 0, k = 0; j < g.nz; j++) for (let i = 0; i < g.nx; i++, k++) { const w = this.src.waterLevel(g.x0 + i * g.step, g.z0 + j * g.step); water[k] = w !== null && w > out[k] ? w : NaN; }
-    }
+    this.src.sample(g, out);
+    if (water) for (let j = 0, k = 0; j < g.nz; j++) for (let i = 0; i < g.nx; i++, k++) { const w = this.src.waterLevel(g.x0 + i * g.step, g.z0 + j * g.step); water[k] = w !== null && w > out[k] ? w : NaN; }
     const base = out.slice();
     this.stamp(g, (k, r, i, t, d) => { const y = segY(r, i, t, d, base[k]); if (y < out[k]) out[k] = y; });
     return out;

@@ -13,7 +13,7 @@ import { icon } from '../proto/ui/icons';
 import { mapById, type MapInfo } from '../proto/maps';
 import { deleteAllSaves, deleteSave, listSaves, saveSearch, type SaveEntry } from '../proto/game/savedb';
 import type { Shell } from '../proto/ui/shell';
-import { loading, render, type MenuHost } from './menu';
+import { goneSave, loading, render, type MenuHost } from './menu';
 import { gameSearch, route, screenOf, type Screen } from './route';
 import { forgetSettings, guideSeen, quality, setQuality } from './store';
 
@@ -51,7 +51,7 @@ const host: MenuHost = {
   },
   saves: [],
   open(e: SaveEntry) {
-    if (inGame) return;
+    if (inGame || goneSave(e)) return; // (a town on a map the game no longer has: it can only be deleted)
     const map = mapById(new URLSearchParams(e.map.query).get('map') ?? e.map.id) ?? mapById(e.map.id);
     if (!map) return;
     gameUrl = `${menuUrl()}${saveSearch(e)}`;
@@ -174,8 +174,8 @@ if (r.kind === 'game') {
 } else {
   // (a map that isn't there, or isn't ready, opens the list of maps, saying so)
   const keep = (history.state as AppState | null)?.app === 'menu' ? history.state : { app: 'menu', depth: 0 };
-  history.replaceState(keep, '', r.notice ? `${menuUrl()}#new` : location.pathname + location.hash);
-  show(r.notice ? 'new' : r.screen, r.notice);
+  history.replaceState(keep, '', r.notice ? `${menuUrl()}#region` : location.pathname + location.hash);
+  show(r.notice ? 'region' : r.screen, r.notice);
   readSaves();
 }
 

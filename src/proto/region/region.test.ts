@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import { generateRegion, KINDS, REGION_BOUND, type Region } from './generate';
 import { buildStreets } from './apply';
-import { MapWater, TOWN_LAKE, lakeGroundOf, lakeRadiusOf } from './water';
+import { MapWater, TOWN_LAKE, lakeGroundOf, lakeRadiusOf } from '../worldmap/water';
 import { isRealPlace, REAL_PLACES } from './names';
-import { centrality, mapById, mapFromQuery, mapOfRegion, optionsFromQuery, optionsQuery, plotCentre, regionMap, regionOptions, STYLE_LOOKS, STYLES, TOWN_MAP, zoneOf } from './index';
+import { centrality, mapFromQuery, mapOfRegion, optionsFromQuery, optionsQuery, plotCentre, regionMap, regionOptions, STYLE_LOOKS, STYLES } from './index';
 import { CROP_NAMES, PALETTE } from '../ground/covers';
 import { Network, DEFAULT_OPTS, ROADS, halfOf, bezier } from '../roads';
 
@@ -198,25 +198,13 @@ describe('names', () => {
 });
 
 describe('maps as data', () => {
-  test('?map= picks the map; the town is the default', () => {
-    expect(mapById(null)).toBe(TOWN_MAP);
-    expect(mapById('nonsense')).toBe(TOWN_MAP);
-    expect(mapById('region').id).toBe('region');
-    expect(mapById('region').bound).toBe(REGION_BOUND);
-    expect(mapById('region-5').seed).toBe(5);
-  });
-  test('the town map is the town as it was', () => {
-    const INDUSTRIAL = (p: { x: number; z: number }) => p.z < -215 && Math.abs(p.x) < 280;
-    for (let x = -600; x <= 600; x += 40) for (let z = -600; z <= 600; z += 40) expect(zoneOf(TOWN_MAP, { x, z }) === 'industrial').toBe(INDUSTRIAL({ x, z }));
-    for (const p of [{ x: -280, z: -300 }, { x: 280, z: -300 }, { x: 0, z: -215 }, { x: 0, z: -215.01 }]) expect(zoneOf(TOWN_MAP, p) === 'industrial').toBe(INDUSTRIAL(p));
-    expect(plotCentre(TOWN_MAP, { x: 100, z: 10 }, { x: 180, z: 10 })).toEqual({ x: 0, z: 0 });
-    expect(centrality(TOWN_MAP, { x: 30, z: 40 })).toBe(50);
-    expect(TOWN_MAP.bound).toBe(1030); // (the town's land was widened from 520: its roads out of town run on to the new edge)
-    // the high street ends where the bypass's curve crosses z = 0, as seedTown() worked it out
-    const bypass = bezier({ x: 110, z: 110 }, { x: 230, z: 40 }, { x: 170, z: -98 });
-    const i = bypass.findIndex((p) => p.z < 0), [p0, p1] = [bypass[i - 1], bypass[i]];
-    expect(TOWN_MAP.streets[0].b).toEqual({ x: p0.x + ((p1.x - p0.x) * p0.z) / (p0.z - p1.z), z: 0 });
-    expect(TOWN_MAP.streets).toHaveLength(21);
+  test('every address opens the one map, the 50 km region (an old ?map=town or ?size=6 too)', () => {
+    for (const q of ['', 'map=town', 'map=region&size=6&seed=5']) {
+      const m = mapFromQuery(new URLSearchParams(q));
+      expect(m.id).toBe('region');
+      expect(m.world?.size).toBe(50000);
+    }
+    expect(mapFromQuery(new URLSearchParams('map=region&size=6&seed=5')).seed).toBe(5);
   });
   test('the region map: plots are as central as their settlement\'s size says', () => {
     const m = mapOfRegion(region(7));
@@ -268,14 +256,12 @@ describe('options: a seed and a few settings make the map, repeatably', () => {
       const full = regionOptions(o), q = new URLSearchParams(optionsQuery(full));
       expect(q.get('map')).toBe('region');
       expect(optionsFromQuery(q)).toEqual(full);
-      expect(mapFromQuery(q).options).toEqual(full);
     }
     expect(optionsFromQuery(new URLSearchParams('map=region&size=6&rivers=9&style=lava&towns=-2'))).toMatchObject({ rivers: 3, style: 'temperate', towns: 0, size: 6 });
     // (50 km is the standard map, with its own limits: docs/streaming.md)
     expect(optionsFromQuery(new URLSearchParams('map=region&rivers=9&style=lava&towns=-2'))).toMatchObject({ rivers: 4, style: 'temperate', towns: 0, size: 50 });
     expect(optionsFromQuery(new URLSearchParams('map=region&size=13'))).toMatchObject({ size: 50 });
     expect(regionOptions({ city: false, towns: 0, villages: 0 }).villages).toBe(1); // (never an empty map)
-    expect(mapFromQuery(new URLSearchParams(''))).toBe(TOWN_MAP);
   });
   test('every style names real palette entries and crops, and temperate changes nothing', () => {
     for (const s of STYLES) {

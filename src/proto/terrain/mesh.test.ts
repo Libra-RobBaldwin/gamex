@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { pointInPoly } from '../land';
 import { FlatHeight, FnHeight } from './height';
 import { cutHoles, drapeStrip, raycast, tileMesh, waterMesh, type MeshData } from './mesh';
-import { ProceduralTerrain, TERRAIN_PRESETS } from './procedural';
+import { landSource } from '../worldmap/land';
 
 const bumpy = new FnHeight((x, z) => 20 * Math.sin(x / 37) * Math.cos(z / 53) + 0.01 * x);
 const vert = (m: MeshData, v: number) => [m.positions[v * 3] + m.offset[0], m.positions[v * 3 + 1], m.positions[v * 3 + 2] + m.offset[1]];
@@ -52,7 +52,7 @@ describe('terrain meshing', () => {
   });
 
   it('same level: neighbouring tiles share their edge exactly, normals included', () => {
-    const src = new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 6 });
+    const src = landSource({ landform: 'uplands', seed: 7 }).source;
     const a = tileMesh(src, 0, 0, { cells: 32, skirt: 0 }), b = tileMesh(src, 1, 0, { cells: 32, skirt: 0 }), M = 33;
     for (let j = 0; j < M; j++) {
       const va = j * M + 32, vb = j * M;

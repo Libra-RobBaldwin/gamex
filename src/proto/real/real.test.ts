@@ -5,7 +5,7 @@ import { realMap } from './map';
 import { readRegion } from './node';
 import { layReal } from './lay';
 import { Network } from '../roads';
-import { MapWater } from '../region/water';
+import { MapWater } from '../worldmap/water';
 
 describe('the tile format', () => {
   it('round-trips heights and features to the quantum', () => {

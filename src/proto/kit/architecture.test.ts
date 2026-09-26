@@ -32,8 +32,8 @@ function offences(src: string): string[] {
 }
 
 // Every page: the html files at the top of the repo and the script each one loads. index.html is
-// the game; proto.html only sends old links on to it; places.html is Real Town Plans (src/places),
-// a Leaflet map and flat plans with no 3D scene.
+// the game; proto.html only sends old links on to it, and places.html (Real Town Plans, gone) sends
+// its old links to the start menu.
 const LEGACY = new Set(['proto.html', 'places.html']);
 const pages = Object.entries(HTML).filter(([f]) => !LEGACY.has(f.slice(1))).map(([f, text]) => {
   // (the Library's small script, src/app/library.ts, leads some pages: the page's own module is the next one)

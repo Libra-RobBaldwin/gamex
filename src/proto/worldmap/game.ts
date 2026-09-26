@@ -4,9 +4,9 @@
 // area that aren't live yet (drawn as scenery, and given to the live ground as gardens and
 // verges), which of them to bring to life next, and the coarse economy of every place on the map.
 import * as THREE from 'three';
-import type { ReliefField } from '../region/terrain';
+import type { ReliefField } from './terrain';
 import type { SettlementInfo } from '../region/mapspec';
-import type { XZ } from '../region/water';
+import type { XZ } from './water';
 import type { Drape } from '../drape';
 import { bandPoly } from './country';
 import { LiveTowns } from './live';

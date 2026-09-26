@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { GameWater } from './water';
 import { generateRegion } from '../region/generate';
-import { MapWater, lakeRadiusOf } from '../region/water';
+import { MapWater, lakeRadiusOf } from '../worldmap/water';
 
 // The game's water on a generated region: several lakes and a river (docs/regiongen.md).
 describe('game water on the region map', () => {

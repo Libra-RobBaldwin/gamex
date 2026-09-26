@@ -19,7 +19,7 @@ import { placeName } from '../region/names';
 import { mix, range, rng, type Rand } from '../region/random';
 import { regionOptions, type RegionOptions } from '../region/options';
 import { PRIORS, between } from '../region/priors';
-import type { XZ } from '../region/water';
+import type { XZ } from './water';
 import { WorldWater, waterFromLand } from './water';
 import { coarseLand } from './landform';
 import { PROFILES, ROUTE_HALF, planRoutes, spurs, type Rail, type Route } from './routes';

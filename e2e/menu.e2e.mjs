@@ -1,7 +1,8 @@
 // The start menu and the guided start (src/app, docs/region.md step F), by touch on a phone:
 //   npm run build && node e2e/menu.e2e.mjs [screenshot dir]
 // (or BASE=http://localhost:5173 node e2e/menu.e2e.mjs to use a running server instead of dist)
-// Checks: a fresh visit shows the menu, fast, without the game's code; every ready map starts;
+// Checks: a fresh visit shows the menu, fast, without the game's code; New game is the Region setup,
+// and the region starts from it;
 // back (and Menu > Main menu) returns to the menu; deep links go straight in; the guide shows
 // once and again on request; and it all works with storage blocked. No console errors anywhere.
 import { spawn } from 'node:child_process';
@@ -45,6 +46,21 @@ async function phone({ blockStorage = false, landscape = false } = {}) {
 }
 const inGame = (page, timeout = 120000) => page.waitForFunction(() => window.proto?.shell && document.body.dataset.app === 'game' && document.querySelector('#app').hidden, null, { timeout });
 const atMenu = (page) => page.waitForSelector('#app .scr:not(.scr-load)', { timeout: 60000 });
+// New game > the Region setup, answered with the first card at each step and a fixed seed, then Start
+async function playRegion(page, seed = '42') {
+  if (!(await page.$('.scr-region'))) await page.tap('[data-go="region"]');
+  await page.waitForSelector('.scr-region');
+  // (a second time it opens on the summary of the last one's answers)
+  if (!(await page.$('.summary'))) {
+    await page.tap('[data-place]'); await page.waitForSelector('[data-climate]');
+    await page.tap('[data-climate]'); await page.waitForSelector('[data-size]');
+    await page.tap('[data-size]'); await page.waitForSelector('.summary');
+  }
+  await page.tap('details.more summary');
+  await page.fill('#rg-seed', seed); await page.dispatchEvent('#rg-seed', 'change');
+  await page.tap('[data-start]');
+  await inGame(page, 300000);
+}
 const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no console errors${page.errors.length ? ` (${page.errors.slice(0, 3).join(' | ')})` : ''}`);
 
 // ---- 1. a fresh visit: the menu, fast, and none of the game's code ----
@@ -66,16 +82,15 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   check((await page.$$('.scr-home [data-go]')).length === 5, 'New game, How to play, Library, Settings and About');
   check(await page.$eval('.hero img', (i) => i.complete && i.naturalWidth > 0).catch(() => false) || await page.waitForFunction(() => document.querySelector('.hero img')?.naturalWidth > 0, null, { timeout: 5000 }).then(() => true, () => false), 'the town picture behind the menu loads');
   await page.screenshot({ path: `${shots}/1-home.png` });
-  for (const s of ['how', 'library', 'settings', 'about', 'new']) {
+  for (const s of ['how', 'library', 'settings', 'about', 'region']) {
     await page.tap(`[data-go="${s}"]`);
     await page.waitForSelector(`.scr-${s}`);
     await page.screenshot({ path: `${shots}/1-${s}.png` });
-    if (s !== 'new') { await page.goBack(); await page.waitForSelector('.scr-home'); }
+    if (s !== 'region') { await page.goBack(); await page.waitForSelector('.scr-home'); }
   }
   check(await page.evaluate(() => document.querySelector('.scr-about') === null), 'back steps from a screen to the home screen');
-  const cards = await page.$$eval('.map', (els) => els.map((e) => ({ ready: e.classList.contains('ready'), text: e.textContent })));
-  check(!cards.some((c) => /Exeter|Ludlow/.test(c.text)), 'New game has no separate cards for the real places (they are in Region)');
-  check(cards.length >= 4 && cards.some((c) => /Region/.test(c.text) && c.ready) && cards.some((c) => !c.ready && /Plans only/i.test(c.text)), 'New game lists the maps: the region ready, real towns as plans only');
+  check(await page.$('.scr-region [data-place]') !== null && await page.$('.map [data-play]') === null, 'New game is the Region setup: one map, no map cards');
+  check(!/Starter town|Sandbox|Real Town Plans/.test(await page.textContent('#app')), 'no starter town, sandbox or Real Town Plans anywhere in New game');
   await page.goto(BASE + '/#about');
   await atMenu(page);
   check(/OpenStreetMap contributors/.test(await page.textContent('.scr-about')), 'About credits © OpenStreetMap contributors');
@@ -87,39 +102,47 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   await ctx.close();
 }
 
-// ---- 2. every ready map starts, and back returns to the menu ----
-for (const id of ['town', 'sandbox']) {
+// ---- 2. the region starts from New game (the guide on a first visit), and back returns to the menu ----
+{
   const { ctx, page } = await phone();
-  await page.goto(BASE + '/#new');
+  await page.goto(BASE + '/');
   await atMenu(page);
-  await page.tap(`[data-play="${id}"]`);
-  await inGame(page);
+  await playRegion(page);
   await page.waitForTimeout(2500);
   const segs = await page.evaluate(() => window.proto.net.segs.size);
-  check(new URL(page.url()).search === `?map=${id}`, `${id}: the address is ?map=${id}`);
-  check(id === 'town' ? segs > 10 : segs === 0, `${id}: starts (${segs} roads)`);
-  if (id === 'town') await page.waitForSelector('#guide', { timeout: 10000 }).catch(() => {});
-  check((id === 'town') === (await page.$('#guide') !== null), `${id}: the guide ${id === 'town' ? 'shows on a first visit' : 'is only for the starter town'}`);
-  await page.screenshot({ path: `${shots}/2-${id}.png` });
+  const q = new URLSearchParams(new URL(page.url()).search);
+  check(q.get('map') === 'region' && q.get('seed') === '42' && q.get('size') === '50', `the address names the region and its options (${new URL(page.url()).search})`);
+  check(segs > 10, `the region starts with its start town (${segs} roads)`);
+  // the first view shows the start town, not sky: the ground under the middle of the screen and a
+  // quarter of the way down is found, and the middle is in the town
+  const look = await page.evaluate(() => {
+    const P = window.proto, W = innerWidth, H = innerHeight, st = P.map.world.settlements[0];
+    const at = (sx, sy) => { const g = P.nav.screenToGround(sx, sy); return g ? { x: Math.round(g.x), z: Math.round(g.z), d: Math.round(Math.hypot(g.x - st.x, g.z - st.z)) } : null; }; // (null: the ray under that point is sky)
+    return { mid: at(W / 2, H / 2), upper: at(W / 2, H / 4), r: st.reach, dpr: devicePixelRatio };
+  });
+  check(look.dpr === 2 && look.mid && look.upper && look.mid.d < look.r, `the first view at DPR 2 looks at the start town, not the sky (${JSON.stringify(look)})`);
+  await page.waitForSelector('#guide', { timeout: 10000 }).catch(() => {});
+  check(await page.$('#guide') !== null, 'the guide shows on a first visit, in the start town');
+  await page.screenshot({ path: `${shots}/2-region.png` });
   // the phone's back button asks first...
   await page.goBack();
   await page.waitForFunction(() => window.proto.shell.sheetKey === 'leave', null, { timeout: 5000 }).catch(() => {});
-  check(await page.evaluate(() => window.proto.shell.sheetKey) === 'leave', `${id}: back asks before leaving the town`);
-  check(new URL(page.url()).search === `?map=${id}`, `${id}: ...and stays in the game while it asks`);
-  await page.screenshot({ path: `${shots}/2-${id}-leave.png` });
+  check(await page.evaluate(() => window.proto.shell.sheetKey) === 'leave', 'back asks before leaving the town');
+  check(new URLSearchParams(new URL(page.url()).search).get('map') === 'region', '...and stays in the game while it asks');
+  await page.screenshot({ path: `${shots}/2-region-leave.png` });
   // ...and a second back leaves
   await page.goBack();
   await atMenu(page);
-  check(await page.evaluate(() => !window.proto && document.body.dataset.app === 'menu'), `${id}: a second back returns to the menu, with the game gone`);
-  noErrors(page, id);
+  check(await page.evaluate(() => !window.proto && document.body.dataset.app === 'menu'), 'a second back returns to the menu, with the game gone');
+  noErrors(page, 'region from New game');
   await ctx.close();
 }
 
 // ---- 3. Menu > Main menu in the HUD; Keep playing stays ----
 {
   const { ctx, page } = await phone();
-  await page.goto(BASE + '/?map=town');
-  await inGame(page);
+  await page.goto(BASE + '/?map=region&seed=42');
+  await inGame(page, 300000);
   check(await page.$('#app .scr-home') === null && await page.$('#guide') === null, 'a deep link goes straight in, with no menu and no guide');
   await page.tap('[data-bar="menu"]');
   await page.waitForTimeout(400);
@@ -139,24 +162,21 @@ for (const id of ['town', 'sandbox']) {
   check(await page.$('.scr-home') !== null, 'Main menu > Leave returns to the start menu');
   // forward again goes back into the game
   await page.goForward();
-  await inGame(page);
+  await inGame(page, 300000);
   check(true, 'forward from the menu reopens the game');
   noErrors(page, 'HUD menu');
   await ctx.close();
 }
 
-// ---- 4. deep links ----
+// ---- 4. deep links to maps the game no longer has: the Region setup, saying so ----
 {
   const { ctx, page } = await phone();
-  await page.goto(BASE + '/?place=horley-demo');
-  await inGame(page);
-  check(true, '?place= goes straight into the game');
-  await page.goto(BASE + '/?map=place');
-  await atMenu(page);
-  check(await page.$('.scr-new .notice') !== null && /Plans only/i.test(await page.textContent('.notice')), '?map=place (not ready) opens New game, saying so');
-  await page.goto(BASE + '/?map=nowhere');
-  await atMenu(page);
-  check(await page.$('.scr-new .notice') !== null, 'an unknown ?map= opens New game, saying so');
+  for (const [q, what] of [['?map=town', /starter town is gone/], ['?map=sandbox', /sandbox is gone/], ['?place=horley-demo', /Real Town Plans is gone/], ['?map=nowhere', /nowhere/]]) {
+    await page.goto(BASE + '/' + q);
+    await atMenu(page);
+    check(await page.$('.scr-region .notice') !== null && what.test(await page.textContent('.notice')), `${q} opens the Region setup, saying so`);
+  }
+  await page.screenshot({ path: `${shots}/4-gone.png` });
   noErrors(page, 'deep links');
   await ctx.close();
 }
@@ -164,10 +184,9 @@ for (const id of ['town', 'sandbox']) {
 // ---- 5. the guide: once, skippable, and again on request ----
 {
   const { ctx, page } = await phone();
-  await page.goto(BASE + '/#new');
+  await page.goto(BASE + '/');
   await atMenu(page);
-  await page.tap('[data-play="town"]');
-  await inGame(page);
+  await playRegion(page);
   await page.waitForSelector('#guide', { timeout: 10000 });
   check(/Move the map/.test(await page.textContent('#guide')), 'the guide starts with moving the map');
   // do it: drag the map, and the step ticks itself off
@@ -176,7 +195,7 @@ for (const id of ['town', 'sandbox']) {
   check(/Build a road/.test(await page.textContent('#guide')), 'moving the map ticks step 1 and moves on to building a road');
   await page.screenshot({ path: `${shots}/5-guide-road.png` });
   // build one (as the road tool would), and place a stop
-  await page.evaluate(() => window.proto.buildRoad({ x: -300, z: 300 }, { x: -300, z: 420 }));
+  await page.evaluate(() => window.proto.buildRoad({ x: 150, z: 0 }, { x: 150, z: 110 }));
   await page.waitForFunction(() => /bus stop/i.test(document.querySelector('#guide')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => {});
   check(/bus stop/i.test(await page.textContent('#guide')), 'building a road moves on to the bus stop');
   await page.tap('#guide [data-next]');
@@ -188,17 +207,16 @@ for (const id of ['town', 'sandbox']) {
   check(await page.$('#guide') === null, 'Skip guide closes it');
   noErrors(page, 'guide');
   // a second game: no guide
-  await page.goto(BASE + '/#new');
+  await page.goto(BASE + '/');
   await atMenu(page);
-  await page.tap('[data-play="town"]');
-  await inGame(page);
+  await playRegion(page);
   await page.waitForTimeout(1500);
   check(await page.$('#guide') === null, 'the guide shows only once');
   // How to play > Start the guided game shows it again
   await page.goto(BASE + '/#how');
   await atMenu(page);
   await page.tap('[data-guide]');
-  await inGame(page);
+  await inGame(page, 300000);
   await page.waitForSelector('#guide', { timeout: 10000 }).catch(() => {});
   check(await page.$('#guide') !== null, 'How to play starts the guide again');
   // Settings > Show the guide again
@@ -206,9 +224,7 @@ for (const id of ['town', 'sandbox']) {
   await atMenu(page);
   await page.tap('[data-guide-reset]');
   await page.tap('[data-back]');
-  await page.tap('[data-go="new"]');
-  await page.tap('[data-play="town"]');
-  await inGame(page);
+  await playRegion(page);
   await page.waitForSelector('#guide', { timeout: 10000 }).catch(() => {});
   check(await page.$('#guide') !== null, 'Settings > Show the guide again brings it back');
   noErrors(page, 'guide again');
@@ -223,9 +239,7 @@ for (const id of ['town', 'sandbox']) {
   await page.tap('[data-go="settings"]');
   await page.tap('input[name="q"][value="3"]');
   await page.tap('[data-back]');
-  await page.tap('[data-go="new"]');
-  await page.tap('[data-play="town"]');
-  await inGame(page);
+  await playRegion(page);
   check(await page.evaluate(() => window.proto.perf().tier) === 'Fast', 'with storage blocked, the menu works and its quality setting reaches the game');
   noErrors(page, 'storage blocked');
   await ctx.close();
@@ -239,9 +253,7 @@ for (const id of ['town', 'sandbox']) {
   const fits = await page.evaluate(() => [...document.querySelectorAll('.scr-home [data-go]')].every((b) => { const r = b.getBoundingClientRect(); return r.bottom <= innerHeight && r.right <= innerWidth; }));
   check(fits, 'landscape: every menu button is on screen');
   await page.screenshot({ path: `${shots}/7-landscape.png` });
-  await page.tap('[data-go="new"]');
-  await page.tap('[data-play="town"]');
-  await inGame(page);
+  await playRegion(page);
   await page.waitForSelector('#guide', { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${shots}/7-landscape-game.png` });
@@ -281,9 +293,8 @@ for (const id of ['town', 'sandbox']) {
 // ---- 9. the region: set up, started from the menu with its options, and back to its setup ----
 {
   const { ctx, page } = await phone();
-  await page.goto(BASE + '/#new');
+  await page.goto(BASE + '/#new'); // (an old address for New game: the Region setup)
   await atMenu(page);
-  await page.tap('[data-go="region"]');
   await page.waitForSelector('.scr-region');
   // simple steps, one question each: a tap on a card answers it and moves on
   check(await page.$$eval('.steps span', (d) => d.length) === 4 && await page.$('[data-place]') !== null, 'region setup: step 1 asks what kind of place');
@@ -305,7 +316,7 @@ for (const id of ['town', 'sandbox']) {
   check(await page.textContent('[data-count="rivers"] output') === String(rivers0 + 1), 'region setup: the steppers change the counts');
   await page.screenshot({ path: `${shots}/9-region-setup.png`, fullPage: true });
   await page.tap('[data-start]');
-  await inGame(page, 300000).catch(() => {}); // (a 6 km map is slow to build under software rendering)
+  await inGame(page, 300000).catch(() => {}); // (a 50 km map is slow to build under software rendering)
   const q = new URLSearchParams(new URL(page.url()).search);
   check(q.get('map') === 'region' && q.get('seed') === '42' && q.get('rivers') === String(rivers0 + 1) && q.get('style') === 'arctic', `the region starts from the menu with its options (${new URL(page.url()).search})`);
   check(await page.evaluate(() => !!window.proto?.shell && document.body.dataset.app === 'game'), 'the region loads');

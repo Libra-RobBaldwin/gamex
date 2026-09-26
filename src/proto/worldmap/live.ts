@@ -7,7 +7,7 @@
 //
 // Pure of three.js: it takes the Network (and the railway) as the parts of them it uses.
 import type { End, P, RoadOpts } from '../roads';
-import type { XZ } from '../region/water';
+import type { XZ } from './water';
 import { LIVE_HALF, type WorldPlan } from './plan';
 
 // the roads' types on the Network (the catalogue's, as interchange/region.ts uses for the region)

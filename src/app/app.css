@@ -202,12 +202,14 @@
 #guide {
   position: fixed; z-index: 30; left: calc(8px + var(--a-safe-l)); right: calc(62px + var(--a-safe-r)); top: calc(58px + var(--a-safe-t));
   max-width: 420px; padding: 10px 12px 6px; color: var(--a-paper); font: 400 14px/1.4 var(--a-ui);
-  background: rgba(15, 51, 34, 0.96); border: 1px solid var(--a-faint); border-top: 2px solid var(--a-gold);
+  background: #0f3322; border: 1px solid var(--a-faint); border-top: 2px solid var(--a-gold);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   border-radius: var(--a-r);
   animation: g-in 0.25s ease-out;
 }
 @keyframes g-in { from { opacity: 0; transform: translateY(-6px); } }
+/* (the game's own goal strip sits where the guide does: it waits until the guide is done) */
+body:has(#guide) #goal { visibility: hidden; }
 #guide p { margin: 6px 0 2px; color: var(--a-muted); }
 #guide p b { color: var(--a-paper); }
 #guide .g-head { display: flex; align-items: center; gap: 10px; }

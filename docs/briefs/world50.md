@@ -3,6 +3,86 @@
 Session: world50, branch `claude/work-world50`. PR #42 is merged into the integration branch and live.
 Written 26 Sep 2026, ~01:20 UTC, after merging the integration branch in (b57164e).
 
+## Status now (26 Sep, ~16:00 UTC)
+
+This section wins over the tables below, which are the brief as first written.
+
+**Rule:** "live" means merged into the integration branch and checked on a 412×915 screenshot. "Done
+locally" means it isn't live yet.
+
+### Live
+- **50 km map with a world plan** (#42, merged).
+  - The plan has places in every 10 km square with land, industries with lanes in, trunk routes over the land (off at the start), OS priors for the counts, `WorldSource` (seeded or real), and far towns in vernacular palettes.
+  - The live area's trees are lighter from mid zoom out, and places come to life a few streets a frame.
+  - Checked on screenshots: the start town, a far town, the docks, the steelworks and a village.
+
+- **The first view frames the start town's centre** (#51, merged). Checked on a screenshot.
+- **Roundabouts are rare on 50 km maps** (#51, merged). The start town went from 14 minis and 4 roundabouts to 1 roundabout, 2 sets of signals and 24 give-ways. Checked on screenshots.
+
+### Urgent fix, in its own PR (branch `claude/work-world50-sky`)
+- **The start view sometimes went all sky blue** (the coordinator saw about 1 start in 4). Cause: the automatic quality tier resized the canvas *after* a frame had drawn. Resizing clears the canvas, so the page showed its sky-blue background until the next frame; after a shadows change that frame recompiles every shader (seconds under SwiftShader, a one-frame flash on a phone at every tier step).
+- Fix: a tier step is applied at the start of the next frame, before it draws.
+- New `e2e/firstview.e2e.mjs`: N cold starts at DPR 2, shot through the first 20 s. Blank before the fix in 2 of 4 starts; after, 0 of 6.
+- **The region's page leaked memory**, about 1 GB of heap every 30 s under SwiftShader (13 GB in a stations run), and only 4 scenery tiles were ever shown. Cause (worldmap/view.ts): a tile's pending mark was cleared when its data arrived, not when it was built, so the view asked for it again every frame while it waited, and the data piled up. Fixed in the same PR: 208 tiles, each asked for once, about 1.2 GB RSS. firstview checks each tile is asked for once (it fails on the old code).
+- Still high: the live area's heap settles at about 800 MB on the region against about 180 MB for the old town. Worth measuring on a phone next.
+- Not live until that PR merges.
+
+### One map, steps 1–3: in a PR from `claude/work-world50` (not live until it merges)
+**Checked on 412×915 screenshots:**
+- The home screen has one New game button, which opens the Region setup.
+- An old or unknown map link opens the setup with a notice ("There's no map called …").
+- The guide runs in the region's start town. Its card is now opaque, and the game's goal strip waits under it, where before both "Step …" counters showed at once.
+- Old saves (the starter town, a 6 km region) are listed as "Made on a map that no longer exists", with only Delete. Continue skips them.
+
+**Done and tested:**
+- `maps.ts` lists one map, with real places inside it.
+- `main.ts` has lost the starter town's, the sandbox's and the 6 km map's own branches.
+- Real Town Plans is deleted (`src/places`, its e2e). `places.html` now only redirects old links to the start menu.
+- PR #22 is closed.
+
+**Bugs found and fixed along the way:**
+- `focusOn` aimed at height 0, so on the hills every "go to" framed the wrong spot.
+- The underground view crashed on 50 km maps: the scenery tiles free their vertex arrays, and the view needed their bounding boxes.
+- A loaded region town drifted from the saved one. Its growth plots were filtered at load, where the town map kept them, so its economy counted fewer free plots.
+- A town saved from a deep link wasn't offered by Continue. A 50 km map's saved query now says `size=50`.
+
+**e2e suites on `proto.html?map=region&seed=42`**, all passing locally with tsc and vitest (only the known economy failure):
+
+| Suite | Notes |
+|---|---|
+| firstview | new: 4 cold starts at DPR 2, no blank screen, each scenery tile asked for once |
+| loop | the decline is checked as the status turning, see the economy note |
+| lines | |
+| stations | the underground pair is 450 m apart, clear of the start town's streets; the train is given 300 s |
+| save | the branch is at z 540, and a one-way dual carriageway bridges it (the region starts with neither) |
+| rail | the branch just north of the start town crosses the lane north on the level |
+| menu | New game > Region, the guide, gone links, the DPR 2 first view |
+
+**Not done yet (step 4, a follow-up PR):**
+- Delete the 6 km parts: `region/generate.ts`, `interchange/region.ts`, `rail/region.ts` and `region/town.ts` (the town map). Their tests go too: the portal-traffic test has to move onto a 50 km map's portals first.
+- The regionsetup's 6 km wording.
+- Leaflet in `package.json` (only Real Town Plans used it).
+- The docs that describe the deleted maps.
+- The start menu's hero pictures still show the old starter town. They need retaking from the region.
+
+### Not done, and waiting on others
+- Grades from `PRIORS.follow` (OS hasn't added them).
+- Fewer places on hills by real height (terrain's heights before placement).
+- The cover-map scratch memory (205 MB, countryside's `ground/paint.ts`).
+- Scenery houses from `buildgen.ts` (with vernacular).
+
+### Agreed with vernacular (PR #50): one building generator
+- `worldmap/towns.ts` is the layout planner: `SceneBuilding` carries the footprint, height, kind and place. `buildgen.ts` alone decides how a building looks.
+- `tilegen`'s `building()` is only the cheap far version of the same buildings: a box and roof in the place's palette, with no windows, doors or chimneys of its own. Vernacular strips those in its next PR.
+- I keep their hunks in my files: `TileData.bld` in tilegen, and its transfer in `tile.worker.ts`. In `view.ts` that's the `bld` mesh, `nearShown()` and `setDressed()`.
+- In `main.ts`'s WORLD path I keep:
+  - the Dresser;
+  - `setPlaces(placeResolver(...MAP.world?.settlements ?? MAP.settlements...))`;
+  - `setGround(RELIEF...)`.
+
+### Finding for the economy
+On the region's start town, the loop e2e shows the town turning to declining once its line is withdrawn. But within 8 to 16 days its people and jobs don't always fall below where they stood with the line: they did on one run and not on another. On the old starter town they fell every time. The suite now checks for the turn to declining, and logs the numbers.
+
 ## (a) Everything asked of this session
 
 ### The original task (the coordinator, 25 Sep)

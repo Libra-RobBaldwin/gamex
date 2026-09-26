@@ -8,7 +8,7 @@ import { ROADS } from '../catalog';
 import { alignRoute, alignSpec } from './align';
 import { CachedHeight, tileGrid } from './height';
 import { tileMesh } from './mesh';
-import { ProceduralTerrain, TERRAIN_PRESETS } from './procedural';
+import { landSource } from '../worldmap/land';
 import { GridHeight } from './raster';
 
 // median of several runs (garbage collection makes single runs noisy)
@@ -22,15 +22,17 @@ const ms = (v: number) => `${v.toFixed(1)} ms`;
 
 it('performance', () => {
   const out: string[] = [];
-  const warm = new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 1 });
-  warm.sample(tileGrid(9, 9, 128)); // JIT warm-up
+  // the 50 km land (worldmap/land.ts; made once, before any timing)
+  const t = landSource({ landform: 'uplands', seed: 7 }).source;
+  t.sample(tileGrid(9, 9, 128)); // JIT warm-up
   let k = 0;
-  // a tile nobody has asked about before: lattice blocks built from scratch
-  const cold512 = time(() => { const t = new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 1 }); tileMesh(t, k++, 0, { cells: 512 }); });
-  const cold256 = time(() => { const t = new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 1 }); tileMesh(t, k++, 0, { cells: 256 }); });
-  const t = new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 1 });
-  tileMesh(t, 0, 5, { cells: 512 });
-  const warm512 = time(() => tileMesh(t, 0, 5, { cells: 512 })), warm256 = time(() => tileMesh(t, 0, 5, { cells: 256 }));
+  // a tile nobody has asked about before, each on its own ground
+  const cold512 = time(() => tileMesh(t, k++, 0, { cells: 512 }));
+  const cold256 = time(() => tileMesh(t, k++, 0, { cells: 256 }));
+  // and on ground already sampled into a cache
+  const cached = new CachedHeight(t);
+  tileMesh(cached, 0, 5, { cells: 512 });
+  const warm512 = time(() => tileMesh(cached, 0, 5, { cells: 512 })), warm256 = time(() => tileMesh(cached, 0, 5, { cells: 256 }));
   tileMesh(t, 3, 3, { cells: 256 });
   const lods = [1, 2, 3, 4].map((lod) => time(() => tileMesh(t, 3, 3, { cells: 256, lod })));
   const sampleOnly = time(() => t.sample(tileGrid(0, 5, 512)));
@@ -49,10 +51,10 @@ it('performance', () => {
   const cells = Array.from({ length: 200 * 200 }, (_, i) => (i % 200) + Math.floor(i / 200) * 0.5);
   os.mosaic.add({ i0: 0, j0: 0, w: 200, h: 200, data: Float32Array.from(cells) });
   const rasterNs = (time(() => { for (const [x, z] of pts) os.heightAt(x * 5, z * 5); }) / N) * 1e6;
-  out.push(`heightAt: CachedHeight ${cachedNs.toFixed(0)} ns, procedural direct (warm lattice) ${directNs.toFixed(0)} ns, OS Terrain 50 mosaic ${rasterNs.toFixed(0)} ns`);
+  out.push(`heightAt: CachedHeight ${cachedNs.toFixed(0)} ns, the land direct ${directNs.toFixed(0)} ns, OS Terrain 50 mosaic ${rasterNs.toFixed(0)} ns`);
 
   // alignment
-  const src = new CachedHeight(new ProceduralTerrain({ ...TERRAIN_PRESETS.upland, seed: 3 }));
+  const src = new CachedHeight(t);
   for (const [id, L] of [['street', 1000], ['street', 3000], ['rail-main', 1000], ['rail-main', 3000], ['rail-rack', 3000], ['motorway', 3000]] as const) {
     const sp = alignSpec(ROADS[id]), path = [{ x: -L / 2, z: 200 }, { x: L / 2, z: -300 }];
     alignRoute(path, src, sp);

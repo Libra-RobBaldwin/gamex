@@ -22,7 +22,7 @@ import type { RegionOptions } from '../region/options';
 import { LEVEL_OF, LEVEL_SIZE, LIVE, inLive, tileBox, tileKey, type Detail, type TileData } from './tilegen';
 import type { Box } from './country';
 import type { FieldData, WorkerRequest } from './tile.worker';
-import { slopeLook } from '../region/terrain';
+import { slopeLook } from './terrain';
 
 export interface ViewState { x: number; z: number; h: number; el: number; az: number }
 export interface WorldViewHost {
@@ -51,7 +51,7 @@ export class WorldView {
   private nodes = new Map<string, Node>();
   private loaders: { load: (req: WorkerRequest, signal: AbortSignal) => Promise<TileData | FieldData>; busy: number }[] = [];
   private queue: { node: Node; detail: Detail; score: number }[] = [];
-  private arrived: { node: Node; data: TileData }[] = [];
+  private arrived: { node: Node; detail: Detail; data: TileData }[] = []; // (still pending until built: asked for again meanwhile, a tile's data would pile up here)
   private shown = new Map<string, { node: Node; detail: Detail }>();
   private detailAt: Detail = 'vast';
   private solidMat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -71,7 +71,7 @@ export class WorldView {
     host.scene.add(this.root);
     this.shared = groundUniforms(coverTexture(new Uint8Array([128, 0, 128, 128]), 1));
     this.sharedFar = groundUniforms(this.shared.uCoverMap.value);
-    for (const u of [this.shared, this.sharedFar]) u.uSlope.value.set(...slopeLook()); // (rock on the steep, moor on the tops: region/terrain.ts)
+    for (const u of [this.shared, this.sharedFar]) u.uSlope.value.set(...slopeLook()); // (rock on the steep, moor on the tops: worldmap/terrain.ts)
     this.setStyle(host.look);
     const n = Math.max(1, Math.min(3, host.workers ?? Math.min(2, Math.max(1, (navigator.hardwareConcurrency ?? 2) - 2))));
     for (let k = 0; k < n; k++) {
@@ -139,6 +139,7 @@ export class WorldView {
       const built = this.build(a.data);
       this.stats.buildMs += performance.now() - b0;
       if (built) { a.node.built[a.data.detail]?.dispose(); a.node.built[a.data.detail] = built; this.stats.built++; }
+      a.node.pending.delete(a.detail);
     }
     // pick what to show
     const next = new Map<string, { node: Node; detail: Detail }>();
@@ -198,9 +199,9 @@ export class WorldView {
       L.busy++;
       this.stats.requested++;
       L.load({ level: q.node.level, i: q.node.i, j: q.node.j, detail: q.detail, options: this.host.options }, new AbortController().signal)
-        .then((d) => { this.stats.arrived++; this.arrived.push({ node: q.node, data: d as TileData }); })
-        .catch((e) => console.warn('world tile', q.node.key, q.detail, e))
-        .finally(() => { L.busy--; q.node.pending.delete(q.detail); this.pump(); });
+        .then((d) => { this.stats.arrived++; this.arrived.push({ node: q.node, detail: q.detail, data: d as TileData }); })
+        .catch((e) => { console.warn('world tile', q.node.key, q.detail, e); q.node.pending.delete(q.detail); })
+        .finally(() => { L.busy--; this.pump(); });
     }
   }
 
@@ -230,7 +231,7 @@ export class WorldView {
       if (nor) g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
       if (col) g.setAttribute('color', new THREE.BufferAttribute(col, 3));
       g.setIndex(new THREE.BufferAttribute(idx, 1));
-      g.computeBoundingSphere();
+      g.computeBoundingSphere(); g.computeBoundingBox(); // (both now: the arrays are let go once on the GPU, and the underground view asks for the box)
       for (const a of Object.values(g.attributes)) (a as THREE.BufferAttribute).onUpload(function (this: THREE.BufferAttribute) { (this as unknown as { array: ArrayLike<number> | null }).array = null; });
       g.index!.onUpload(function (this: THREE.BufferAttribute) { (this as unknown as { array: ArrayLike<number> | null }).array = null; });
       bytes += pos.byteLength + idx.byteLength + (nor?.byteLength ?? 0) + (col?.byteLength ?? 0);

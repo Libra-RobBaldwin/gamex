@@ -1,3 +1,48 @@
+# Coordinator change and the state at 26 Sep 2026, 20:00 UTC. This section wins over everything below it.
+
+A new coordinating session took over at 17:30 UTC: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU.
+It reports to the user from the briefs in this folder, as before. Region sessions still alive on the other
+account: merge the integration branch before every push, and reply on your PR when the coordinator asks.
+
+## Landed at 19:52 UTC (integration head 7f9b21e)
+
+In this order, each merging cleanly except one `main.ts` import hunk (resolved): #58 (blank-sky start and the
+scenery-tile memory leak), #59 (one map, steps 1–3: New game is the 50 km region, old maps and saves say they're
+gone, every e2e on the region), #57 (one height, water and coast generator), #55 (parked cars on the ground,
+street trees in dressed scenery). Then the 31 e2e screenshots and a pid file committed at the repo root were
+removed and ignored. Typecheck clean; the full unit suite passes except the economy growth test (below).
+
+## Decisions
+
+1. **#52 (countryside, one generator) comes back, re-applied on the new head, not by reverting the revert.**
+   The previous coordinator reverted it (dcdd4f2) because it blanked the region's first view at device scale 2.
+   #58 has since fixed the blank first view at its cause (a quality-tier step clearing the canvas after the
+   frame drew), so #52 is likely fine now, but that has to be shown: run `e2e/firstview.e2e.mjs` for several
+   starts at DPR 2 with #52 applied. Re-applied on today's head it also fails `region/fields.test.ts` "lines each
+   block up with the road beside it" (81 other region, ground and worldmap tests pass), and #57 has rewritten
+   that test file to lay its fields on rolling hills of its own. Owner: countryside, as a fresh PR from
+   `claude/work-country`; #54 closes when that PR is open.
+2. **The economy growth test is being fixed at its root** ("a well-served town grows and gets denser", 796
+   residents against more than 902.4) on `claude/work-economy-growth`. Until it lands, CI's `check` job stays
+   red on that one test. Nothing else may be reported as "the known failure".
+3. **The bridge timing test** (`bridges/perf.review.test.ts` "suspension gallery scene in under 150 ms") fails
+   by under 1% on about one CI run in three and locally: seven builds in one process measured 95–251 ms, so
+   its median of three is noise. It will measure best-of-five, as `test/speed.ts` itself does, with the budget
+   unchanged. Same PR as 2.
+4. **ONE MAP step 4** (delete `region/generate.ts`, `interchange/region.ts`, `rail/region.ts`, `region/town.ts`
+   where WORLD doesn't use them; the setup's 6 km wording; Leaflet in `package.json`; docs describing deleted
+   maps; new hero pictures from the region) stays world50's if that session replies on #59; otherwise a fresh
+   session takes it, on a branch off the new head.
+5. **Next, once CI is green:** play the region on the phone and fix what the loop does wrong there. The six
+   e2es pass on `?map=region&seed=42`, but nobody has yet played a 50 km region start as a player (build stops,
+   draw a line, watch the town) and written down what's wrong. That review is the next stream, and its fixes
+   are small PRs into integration.
+
+## Honesty rule (unchanged)
+
+Every session keeps `docs/briefs/<name>.md` current: what's left, done or not done, and nothing reported as done
+until it is live and checked on a 412×915 screenshot.
+
 # ONE MAP: the clean-up (26 Sep 2026, 07:40 UTC). This section wins over everything below it.
 
 The user: "Delete all the old stuff... Get rid of the starter town and just start from the region. Sounds like

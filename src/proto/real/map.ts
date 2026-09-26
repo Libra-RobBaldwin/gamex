@@ -6,7 +6,7 @@
 // Map coordinates are the window's: the region's metres, shifted so the window's centre is 0, 0.
 // Contains OS data © Crown copyright and database right (the Open Government Licence).
 import type { MapSpec, SettlementInfo } from '../region/mapspec';
-import type { LakeSpec, RiverSpec } from '../region/water';
+import type { LakeSpec, RiverSpec } from '../worldmap/water';
 import { RIVER_FORMS, WIDTH, type Place, type RegionManifest, type Tile } from './format';
 import { ringArea, toOverpass, type Box, type XZ } from './osm';
 import { rng } from '../region/random';
@@ -181,10 +181,10 @@ function densify(p: XZ[], step: number): XZ[] {
 }
 
 // ---------------- the ground ----------------
-// The game's water all lies at one level (region/water.ts LEVEL), on ground that's flat at 0 round
+// The game's water all lies at one level (worldmap/water.ts LEVEL), on ground that's flat at 0 round
 // it. So the ground the game gets is the real height above the nearest river's (Terrain 50 there
 // is the water's surface), eased down to 0 over the last 200 m to each bank, on the region
-// generator's 25 m grid (region/terrain.ts). A lake well above its river (a pond up a hill) would
+// generator's 25 m grid (worldmap/terrain.ts). A lake well above its river (a pond up a hill) would
 // be a pit in that, so it's left out.
 export const RELIEF_STEP = 25;
 export function reliefOf(H: HeightGrid, w: { lakes: LakeSpec[]; rivers: RiverSpec[] }, half: number) {

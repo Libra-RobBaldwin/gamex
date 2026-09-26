@@ -14,8 +14,8 @@
 // this file registers it (setRealSource), on the main thread and in the tile worker alike.
 import { decodeTile, tileFile, RAIL_CLASSES, ROAD_CLASSES, type RegionManifest, type Tile } from './format';
 import { waterOf, type RealRegion } from './map';
-import { field as reliefField, type ReliefField } from '../region/terrain';
-import { LEVEL, RIM, type XZ } from '../region/water';
+import { field as reliefField, type ReliefField } from '../worldmap/terrain';
+import { LEVEL, RIM, type XZ } from '../worldmap/water';
 import { regionOptions, type RegionOptions } from '../region/options';
 import type { Kind } from '../region/generate';
 import { setRealSource, type Box, type WorldHeights, type WorldSource } from '../worldmap/source';

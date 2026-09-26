@@ -1,7 +1,7 @@
 // The region map (docs/region.md): a seeded 6 × 6 km map of a dozen settlements, and maps as data.
 //
-//   import { regionMap, TOWN_MAP, mapById } from './region';
-//   const map = mapById(new URLSearchParams(location.search).get('map'));   // TOWN_MAP by default
+//   import { mapFromQuery } from './region';
+//   const map = mapFromQuery(new URLSearchParams(location.search));   // the 50 km region
 //
 // For the road and rail sessions: `map.settlements` (centre, size, kind, name), `map.links` (a
 // trimmed Gabriel graph: which places to join, A or B road, and whether it crosses water) and
@@ -12,15 +12,15 @@ import { TOWN_MAP } from './town';
 import { optionsFromQuery, type RegionOptions } from './options';
 import { STYLE_LOOKS } from './styles';
 import { worldMapSpec } from '../worldmap/spec';
-import { makeRelief } from './terrain';
-import { MapWater } from './water';
+import { makeRelief } from '../worldmap/terrain';
+import { MapWater } from '../worldmap/water';
 import { woodSpots } from './priors';
 import { mix, rng } from './random';
 
 export * from './generate';
 export * from './mapspec';
 export { buildStreets, type StreetNet } from './apply';
-export { MapWater, TOWN_WATER, type WaterSpec, type LakeSpec, type RiverSpec } from './water';
+export { MapWater, TOWN_WATER, type WaterSpec, type LakeSpec, type RiverSpec } from '../worldmap/water';
 export { isRealPlace, placeName, REAL_PLACES } from './names';
 export { TOWN_MAP };
 export * from './options';
@@ -68,16 +68,8 @@ export function mapOfRegion(g: Region): MapSpec {
   };
 }
 
-// The map a URL asks for: ?map=region with its options (?seed=7&rivers=2&style=desert…: options.ts),
-// or the town when there's no map or it isn't known.
+// The map a URL asks for: there is one map, the 50 km region, with its options (?seed=7&rivers=2&style=desert…:
+// options.ts). An old address (?map=town, a 6 km ?size=6) opens the region all the same.
 export function mapFromQuery(q: URLSearchParams): MapSpec {
-  if (q.get('map') === 'region') { const o = optionsFromQuery(q); return o.size > 6 ? worldMapSpec(o) : regionMap(o); } // (50 km: streamed, docs/streaming.md)
-  return mapById(q.get('map'));
-}
-// the maps the game can open, by ?map= id (the town when there's none, or it isn't known)
-export function mapById(id: string | null | undefined): MapSpec {
-  if (id === 'region') return regionMap();
-  const seed = id?.match(/^region-(\d+)$/)?.[1];
-  if (seed) return regionMap(Number(seed));
-  return TOWN_MAP;
+  return worldMapSpec({ ...optionsFromQuery(q), size: 50 }); // (streamed: docs/streaming.md)
 }

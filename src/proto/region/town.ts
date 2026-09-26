@@ -1,7 +1,7 @@
 // The invented town (the starter map) as a MapSpec: the hand-drawn roads that used to be
 // seedTown() in main.ts, the lake, and the industrial estate south of the centre.
 import type { MapSpec, MapStreet } from './mapspec';
-import { TOWN_WATER, type XZ } from './water';
+import { TOWN_WATER, type XZ } from '../worldmap/water';
 
 const dist = (a: XZ, b: XZ) => Math.hypot(a.x - b.x, a.z - b.z);
 // (the Network's quadratic Bézier, point for point: roads.ts bezier())

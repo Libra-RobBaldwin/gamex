@@ -1,12 +1,12 @@
 // Stations on a curve, on a viaduct and underground (docs/rail.md), played by touch on a
-// phone-sized page. Three lines are laid in the starter town (a gentle curve, one held up on a
+// phone-sized page. Three lines are laid round the 50 km region's start town (a gentle curve, one held up on a
 // viaduct, one down in a deep tunnel under the town); a station is built on each from Build >
 // Stops by tapping the track, the underground ones with the underground view on; a line is drawn
 // between the two underground stations and its train calls at both with its doors open; the view
 // fades out and back with nothing left over; and nothing is logged as an error.
 // node e2e/stations.e2e.mjs [url] [shots dir]
 import { chromium } from 'playwright-core';
-const url = process.argv[2] ?? 'http://localhost:5173/proto.html?map=town';
+const url = process.argv[2] ?? 'http://localhost:5173/proto.html?map=region&seed=42';
 const out = process.argv[3] ?? '.';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -99,7 +99,7 @@ if ((await page.getAttribute('#ugbtn', 'aria-pressed')) !== 'true') fail('the un
 if (!(await page.evaluate(() => window.proto.underView.on))) fail('the underground view didn’t come on');
 const d1 = await buildStation('underground-1', -250, -60, -14, -4);
 await close();
-const d2 = await buildStation('underground-2', -30, -60, -14, -4); // (the line dips further to pass under something round x = 250)
+const d2 = await buildStation('underground-2', 200, -60, -14, -4); // (clear of the start town's streets above: an underground station needs its entrances)
 for (const d of [d1, d2]) if (!d || d.structure !== 'underground') fail(`an underground station wasn't built (${d?.structure})`);
 // the second's sheet is open: New line from here, tap the first, Create
 let started = false;
@@ -125,7 +125,9 @@ if (!line || !d1 || !d2 || line.stops.length !== 2 || !line.stops.includes(d1.id
 await page.tap('#ugbtn');
 await page.evaluate(() => { window.proto.setSpeed(4); window.proto.focusOn({ x: -250, z: -60 }, 200); });
 let doorsSeen = false;
-for (let i = 0; line && i < 180; i++) {
+// (up to 5 min: the region's two underground stations are 450 m apart, clear of the start town's
+// streets above, and SwiftShader draws the region at a couple of frames a second)
+for (let i = 0; line && i < 300; i++) {
   await wait(1000);
   const s = await page.evaluate((lid) => {
     const R = window.proto.railway, sim = R.sim, l = R.lines.find((x) => x.id === lid);
@@ -145,7 +147,7 @@ for (let i = 0; line && i < 180; i++) {
   }
   doorsSeen ||= s.doors;
   if (new Set(s.calls).size >= 2 && doorsSeen) { console.log('after', i + 1, 's', JSON.stringify(s)); break; }
-  if (i === 179) { console.log('state', JSON.stringify(s)); fail('the train did not call at both underground stations with its doors open'); }
+  if (i === 299) { console.log('state', JSON.stringify(s)); fail('the train did not call at both underground stations with its doors open'); }
   if (s.red) fail('a train passed a red signal');
 }
 await page.evaluate(() => window.proto.setSpeed(0));

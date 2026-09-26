@@ -17,7 +17,7 @@
 // of the places they don't serve. Pure: no three.js.
 import { mix, range, rng, type Rand } from '../region/random';
 import { worldNoise } from '../ground/noise';
-import { lakeRadiusOf, type XZ } from '../region/water';
+import { lakeRadiusOf, type XZ } from './water';
 import type { Link } from '../region/generate';
 import type { WorldWater } from './water';
 import { LIVE_HALF, type SettlementGrid, type WorldSettlement } from './plan';

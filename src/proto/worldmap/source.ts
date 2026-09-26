@@ -12,9 +12,9 @@
 // start (or home) place at 0, 0. A real source shifts its region so its home place is there. The
 // live play area (plan.ts LIVE_HALF, 8 km across) is the same for both.
 import type { RegionOptions } from '../region/options';
-import type { ReliefField } from '../region/terrain';
+import type { ReliefField } from './terrain';
 import type { Link } from '../region/generate';
-import type { XZ } from '../region/water';
+import type { XZ } from './water';
 import type { SettlementGrid, WorldSettlement } from './plan';
 import type { Rail, Route } from './routes';
 import type { WorldWater } from './water';

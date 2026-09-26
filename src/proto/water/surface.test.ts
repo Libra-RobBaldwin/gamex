@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FnHeight, ProceduralTerrain, TERRAIN_PRESETS, tileMesh } from '../terrain';
+import { FnHeight, tileMesh } from '../terrain';
+import { landSource } from '../worldmap/land';
 import { reedSpots, shoreColours, waterSurface } from './surface';
 import { KIND_CODE } from './types';
 import { WaterSystem } from './water';
@@ -27,8 +28,8 @@ describe('the water mesh', () => {
     expect(waterSurface(new WaterSystem(new FnHeight(() => 10), { region: 2000, margin: 400, cell: 16, riverArea: 1e9 }).tile(0, 0))).toBeNull();
   });
   it('colours the ground by the water and puts reeds on lake and river edges only', () => {
-    const w = new WaterSystem(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }));
-    const t = w.tile(2, 4), m = tileMesh(w.terrain, 2, 4, { cells: 128, skirt: 0 }), c = shoreColours(t, m);
+    const w = new WaterSystem(landSource({ landform: 'uplands', seed: 7 }).source);
+    const t = w.tile(0, 0), m = tileMesh(w.terrain, 0, 0, { cells: 128, skirt: 0 }), c = shoreColours(t, m);
     let bed = 0, far = 0;
     for (let v = 0; v < m.vertexCount; v++) {
       const a = c[v * 4 + 3];
@@ -43,7 +44,7 @@ describe('the water mesh', () => {
     expect(r.length % 5).toBe(0);
     expect(r.length / 5).toBeGreaterThan(5);
     for (let i = 0; i < r.length; i += 5) {
-      expect(r[i]).toBeGreaterThanOrEqual(2000 - 2); expect(r[i]).toBeLessThanOrEqual(3000 + 2); // (jittered up to half a cell)
+      expect(r[i]).toBeGreaterThanOrEqual(0 - 2); expect(r[i]).toBeLessThanOrEqual(1000 + 2); // (jittered up to half a cell)
       expect(Math.abs(w.distanceToShore(r[i], r[i + 2]))).toBeLessThan(8);
       expect(w.kindAt(r[i], r[i + 2]) === 'sea').toBe(false);
     }

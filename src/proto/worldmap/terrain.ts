@@ -15,8 +15,7 @@
 //
 // Nothing here is a grid until `field` is asked for: a tile, the worker or a test can ask the height
 // anywhere. Pure: no three.js.
-import { field as reliefField, type ReliefField } from '../region/terrain';
-import { LEVEL, RIM } from '../region/water';
+import { LEVEL, RIM } from './water';
 import { mix } from '../region/random';
 import type { Relief } from '../region/options';
 import { PARAMS, noise2, rockAt, sampleGrid, sampleSmooth, type CoarseLand, type Rock } from './landform';
@@ -24,6 +23,84 @@ import { riverFloor, type WorldWater } from './water';
 import type { SettlementGrid, WorldSettlement } from './plan';
 
 const smooth = (a: number, b: number, v: number) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+// ---------------- the height field everything is drawn on ----------------
+// The ground's heights on a square grid, and between grid points planar over the two triangles of
+// each cell, split along the (i+1, j)–(i, j+1) diagonal: exactly how the ground mesh is triangulated,
+// and what the drape shader does (drape.ts). So anything placed at `heightAt(x, z)`, on the CPU or in
+// a shader, lies on the ground mesh itself: no gaps, no fighting.
+export interface ReliefField {
+  x0: number; z0: number; step: number; n: number; // grid: n × n points from (x0, z0)
+  h: Float32Array; // heights, row by row (z outer): h[j * n + i] is at (x0 + i·step, z0 + j·step)
+  max: number; // the highest point
+  heightAt(x: number, z: number): number; // planar over the ground mesh's triangles (see above)
+}
+
+// A real map's own heights (a real region's bake: real/map.ts) as the field, or null for a map
+// without any (the 50 km map's come from WorldTerrain.field / partField instead).
+export function makeRelief(m: { ground?: { x0: number; z0: number; step: number; n: number; h: Float32Array; max: number }; relief?: unknown; seed?: unknown; water?: unknown; settlements?: unknown }, _half?: number): ReliefField | null {
+  return m.ground ? field(m.ground.x0, m.ground.z0, m.ground.step, m.ground.n, m.ground.h, m.ground.max) : null;
+}
+
+export function field(x0: number, z0: number, step: number, n: number, h: Float32Array, max: number): ReliefField {
+  const top = n - 1 - 1e-4;
+  return {
+    x0, z0, step, n, h, max,
+    // (the shader in drape.ts does exactly this, in the same order)
+    heightAt(x: number, z: number) {
+      const gx = Math.max(0, Math.min(top, (x - x0) / step)), gz = Math.max(0, Math.min(top, (z - z0) / step));
+      const i = Math.floor(gx), j = Math.floor(gz), fx = gx - i, fz = gz - j, k = j * n + i;
+      const h10 = h[k + 1], h01 = h[k + n];
+      if (fx + fz <= 1) { const h00 = h[k]; return h00 + (h10 - h00) * fx + (h01 - h00) * fz; }
+      const h11 = h[k + n + 1];
+      return h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
+    },
+  };
+}
+
+// (for tests: the steepest slope between neighbouring grid points)
+export function steepest(f: ReliefField) {
+  let s = 0;
+  for (let j = 0; j + 1 < f.n; j++) for (let i = 0; i + 1 < f.n; i++) {
+    const k = j * f.n + i;
+    s = Math.max(s, Math.abs(f.h[k + 1] - f.h[k]) / f.step, Math.abs(f.h[k + f.n] - f.h[k]) / f.step);
+  }
+  return s;
+}
+
+// ---- the hills' lighting, in one place ----
+// The ground is lit as if GROUND_LIFT times as steep as it is (the live ground: game/water.ts; the
+// 50 km map's far tiles: worldmap/tilegen.ts): from the game's height, gentle country otherwise
+// reads as flat. `litSlope` is what a true slope (rise over run) reads as in the ground shader's
+// 1 − normal.y, and `slopeLook` the shader's uSlope for a map with hills (ground/material.ts: bare
+// rock from a 1 in 2 slope, all rock by 1 in 1.1; heather on the tops from 300 m, all moor by 420).
+export const GROUND_LIFT = 4.5;
+export const litSlope = (s: number) => 1 - 1 / Math.hypot(1, GROUND_LIFT * s);
+export const slopeLook = (): [number, number, number, number] => [litSlope(0.55), litSlope(0.9), 300, 420];
+// and the sun for a map with hills: from the south-west, about 32° up (low enough that slopes facing
+// away from it fall into shade, high enough that valleys aren't lost in it)
+export const SUN_HILLS = { x: -190, y: 160, z: 170 };
+// and the light's balance: less from the sky all round, more from the sun, so a slope's facing shows
+export const LIGHT_HILLS = { hemi: 0.75, sun: 3.1 };
+// The ground's small swells and dells, for the light only: at the game's zoom a whole hillside is one
+// even slope, evenly lit, and reads as flat; what shows the land's shape is the rise and fall of the
+// ground field by field. They're a sum of waves (the same in JS and GLSL, so the live ground, the far
+// tiles and the fields drawn over the ground agree), a few hundred metres long, tilting the normal
+// as if the ground rose and fell `amp` metres; heights are untouched, so nothing built on it moves.
+const WAVES: [number, number, number, number][] = [[182, 0.3, 1.1, 1], [247, 1.9, 4.2, 0.9], [311, 2.8, 2.3, 0.8], [389, 4.1, 5.9, 0.7], [463, 0.95, 0.4, 0.6], [587, 5.3, 3.7, 0.5]]
+  .map(([L, a, ph, w]) => [(Math.cos(a) * 2 * Math.PI) / L, (Math.sin(a) * 2 * Math.PI) / L, ph, w]);
+const WSUM = WAVES.reduce((t, w) => t + w[3], 0);
+// the swells' slope at a point (rise over run, x and z) for swells `amp` metres high
+export function swellSlope(x: number, z: number, amp: number): [number, number] {
+  let gx = 0, gz = 0;
+  for (const [kx, kz, ph, w] of WAVES) { const c = (w / WSUM) * Math.cos(kx * x + kz * z + ph); gx += c * kx; gz += c * kz; }
+  return [gx * amp, gz * amp];
+}
+export const SWELL_GLSL = `vec2 swellSlope( vec2 p, float amp ) { vec2 g = vec2( 0.0 ); float c;
+${WAVES.map(([kx, kz, ph, w]) => `  c = ${(w / WSUM).toFixed(6)} * cos( ${kx.toFixed(8)} * p.x + ${kz.toFixed(8)} * p.y + ${ph.toFixed(4)} ); g += c * vec2( ${kx.toFixed(8)}, ${kz.toFixed(8)} );`).join('\n')}
+  return g * amp; }`;
+// how high the swells are lit as, on a 50 km map (0 elsewhere)
+export const SWELL_AMP = 30;
 
 export interface TerrainInput { seed: number; relief: Relief; half: number; water: WorldWater; grid: SettlementGrid; land: CoarseLand }
 
@@ -182,7 +259,7 @@ export class WorldTerrain {
     const w = Math.min(COR_REACH, 6 + 2 * Math.abs(h - bp)), f = smooth(0, w, bd);
     return bp + (h - bp) * f;
   }
-  // How far the ground dips below heightAt for standing water: a lake's bowl (region/water.ts) or
+  // How far the ground dips below heightAt for standing water: a lake's bowl (worldmap/water.ts) or
   // the sea's shelving bed, from a beach at the coast. (Rivers are drawn on the valley floor.)
   bed = (x: number, z: number) => {
     const w = this.o.water;
@@ -205,15 +282,15 @@ export class WorldTerrain {
     const i0 = Math.max(0, Math.floor((box.x0 - x0) / step) - 1), i1 = Math.min(n - 1, Math.ceil((box.x1 - x0) / step) + 1);
     const j0 = Math.max(0, Math.floor((box.z0 - x0) / step) - 1), j1 = Math.min(n - 1, Math.ceil((box.z1 - x0) / step) + 1);
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) h[j * n + i] = this.heightAt(x0 + i * step, x0 + j * step);
-    return reliefField(x0, x0, step, n, h, this.top);
+    return field(x0, x0, step, n, h, this.top);
   }
   // The heights on a grid `step` metres apart over the whole map (and a cell past its edge), as the
-  // drape shader and the ground meshes take them (region/terrain.ts ReliefField).
+  // drape shader and the ground meshes take them (worldmap/terrain.ts ReliefField).
   field(step = 50): ReliefField | null {
     const H = this.o.half + step, x0 = -Math.ceil(H / step) * step, n = Math.round((-2 * x0) / step) + 1;
     const h = new Float32Array(n * n);
     let max = 0;
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const v = this.heightAt(x0 + i * step, x0 + j * step); h[j * n + i] = v; if (v > max) max = v; }
-    return reliefField(x0, x0, step, n, h, max);
+    return field(x0, x0, step, n, h, max);
   }
 }

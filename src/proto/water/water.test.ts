@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FnHeight, ProceduralTerrain, TERRAIN_PRESETS } from '../terrain';
+import { FnHeight } from '../terrain';
+import { landSource } from '../worldmap/land';
 import { CLASS_OF, type Reach } from './rivers';
 import { NAV, type WaterParams } from './types';
 import { WaterSystem } from './water';
@@ -128,24 +129,26 @@ describe('sea and lakes', () => {
   });
 });
 
-describe('the procedural terrain', () => {
-  const t = new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 });
+describe('on the 50 km land', () => {
+  const land = landSource({ landform: 'uplands', seed: 7 }), t = land.source;
   const w = new WaterSystem(t);
-  it('keeps rivers on the terrain’s river valleys', () => {
+  it('finds water along the land’s own rivers', () => {
+    // the land's rivers (worldmap/water.ts) through the region 8–16 km east, 16–24 km south: most
+    // of their length has this system's water within 60 m, on their valley floors
     let near = 0, all = 0;
-    for (const r of w.reaches()) for (let k = 0; k < r.n; k += 4) {
-      if (r.area[k] < 5) continue;
-      const f = t.riverField(r.x[k], r.z[k])!;
+    for (const r of land.water.world.rivers) for (let i = 1; i < r.path.length; i += 4) {
+      const p = r.path[i], x = p.x - 8000, z = p.z - 16000;
+      if (x < 300 || z < 300 || x > 7700 || z > 7700) continue;
       all++;
-      if ((Math.abs(f.v) * f.lam) / 1.1 < 90) near++;
+      if (w.distanceToShore(p.x, p.z) > -60) near++;
     }
-    expect(all).toBeGreaterThan(100);
-    expect(near / all).toBeGreaterThan(0.6);
+    expect(all).toBeGreaterThan(50);
+    expect(near / all).toBeGreaterThan(0.5);
   });
   it('is deterministic, whichever tile is asked for first, and agrees with point queries', () => {
-    const a = new WaterSystem(t).tile(4, 3), w2 = new WaterSystem(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }));
-    w2.tile(5, 3); w2.tile(2, 2);
-    const b = w2.tile(4, 3);
+    const a = new WaterSystem(t).tile(3, 4), w2 = new WaterSystem(landSource({ landform: 'uplands', seed: 7 }).source);
+    w2.tile(4, 4); w2.tile(2, 3);
+    const b = w2.tile(3, 4);
     expect(b.level).toEqual(a.level);
     expect(b.ground).toEqual(a.ground);
     expect(b.kind).toEqual(a.kind);
@@ -172,7 +175,7 @@ describe('the procedural terrain', () => {
   it('has lakes shaped by the ground, not circles', () => {
     // every lake body in a few tiles: how far its shore strays from the best circle
     let lakes = 0;
-    for (const [ti, tj] of [[2, 4], [1, 6], [2, 5], [6, 6], [0, 2], [6, 1]]) {
+    for (const [ti, tj] of [[0, -1], [1, -1], [0, 0], [1, 0]]) {
       const tl = w.tile(ti, tj), g = tl.g;
       const byBody = new Map<number, [number, number][]>();
       for (let k = 0; k < tl.kind.length; k++) if (tl.kind[k] === 2) { const b = tl.body[k]; if (!byBody.has(b)) byBody.set(b, []); byBody.get(b)!.push([g.x0 + (k % g.nx) * g.step, g.z0 + Math.floor(k / g.nx) * g.step]); }

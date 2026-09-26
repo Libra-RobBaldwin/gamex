@@ -14,7 +14,7 @@
 import { INDUSTRY_TYPES, type IndustryId } from '../industries/catalogue';
 import { buildable } from '../industries/chains';
 import { mix, range, rng, type Rand } from '../region/random';
-import type { XZ } from '../region/water';
+import type { XZ } from './water';
 import { LIVE_HALF, type SettlementGrid, type WorldSettlement } from './plan';
 import type { Route } from './routes';
 import type { SceneBuilding } from './towns';
