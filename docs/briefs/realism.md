@@ -1,7 +1,7 @@
 # Brief: realism (seeded places and roads as real UK ones, from OS data)
 
 Session: https://claude.ai/code/session_01N2xhRAKzQWsSt6RZQH8jdG (the onemap-4 session), branch
-`claude/work-realism` (step 4 is merged, #61; the integration branch is merged in, so this branch carries only its own changes).
+`claude/work-realism` (step 4 is merged, #61; the stream's first PR, spokes and stems, is merged, #65; the integration branch is merged in after each landing, so a PR carries only what is new).
 Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU. Its brief came at 20:52 UTC, 26 Sep 2026.
 
 **Rule:** nothing is "done" until it is live (merged into the integration branch) and checked on a 412×915
@@ -94,12 +94,14 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 ## State
 | Item | State |
 |---|---|
-| Exits measured, priors written | done locally |
-| Spokes and stems | done locally; checked on 1600×900 and 412×915 shots of seed 42 (the lanes continue the town's streets and fork outside it); tsc clean, full vitest green, all six phone suites green (rail and save with their positions moved, listed in the PR); not live |
-| PR open | #65, open, subscribed |
-| Radials, edge, T-junctions, closes, village shapes measured | done locally: `tools/os/towns.mjs`, `PRIORS.towns`, a section in the report |
-| Generator: town grown along its radials | done locally (`layStreets` rewritten); region and worldmap tests pass; the start town checked on a 1600×900 shot (looks like a market town from the air); the six phone suites and the full unit suite running; not at 412×915 yet; not live |
+| Exits measured, priors written | live (#65) |
+| Spokes and stems | live (#65), checked at 412×915 |
+| PR open | #65 merged (integration head 2338450, 26 Sep); the radial town is the next PR from this branch, to open once the suites pass |
+| Radials, edge, T-junctions, closes, village shapes measured | committed: `tools/os/towns.mjs`, `PRIORS.towns`, a section in the report; on this branch, not live |
+| Generator: town grown along its radials | committed (`layStreets` rewritten, then made crossing-free: side streets end on radials as Ts, the estate beside its radial, radials start where they cross no other); the careful builder refuses nothing on five seeds; region and worldmap tests pass; tsc clean; the start town checked at 412×915 from 900 m and 400 m (report, `town-radial-900.jpg`, `-400.jpg`): a market town with radials, ribbons and an estate; the six phone suites and the full unit suite running on the merged head; not live |
+| Lanes: the best-facing spoke, water at the stem, a blend into the course | committed with the above; `region.test.ts` checks every lane on three plans |
+| Compare yardsticks: radials, junction shares, street pieces, orientation order | committed (`compare.mjs`, the places table in `seeded-vs-real.md`), within the real ranges |
 | Lane grades and density | not started |
-| Side-by-side evidence, compare yardsticks, hero pictures retaken | not started |
+| Side-by-side evidence at whole map / 6 km / 1 km, hero pictures retaken | hero pictures to retake after the suites pass; side-by-sides not started |
 | Review bug 11 (failed tiles asked for for ever) | not started |
 | Review: bounded coarse growth, no jump on activation | not started |
