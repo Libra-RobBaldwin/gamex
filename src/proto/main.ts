@@ -1196,7 +1196,8 @@ function focusOn(p: P, h: number, dir?: P, el?: number) {
     az = [a, a + Math.PI].map((v) => view.az + wrap(v - view.az)).sort((x, y) => Math.abs(x - view.az) - Math.abs(y - view.az))[0];
   }
   const c = shell.clearRect();
-  nav.animateTo(nav.framing(p, (c.left + c.right) / 2, (c.top + c.bottom) / 2, { az, h, ...(el ? { el } : {}) }));
+  // (the point on the ground, however high the hills put it: aimed at height 0 it lands short, up the line of sight)
+  nav.animateTo(nav.framing({ x: p.x, z: p.z, y: surfaceAt(p.x, p.z) }, (c.left + c.right) / 2, (c.top + c.bottom) / 2, { az, h, ...(el ? { el } : {}) }));
 }
 
 // ---- road picker: a few filters over the whole catalogue ----
