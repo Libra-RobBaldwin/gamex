@@ -14,7 +14,7 @@ import {
 } from './econdefs';
 import { LineState, NC, type LineCtx, type StopPos } from './econlines';
 import { Pairs, Skim, assignTrips, installTrips, reach, townFlows, type PairCache, type TownFlow, type Reach, type ZoneAccess } from './econaccess';
-import { newTown, perUse, reviewTown, type BState, type Crowding, type TState, type TownCtx, type ZState } from './econtowns';
+import { fedJobs, newTown, perUse, reviewTown, type BState, type Crowding, type TState, type TownCtx, type ZState } from './econtowns';
 
 export { LineState } from './econlines';
 export type { TState, ZState, BState } from './econtowns';
@@ -848,10 +848,22 @@ export class Economy {
         t.supply.goods += a * (t.month.goods / hours - t.supply.goods);
         t.supply.materials += a * (t.month.materials / hours - t.supply.materials);
         t.supply.visitors += a * (t.month.visitors / hours - t.supply.visitors);
-        const o = t.offmap;
+        const o = t.offmap, delivered = { goods: t.month.goods / hours, materials: t.month.materials / hours, visitors: t.month.visitors / hours };
+        // Jobs your lines stopped feeding last month drop out of this month's reach at once, before
+        // it's worked out below, not a review later (see reviewTown's health): cut a town's lines
+        // and its people don't spend a month seeing every job in town as theirs. What the map is
+        // taken to have fed the town keeps fading at the review, as before.
+        if (t.primed) {
+          const fed = fedJobs(t, T, { goods: delivered.goods + o.goods, materials: delivered.materials + o.materials, visitors: delivered.visitors + o.visitors });
+          for (const u of ['shop', 'office', 'works'] as const) {
+            let cu = 0;
+            for (const z of t.zones) for (const b of z.buildings) if (!b.abandoned && b.use === u) cu += b.cap;
+            if (cu > 0) t.health[u] = Math.min(t.health[u], fed[u] / cu);
+          }
+        }
         o.goods *= 1 - a; o.materials *= 1 - a; o.visitors *= 1 - a;
-        t.got = { goods: t.month.goods / hours + o.goods, materials: t.month.materials / hours + o.materials, visitors: t.month.visitors / hours + o.visitors };
-        t.delivered = { goods: t.month.goods / hours, materials: t.month.materials / hours, visitors: t.month.visitors / hours };
+        t.got = { goods: delivered.goods + o.goods, materials: delivered.materials + o.materials, visitors: delivered.visitors + o.visitors };
+        t.delivered = delivered;
         t.month = { goods: 0, materials: 0, visitors: 0 };
       }
       for (const L of this.lineList) L.roll();
