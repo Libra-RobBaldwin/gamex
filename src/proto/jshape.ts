@@ -216,7 +216,10 @@ function cornerOf(n0: XZ, li: ShapeLeg, lj: ShapeLeg, ki: number, kj: number, r:
     if (m && m.s < 0 && m.s > -3 * Math.max(ki, kj)) return { ti: 0, tj: 0, pts: [add(pi, li.dir, m.s)], x: add(pi, li.dir, m.s), centre: null as XZ | null };
     return { ti: 0, tj: 0, pts: [pi, pj], x: null as XZ | null, centre: null as XZ | null };
   }
-  const m = meet(pi, li.dir, pj, lj.dir)!;
+  const m = meet(pi, li.dir, pj, lj.dir);
+  // (two legs all but lying along each other, at a sharp angle: their kerbs cross far off, or never,
+  // so a corner can't be rounded there; the kerbs just meet, as straight on)
+  if (!m || !Number.isFinite(m.s) || !Number.isFinite(m.t) || Math.abs(m.s) > 200 || Math.abs(m.t) > 200) return { ti: 0, tj: 0, pts: [pi, pj], x: null as XZ | null, centre: null as XZ | null };
   const X = add(pi, li.dir, m.s);
   const rr = Math.max(0.3, Math.min(r, Math.min(li.len, lj.len) * 0.35 * Math.tan(g / 2)));
   const t = rr / Math.tan(g / 2);

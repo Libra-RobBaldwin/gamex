@@ -29,6 +29,9 @@ export interface TerrainInput { seed: number; relief: Relief; half: number; wate
 
 // how far round a place its level ground eases out into the hills (m, past its reach)
 const PLACE_EASE = 900;
+// the live area's knolls: how high on each landform (m), and where they fade out (Chebyshev distance from the start, m)
+const LIVE_KNOLLS: Record<string, number> = { vale: 10, downs: 20, estuary: 14, uplands: 24, mountains: 32, coast: 18, islands: 18 };
+const LIVE_FADE = [3300, 4300];
 const COR_REACH = 120; // (the furthest a corridor's side slope reaches past its edge)
 const PLACE_SLOPE = 0.025; // (and the most its own ground slopes)
 
@@ -39,6 +42,7 @@ export class WorldTerrain {
   private n1: (x: number, z: number) => number; private n2: (x: number, z: number) => number; private n3: (x: number, z: number) => number;
   private levels = new Map<number, [number, number, number]>(); // each place's ground: its level at the middle, and its tilt
   readonly top: number; // the most the ground can reach
+  private live: number; // (the live area's knolls' height)
   // the trunk routes' corridors (ease): each one's centre line, its ground's profile along it, and
   // half-width; their segments by 100 m bucket (corridor << 16 | segment)
   private cor: { path: { x: number; z: number }[]; prof: Float32Array; half: number }[] = [];
@@ -48,7 +52,8 @@ export class WorldTerrain {
     this.surf = new Float32Array(L.h);
     for (let k = 0; k < L.h.length; k++) if (L.lake[k] >= 0) this.surf[k] = L.lakes[L.lake[k]].level;
     this.n1 = noise2(mix(o.seed, 351)); this.n2 = noise2(mix(o.seed, 352)); this.n3 = noise2(mix(o.seed, 353));
-    this.top = L.max + PARAMS.detail.amp * 1.8 * 1.4 + 5;
+    this.live = LIVE_KNOLLS[L.landform] ?? 16;
+    this.top = L.max + PARAMS.detail.amp * 1.8 * 1.4 + this.live + 5;
   }
   // The rock under a spot (for the buildings' walls and roofs: vernacular's setGeology).
   geologyAt = (x: number, z: number): Rock => rockAt(this.land, x, z);
@@ -82,6 +87,16 @@ export class WorldTerrain {
     let f = 0.55 * this.n1(p, q) + 0.3 * this.n2(p * 2.3 + 3.3, q * 2.3 - 1.7) + 0.15 * this.n1(p * 5.1 - 7.1, q * 5.1 + 2.2);
     f = f > 0 ? f : 0.5 * f;
     h += a * f * smooth(0, 120, s) * Math.min(1, h / 6);
+    // (and round the start town, where the game is played and the camera looks: knolls and dells a
+    // few hundred metres across, as the fields there rise and fall; gone by the live area's edge, so
+    // the trunk routes beyond it, which keep to their grades, never meet them)
+    const cheb = Math.max(Math.abs(x), Math.abs(z));
+    if (cheb < LIVE_FADE[1] && this.live) {
+      const q1 = x / 620, q2 = z / 620;
+      let g = 0.65 * this.n3(q1 + 11.3, q2 - 4.1) + 0.35 * this.n2(q1 * 2.4 - 3.9, q2 * 2.4 + 8.8);
+      g = g > 0 ? g : 0.6 * g;
+      h += this.live * g * (1 - smooth(LIVE_FADE[0], LIVE_FADE[1], cheb)) * smooth(0, 120, s) * Math.min(1, h / 6);
+    }
     return Math.max(0, h);
   }
   // A place's own ground: a plane through its middle's height, tilted as the land is there but no
@@ -104,9 +119,10 @@ export class WorldTerrain {
     // places: level in them, easing out; every one near weighed by how near (w⁴ / (1 − w))
     let W = 1, S = h;
     for (const s of this.o.grid.near(x, z)) {
-      const d = Math.hypot(x - s.x, z - s.z) - s.reach - 60;
-      if (d >= PLACE_EASE) continue;
-      const t = 1 - smooth(0, PLACE_EASE, d), wt = (t * t * t * t) / (1.000001 - t);
+      // (the start town's flat is tight round it: the hills of its valley rise just past its edge)
+      const home = s.id === 0, E = home ? 350 : PLACE_EASE, d = Math.hypot(x - s.x, z - s.z) - s.reach - (home ? 20 : 60);
+      if (d >= E) continue;
+      const t = 1 - smooth(0, E, d), wt = (t * t * t * t) / (1.000001 - t);
       const [l0, gx, gz] = this.levelOf(s);
       W += wt; S += wt * Math.max(1, l0 + gx * (x - s.x) + gz * (z - s.z));
     }
