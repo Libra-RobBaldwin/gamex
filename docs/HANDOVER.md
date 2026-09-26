@@ -65,9 +65,7 @@ are tile scenery, and farm tracks route over the land. `worldmap/country.ts` is 
      then merges hourly. Morning summary at 06:15 UTC.
 4. Then wire terrain's landform presets and islands into the region setup's first step, and do
    HUD phase 3 (small tap cards for a bus, stop or building).
-5. The user's home town is still named in the repo in a few places, from before the privacy
-   rule (region names, vehicle brands, tests, docs). It's gone from the menu. Ask the user
-   before removing the rest.
+5. The home town's name elsewhere in the repo: the user doesn't mind (26 Sep). Leave it.
 
 Coordinator: https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. Integration branch as before.
 - **HUD, second pass (`ui/shell.ts`, `proto.css`):** a rounded floating dock with a Build button
