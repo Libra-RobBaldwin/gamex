@@ -27,7 +27,7 @@ export interface MapSpec {
   streets: MapStreet[];
   generated: boolean; // streets from the generator: each is checked, and left out if the Network refuses it (apply.ts)
   links: Link[]; // suggested links between settlements (for the road and rail sessions)
-  view: { x: number; z: number; h: number }; // where the camera starts
+  view: { x: number; z: number; h: number; y?: number }; // where the camera starts (y: the ground's height there, on a map with hills)
   stops: XZ[]; // a few bus stops to start with, near these points
   line: XZ[]; // the starter bus line: the stops nearest these, in order
   industries: boolean; // library industrial sites on the town's estate (game/industry.ts townWishes)
