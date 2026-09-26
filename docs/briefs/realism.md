@@ -96,7 +96,7 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 |---|---|
 | Exits measured, priors written | live (#65) |
 | Spokes and stems | live (#65), checked at 412×915 |
-| PR open | #65 merged (integration head 2338450, 26 Sep); the radial town is the next PR from this branch, to open once the suites pass |
+| PR open | #67 (the radial town), open, subscribed; #65 merged (integration head 2338450, 26 Sep) |
 | Radials, edge, T-junctions, closes, village shapes measured | committed: `tools/os/towns.mjs`, `PRIORS.towns`, a section in the report; on this branch, not live |
 | Generator: town grown along its radials | committed (`layStreets` rewritten, then made crossing-free: side streets end on radials as Ts, the estate beside its radial, radials start where they cross no other); the careful builder refuses nothing on five seeds; region and worldmap tests pass; tsc clean; the start town checked at 412×915 from 900 m and 400 m (report, `town-radial-900.jpg`, `-400.jpg`): a market town with radials, ribbons and an estate; the six phone suites and the full unit suite running on the merged head; not live |
 | Lanes: the best-facing spoke, water at the stem, a blend into the course | committed with the above; `region.test.ts` checks every lane on three plans |
