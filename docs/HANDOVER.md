@@ -2,6 +2,23 @@
 
 ## Latest: HUD, start menu and region work (25 Sep 2026)
 
+**Morning, 26 Sep (06:30 UTC):** everything in `docs/briefs/PLAN.md` merged overnight is live:
+- world50: WorldSource, places in every 10 km square, industries, trunk routes over the land, priors;
+- edge on WORLD;
+- vernacular's shopping complexes;
+- countryside on WORLD (one field style);
+- OS's faster real maps (40 s Exeter under SwiftShader);
+- terrain on WORLD (landforms, islands).
+
+The region setup shows the seven landforms, and the real places under "Or play a real place".
+
+Open issues:
+- The region's first view lands on a field beside the start town, not on the town. World50 and terrain have
+  been told.
+- The OS fold-in of real maps into the WORLD pipeline is not done: real places still open ?map=exe or teme.
+- The gameplay review session (session_01U9NWdcPH7mkV5QoNQxL1zG) had no repo attached, and its documents never
+  reached GitHub.
+
 **Countryside on `WORLD` (26 Sep, `claude/work-country`).** One field style everywhere: the farm
 blocks of `region/fields.ts` on every 50 km tile, the live area and the town (the town's fields
 changed; its world state didn't). The old grid, bend and swirl generator in `ground/layout.ts` is
