@@ -1,7 +1,8 @@
 # Play brief: the 50 km region played as a player (26 Sep 2026)
 
-Session: https://claude.ai/code/session_01DGEkjY29QMXCGUF7EoXkuj. Branch `claude/work-play`, PR into
-`claude/cloud-session-history-rvqkm1`. Screenshots in `docs/reports/play/`, all 412×915, DPR 2, touch,
+Session: https://claude.ai/code/session_01DGEkjY29QMXCGUF7EoXkuj. Branch `claude/work-play`. PR #63 (the
+play-through, six loop fixes and the review's tests) is merged into `claude/cloud-session-history-rvqkm1`;
+the parks, the walls and the review's play rows follow on a second PR from the same branch. Screenshots in `docs/reports/play/`, all 412×915, DPR 2, touch,
 Chromium with SwiftShader, on the production build (`npm run build`, `vite preview`).
 
 What was played, in order: Start menu > New game > Region (Lowland vale, Temperate, Villages, seed 42) with
@@ -192,16 +193,20 @@ test once its fix is in; the rest are `it.fails` (expected to fail), so CI stays
 
 ## Done and not done
 
-- Done in this PR, each its own commit: 1 (building tap, with a lines e2e step), 2 (line framing), 2b (stop
-  badges), 3 (one guide, with menu e2e checks), 5 (rail Join), 9 (loading counts). Each is checked on a
-  screenshot named above; "live" once the PR is merged and the integration branch is deployed.
-- Done in this PR too: 12 (fields stay fields, no ponds, paths from the gates), 13 (park walls and gates).
+- Done and merged (PR #63), each its own commit: 1 (building tap, with a lines e2e step), 2 (line framing),
+  2b (stop badges), 3 (one guide, with menu e2e checks), 5 (rail Join), 9 (loading counts). Each is checked
+  on a screenshot named above; live once the integration branch is deployed.
+- On the second PR: 12 (fields stay fields, no ponds, paths from the gates), 13 (park walls and gates).
 - Reported for their owners, not done: 4 (a short bridge is refused), 6 (money), 7 (real regions decline),
   8 (riders label), 10 (buildings and scenery), the `/assets/regions` fetch, a pond in a real hollow (12).
-- From the logic review: rows 3, 4, 2 (play half), the half-built village, 8, 7, 10 and the rest of the play
-  list are fixed in this PR, each its own commit (table above). Row 9's test stays expected-to-fail (world50's
-  activation radius); row 2's two tests wait on the vehicles session.
+- From the logic review, on the second PR: rows 3, 4, 2 (play half), the half-built village, 8, 7, 10 and the
+  rest of the play list, each its own commit (table above). Row 9's test stays expected-to-fail (world50's
+  activation radius); row 2's two tests pass since the vehicles session's PR #64 keeps stops across a split.
 
-## Test results
+## Test results (second PR, on the rebased branch)
 
-Filled in at each push.
+- `npx tsc --noEmit`: clean.
+- The six phone e2es on a production build of the branch before the rebase onto the merged #63, #64 and #65
+  (lines with the building tap, loop, rail, save with the bulldoze-refund step, stations, menu on the build):
+  all pass. CI runs them again on the PR.
+- `npx vitest run --no-file-parallelism` on the rebased tree: see the PR.
