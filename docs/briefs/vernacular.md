@@ -10,11 +10,11 @@ PRs:
 
 ## Now (ONE MAP, PLAN.md 07:40)
 
-1. **Urgent: the phone's plain grey boxes that don't improve on zoom.** **In PR #50.**
+1. **Urgent: the phone's plain grey boxes that don't improve on zoom.** **Live** (merged into the integration branch at 63e7a2f). Street trees in dressed places followed in #50 (pushed 10:20).
    - Cause: on the 50 km map, towns outside the live play area, and places in it not yet live, are world50's scenery boxes at every zoom.
    - Fix: `game/dress.ts` rebuilds them with buildgen below a 700 m view and hides the boxes in the same frame.
    - Checked at 412×915 on `?map=region&seed=42`: a town 7 km out and a city (screenshots in `docs/reports/dress/`).
-   - Not yet checked on the user's phone.
+   - Not yet checked on the user's phone; the coordinator or the user should zoom in on a town outside the start area and wait a few seconds.
    - Known limits:
      - A tile appears only once it's all built: a few seconds on a phone, about a minute under SwiftShader.
      - Streets in dressed places are still world50's plain ribbons (no kerbs, lamps or markings).
@@ -33,7 +33,6 @@ PRs:
   - In PR #50: buildings level on slopes.
   - Not started:
     - window depth up close;
-    - street trees in dressed places;
     - more colour variety within a street.
 - **Cars park in spaces; car parks used.** Done (#45), for live towns only; dressed scenery has no cars.
 - **Shopping complexes** (parade, arcade, retail park, covered centre). Done (#48) on the live town map. On the 50 km map:
