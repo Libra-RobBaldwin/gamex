@@ -207,8 +207,9 @@ export class CoverMap {
       if (l.hedge && p !== 'wood' && q !== 'wood' && !(p === 'rough' && q === 'rough') && p !== 'town' && q !== 'town') band(l.a, l.b, hedge);
     }
     // (on a coarse map the margins and the hedge's foot widen with the texel, weaker, so they stay
-    // a continuous line rather than a dotted one where the texels only sometimes land on them)
-    const sc = Math.max(1, t / 4), hw = 3 * sc, hk = 0.78 / Math.sqrt(sc);
+    // a continuous line rather than a dotted one where the texels only sometimes land on them; no
+    // wider than at 16 m texels, past which they'd cover the fields and hide their crops)
+    const sc = Math.min(4, Math.max(1, t / 4)), hw = 3 * sc, hk = 0.78 / Math.sqrt(sc);
     let lastId = -2, inf: ParcelInfo = { kind: 'grass', crop: 0, dir: 0 };
     for (let k = 0; k < N; k++) {
       const id = pid[k];

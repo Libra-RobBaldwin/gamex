@@ -41,6 +41,7 @@ export function chooseWoods(sites: WoodSite[], o: { seed: number; woods: number;
   const blockPine = (b: number) => (mix(o.seed, 83, b) & 0xffff) / 0xffff;
   return sites.map((s) => {
     if (s.town < 40) return null; // (the village's own land: its gardens and paddocks)
+    if (s.water < -5) return null; // (under a lake or the sea: no trees standing out of the water)
     const r = s.rand, high = s.hMax > 25 ? s.height / s.hMax : 0;
     // how likely this field is wood, from each reason there'd be one
     let p = 0;

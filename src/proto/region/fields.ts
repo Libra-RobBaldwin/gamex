@@ -254,6 +254,7 @@ export class Countryside {
     this.decide(me, fields, sites);
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (const q of P.pts) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
+    for (const l of lines) if (l.hedge && this.water((l.a.x + l.b.x) / 2, (l.a.z + l.b.z) / 2) < -5) l.hedge = false; // (no hedges under the water)
     return { id: me, i, j, box: { x0, z0, x1, z1 }, fields, lines, farms: null };
   }
 

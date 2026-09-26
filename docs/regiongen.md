@@ -82,6 +82,10 @@ docs/ground.md):
   them), about 1.5 ms a 1 km tile once warm. No DOM or three.js, so it can run in a worker.
   `tileCover(box, n)` is a far tile's cheap look: n × n RGBA, a colour a field and dark hedge lines
   (about 13 ms for 128²). `layFields(inp)` is the same over a whole box at once (the 6 km region).
+  `blocksNear(box)` is the ground's field source (a `Layout` over any cover map, docs/ground.md),
+  and `farmsNear(box)` the farms whose yard is in a box. The 50 km map's source is
+  `worldmap/country.ts` `countryFor(plan)`: its roads and railways to follow, its rivers and lakes
+  as water and its terrain for height. Farm tracks are routed with `laneRoute` (below).
 - **Winding roads (`lanes.ts`):** B roads, and a lane from each village to the nearest place it has
   no road to yet (`minorLinks`, `rural-40`), follow `laneRoute(a, b, ctx, { minR })`: the cheapest
   way over a 40 m grid in a corridor round the straight line. Each step costs its length times how
