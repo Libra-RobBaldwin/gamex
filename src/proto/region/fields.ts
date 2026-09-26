@@ -9,15 +9,17 @@
 //              // has hedges of its own)
 //   c.farmsNear(box)       // the farmsteads whose yard is in the blocks touching a box
 //
-// How: the country is cut into farm blocks (the Voronoi cells of seeds about 650 m apart). Each
+// How: the country is cut into farm blocks (the Voronoi cells of seeds about 800 m apart). Each
 // block has one direction its fields are laid out in: along the nearest lane or river if there's
 // one close, else across the slope (fields follow the contours), else as the land's grain runs.
 // Each block is then cut, again and again, square across its longer side, until its fields are
 // the size that land has: big (6 to 10 ha) on flat arable land far from anywhere, smaller (2 to 4)
-// round villages, on slopes and in pasture. So fields are four-sided with right angles, sit in
-// patterns that change from farm to farm, and meet the block's edge (a lane, an old boundary) at
-// whatever angle it takes. A lane through a field splits it. Now and then a cut is a narrow strip
-// of trees: a shelter belt.
+// round villages, on slopes and in pasture. The lanes wind (a B road turns 16° across a block,
+// half the time), so a piece beside one turns to the lane where it has bent away from the block's
+// grain, and the fields along it follow its bends. So fields are four-sided with right angles,
+// sit in patterns that change from farm to farm, and meet the block's edge (a lane, an old
+// boundary) at whatever angle it takes. A lane through a field splits it. Now and then a cut is a
+// narrow strip of trees: a shelter belt.
 //
 // Pure: no three.js, no DOM. The same inputs always give the same fields.
 import { rng, mix, type Rand } from './random';
@@ -137,6 +139,8 @@ function noise(seed: number) {
 }
 
 export interface FieldSite extends WoodSite { arable: number }
+// how far apart two field directions are (0 to π/4: fields run along a direction or square to it)
+const turn = (a: number, b: number) => { const d = Math.abs(((a - b) % (Math.PI / 2) + Math.PI / 2) % (Math.PI / 2)); return Math.min(d, Math.PI / 2 - d); };
 const C = COUNTRYSIDE;
 const blockId = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
 export interface BlockPlan { id: number; i: number; j: number; box: { x0: number; z0: number; x1: number; z1: number }; fields: Field[]; lines: Line[]; farms: Farm[] | null }
@@ -224,14 +228,19 @@ export class Countryside {
 
   private cutBlock(poly: Poly, block: number, r: Rand, fields: Field[], lines: Line[], sites: FieldSite[]) {
     const H = this.inp.heightAt, nz = this.nz, c = centroidOf(poly), slope = this.slopeAt(c.x, c.z), dT = this.townD(c.x, c.z), dW = this.water(c.x, c.z);
-    // which way the fields run
-    let theta: number;
-    const lane = this.lanes.nearest(c.x, c.z, C.alignReach), river = this.rivers.nearest(c.x, c.z, C.alignReach);
-    if (lane && (!river || lane.d < river.d * 1.3)) theta = lane.a;
-    else if (river) theta = river.a;
-    else if (slope > 0.015 && H) theta = Math.atan2(H(c.x + 20, c.z) - H(c.x - 20, c.z), -(H(c.x, c.z + 20) - H(c.x, c.z - 20))); // (along the contour)
-    else theta = nz(c.x, c.z, 2600) * Math.PI * 2 + (r() - 0.5) * 0.5;
-    theta += (r() - 0.5) * 0.08;
+    // which way the fields run: along the lane or river near the block's middle; else along the
+    // contour on a slope; else as the land's grain runs
+    const jitter = (r() - 0.5) * 0.08;
+    const along = (x: number, z: number, reach: number): number | null => {
+      const lane = this.lanes.nearest(x, z, reach), river = this.rivers.nearest(x, z, reach);
+      return lane && (!river || lane.d < river.d * 1.3) ? lane.a + jitter : river ? river.a + jitter : null;
+    };
+    let theta = along(c.x, c.z, C.alignReach);
+    if (theta === null) {
+      if (slope > 0.015 && H) theta = Math.atan2(H(c.x + 20, c.z) - H(c.x - 20, c.z), -(H(c.x, c.z + 20) - H(c.x, c.z - 20))); // (along the contour)
+      else theta = nz(c.x, c.z, 2600) * Math.PI * 2 + (r() - 0.5) * 0.5;
+      theta += jitter;
+    }
     // how much of it is ploughed: flat land away from the towns and the water
     const A0 = C.arable, flat = 1 - Math.min(1, slope / A0.flatSlope);
     const arable = Math.max(0, Math.min(1, (A0.base + A0.noise * nz(c.x + 5000, c.z, A0.noiseScale)) * flat * Math.min(1, Math.max(0.3, (dT - 50) / A0.townFade)) * (dW < 150 ? A0.water : 1)));
@@ -239,14 +248,18 @@ export class Countryside {
     let target = (C.fieldHa.base + C.fieldHa.arable * arable) * 1e4;
     if (dT < C.nearTown.reach) target *= C.nearTown.least + (1 - C.nearTown.least) * Math.max(0, dT) / C.nearTown.reach;
     target *= (0.85 + 0.3 * r()) / (1 + slope * C.slopeShrink);
-    const ux = Math.cos(theta), uz = Math.sin(theta), vx = -uz, vz = ux;
-    const leaves: { poly: Poly; belt: boolean }[] = [];
-    const [k0, k1] = C.keepWhole, Bt = C.belt;
-    const split = (p: Poly, depth: number) => {
-      const A = area(p);
-      if (depth > 14 || A < target * (k0 + (k1 - k0) * r())) { leaves.push({ poly: p, belt: false }); return; }
+    const leaves: { poly: Poly; belt: boolean; theta: number }[] = [];
+    const [k0, k1] = C.keepWhole, Bt = C.belt, F = C.follow;
+    // (th: the way this piece's fields run. A piece beside a lane turns to it once the lane has
+    // bent more than F.turn away from the grain it was cut in, so the fields along a winding lane
+    // follow its bends; the rest of the block keeps its one direction, and its corners square.)
+    const split = (p: Poly, depth: number, th: number) => {
+      const A = area(p), m = centroidOf(p);
+      if (depth) { const la = along(m.x, m.z, F.reach); if (la !== null && turn(la, th) > F.turn) th = la; }
+      if (depth > 14 || A < target * (k0 + (k1 - k0) * r())) { leaves.push({ poly: p, belt: false, theta: th }); return; }
+      const ux = Math.cos(th), uz = Math.sin(th), vx = -uz, vz = ux;
       const [u0, u1] = extent(p, ux, uz), [v0, v1] = extent(p, vx, vz), Lu = u1 - u0, Lv = v1 - v0;
-      // across the longer side (fields about 1:1.6), square to the block's direction
+      // across the longer side (fields about 1:1.6), square to the piece's direction
       const acrossU = Lu > Lv * (0.85 + 0.3 * r());
       const [nx, nzz, lo, L] = acrossU ? [ux, uz, u0, Lu] : [vx, vz, v0, Lv];
       const cpos = lo + L * (0.36 + 0.28 * r());
@@ -255,19 +268,19 @@ export class Countryside {
         const w = Bt.width[0] + r() * (Bt.width[1] - Bt.width[0]), a = cutPoly({ pts: p, tags: p.map(() => 0) }, nx, nzz, cpos - w / 2, 1), b = cutPoly({ pts: a.hi.pts, tags: a.hi.tags }, nx, nzz, cpos + w / 2, 1);
         if (a.seg && b.seg && area(a.lo.pts) > target * 0.4 && area(b.hi.pts) > target * 0.4) {
           lines.push({ a: a.seg[0], b: a.seg[1], hedge: false }, { a: b.seg[0], b: b.seg[1], hedge: false });
-          leaves.push({ poly: b.lo.pts, belt: true });
-          split(a.lo.pts, depth + 1); split(b.hi.pts, depth + 1);
+          leaves.push({ poly: b.lo.pts, belt: true, theta: th });
+          split(a.lo.pts, depth + 1, th); split(b.hi.pts, depth + 1, th);
           return;
         }
       }
       const got = cutPoly({ pts: p, tags: p.map(() => 0) }, nx, nzz, cpos, 1);
-      if (!got.seg || area(got.lo.pts) < target * C.minPiece || area(got.hi.pts) < target * C.minPiece) { leaves.push({ poly: p, belt: false }); return; }
+      if (!got.seg || area(got.lo.pts) < target * C.minPiece || area(got.hi.pts) < target * C.minPiece) { leaves.push({ poly: p, belt: false, theta: th }); return; }
       lines.push({ a: got.seg[0], b: got.seg[1], hedge: true });
-      split(got.lo.pts, depth + 1); split(got.hi.pts, depth + 1);
+      split(got.lo.pts, depth + 1, th); split(got.hi.pts, depth + 1, th);
     };
-    split(poly, 0);
+    split(poly, 0, theta);
     // a lane through a field splits it (along the chord it takes across it)
-    const out: { poly: Poly; belt: boolean }[] = [];
+    const out: typeof leaves = [];
     for (const lf of leaves) {
       let parts = [lf];
       if (!lf.belt) for (let pass = 0; pass < 2; pass++) {
@@ -279,16 +292,17 @@ export class Countryside {
           const got = cutPoly({ pts: pt.poly, tags: pt.poly.map(() => 0) }, nx / L, nzz / L, cc, 1);
           if (!got.seg || area(got.lo.pts) < C.laneSplitMin || area(got.hi.pts) < C.laneSplitMin) { next.push(pt); continue; }
           lines.push({ a: got.seg[0], b: got.seg[1], hedge: false });
-          next.push({ poly: got.lo.pts, belt: false }, { poly: got.hi.pts, belt: false });
+          next.push({ poly: got.lo.pts, belt: false, theta: pt.theta }, { poly: got.hi.pts, belt: false, theta: pt.theta });
         }
         parts = next;
       }
       out.push(...parts);
     }
     for (const lf of out) {
+      const th = lf.theta, ux = Math.cos(th), uz = Math.sin(th), vx = -uz, vz = ux;
       const m = centroidOf(lf.poly), [u0, u1] = extent(lf.poly, ux, uz), [v0, v1] = extent(lf.poly, vx, vz);
-      // rows along the field's long side (the block's direction or square to it)
-      const dir = (((u1 - u0 >= v1 - v0 ? theta : theta + Math.PI / 2) % Math.PI) + Math.PI) % Math.PI;
+      // rows along the field's long side (the field's direction or square to it)
+      const dir = (((u1 - u0 >= v1 - v0 ? th : th + Math.PI / 2) % Math.PI) + Math.PI) % Math.PI;
       fields.push({ poly: lf.poly, kind: 'grass', crop: 'grass', dir, block, belt: lf.belt || undefined });
       sites.push({ x: m.x, z: m.z, area: area(lf.poly), slope: this.slopeAt(m.x, m.z), high: H ? this.high(H(m.x, m.z)) : 0, water: this.water(m.x, m.z), town: this.townD(m.x, m.z), belt: lf.belt, arable, block, rand: r() });
     }

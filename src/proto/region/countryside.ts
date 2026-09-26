@@ -3,8 +3,9 @@
 // Local) will feed shape statistics back into these. Pure data.
 export const COUNTRYSIDE = {
   // ---- farm blocks and fields (fields.ts) ----
-  block: 650, // m between farm-block seeds (each block's fields run one way)
+  block: 800, // m between farm-block seeds (each block's fields run one way; about 64 ha, an English farm)
   alignReach: 380, // m: a block lines its fields up with a road or river this close to its middle
+  follow: { reach: 150, turn: 0.2 }, // a piece of a block within `reach` m of a lane turns to it once the lane has bent more than `turn` radians (11°) from the piece's grain (the fields along a winding lane follow its bends)
   fieldHa: { base: 4, arable: 7.5 }, // target field size: base + arable × the block's ploughed share (ha)
   nearTown: { reach: 700, least: 0.6 }, // fields shrink towards a settlement, to `least` of the size at its edge
   slopeShrink: 6, // target ÷ (1 + slope × this)
