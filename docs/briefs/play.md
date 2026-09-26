@@ -183,7 +183,7 @@ test once its fix is in; the rest are `it.fails` (expected to fail), so CI stays
 | 7 | The economy put each stop at the wrong point on its road | Fixed: `pointAt` by arc length, as the overlay. |
 | 9 | The guide's road step ticked when a village came to life | The road step is gone (fix 3 above), so nothing of the guide's ticks on activation. The review's test measures the world's activation radius (3.3 km at a 2 km view, `worldmap/game.ts`), which is world50's call: it stays expected-to-fail with a note. |
 | 10 | Continue offered an old real-region save the game refuses | Fixed in `menu.ts`, with the same rule as `isOldRealSave`. |
-| rest | "No route" line problem never shown; goalDone/firstLineAt not saved; real-region saves named "Region"; track and stations can't be bulldozed | Next. |
+| rest | "No route" line problem never shown; goalDone/firstLineAt not saved; real-region saves named "Region"; track and stations can't be bulldozed | Fixed: the line sheet leads with the economy's problem; the goal card's progress is saved; a real region's town is named after its place; the bulldozer takes track that no station stands on (a station comes away from its own sheet, as before). |
 
 ### 11. Bulldoze refuses a road with a reason (fine)
 
@@ -198,8 +198,9 @@ test once its fix is in; the rest are `it.fails` (expected to fail), so CI stays
 - Done in this PR too: 12 (fields stay fields, no ponds, paths from the gates), 13 (park walls and gates).
 - Reported for their owners, not done: 4 (a short bridge is refused), 6 (money), 7 (real regions decline),
   8 (riders label), 10 (buildings and scenery), the `/assets/regions` fetch, a pond in a real hollow (12).
-- From the logic review: rows 3, 4, 2 (play half), the half-built village, 8, 7 and 10 are fixed in this PR,
-  each its own commit (table above); the rest of the play list is next.
+- From the logic review: rows 3, 4, 2 (play half), the half-built village, 8, 7, 10 and the rest of the play
+  list are fixed in this PR, each its own commit (table above). Row 9's test stays expected-to-fail (world50's
+  activation radius); row 2's two tests wait on the vehicles session.
 
 ## Test results
 
