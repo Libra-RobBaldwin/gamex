@@ -137,13 +137,16 @@ as big as the engine takes today; the ground runs 1.5 × further):
     - `placeLots` stands each on its land. It moves a building up to 4 m back from its road and makes
       it up to 30% smaller before dropping it, because a catalogue road is often wider than the real
       street. 85% of the city centre's buildings stand.
+    - Neighbours may touch, as a terrace's houses do, but their rectangles as drawn never cross (it
+      used to check them 0.6 m in a side, and neighbouring shops' boxes crossed). That costs 1.7% of
+      the buildings.
     - A building's zone comes from where it stands: commercial in a place's inner quarter,
       residential in the rest.
     - A church lot far bigger than a parish church's is drawn at its size, taller to match
       (`buildgen.ts`).
   - **Growth:** the game's own plots grow only where they're 14 m clear of the real buildings.
 
-**Measured** (412 × 915, DPR 2, SwiftShader, `node e2e/perf.e2e.mjs`), against the generated
+**Measured before the pack** (see "Speed" below) (412 × 915, DPR 2, SwiftShader, `node e2e/perf.e2e.mjs`), against the generated
 region on the same tier:
 
 | | Region (generated, 3,120 buildings) | Exeter (26,700 buildings) |
@@ -172,6 +175,97 @@ real city has many materials a chunk.
 - **The city centre:** it still looks sparser than the real one, and its grid-cut blocks are
   uniform.
 - **Edits on a real map:** they don't look again for leftover land.
+
+## Speed: the live pack (`tools/os/pack.mjs`, `src/proto/real/live.ts`)
+
+Everything the game used to work out while the player waited is now worked out in the bake:
+
+```
+node --experimental-transform-types --no-warnings --import ./tools/os/ts-register.mjs tools/os/pack.mjs exe [--home Exeter] [--half 3000]
+```
+
+`pack.mjs` runs the game's own code over the baked tiles: `realMap`, the OSM importer's stages,
+`design()` at every junction, `placeLots`, the growth plots as `queuePlots` would lay them,
+`greenRegions` and `deadEndPaths`. (`ts-register.mjs` lets node import the game's TypeScript.)
+It writes `public/regions/<id>/live/<home>.json`, rounded columns that compress well. The file
+holds:
+- the map, with the relief as Int16 decimetres;
+- the nodes and segments;
+- each junction's chosen form;
+- every lot, tagged with its 1 km tile;
+- the growth plots;
+- the parks and the dead ends' paths.
+
+| Pack | Size | Gzipped | Buildings | Junctions | Plots |
+|---|---|---|---|---|---|
+| Exeter | 3.8 MB | 1.1 MB | 28,969 | 1,425 | 2,331 |
+| Ludlow | 1.3 MB | 0.45 MB | 6,695 | 252 | 1,408 |
+
+The game (`load.ts`, then `main.ts seedTown`) fetches the pack unless `&pack=0` is set, then:
+- restores the network, whose land claims come back from the roads;
+- designs each junction in its packed form only (`preferAt`);
+- puts every lot on the land at once, so the economy, the paths and the land registry see the
+  whole town;
+- draws the buildings within 1.2 km before the first frame, and the rest a tile at a time, nearest
+  first, 4 ms a frame (`LotStream`).
+
+Repack after changing the bake, the importer, `design()`, `placeLots` or the plot layout.
+
+Engine speed-ups found on the way. Each gives the same answers as before, so the town is unchanged:
+- **The water's ground** (`region/water.ts`) skips any lake bowl or river channel whose box the
+  spot is outside. Exeter's 46 lakes and 16 rivers took 11 s; now 2.5 s.
+- **`Network.segsAt`** reads an index of each node's segments, kept by `SegMap` as segments are
+  set and deleted, instead of scanning all of them.
+- **The dead ends' paths** aren't worked out again when the roads haven't changed.
+
+A real park is hectares of open lawn, not a 30 m gap planted like a garden. So a real map plants
+its big parks more thinly (`parkLeafiness`, buildgen's `leafy`): a 1 ha park is planted as before,
+a 14 ha one has a tree every 400 m² or so. That took the parks from 2.5 M triangles to 1.5 M, and
+from 4.4 s to 2.8 s to build.
+
+Exeter's load (412 × 915, DPR 2, SwiftShader), in seconds:
+
+| Stage | Before (no pack) | Pack | Now |
+|---|---|---|---|
+| Hills and rivers | 16 | 16.8 | 5.1 |
+| Roads and railway | 6–7 | 4.2 | 0.8 |
+| Buildings round you | 17–23 | 3.9 | 3.7–4.2 |
+| Bus stops and drawing the roads | | 9.0 | 9.0 |
+| Parks | | 5.9 | 3.2 |
+| Map round you | 6–7 | 7.1 | 4.3 |
+| **Total** | 67–85 (142 on the coordinator's run) | 61–69 | **41–47** |
+
+Ludlow loads in 29 s.
+
+What's left is mostly SwiftShader's, and a phone's GPU does it far faster:
+- **About 9 s in the bus-stop stage:** the first `renderer.setSize` (2.2 s even on the town) and a
+  paint the GPU process holds up.
+- **About 14 s after the last stage:** compiling the shaders and uploading the buffers
+  (`onFirstUse`, `createBuffer`).
+
+The first frame over Exeter draws 2,405 calls and 1.38 M triangles.
+
+## Dead ends and their paths (every map)
+
+A dead end just stops, as a UK cul-de-sac does. There are no turning circles any more:
+`Network.turningHeads` is off, and a test turns it on to keep the old shape working.
+
+A footpath carries on from each dead end (`src/proto/game/paths.ts`):
+- **Through:** to the nearest street within 90 m straight ahead (inside a 40° cone), stopping at its
+  footway.
+- **Stub:** failing that, 12 m on into the ground.
+- **Where they go:**
+  - only to streets at ground level that have a footway;
+  - never over a building, water, another road or a railway;
+  - on a real map, worked out after the real buildings go up.
+- **Land:** each path claims its land (`path:<node>`), so nothing is built on it.
+- **Drawing:** the paths are drawn as one draped tarmac mesh, 2 m wide, 6 cm above the ground.
+- **Edits:** worked out again with every road edit.
+
+Exeter has 526 of them, 108 running through to the next street. The starter town has 8. So the
+starter town now differs from before at its cul-de-sacs.
+
+Free OS data has no real footpaths. OSM's (`highway=footway`) would replace these where they exist.
 
 ## Priors (`src/proto/region/priors.ts`)
 

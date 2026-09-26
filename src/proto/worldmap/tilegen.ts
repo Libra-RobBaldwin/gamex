@@ -121,7 +121,7 @@ const shade = (c: [number, number, number], k: number): [number, number, number]
 function building(o: Out, b: SceneBuilding, detail: Detail) {
   const co = Math.cos(b.rot), si = Math.sin(b.rot), hw = b.w / 2, hd = b.d / 2;
   const at = (u: number, v: number, y: number) => [b.x + u * co - v * si, y, b.z + u * si + v * co];
-  const wall = rgb(WALLS[b.wall] ?? WALLS[0]), roof = rgb(ROOFS[b.roof] ?? ROOFS[0]), foot = shade(wall, 0.72);
+  const wall = rgb(b.wc ?? WALLS[b.wall] ?? WALLS[0]), roof = rgb(b.rc ?? ROOFS[b.roof] ?? ROOFS[0]), foot = shade(wall, 0.72);
   const h = b.h, top = detail === 'near' || detail === 'mid' ? b.ridge : 0;
   if (detail === 'vast') { o.quad(at(-hw, -hd, h), at(-hw, hd, h), at(hw, hd, h), at(hw, -hd, h), UP, roof); return; }
   // walls: -v (front), +u, +v (back), -u
@@ -158,7 +158,7 @@ function building(o: Out, b: SceneBuilding, detail: Detail) {
     if (top && b.kind !== 'shop') {
       const cu = hw - 0.9, ch = h + top + 0.9, cw = 0.35;
       const C = (du: number, dv: number, y: number) => at(cu + du, dv, y);
-      const cc = rgb(WALLS[b.wall] ?? WALLS[0]), cn: [number, number, number][] = [[si, 0, -co], [co, 0, si], [-si, 0, co], [-co, 0, -si]];
+      const cc = rgb(b.wc ?? WALLS[b.wall] ?? WALLS[0]), cn: [number, number, number][] = [[si, 0, -co], [co, 0, si], [-si, 0, co], [-co, 0, -si]];
       const cs: [number, number, number, number][] = [[-cw, -cw, cw, -cw], [cw, -cw, cw, cw], [cw, cw, -cw, cw], [-cw, cw, -cw, -cw]];
       cs.forEach(([u0, v0, u1, v1], k) => o.quad(C(u1, v1, h + top - 0.6), C(u0, v0, h + top - 0.6), C(u0, v0, ch), C(u1, v1, ch), cn[k], shade(cc, 0.85)));
       o.quad(C(-cw, -cw, ch), C(-cw, cw, ch), C(cw, cw, ch), C(cw, -cw, ch), UP, shade(cc, 0.6));
