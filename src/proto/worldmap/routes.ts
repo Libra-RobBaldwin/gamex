@@ -39,13 +39,14 @@ export const ROUTE_HALF: Record<RouteKind | 'rail', number> = { motorway: 17, A:
 // How each kind of route takes the land (the lanes as before): the steepest gradient it's built to,
 // how much it wanders, what a river bridge costs it, how far it keeps from the places it passes and
 // how long its bends are (the smoothing, in 25 m steps). Steeper than its grade, it has to cut or
-// tunnel, at `dig` times the cost a metre, so it goes round a hill unless going through pays.
-export interface Profile { grade: number; wander: number; bridge: number; keep: number; smooth: number; dig: number; live: boolean }
+// tunnel, at `dig` times the cost a metre, so it goes round a hill unless going through pays. And
+// turning costs it (`turn`: a railway or a motorway can't take a tight bend), so it keeps a line.
+export interface Profile { grade: number; wander: number; bridge: number; keep: number; smooth: number; dig: number; live: boolean; turn: number }
 export const PROFILES: Record<RouteKind | 'rail', Profile> = {
-  B: { grade: 0.05, wander: 1, bridge: 900, keep: 60, smooth: 7, dig: 0, live: false },
-  A: { grade: 0.06, wander: 0.7, bridge: 1600, keep: 150, smooth: 12, dig: 14, live: false },
-  motorway: { grade: 0.04, wander: 0.25, bridge: 2500, keep: 350, smooth: 22, dig: 10, live: true },
-  rail: { grade: 0.02, wander: 0.15, bridge: 2500, keep: 120, smooth: 14, dig: 30, live: false },
+  B: { grade: 0.05, wander: 1, bridge: 900, keep: 60, smooth: 7, dig: 0, live: false, turn: 0 },
+  A: { grade: 0.06, wander: 0.7, bridge: 1600, keep: 150, smooth: 12, dig: 14, live: false, turn: 0.5 },
+  motorway: { grade: 0.04, wander: 0.25, bridge: 2500, keep: 350, smooth: 22, dig: 10, live: true, turn: 2 },
+  rail: { grade: 0.02, wander: 0.15, bridge: 2500, keep: 120, smooth: 14, dig: 30, live: false, turn: 3 },
 };
 
 interface Ctx { seed: number; half: number; settlements: WorldSettlement[]; links: Link[]; water: WorldWater; grid: SettlementGrid; heightAt: (x: number, z: number) => number }
@@ -207,6 +208,12 @@ class LaneFinder {
         let w = !P.dig ? len * (1 + 2 * (slope / 0.05) ** 2) * wf
           : len * (1 + 2 * (Math.min(slope, P.grade) / 0.05) ** 2) * wf + (slope > P.grade ? len * P.dig * (1 + (slope - P.grade) / P.grade) : 0);
         if (this.water(ni, nj) === 2 && this.water(i, j) !== 2) w += P.bridge; // (a bridge: only where it must)
+        if (P.turn && from[k] >= 0) {
+          // (against the way it came into this cell: straight on is free, a right angle dear)
+          const pi = (from[k] % W) + i0, pj = Math.floor(from[k] / W) + j0, ux = i - pi, uz = j - pj;
+          const cos = (ux * di + uz * dj) / (Math.hypot(ux, uz) * Math.hypot(di, dj));
+          w += len * P.turn * (1 - cos);
+        }
         const gg = g[k] + w;
         if (gg < g[nk]) { g[nk] = gg; from[nk] = k; push(gg + est(ni, nj), nk); }
       }
@@ -415,7 +422,8 @@ function planRails(c: Ctx, r: Rand, L: LaneFinder): Rail[] {
   // calling at the start town, and at every city and town within 3.5 km of that line (their stations
   // a little off their middles, so the line runs along the edge of the centre)
   const calls = big.filter((s) => Math.abs(s.x * n.x + s.z * n.z) < (s.id === 0 ? 1 : 3500) + (s.kind === 'city' ? 2500 : 0)).sort((a, b) => (a.x * u.x + a.z * u.z) - (b.x * u.x + b.z * u.z));
-  const stationAt = (s: WorldSettlement): XZ => { const k = s.id === 0 ? 0.55 : 0.35; return { x: s.x + n.x * s.r * k, z: s.z + n.z * s.r * k }; };
+  // (on the side of the town facing the line, so it doesn't loop round the town to call)
+  const stationAt = (s: WorldSettlement): XZ => { const q = s.x * n.x + s.z * n.z, k = (s.id === 0 ? 0.55 : 0.35) * (s.id === 0 || q <= 0 ? 1 : -1); return { x: s.x + n.x * s.r * k, z: s.z + n.z * s.r * k }; };
   const ends = (sgn: number) => { const last = sgn > 0 ? calls[calls.length - 1] : calls[0], t = H * 1.15; return { x: last.x + u.x * sgn * t, z: last.z + u.z * sgn * t }; };
   const pts = [ends(-1), ...calls.map(stationAt), ends(1)];
   // (a line that would run into the sea stops at its last station short of it)
