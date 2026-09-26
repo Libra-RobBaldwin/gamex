@@ -22,6 +22,7 @@ import type { RegionOptions } from '../region/options';
 import { LEVEL_OF, LEVEL_SIZE, LIVE, inLive, tileBox, tileKey, type Detail, type TileData } from './tilegen';
 import type { Box } from './country';
 import type { FieldData, WorkerRequest } from './tile.worker';
+import { slopeLook } from '../region/terrain';
 
 export interface ViewState { x: number; z: number; h: number; el: number; az: number }
 export interface WorldViewHost {
@@ -70,6 +71,7 @@ export class WorldView {
     host.scene.add(this.root);
     this.shared = groundUniforms(coverTexture(new Uint8Array([128, 0, 128, 128]), 1));
     this.sharedFar = groundUniforms(this.shared.uCoverMap.value);
+    for (const u of [this.shared, this.sharedFar]) u.uSlope.value.set(...slopeLook()); // (rock on the steep, moor on the tops: region/terrain.ts)
     this.setStyle(host.look);
     const n = Math.max(1, Math.min(3, host.workers ?? Math.min(2, Math.max(1, (navigator.hardwareConcurrency ?? 2) - 2))));
     for (let k = 0; k < n; k++) {

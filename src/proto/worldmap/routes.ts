@@ -426,6 +426,7 @@ function edgeExits(c: Ctx, r: Rand) {
       const j = range(r, -0.15, 0.15) * H;
       const to = side === 'n' ? { x: s.x + j * 0.3, z: -H - 30 } : side === 's' ? { x: s.x + j * 0.3, z: H + 30 } : side === 'e' ? { x: H + 30, z: s.z + j * 0.3 } : { x: -H - 30, z: s.z + j * 0.3 };
       if (Math.abs(to.x) > H + 40 || Math.abs(to.z) > H + 40) continue;
+      if (c.water.seaDistance(to.x, to.z, 400) < 300) continue; // (no road out where the edge is at sea: round islands, or a coast that reaches the edge)
       out.push({ from: s, to: { x: Math.max(-H - 30, Math.min(H + 30, to.x)), z: Math.max(-H - 30, Math.min(H + 30, to.z)) } });
     }
   }

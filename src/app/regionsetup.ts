@@ -3,7 +3,7 @@
 // (region/options.ts, pure, no three.js); the same options always make the same map, and the
 // game reads them from the address (?map=region&seed=…). The last region started is remembered.
 
-import { DEFAULT_OPTIONS, SIZES as MAP_SIZES, STYLES, limitsFor, optionsFromQuery, optionsQuery, regionOptions, type RegionOptions, type Style } from '../proto/region/options';
+import { LANDFORMS, DEFAULT_OPTIONS, STYLES, limitsFor, optionsFromQuery, optionsQuery, regionOptions, type RegionOptions, type Style } from '../proto/region/options';
 import { REAL_REGION_LIST } from '../proto/real/list';
 import { icon } from '../proto/ui/icons';
 import { KEYS, load, save } from './store';
@@ -17,7 +17,8 @@ const STYLE_NAMES: Record<Style, [string, string]> = {
 /** The options last started (or the defaults). */
 export function lastRegion(): RegionOptions {
   const q = load(KEYS.region);
-  return q ? optionsFromQuery(new URLSearchParams(q)) : regionOptions();
+  // (every new region is 50 km: a remembered 6 km setup from before comes back at 50 km)
+  return q ? regionOptions({ ...optionsFromQuery(new URLSearchParams(q)), size: 50 }) : regionOptions();
 }
 
 type Counted = 'rivers' | 'lakes' | 'towns' | 'villages';
@@ -30,11 +31,6 @@ const COUNTS: [Counted, string, string][] = [
 // lakes and villages can be left to the seed (−1), and on a 50 km map the towns too
 const AUTO: Partial<Record<Counted, true>> = { lakes: true, villages: true };
 const auto = (k: Counted, o: RegionOptions) => !!AUTO[k] || (k === 'towns' && o.size > 6);
-// the map's size: 50 km is the standard map (streamed round you: docs/streaming.md); larger ones later
-const MAP_SIZE_NAMES: Record<number, [string, string]> = {
-  50: ['50 km', 'The standard map: cities, market towns, villages, hills and a coast, streamed round you'],
-  6: ['6 km', 'The first region: a city and a few towns, all built before you start'],
-};
 
 // The setup is a few simple steps, one question each, a tap on a card answering it and moving
 // on (the user: "simple, easy to follow steps", not everything on one screen), then a summary
@@ -47,6 +43,12 @@ const PLACES: Pick[] = [
   { id: 'uplands', name: 'Hills and lakes', note: 'High ground, deep valleys, lakes in the hollows', ic: 'mountain', patch: { relief: 'upland', rivers: 1, lakes: 3 } },
   { id: 'mountains', name: 'Mountains', note: 'Big peaks and passes; towns squeeze into the valleys', ic: 'mountain', patch: { relief: 'mountain', rivers: 1, lakes: 2 } },
 ];
+// on a 50 km map the kinds of place are the terrain's landforms (region/options.ts LANDFORMS: vale,
+// downs, estuary, uplands, mountains, coast, islands); the old 6 km map keeps its four
+const LANDFORM_ICONS: Record<string, Parameters<typeof icon>[0]> = { vale: 'wheat', downs: 'trees', estuary: 'droplet', uplands: 'mountain', mountains: 'mountain', coast: 'droplet', islands: 'map' };
+const placesFor = (o: RegionOptions): Pick[] => o.size > 6
+  ? LANDFORMS.map((l) => ({ id: l.id, name: l.name, note: l.note, ic: LANDFORM_ICONS[l.id] ?? 'map', patch: l.options }))
+  : PLACES;
 const CLIMATES: [Style, string, string, Parameters<typeof icon>[0]][] = [
   ['temperate', 'Temperate', 'Green fields, woods and hedgerows', 'trees'],
   ['arctic', 'Cold', 'Snow, and dark pine woods', 'mountain'],
@@ -75,7 +77,7 @@ export function regionBody(o: RegionOptions) {
   const dots = `<div class="steps" aria-label="Step ${step + 1} of ${STEPS.length}">${STEPS.map((_, i) => `<span class="${i === step ? 'on' : i < step ? 'done' : ''}">${i < step ? icon('check') : i + 1}</span>`).join('')}</div>`;
   const nav = (next: string) => `<div class="stepnav">${step ? `<button class="act" data-prev>${icon('arrowLeft')}<span>Back</span></button>` : '<span></span>'}${next}</div>`;
   if (step === 0) return `${dots}<h3 class="q">What kind of place?</h3>
-    ${cards(PLACES.map((p) => ({ ...p, on: same(o, p.patch) })), 'data-place')}
+    ${cards(placesFor(o).map((p) => ({ ...p, on: same(o, p.patch) })), 'data-place')}
     <button class="act wide lib-link" data-surprise>${icon('sparkles')}<span>Surprise me</span></button>
     ${nav(`<button class="act primary" data-next>${icon('play')}<span>Next</span></button>`)}
     <h4 class="or">Or play a real place</h4>
@@ -88,7 +90,7 @@ export function regionBody(o: RegionOptions) {
     ${cards(sizesFor(o).map((p) => ({ ...p, on: same(o, p.patch) })), 'data-size')}
     ${nav(`<button class="act primary" data-next>${icon('play')}<span>Next</span></button>`)}`;
   // the summary: what was picked (tap a line to change it), the big button, and the rest folded away
-  const place = PLACES.find((p) => same(o, p.patch)), size = sizesFor(o).find((p) => same(o, p.patch)), clim = CLIMATES.find((c) => c[0] === o.style)!;
+  const place = placesFor(o).find((p) => same(o, p.patch)), size = sizesFor(o).find((p) => same(o, p.patch)), clim = CLIMATES.find((c) => c[0] === o.style)!;
   const count = (k: Counted, label: string, note: string) => {
     const v = o[k], [lo, hi] = limitsFor(o.size)[k], au = auto(k, o), isAuto = au && v === -1;
     return `<div class="stepper" data-count="${k}">
@@ -111,7 +113,6 @@ export function regionBody(o: RegionOptions) {
         <button class="act" data-shuffle>${icon('refresh')}<span>New seed</span></button></div>
       <p class="fine">The same seed and choices always make the same map, so a seed is a way to share one.</p>
       <div class="opts" role="radiogroup" aria-label="Climate" hidden>${STYLES.map((st) => `<label class="opt"><input type="radio" name="rg-style" value="${st}" ${o.style === st ? 'checked' : ''}><span><b>${STYLE_NAMES[st][0]}</b></span></label>`).join('')}</div>
-      <div class="opts" role="radiogroup" aria-label="Map size">${MAP_SIZES.map((k) => `<label class="opt"><input type="radio" name="rg-size" value="${k}" ${o.size === k ? 'checked' : ''}><span><b>${MAP_SIZE_NAMES[k][0]}</b><small>${MAP_SIZE_NAMES[k][1]}</small></span></label>`).join('')}</div>
       ${o.size > 6 ? `<label class="opt"><input type="checkbox" id="rg-sea" ${o.sea ? 'checked' : ''}><span><b>A coast</b><small>The sea along one edge, and the rivers running down to it</small></span></label>` : ''}
       <label class="opt"><input type="checkbox" id="rg-city" ${o.city ? 'checked' : ''}><span><b>${o.size > 6 ? 'Cities' : 'A city in the middle'}</b><small>${o.size > 6 ? 'Two, the biggest places' : 'The biggest place, where the lines meet'}</small></span></label>
       ${COUNTS.map(([k, l, n]) => count(k, l, n)).join('')}
@@ -127,13 +128,13 @@ export function bindRegion(root: HTMLElement, o0: RegionOptions, redraw: (o: Reg
   const go = (n: number) => { step = Math.max(0, Math.min(STEPS.length - 1, n)); redraw(o); };
   const on = (sel: string, f: (el: HTMLElement) => void) => root.querySelectorAll<HTMLElement>(sel).forEach((el) => el.addEventListener('click', () => f(el)));
   // (a card answers its step and moves on)
-  on('[data-place]', (el) => { const p = PLACES.find((x) => x.id === el.dataset.place)!; o = regionOptions({ ...o, ...p.patch }); go(step + 1); });
+  on('[data-place]', (el) => { const p = placesFor(o).find((x) => x.id === el.dataset.place)!; o = regionOptions({ ...o, ...p.patch }); go(step + 1); });
   on('[data-climate]', (el) => { o = regionOptions({ ...o, style: el.dataset.climate as Style }); go(step + 1); });
   on('[data-size]', (el) => { const p = sizesFor(o).find((x) => x.id === el.dataset.size)!; o = regionOptions({ ...o, ...p.patch }); go(step + 1); });
   on('[data-surprise]', () => {
     const r = (n: number) => Math.floor(Math.random() * n);
     const sz = sizesFor(o);
-    o = regionOptions({ ...o, ...PLACES[r(PLACES.length)].patch, ...sz[r(sz.length)].patch, style: CLIMATES[r(CLIMATES.length)][0], seed: r(99999) + 1 });
+    o = regionOptions({ ...o, ...(() => { const pl = placesFor(o); return pl[r(pl.length)].patch; })(), ...sz[r(sz.length)].patch, style: CLIMATES[r(CLIMATES.length)][0], seed: r(99999) + 1 });
     go(STEPS.length - 1);
   });
   // (a real place from OS maps: started as it is, nothing to set up: real/list.ts)
@@ -147,8 +148,6 @@ export function bindRegion(root: HTMLElement, o0: RegionOptions, redraw: (o: Reg
   root.querySelectorAll<HTMLInputElement>('input[name="rg-style"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) set({ style: r.value as Style }, false); }));
   root.querySelector<HTMLInputElement>('#rg-city')?.addEventListener('change', (e) => set({ city: (e.target as HTMLInputElement).checked }));
   root.querySelector<HTMLInputElement>('#rg-sea')?.addEventListener('change', (e) => set({ sea: (e.target as HTMLInputElement).checked }));
-  // (a new size starts its counts from its own defaults)
-  root.querySelectorAll<HTMLInputElement>('input[name="rg-size"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) { const d = regionOptions({ seed: o.seed, size: Number(r.value) }); set({ size: d.size, rivers: d.rivers, lakes: d.lakes, towns: d.towns, villages: d.villages }); } }));
   root.querySelectorAll<HTMLElement>('[data-count]').forEach((row) => {
     const k = row.dataset.count as Counted;
     row.querySelectorAll<HTMLButtonElement>('[data-step]').forEach((b) => b.addEventListener('click', () => {

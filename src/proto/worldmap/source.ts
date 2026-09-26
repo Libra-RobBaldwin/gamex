@@ -29,6 +29,8 @@ export interface WorldHeights {
   bed(x: number, z: number): number; // the bottom of the water (the sea, lakes, rivers) where there is water
   field(step?: number): ReliefField | null; // the whole map's heights on a grid (for the drape)
   partField(box: Box, step?: number): ReliefField | null; // part of it (the live area's, at the start)
+  ease?(routes: { path: XZ[]; grade: number; half: number }[]): void; // the ground laid to the trunk routes once they're planned (their cuttings and embankments)
+  geologyAt?(x: number, z: number): 'limestone' | 'gritstone' | 'slate' | 'granite' | 'chalk' | 'clay' | 'sandstone' | 'alluvium' | null; // the rock under a spot (for the buildings' stone: vernacular's setGeology)
 }
 
 export interface WorldSource {

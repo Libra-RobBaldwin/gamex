@@ -5,6 +5,7 @@
 import { hash2, worldNoise } from './noise';
 import { bbox, Layout, type GroundInput, type XZ } from './layout';
 import type { Spot } from './paint';
+import { pointInPoly } from '../land';
 
 export interface Piece { x: number; z: number; a: number; len: number; h: number; w: number } // centre, angle, size
 export interface HedgeTree { x: number; z: number; s: number; kind: number }
@@ -12,6 +13,8 @@ export interface HedgeGroup { key: string; pieces: Piece[]; trees: HedgeTree[]; 
 
 const STEP = 8; // metres per hedge piece
 const CLEAR = 2.2; // how far a hedge keeps from roads, plots, parks and water
+const BIG_R = 5; // (the most clearance asked of a big polygon's edge index)
+const NO_EDGES: number[] = [];
 
 // Is a point clear of everything a hedge mustn't touch? Polygons are bucketed on a 40 m grid.
 // The roads, parks and water part is kept while those arrays stay the same (plots change often).
@@ -33,6 +36,9 @@ export class Occupancy {
     this.under = f.occ;
     this.add((input.plots ?? []).map((p) => p.poly));
   }
+  // (a big polygon, a river's bank, hundreds of edges: each cell keeps only the edges near it, and
+  // whether a point is inside it is asked of the land registry's banded test; the same answers)
+  private near = new Map<XZ[], Map<number, number[]>>();
   private add(all: XZ[][]) {
     for (const p of all) {
       const { x0, z0, x1, z1 } = bbox(p);
@@ -43,15 +49,35 @@ export class Occupancy {
         if (!l) this.grid.set(k, (l = []));
         l.push(p);
       }
+      if (p.length > 96) {
+        const m = new Map<number, number[]>(), R = BIG_R;
+        for (let a = 0, b = p.length - 1; a < p.length; b = a++) {
+          const e0 = Math.min(p[a].x, p[b].x) - R, e1 = Math.max(p[a].x, p[b].x) + R, f0 = Math.min(p[a].z, p[b].z) - R, f1 = Math.max(p[a].z, p[b].z) + R;
+          for (let i = Math.floor(e0 / C); i <= Math.floor(e1 / C); i++) for (let j = Math.floor(f0 / C); j <= Math.floor(f1 / C); j++) { const k = this.key(i, j); let l = m.get(k); if (!l) m.set(k, (l = [])); l.push(a); }
+        }
+        this.near.set(p, m);
+      }
     }
   }
   // clear by at least r metres?
   free(x: number, z: number, r = CLEAR): boolean {
     if (this.under && !this.under.free(x, z, r)) return false;
-    const l = this.grid.get(this.key(Math.floor(x / Occupancy.C), Math.floor(z / Occupancy.C)));
+    const ck = this.key(Math.floor(x / Occupancy.C), Math.floor(z / Occupancy.C)), l = this.grid.get(ck);
     if (!l) return true;
     const r2 = r * r;
     for (const poly of l) {
+      const m = r <= BIG_R ? this.near.get(poly) : undefined;
+      if (m) {
+        for (const a of m.get(ck) ?? NO_EDGES) {
+          const p = poly[a], q = poly[a === 0 ? poly.length - 1 : a - 1];
+          const ex = q.x - p.x, ez = q.z - p.z, L = ex * ex + ez * ez;
+          const s = L > 0 ? Math.max(0, Math.min(1, ((x - p.x) * ex + (z - p.z) * ez) / L)) : 0;
+          const dx = p.x + ex * s - x, dz = p.z + ez * s - z;
+          if (dx * dx + dz * dz < r2) return false;
+        }
+        if (pointInPoly({ x, z }, poly)) return false;
+        continue;
+      }
       let inside = false;
       for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
         const p = poly[a], q = poly[b];

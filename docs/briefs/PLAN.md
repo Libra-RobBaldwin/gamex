@@ -1,3 +1,69 @@
+# ONE MAP: the clean-up (26 Sep 2026, 07:40 UTC). This section wins over everything below it.
+
+The user: "Delete all the old stuff... Get rid of the starter town and just start from the region. Sounds like
+you've got lots of conflicting duplication that you need to solve."
+
+**The game has one map: the 50 km region.** It has two sources, seeded or a real OS region, through one
+WORLD pipeline.
+
+**Delete:**
+- the starter town (`?map=town`, `TOWN_MAP`) and the sandbox;
+- the 6 km region (`size=6`, the `BIG` path in main.ts, the 6 km parts of `region/generate.ts`,
+  `interchange/region.ts` and `rail/region.ts` if nothing on WORLD uses them);
+- Real Town Plans (`places.html`, the `place` card, OSM `?place=`), which the OS regions replace. Close PR #22.
+
+Also delete every duplicate generator (the list is below), and any feature flags that only kept old
+behaviour alive.
+
+**Old saves** of deleted maps can't open. Saved towns shows them as "made on a map that no longer exists"
+with a Delete button, and Continue skips them.
+
+**Tests follow the map:**
+- the loop, lines, save, stations and rail e2es run on `proto.html?map=region&seed=<fixed>`;
+- the menu e2e walks New game → Region;
+- the guided start runs in the region's start town.
+
+## Who deletes what (nobody touches another session's list)
+
+**world50: the consolidation, AFTER its urgent fix (first view and roundabouts) has landed:**
+- main.ts: remove the town, sandbox and BIG paths;
+- `maps.ts`: one map, plus real regions (`inRegion`);
+- `src/app`: world50 may edit it for this. New game goes straight to the Region setup: no map cards, no
+  size choice. Starter town, Sandbox and Real town are removed from the menu, and the guide moves to
+  the region.
+- saves: the "old map" handling;
+- e2e: move all six suites onto the region with a fixed seed, and keep each suite's intent (loop economy,
+  lines, save round trip, stations, rail, menu);
+- `region/generate.ts`, `interchange/region.ts`, `rail/region.ts`, `game/regionview.ts`: delete whatever
+  WORLD doesn't use;
+- `places.html`, `osm/`: the Real Town Plans page and its importer, unless OS uses them;
+- docs: remove or rewrite anything describing deleted maps.
+
+**terrain:** one height, water and coast generator. Delete `region/terrain.ts` and `region/water.ts`, or
+merge them into `worldmap/terrain.ts`, `water.ts` and `landform.ts`, so only one remains. Also:
+- the urgent relief fix first;
+- `game/corridors.ts`: keep it only if WORLD uses it.
+
+**countryside:** one field, woods and lanes generator. Delete whichever of `region/fields.ts`,
+`woods.ts`, `lanes.ts` and `countryside.ts` isn't what `worldmap/country.ts` runs, and anything left in
+`ground/` that only served the town map.
+
+**OS:** fold real regions into WORLD (`real/world.ts`, a `WorldSource`). Then delete the separate real-map
+path (`real/lay.ts` and `real/live.ts` loading into main.ts) once real regions ride WORLD. Keep `?map=exe`
+and `?map=teme` as aliases.
+
+**vernacular:** the urgent phone building-quality fix. One building generator: world50's scenery houses
+(`worldmap/towns.ts`) must use `buildgen.ts` or be replaced by it, so no second, uglier set of buildings
+exists. Do it with world50.
+
+**edge:** finished and archived. Its code stays.
+
+## Honesty rule
+
+Every session keeps `docs/briefs/<name>.md` current: what's left, done or not done, and nothing reported
+as done until it is live and checked on a 412×915 screenshot. The coordinator reports to the user from
+those files, not from PR titles.
+
 # Overnight plan: one owner per file, every request assigned (26 Sep 2026, 01:55 UTC)
 
 The coordinator wrote this from the six briefs in this folder. It answers their open questions. When a brief and

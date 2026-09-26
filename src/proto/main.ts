@@ -15,7 +15,7 @@ import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setGround, setP
 import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
 import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops
 import { Dresser } from './game/dress'; // the 50 km map's scenery as real buildings up close
-import { placeResolver, REAL_VERN, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
+import { placeResolver, REAL_VERN, setGeology, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
@@ -47,7 +47,7 @@ import { STD } from './standards';
 import { Loading } from './loading';
 import { Drape } from './drape';
 import { PlaceLabels, openPlaces } from './game/places';
-import { makeRelief } from './region/terrain';
+import { makeRelief, slopeLook } from './region/terrain';
 import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; // a big map streamed in tiles (docs/region.md R4)
 import { mapById as menuMap } from './maps';
 import { WorldGame } from './worldmap/game'; // a 50 km map: streamed scenery round a live play area (docs/streaming.md)
@@ -170,6 +170,8 @@ window.addEventListener('resize', resize);
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
 const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, BIG ? 4 : undefined, !BIG, BIG ? undefined : gameWater.half, WORLD ? GROUND_SEED : undefined, WORLD ? countryFor(WORLD) : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
+if (WORLD) gameGround.ground.uniforms.uSlope.value.set(...slopeLook()); // (the hills' rock and moor: region/terrain.ts, as the far tiles have it)
+if (WORLD?.terrain.geologyAt) setGeology(WORLD.terrain.geologyAt); // (the buildings' stone from the rock under them: worldmap/landform.ts)
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
 const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
 ground.userData.noDrape = true; // (the hills are in its heights already)

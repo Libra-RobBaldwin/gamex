@@ -38,11 +38,12 @@ await page.screenshot({ path: `${out}/m1-1-lines.png` });
 if (await page.$('[data-line="0"]')) fail('a line is listed before one was drawn');
 
 // (on a slow machine, SwiftShader draws a frame or two a second: wait for the camera to stop
-// moving before working out where to tap, and for each tap to take, rather than for fixed times)
+// moving before working out where to tap, and for each tap to take, rather than for fixed times;
+// each look is after a frame is drawn, so a camera that hasn't started moving yet isn't taken as settled)
 async function settle(p = { x: 0, z: 0 }) {
   let last = null;
   for (let i = 0; i < 60; i++) {
-    const s = await page.evaluate((p) => window.proto.toScreen(p), p);
+    const s = await page.evaluate((p) => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => res(window.proto.toScreen(p))))), p);
     if (last && Math.hypot(s.x - last.x, s.y - last.y) < 0.5) return;
     last = s; await page.waitForTimeout(400);
   }

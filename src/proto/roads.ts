@@ -63,6 +63,8 @@ export interface P { x: number; z: number; y?: number }
 export interface End extends P { node?: number; seg?: number }
 
 const dist = (a: P, b: P) => Math.hypot(a.x - b.x, a.z - b.z);
+// a path's box: [x0, z0, x1, z1], a metre out each way
+const boxOf = (p: P[]) => { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const q of p) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z; } return [x0 - 1, z0 - 1, x1 + 1, z1 + 1]; };
 
 // A seeded stream of numbers in [0, 1). Its `state` can be read and set, so a saved game carries
 // on drawing exactly the numbers it would have (game/save.ts).
@@ -478,13 +480,18 @@ export class Network {
     for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + dist(path[i - 1], path[i]));
     const A = path[0], B = path[path.length - 1];
     const out: { s: number; x: number; z: number; e: number; sin: number; seg?: number; node?: number }[] = [];
+    // (only what's within the path's box can be on it or cross it)
+    const [x0, z0, x1, z1] = boxOf(path);
     for (const n of this.nodes.values()) {
+      if (n.x < x0 || n.x > x1 || n.z < z0 || n.z > z1) continue;
       if (dist(n, A) < 1 || dist(n, B) < 1) continue;
       const c = closestOnPath(n, path);
       if (c.d < 0.75) out.push({ s: c.s, x: n.x, z: n.z, e: n.y, sin: 1, node: n.id });
     }
     for (const s of this.segs.values()) {
       const sp = this.path(s);
+      const [a0, c0, a1, c1] = boxOf(sp);
+      if (a1 < x0 || a0 > x1 || c1 < z0 || c0 > z1) continue; // (their boxes apart: it can't cross)
       const e0 = sp[0], e1 = sp[sp.length - 1];
       for (let i = 1; i < path.length; i++)
         for (let j = 1; j < sp.length; j++) {
@@ -511,10 +518,11 @@ export class Network {
   // Does this road cross a railway on the level within `d` of a point on it?
   levelCrossingNear(s: RSeg, p: P, d: number) {
     if (this.def(s).cls !== 'road') return false;
-    const sp = this.path(s), at = closestOnPath(p, sp).s;
+    const sp = this.path(s), at = closestOnPath(p, sp).s, bx = boxOf(sp);
     for (const r of this.segs.values()) {
       if (this.def(r).cls !== 'rail') continue;
-      const rp = this.path(r);
+      const rp = this.path(r), rb = boxOf(rp);
+      if (rb[2] < bx[0] || rb[0] > bx[2] || rb[3] < bx[1] || rb[1] > bx[3]) continue; // (their boxes apart: they can't cross)
       let acc = 0;
       for (let j = 1; j < sp.length; j++) {
         const L = dist(sp[j - 1], sp[j]);
