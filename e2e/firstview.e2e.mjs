@@ -44,7 +44,12 @@ for (let i = 0; i < N; i++) {
   });
   if (!look.g) fail(`start ${i + 1}: the middle of the screen is sky`);
   else if (Math.hypot(look.g.x - look.at.x, look.g.z - look.at.z) > 400) fail(`start ${i + 1}: the middle of the screen is ${JSON.stringify(look.g)}, far from the view's ${JSON.stringify(look.at)}`);
+  // the scenery round it: each tile asked for once and built once (a tile asked for again while its
+  // data waited to be built piled that data up, gigabytes a minute on a slow phone: worldmap/view.ts)
+  const tiles = await page.evaluate(() => { const V = window.proto.worldGame?.view; if (!V) return null; let pending = 0; for (const n of V.nodes.values()) pending += n.pending.size; return { requested: V.stats.requested, built: V.stats.built, pending, heap: Math.round((performance.memory?.usedJSHeapSize ?? 0) / 1e6) }; });
+  if (tiles && tiles.requested > tiles.built + tiles.pending + 2) fail(`start ${i + 1}: ${tiles.requested} scenery tiles asked for, ${tiles.built} built and ${tiles.pending} on the way: tiles are asked for more than once`);
   if (i === 0) await page.screenshot({ path: `${out}/firstview-settled.png` });
+  console.log(`start ${i + 1}: scenery`, JSON.stringify(tiles));
   console.log(`start ${i + 1}: worst ${Math.round(worst * 100)}% blank ·`, seen.join(' · '), errs.length ? `· errors ${errs.slice(0, 2).join(' | ')}` : '');
   if (errs.length) fail(`start ${i + 1}: page errors`);
   await ctx.close();

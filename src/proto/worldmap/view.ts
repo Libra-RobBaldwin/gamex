@@ -51,7 +51,7 @@ export class WorldView {
   private nodes = new Map<string, Node>();
   private loaders: { load: (req: WorkerRequest, signal: AbortSignal) => Promise<TileData | FieldData>; busy: number }[] = [];
   private queue: { node: Node; detail: Detail; score: number }[] = [];
-  private arrived: { node: Node; data: TileData }[] = [];
+  private arrived: { node: Node; detail: Detail; data: TileData }[] = []; // (still pending until built: asked for again meanwhile, a tile's data would pile up here)
   private shown = new Map<string, { node: Node; detail: Detail }>();
   private detailAt: Detail = 'vast';
   private solidMat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -139,6 +139,7 @@ export class WorldView {
       const built = this.build(a.data);
       this.stats.buildMs += performance.now() - b0;
       if (built) { a.node.built[a.data.detail]?.dispose(); a.node.built[a.data.detail] = built; this.stats.built++; }
+      a.node.pending.delete(a.detail);
     }
     // pick what to show
     const next = new Map<string, { node: Node; detail: Detail }>();
@@ -198,9 +199,9 @@ export class WorldView {
       L.busy++;
       this.stats.requested++;
       L.load({ level: q.node.level, i: q.node.i, j: q.node.j, detail: q.detail, options: this.host.options }, new AbortController().signal)
-        .then((d) => { this.stats.arrived++; this.arrived.push({ node: q.node, data: d as TileData }); })
-        .catch((e) => console.warn('world tile', q.node.key, q.detail, e))
-        .finally(() => { L.busy--; q.node.pending.delete(q.detail); this.pump(); });
+        .then((d) => { this.stats.arrived++; this.arrived.push({ node: q.node, detail: q.detail, data: d as TileData }); })
+        .catch((e) => { console.warn('world tile', q.node.key, q.detail, e); q.node.pending.delete(q.detail); })
+        .finally(() => { L.busy--; this.pump(); });
     }
   }
 
