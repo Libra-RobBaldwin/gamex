@@ -32,7 +32,7 @@ export const riverSpec = (r: WorldRiver): RiverSpec => ({ path: r.path, width: M
 
 // how far round a river the ground can be laid down to it (terrain.ts): its bank, then at most this
 // much more (its floor, and the valley side eased down to it)
-export const riverFloor = (half: number) => Math.max(240, 5 * half);
+export const riverFloor = (half: number) => Math.max(400, 6 * half);
 const G = 100; // m: the buckets rivers and lakes are found by
 
 export class WorldWater extends MapWater {
@@ -73,12 +73,26 @@ export class WorldWater extends MapWater {
   // How far inland a spot is from the coast (negative out at sea); Infinity with no sea.
   seaDistance(x: number, z: number, cap = 1e5): number {
     const L = this.land;
-    if (!this.world.sea || !L) return Infinity;
+    if (!this.world.sea) return Infinity;
+    if (!L) return this.lineSea(x, z, cap);
     let v = sampleGrid(L, L.sea, x, z);
     const a = Math.abs(v);
     // (near the coast: smoothly, with the small bays and points the coarse grid is too coarse for)
     if (a < 450) v = sampleSmooth(L, L.sea, x, z) + this.coastNoise(x, z) * (a < 250 ? 1 : 1 - smooth01((a - 250) / 200));
     return v > cap ? cap : v < -cap ? -cap : v;
+  }
+  // (without the coarse land, a real source's: the coast as a line along one edge, points running
+  // from one side of the map to the other, the sea on its `side`)
+  private coastLine: LineIndex | null = null;
+  private lineSea(x: number, z: number, cap: number) {
+    const s = this.world.sea!, c = s.coast, n = c.length;
+    if (!this.coastLine) this.coastLine = new LineIndex(c, 256);
+    const ns = s.side === 'n' || s.side === 's', t = ns ? x : z, al = (p: XZ) => (ns ? p.x : p.z), ac = (p: XZ) => (ns ? p.z : p.x);
+    const f = Math.max(0, Math.min(n - 1.001, ((t - al(c[0])) / (al(c[n - 1]) - al(c[0]))) * (n - 1))), i = Math.floor(f), u = f - i;
+    const at = ac(c[i]) * (1 - u) + ac(c[i + 1]) * u, v = ns ? z : x;
+    const land = s.side === 's' || s.side === 'e' ? v < at : v > at;
+    const d = this.coastLine.near(x, z, cap);
+    return d === Infinity ? (land ? cap : -cap) : land ? d : -d;
   }
   // (a spot well out at sea: nothing else to ask about)
   atSea(x: number, z: number) { return !!this.world.sea && !!this.land && sampleGrid(this.land, this.land.sea, x, z) < -500; }

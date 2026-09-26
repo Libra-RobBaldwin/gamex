@@ -709,22 +709,35 @@ export class Network {
   }
 
   // What gets built at a spot: the kind of building (by zone and how central it is) and its size.
-  private lotSpec(m: P, centre: P) {
+  private lotSpec(m: P, centre: P & { kind?: string }, room = Infinity) {
     const dc = Math.hypot(m.x - centre.x, m.z - centre.z);
+    // a town or city has room for a retail park out past its centre and a city for a covered
+    // shopping centre in it (buildgen.ts's complexes; chosen by where, not from the random stream,
+    // so every other plot comes out as it always has)
+    if (centre.kind === 'town' || centre.kind === 'city') {
+      const hh = ((Math.imul(Math.round(m.x / 45) | 0, 73856093) ^ Math.imul(Math.round(m.z / 45) | 0, 19349663)) >>> 0) % 1000;
+      const city = centre.kind === 'city';
+      if (this.zoneAt(m) !== 'industrial' && dc > 150 && dc < 260 && hh < (city ? 150 : 100) && 60 + (hh % 30) + 6 <= room)
+        return { kind: 'shop' as LotKind, arch: 'retailpark', w: 60 + (hh % 30), d: 36 + (hh % 12), gap: 6, front: 12, h: 9 };
+      if (city && dc > 62 && dc < 110 && hh >= 960 && 110 + (hh % 40) + 6 <= room)
+        return { kind: 'shop' as LotKind, arch: 'mall', w: 110 + (hh % 40), d: 80 + (hh % 20), gap: 6, front: 10, h: 14 };
+    }
     const r = this.rand();
+    // (shops come in stretches of street, which become parades and arcades: complexes.ts)
+    const street = ((Math.imul(Math.round(m.x / 60) | 0, 83492791) ^ Math.imul(Math.round(m.z / 60) | 0, 2971215073)) >>> 0) % 100 < 45;
     const kind: LotKind = this.zoneAt(m) === 'industrial' ? 'industry'
-      : dc < 60 ? (r < 0.3 ? 'tower' : r < 0.55 ? 'office' : 'flats') : dc < 110 ? (r < 0.45 ? 'shop' : r < 0.75 ? 'flats' : 'office') : dc < 170 ? 'terrace' : 'house';
+      : dc < 60 ? (r < 0.3 ? 'tower' : r < 0.55 ? 'office' : 'flats') : dc < 110 ? (street ? 'shop' : r < 0.55 ? 'flats' : 'office') : dc < 170 ? 'terrace' : 'house';
     const w = kind === 'industry' ? 26 + this.rand() * 16 : kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 6 + this.rand() * 1.5 : 12 + this.rand() * 6;
     const d = kind === 'industry' ? 20 + this.rand() * 12 : kind === 'house' ? 9 + this.rand() * 3 : kind === 'terrace' ? 9 : 12 + this.rand() * 8;
     // the side gap belongs to the plot: a driveway for houses, a service lane for the rest
     const gap = kind === 'terrace' ? 0.2 : kind === 'house' ? 3.4 + this.rand() * 1.4 : kind === 'industry' ? 6 : 3 + this.rand() * 3;
     const front = { house: 5.5, terrace: 2.2, shop: 4, flats: 6.5, office: 8, tower: 10, industry: 14, civic: 6 }[kind] + (kind === 'house' ? this.rand() * 2 : 0);
     const h = kind === 'house' ? 6 : kind === 'terrace' ? 7 + this.rand() * 2 : kind === 'shop' ? 8 + this.rand() * 6 : kind === 'flats' ? 12 + this.rand() * 12 : kind === 'office' ? 16 + this.rand() * 14 : kind === 'industry' ? 8 + this.rand() * 4 : 30 + this.rand() * 45;
-    return { kind, w, d, gap, front, h };
+    return { kind, w, d, gap, front, h, arch: undefined as string | undefined };
   }
 
   // Free plots along both sides of a segment, straight or curved. `centre` makes buildings denser/taller.
-  plotsFor(segId: number, centre: P = { x: 0, z: 0 }): Lot[] {
+  plotsFor(segId: number, centre: P & { kind?: string } = { x: 0, z: 0 }): Lot[] {
     const s = this.segs.get(segId);
     if (!s) return [];
     const path = this.path(s);
@@ -738,7 +751,7 @@ export class Network {
       const row = (segId * 7919 + (side > 0 ? 1 : 0) * 104729) % 1000003;
       let t = HALF + 2;
       while (t < L - HALF - 2) {
-        const { kind, w, d, gap, front, h } = this.lotSpec(pointAt(path, t), centre);
+        const { kind, w, d, gap, front, h, arch } = this.lotSpec(pointAt(path, t), centre, L - HALF - 2 - t);
         if (t + w > L - HALF - 2) break;
         const off = back(t + w / 2) + front + d / 2;
         // the building's front faces the road, square to it at the middle of the plot
@@ -748,7 +761,7 @@ export class Network {
         const cx = c.x - c.uz * off * side, cz = c.z + c.ux * off * side;
         const rot = Math.atan2(c.uz, c.ux);
         // local +x runs along the road in the direction of travel for side -1, against it for side 1
-        const lot: Lot = { id: this.nextId++, x: cx, z: cz, rot: side === 1 ? rot + Math.PI : rot, w, d, h, kind, seg: segId, seed: this.rand(), row, front, back: BACK[kind], px: (side === -1 ? gap : -gap) / 2, pw: w + gap };
+        const lot: Lot = { id: this.nextId++, x: cx, z: cz, rot: side === 1 ? rot + Math.PI : rot, w, d, h, kind, seg: segId, seed: this.rand(), row, front, back: arch ? 8 : BACK[kind], px: (side === -1 ? gap : -gap) / 2, pw: w + gap, ...(arch ? { arch } : {}) };
         // (a plot that doesn't fit here is skipped a little way, so the next one can start sooner)
         if (this.lotFree(lot, out) && this.fitParcel(lot, out)) { out.push(lot); t += w + gap; } else t += 3;
       }

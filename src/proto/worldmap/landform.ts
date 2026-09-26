@@ -49,7 +49,7 @@ export const PARAMS = {
   rounds: 10,
   K: 0.2, // per round, with A in m²: how hard running water cuts (then the land is scaled back to its height)
   m: 0.45,
-  creep: 0.18, // hillslope diffusion per round (share of the difference with the neighbours' mean)
+  creep: 0.5, // hillslope diffusion per round (share of the difference with the neighbours' mean)
   // floodplains: rivers draining `from` m² or more have a floor a · √(km²) m wide (at most `max`),
   // rising `rise` (m per m) from the river to its edge
   floodplain: { from: 30e6, a: 38, max: 1800, rise: 0.004 },
@@ -69,7 +69,7 @@ export const PARAMS = {
   // fine detail on top (worldmap/terrain.ts): the hills too small for the coarse grid (a few hundred
   // metres to a couple of kilometres across), this high (m) in country `relief` m rugged, and the
   // biggest's size
-  detail: { amp: 26, relief: 80, wavelength: 1500 },
+  detail: { amp: 16, relief: 80, wavelength: 1500 },
 };
 // Each landform's shape: how high it gets, and how much of each kind of bone it has.
 export interface LandformParams {
@@ -90,8 +90,8 @@ export const LANDFORM_PARAMS: Record<Landform, LandformParams> = {
   downs: { hills: 0.3, height: 240, swell: 0.5, ranges: 0.1, scarps: 1, plateau: 0.2, massif: 0, glacial: 0, sea: 0.22, drown: 3, rocks: ['clay', 'chalk', 'chalk', 'chalk'] },
   estuary: { hills: 0.4, height: 170, swell: 0.7, ranges: 0.25, scarps: 0.2, plateau: 0, massif: 0.1, glacial: 0, sea: 0.28, drown: 14, rocks: ['clay', 'sandstone', 'sandstone', 'granite'] },
   uplands: { hills: 0.3, height: 520, swell: 0.6, ranges: 0.4, scarps: 0.5, plateau: 0.5, massif: 0.2, glacial: 0, sea: 0, drown: 0, rocks: ['sandstone', 'limestone', 'limestone', 'gritstone'] },
-  mountains: { hills: 0.25, height: 950, swell: 0.4, ranges: 1, scarps: 0.1, plateau: 0.15, massif: 0.5, glacial: 1, sea: 0, drown: 0, rocks: ['sandstone', 'slate', 'slate', 'granite'] },
-  coast: { hills: 0.45, height: 260, swell: 0.7, ranges: 0.35, scarps: 0.3, plateau: 0.2, massif: 0.25, glacial: 0, sea: 0.3, drown: 5, rocks: ['clay', 'sandstone', 'slate', 'granite'] },
+  mountains: { hills: 0.25, height: 720, swell: 0.4, ranges: 1, scarps: 0.1, plateau: 0.15, massif: 0.5, glacial: 1, sea: 0, drown: 0, rocks: ['sandstone', 'slate', 'slate', 'granite'] },
+  coast: { hills: 0.3, height: 220, swell: 0.7, ranges: 0.35, scarps: 0.3, plateau: 0.2, massif: 0.25, glacial: 0, sea: 0.3, drown: 5, rocks: ['clay', 'sandstone', 'slate', 'granite'] },
   islands: { hills: 0.35, height: 300, swell: 0.6, ranges: 0.45, scarps: 0.1, plateau: 0.2, massif: 0.45, glacial: 0.2, sea: 1, drown: 6, rocks: ['sandstone', 'slate', 'granite', 'granite'] },
 };
 // For OS's priors (region/priors.ts) or a test: change any of the tunables. The land is made again

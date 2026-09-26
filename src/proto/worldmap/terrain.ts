@@ -28,7 +28,8 @@ const smooth = (a: number, b: number, v: number) => { const t = Math.max(0, Math
 export interface TerrainInput { seed: number; relief: Relief; half: number; water: WorldWater; grid: SettlementGrid; land: CoarseLand }
 
 // how far round a place its level ground eases out into the hills (m, past its reach)
-const PLACE_EASE = 650;
+const PLACE_EASE = 900;
+const COR_REACH = 120; // (the furthest a corridor's side slope reaches past its edge)
 const PLACE_SLOPE = 0.025; // (and the most its own ground slopes)
 
 export class WorldTerrain {
@@ -38,6 +39,10 @@ export class WorldTerrain {
   private n1: (x: number, z: number) => number; private n2: (x: number, z: number) => number; private n3: (x: number, z: number) => number;
   private levels = new Map<number, [number, number, number]>(); // each place's ground: its level at the middle, and its tilt
   readonly top: number; // the most the ground can reach
+  // the trunk routes' corridors (ease): each one's centre line, its ground's profile along it, and
+  // half-width; their segments by 100 m bucket (corridor << 16 | segment)
+  private cor: { path: { x: number; z: number }[]; prof: Float32Array; half: number }[] = [];
+  private corSegs = new Map<number, number[]>();
   constructor(readonly o: TerrainInput) {
     const L = (this.land = o.land);
     this.surf = new Float32Array(L.h);
@@ -109,14 +114,58 @@ export class WorldTerrain {
     // the water: rivers' floors at their level, lakes' shores at theirs, the sea's at 0
     const r = w.riverAt(x, z);
     if (r) {
-      // (its floor, then the valley side up to the land, no steeper than about 1 in 8)
-      const b = r.half + RIM + 20, f = smooth(b, b + Math.min(riverFloor(r.half) - 20, Math.max(70, 3 * r.half, (h - r.level) * 8)), r.d);
+      // (its floor, then the valley side up to the land, no steeper than about 1 in 14)
+      const b = r.half + RIM + 20, f = smooth(b, b + Math.min(riverFloor(r.half) - 20, Math.max(70, 3 * r.half, (h - r.level) * 14)), r.d);
       h = r.level + (Math.max(h, r.level) - r.level) * f;
     }
+    if (this.cor.length) h = this.corridor(x, z, h);
     const l = w.lakeAt(x, z);
     if (l) h = l.level + (Math.max(h, l.level) - l.level) * smooth(RIM + 10, 250, l.d);
     return h;
   };
+  // Ease the ground along the trunk routes once they're planned (plan.ts): each laid to a profile
+  // no steeper than its grade, cut down through the crests and banked up over the dips (the lesser
+  // of the two, blended), with its cuttings' and embankments' sides at about 1 in 2 either side.
+  // Called once, before anything is drawn; the routes were planned on the ground before it.
+  ease(routes: { path: { x: number; z: number }[]; grade: number; half: number }[]) {
+    for (const r of routes) {
+      const P = r.path, n = P.length;
+      if (n < 2) continue;
+      const g = Float32Array.from(P, (p) => this.heightAt(p.x, p.z)), up = new Float32Array(g), lo = new Float32Array(g), G = r.grade * 0.85;
+      const ds = (i: number) => Math.hypot(P[i].x - P[i - 1].x, P[i].z - P[i - 1].z);
+      // (the cut envelope, never above the ground and never steeper than G; the fill one, never below)
+      for (let i = 1; i < n; i++) { up[i] = Math.min(up[i], up[i - 1] + G * ds(i)); lo[i] = Math.max(lo[i], lo[i - 1] - G * ds(i)); }
+      for (let i = n - 2; i >= 0; i--) { up[i] = Math.min(up[i], up[i + 1] + G * ds(i + 1)); lo[i] = Math.max(lo[i], lo[i + 1] - G * ds(i + 1)); }
+      const prof = new Float32Array(n);
+      for (let i = 0; i < n; i++) prof[i] = (up[i] + lo[i]) / 2;
+      const ci = this.cor.length;
+      this.cor.push({ path: P, prof, half: r.half });
+      const R = r.half + COR_REACH;
+      for (let i = 1; i < n; i++) {
+        const a = P[i - 1], b = P[i];
+        for (let gi = Math.floor((Math.min(a.x, b.x) - R) / 100); gi <= Math.floor((Math.max(a.x, b.x) + R) / 100); gi++) for (let gj = Math.floor((Math.min(a.z, b.z) - R) / 100); gj <= Math.floor((Math.max(a.z, b.z) + R) / 100); gj++) {
+          const k = (gi + 32768) * 65536 + (gj + 32768), l = this.corSegs.get(k);
+          if (l) l.push((ci << 16) | i); else this.corSegs.set(k, [(ci << 16) | i]);
+        }
+      }
+    }
+  }
+  // (the ground at a spot near a corridor: its profile across the route's width, then the side slope
+  // back to the land; the nearest corridor wins)
+  private corridor(x: number, z: number, h: number) {
+    const l = this.corSegs.get((Math.floor(x / 100) + 32768) * 65536 + (Math.floor(z / 100) + 32768));
+    if (!l) return h;
+    let bd = Infinity, bp = 0;
+    for (const e of l) {
+      const c = this.cor[e >>> 16], i = e & 0xffff, a = c.path[i - 1], b = c.path[i];
+      const ux = b.x - a.x, uz = b.z - a.z, L2 = ux * ux + uz * uz || 1, t = Math.max(0, Math.min(1, ((x - a.x) * ux + (z - a.z) * uz) / L2));
+      const d = Math.hypot(x - a.x - ux * t, z - a.z - uz * t) - c.half;
+      if (d < bd) { bd = d; bp = c.prof[i - 1] + (c.prof[i] - c.prof[i - 1]) * t; }
+    }
+    if (bd >= COR_REACH) return h;
+    const w = Math.min(COR_REACH, 6 + 2 * Math.abs(h - bp)), f = smooth(0, w, bd);
+    return bp + (h - bp) * f;
+  }
   // How far the ground dips below heightAt for standing water: a lake's bowl (region/water.ts) or
   // the sea's shelving bed, from a beach at the coast. (Rivers are drawn on the valley floor.)
   bed = (x: number, z: number) => {

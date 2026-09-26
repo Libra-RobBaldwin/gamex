@@ -11,6 +11,7 @@
 // passing loop at its village station, and leaves the main line at points facing the city.
 import { DEFAULT_OPTS, pathLength, type End, type P } from '../roads';
 import { ROADS, TRAINS, type TrainDef } from '../catalog';
+import { splitLong } from '../interchange/region';
 import type { Railway } from './railway';
 import type { RailLine } from './sim';
 import type { Station } from './station';
@@ -22,8 +23,12 @@ export interface RegionRailPlan {
   branch: { from: P; legs: { a: P; b: P; ctrl?: P }[] } | null;
   stations: RailStationPlan[];
   lines: { name: string; route: 'main' | 'branch'; stops: (string | number)[] }[];
+  // the main line running on off the map from its end stations, straight out to the ground's edge
+  // (`o.edge`, past the map's bound): where trains go to and come from the world beyond (game/portals.ts)
+  out?: { legs: { a: P; b: P }[]; edge: number };
 }
 const STRAIGHT = 260; // straight track either side of a station's middle
+export const OFF_MAP = 480; // how far the main line runs on past the ground's edge (to its station off the map)
 const MAIN_R = ROADS['rail-main'].minR, BRANCH_R = ROADS['rail-branch'].minR;
 
 const sub = (a: P, b: P) => ({ x: a.x - b.x, z: a.z - b.z });
@@ -32,7 +37,7 @@ const unit = (v: P) => { const l = len(v) || 1; return { x: v.x / l, z: v.z / l 
 const add = (a: P, v: P, k: number) => ({ x: a.x + v.x * k, z: a.z + v.z * k });
 
 // Where the main line and the branch go.
-export function planRegionRail(all: RailSettlement[], o: { bound: number; isWater?: (p: P) => boolean }): RegionRailPlan | null {
+export function planRegionRail(all: RailSettlement[], o: { bound: number; isWater?: (p: P) => boolean; edge?: number }): RegionRailPlan | null {
   const city = [...all].filter((s) => s.kind === 'city').sort((a, b) => b.r - a.r)[0] ?? [...all].sort((a, b) => b.r - a.r)[0];
   if (!city) return null;
   const towns = all.filter((s) => s !== city && s.kind === 'town');
@@ -96,7 +101,23 @@ export function planRegionRail(all: RailSettlement[], o: { bound: number; isWate
   }
   const lines: RegionRailPlan['lines'] = [{ name: `${order[0].name} – ${order[2].name}`, route: 'main', stops: order.map((s) => s.id) }];
   if (branch && bv) lines.push({ name: `${bv.name} – ${city.name}`, route: 'branch', stops: [bv.id, city.id] });
-  return { main: { legs }, branch, stations, lines };
+  const plan: RegionRailPlan = { main: { legs }, branch, stations, lines };
+  if (o.edge) {
+    // from each end of the main line straight on out, if that's clear of the other places
+    // (to the ground's edge, and on past it for the station off the map where trains reach the world beyond)
+    const E = o.edge + OFF_MAP, outLegs: { a: P; b: P }[] = [];
+    const first = legs[0], last = legs[legs.length - 1];
+    for (const [p, h] of [[first.a, unit(sub(first.a, first.b))], [last.b, unit(sub(last.b, last.a))]] as [P, P][]) {
+      const t = Math.min(h.x ? (Math.sign(h.x) * E - p.x) / h.x : Infinity, h.z ? (Math.sign(h.z) * E - p.z) / h.z : Infinity);
+      if (!(t > 50)) continue;
+      const b = add(p, h, t);
+      // (clear of every place but the one it's leaving)
+      const hits = all.some((s) => { if (len(sub(s, p)) < s.r + 300) return false; const q = sub(s, p), k = Math.max(0, Math.min(t, q.x * h.x + q.z * h.z)); return len(sub(s, add(p, h, k))) < s.r + 60; });
+      if (!hits) outLegs.push({ a: p, b });
+    }
+    if (outLegs.length) plan.out = { legs: outLegs, edge: o.edge };
+  }
+  return plan;
 }
 // the station stands by the settlement's centre, a little way off it (so the line misses the high street)
 function stationSpot(s: RailSettlement, h: P) {
@@ -147,6 +168,25 @@ export function layRegionRail(rw: Railway, plan: RegionRailPlan, o: { mainTrains
   };
   const snap = (p: P) => { const n = net.nearestNode(p, 1, 'rail'); return n ? { x: n.x, z: n.z, node: n.id } : { ...p }; };
   for (const l of plan.main.legs) build(snap(l.a), snap(l.b), l.ctrl, 'rail-main');
+  if (plan.out) {
+    // (out past the map's bound, as far as the ground goes: the network's bound lets it just for this)
+    const was = net.bound, E = plan.out.edge;
+    net.bound = E + OFF_MAP + 5;
+    try {
+      for (const l of plan.out.legs) {
+        if (!build(snap(l.a), { ...l.b }, undefined, 'rail-main')) continue;
+        // (a join where it passes through the edge: the stretch beyond isn't drawn, game/portals.ts)
+        const sg = net.nearestSeg(l.b, 2, (s) => net.def(s).cls === 'rail');
+        if (!sg) continue;
+        const u = unit(sub(l.b, l.a)), t = Math.min(u.x ? (Math.sign(u.x) * E - l.a.x) / u.x : Infinity, u.z ? (Math.sign(u.z) * E - l.a.z) / u.z : Infinity);
+        const cut = net.nearestSeg(add(l.a, u, t), 2, (s) => net.def(s).cls === 'rail');
+        if (!cut) continue;
+        const face = net.split(cut.seg.id, add(l.a, u, t));
+        // (and the run in from the edge in pieces, so it's drawn wherever it's in view)
+        splitLong(net, 450, new Set(), net.segsAt(face).map((s) => s.id));
+      }
+    } finally { net.bound = was; }
+  }
   if (plan.branch) {
     // (the points: the branch starts on the main line itself)
     const sg = net.nearestSeg(plan.branch.from, 2, (s) => net.def(s).cls === 'rail');
