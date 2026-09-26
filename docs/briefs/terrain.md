@@ -59,7 +59,7 @@ or of a local build of the named commit.
   cut a canyon through it, up to 110 m deep in the mountains. It does this because its river surfaces may never
   climb downstream. The game doesn't draw those streams: it asks the water system for standing water only
   (`riverArea` 1e9). So only the library's demo and tests see it, and the demo avoids those spots.
-- **The land's `riverAt` is 2.7× faster** (on the branch, not yet pushed). It was slow near wide rivers because
+- **The land's `riverAt` is 2.7× faster** (3b80d3b, in PR #57). It was slow near wide rivers because
   of `Math.hypot`, not because of how many segments it looks at (about 21 per bucket). `Math.hypot` takes about
   46 ns in V8, against 11 ns for `Math.sqrt(x * x + z * z)`.
   - Measured on coast seed 7:
