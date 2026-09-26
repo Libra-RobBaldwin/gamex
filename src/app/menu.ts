@@ -31,6 +31,8 @@ export interface MenuHost {
   saves: SaveEntry[];
   open(save: SaveEntry): void;
   remove(save: SaveEntry): void;
+  /** delete every save, setting and offline copy on this device, then start afresh */
+  wipe(): void;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
@@ -144,6 +146,10 @@ function settings() {
     <section class="grp"><h3>Guided start</h3>
       <p class="fine" data-guide-state>${guideSeen() ? 'You’ve seen the guide. It can show again the next time you start the starter town.' : 'The guide shows the next time you start the starter town.'}</p>
       <button class="act wide" data-guide-reset ${guideSeen() ? '' : 'disabled'}>${icon('restore')}<span>Show the guide again</span></button>
+    </section>
+    <section class="grp danger"><h3>Saved data</h3>
+      <p class="fine">Deletes every saved town, the settings above and the app's offline copy on this device, so the game starts completely fresh with the latest version. It can't be undone.</p>
+      <button class="act wide" data-wipe>${icon('trash')}<span>Delete all saved data</span></button>
     </section>`;
 }
 
@@ -193,6 +199,14 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
   root.querySelectorAll<HTMLElement>('[data-play]').forEach((b) => b.addEventListener('click', () => h.play(MAPS.find((m) => m.id === b.dataset.play)!, false)));
   root.querySelector('[data-guide]')?.addEventListener('click', () => h.play(MAPS.find((m) => m.guide && m.ready)!, true));
   root.querySelectorAll<HTMLInputElement>('input[name="q"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) setQuality(r.value === 'auto' ? 'auto' : +r.value); }));
+  // (a second tap confirms, as with a saved town's delete)
+  const wipe = root.querySelector<HTMLButtonElement>('[data-wipe]');
+  wipe?.addEventListener('click', () => {
+    if (wipe.dataset.sure !== '1') { wipe.dataset.sure = '1'; wipe.classList.add('primary'); wipe.innerHTML = `${icon('trash')}<span>Tap again to delete everything</span>`; return; }
+    wipe.disabled = true;
+    wipe.innerHTML = `${icon('trash')}<span>Deleting…</span>`;
+    h.wipe();
+  });
   const reset = root.querySelector<HTMLButtonElement>('[data-guide-reset]');
   reset?.addEventListener('click', () => {
     setGuideSeen(false);
