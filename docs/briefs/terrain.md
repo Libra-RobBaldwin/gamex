@@ -42,12 +42,16 @@ or of a local build of the named commit.
 
 ## Not done
 
-- **One generator (PLAN.md):**
-  - merge or delete `region/terrain.ts` and `region/water.ts`, so only the `worldmap/` height, water and coast
-    remain;
-  - delete `game/corridors.ts` and anything else only the 6 km map used;
-  - `terrain/procedural.ts` and `water/coast.ts` are a second height and coast generator (used by the water
-    library's own tests and demo); they need deciding too.
+- **One generator (PLAN.md):** committed on the branch (4eb90c6), not pushed yet. It waits for #53 to merge, so
+  #53 stays small.
+  - `region/water.ts` is merged into `worldmap/water.ts`.
+  - `region/terrain.ts`'s height field and lighting are merged into `worldmap/terrain.ts`.
+  - The 6 km hill generator is deleted. `makeRelief` now only wraps a real map's own heights.
+  - The region still loads and looks the same (checked at 412×915, coast seed 7).
+  - `game/corridors.ts` never reached the integration branch, so there's nothing to delete.
+  - **Still open:** `terrain/procedural.ts` and `water/coast.ts`. They're a second height and coast generator,
+    used only by the water library's own tests and demo, not by the game. Deleting them means moving those
+    tests onto the 50 km land.
 - The coarse pass (about 0.65 s) runs on the main thread and in each tile worker. It isn't yet in a worker of
   its own.
 - Lowland maps have no lakes (reservoirs).
