@@ -48,7 +48,7 @@ async function buildStation(x) {
   await wait(500);
   await page.evaluate((x) => window.proto.focusOn({ x, z: 590 }, 380), x);
   await wait(1800);
-  const s = await page.evaluate((x) => window.proto.toScreen({ x, z: 537 }), x);
+  const s = await page.evaluate((x) => window.proto.toScreen({ x, z: 587 }), x);
   await page.touchscreen.tap(s.x, s.y);
   await wait(1500);
   await page.screenshot({ path: `${out}/rail-1-plan-${x}.png` });
@@ -61,7 +61,7 @@ async function buildStation(x) {
 await buildStation(-300);
 await page.tap('#sheet .close').catch(() => {});
 await wait(300);
-await buildStation(300);
+await buildStation(340);
 const built = await page.evaluate(() => window.proto.railway.stations.map((s) => ({ id: s.id, name: s.name, x: Math.round(s.x) })));
 console.log('stations', JSON.stringify(built));
 if (built.length !== 2) fail('two stations were not built on the branch');

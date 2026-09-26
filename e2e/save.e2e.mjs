@@ -58,7 +58,7 @@ const changed = await A.evaluate(() => {
   P.rebuild();
   const R = P.railway, seg = [...net.segs.values()].filter((x) => net.def(x).cls === 'rail').sort((a, b) => net.length(b) - net.length(a))[0];
   const made = [];
-  for (const at of [0.25, 0.75]) { const pl = [1, -1].flatMap((side) => R.plan(seg.id, net.length(seg) * at, side, 130).plans).find((x) => x.ok); if (pl) made.push(R.build(pl).station.id); }
+  for (const at of [0.4, 0.85]) { const pl = [1, -1].flatMap((side) => R.plan(seg.id, net.length(seg) * at, side, 130).plans).find((x) => x.ok); if (pl) made.push(R.build(pl).station.id); }
   const f = P.traffic.fleet, dmu = f.defFor(f.offerFor('dmu'));
   const rl = made.length === 2 ? R.addLine(made, false, [dmu]) : 'no stations';
   P.rebuild();
