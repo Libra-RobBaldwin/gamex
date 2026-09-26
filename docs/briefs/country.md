@@ -1,7 +1,7 @@
 # Brief: country (the countryside session, second run)
 
-Session https://claude.ai/code/session_016uD19qC4yiFZR8AhPrtiib, branch `claude/work-country-2`, one PR into
-`claude/cloud-session-history-rvqkm1`. Written 26 Sep 2026, 21:00 UTC. Coordinator:
+Session https://claude.ai/code/session_016uD19qC4yiFZR8AhPrtiib, branch `claude/work-country-2`, PR #62 (merged) into
+`claude/cloud-session-history-rvqkm1`, then `claude/work-country-pools`. Written 26 Sep 2026, 21:00 UTC, updated 23:05. Coordinator:
 https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, decision 1).
 
 ## The state, honestly
@@ -40,7 +40,12 @@ https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, de
    the town 384 / 737k → 372 / 757k; 2.6 km 399 / 528k → 386 / 581k; 5 km 431 / 568k → 418 / 623k; 3 km over
    the country 48 / 226k → 37 / 198k; 500 m 36 / 273k → 35 / 232k. Load to the first frame under SwiftShader:
    about 10–14 s (the first-view runs), as before.
-6. Docs: `docs/regiongen.md` (the block size and the follow rule); this brief.
+6. **world50's (e) finding, the CoverMap scratch pools: done** (branch `claude/work-country-pools`, its own
+   small PR). `ground/paint.ts` drops its scratch layers after a paint whose window is over 2^20 texels (the
+   live area's first whole-area paint); the small repaints after it size them again. On the region 15 s
+   after loading: the pools were 110 MB, now 22 MB; the JS heap 427 MB, now 341 MB. A test in
+   `ground.test.ts` covers it.
+7. Docs: `docs/regiongen.md` (the block size and the follow rule); this brief.
 
 **Checks before the push**, on the branch merged with the integration head 58ec61a (PR #60, the economy
 fix): `tsc` clean; `vitest run --no-file-parallelism` 117 files, 1104 passed, 8 skipped, no failures (the
@@ -50,10 +55,12 @@ e2e all pass, before the merge and after it.
 
 ## Not done
 
-- **world50 (e) findings**, not started: `ground/paint.ts` CoverMap scratch pools (about 205 MB) should be
-  dropped after a paint over about 1M texels; hedges beside a lane that run straight while the lane curves
-  (probably the hedge follows the lane's `GroundInput.lanes` centre line at a coarser step than the road;
-  to be measured at 700 m over the live area).
+- **world50's (e) other finding, hedges beside a lane that run straight while the lane curves: looked at,
+  not reproduced.** The live area's lane hedges follow `net.path(s)`, and a curved leg carries 27 points
+  over 150 m (a point every 6 m), so a hedge tracks the bend; `hedgerows.ts` `runs(path, 20)` keeps every
+  other point. Three 700 m views over the longest rural segments in the region's live area (seed 42) show
+  the hedges on the bends. What does run straight into a field at 700 m is a hedged field boundary meeting
+  the lane, which is right. If world50 has the screenshot, the spot would settle it.
 - **Wood edges up close:** the canopy's crowns still make a sawtooth along a straight wood edge from far out
   (the domes' tips at the outline). Not a staircase, and #52 had the same; a smoother edge row is possible.
 - **Farmsteads per km² fell** with the bigger blocks (about one farm a block, and blocks are 1.5× the area).
