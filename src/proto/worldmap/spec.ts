@@ -36,7 +36,9 @@ export function worldMapSpec(opts: Partial<RegionOptions> = {}, plan = planWorld
     streets,
     generated: true,
     links: plan.links.filter((l) => inLiveArea(plan.settlements[l.a]) && inLiveArea(plan.settlements[l.b])),
-    view: { x: start.x, z: start.z + 20, h: 300 },
+    // (looking at the town centre on the ground, however high the hills have put it: the camera
+    // otherwise settles its target onto the ground along its line of sight, short of the centre)
+    view: { x: start.x, z: start.z + 20, h: 300, y: plan.terrain.heightAt(start.x, start.z + 20) },
     stops: [...line, at(0, 1.5 * S)],
     line,
     industries: false,
