@@ -49,9 +49,12 @@ const A = await open(url);
 await A.evaluate(() => window.proto.setSpeed(0)); // (paused from here: only the town's clock moves, by skip)
 const changed = await A.evaluate(() => {
   const P = window.proto, net = P.net;
-  // a branch line across the north of the town, two stations on it and a rail line between them
+  // a branch line just north of the start town, two stations on it and a rail line between them
   P.purse.balance += 3_000_000;
-  P.buildRoad({ x: -480, z: 340 }, { x: 480, z: 340 }, 'rail-branch');
+  P.buildRoad({ x: -480, z: 540 }, { x: 480, z: 540 }, 'rail-branch');
+  P.rebuild();
+  // and a one-way carriageway north out of town, bridging the branch (the region starts with neither)
+  P.buildRoad({ x: 150, z: 350 }, { x: 150, z: 1300 }, 'dual', { oneway: true });
   P.rebuild();
   const R = P.railway, seg = [...net.segs.values()].filter((x) => net.def(x).cls === 'rail').sort((a, b) => net.length(b) - net.length(a))[0];
   const made = [];
@@ -122,7 +125,7 @@ if (d0.length) for (const k of d0.slice(0, 3)) console.log(k, JSON.stringify(sa[
 ok(sb.mine.includes(`${changed.junction}:${sa.mine.find((x) => x.startsWith(`${changed.junction}:`))?.split(':')[1]}`), 'the junction of the player’s design is kept');
 ok(sb.lines.some((l) => l.startsWith(`${changed.line}:`)), 'the new line is kept, with its buses');
 ok(sb.segs.some((s) => s.includes(`:${changed.stop}`)), 'the new stop is kept');
-ok(sb.segs.some((s) => s.split(':')[3] === '1'), 'one-way carriageways (the motorway) are kept');
+ok(sb.segs.some((s) => s.split(':')[3] === '1'), 'one-way carriageways are kept');
 ok(sb.segs.some((s) => s.split(':')[5]), 'bridges and their types are kept');
 ok(changed.stations === 2 && sb.stations.length === 2 && sb.raillines === 1, `railway stations and the rail line are kept (${JSON.stringify(changed)})`);
 ok(await B.evaluate(() => window.proto.railway.trains.length) === await A.evaluate(() => window.proto.railway.trains.length), 'the rail line runs as many trains');

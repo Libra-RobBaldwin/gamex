@@ -50,9 +50,12 @@ const atMenu = (page) => page.waitForSelector('#app .scr:not(.scr-load)', { time
 async function playRegion(page, seed = '42') {
   if (!(await page.$('.scr-region'))) await page.tap('[data-go="region"]');
   await page.waitForSelector('.scr-region');
-  await page.tap('[data-place]'); await page.waitForSelector('[data-climate]');
-  await page.tap('[data-climate]'); await page.waitForSelector('[data-size]');
-  await page.tap('[data-size]'); await page.waitForSelector('.summary');
+  // (a second time it opens on the summary of the last one's answers)
+  if (!(await page.$('.summary'))) {
+    await page.tap('[data-place]'); await page.waitForSelector('[data-climate]');
+    await page.tap('[data-climate]'); await page.waitForSelector('[data-size]');
+    await page.tap('[data-size]'); await page.waitForSelector('.summary');
+  }
   await page.tap('details.more summary');
   await page.fill('#rg-seed', seed); await page.dispatchEvent('#rg-seed', 'change');
   await page.tap('[data-start]');

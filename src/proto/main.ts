@@ -84,7 +84,7 @@ const MAP_Q = SAVED ? new URLSearchParams(SAVED.map.query) : isRealQuery(PARAMS)
 const MAP: MapSpec = isRealQuery(MAP_Q) ? await realWorldMap(MAP_Q) : mapFromQuery(MAP_Q); // (a real region: the 50 km map from its bake, real/world.ts)
 const REAL: { parks: Region[]; forms?: Map<number, { form: Form; slip: boolean }>; stream?: LotStream } | null = 'livePack' in MAP ? { parks: [] } : null; // (a real region's live area, packed: real/live.ts)
 // (the query that makes this map, kept with its saves)
-const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(MAP_Q); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
+const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(MAP_Q); q.delete('save'); q.delete('guide'); if (MAP.world && q.get('map') === 'region') q.set('size', String(MAP.world.options.size)); return q.toString() || `map=${MAP.id}`; })(); // (a 50 km map says so: a region save without a size is an old 6 km one, src/app/menu.ts)
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
 const WORLD = MAP.world ?? null; // (a 50 km map's plan: MAP is its live play area round the start town, the rest streams as scenery)
 setRoundabouts('rare'); // (roundabouts where big roads meet, not at every lane junction: junction.ts)
@@ -414,7 +414,7 @@ function evictWithin(boxes: Box[]) {
     if (!net.land.free(rectCorners(l.x, l.z, l.rot, l.w, l.d))) { net.lots = net.lots.filter((x) => x !== l); demolish(b); continue; }
     if (!net.land.free(net.parcelRect(l, -0.3), works)) { const was = l.back; net.fitParcel(l); if (l.back !== was) regenerate(b); }
   }
-  queue = queue.filter((l) => !inBoxes(l, boxes, 40) || net.lotFree(l));
+  if (!keepQueue) queue = queue.filter((l) => !inBoxes(l, boxes, 40) || net.lotFree(l)); // (loading a save: its plots stay as saved, as evictFromWorks keeps them)
 }
 // The one place the town changes shape. Roads first, then the junctions they form (which claim
 // their land), then anything standing on land that's now taken moves out, then plots fill in.
@@ -2818,7 +2818,7 @@ loading.finish();
 let loaded = false;
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street') => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, overlays: { flowGroup, cover: () => coverMesh }, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street', more: Partial<RoadOpts> = {}) => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type, ...more }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, overlays: { flowGroup, cover: () => coverMesh }, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { underView, toggleUnderground }); // (the underground view: game/underview.ts)
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
