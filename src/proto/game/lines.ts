@@ -76,13 +76,14 @@ export class Lines {
     this.list = this.list.filter((x) => x !== l);
   }
   // stops that no longer exist leave their lines (a road rebuilt through them); a line left with
-  // fewer than two stops goes, and its buses with it
+  // fewer than two stops goes, and its buses with it. The buses of a line that lost a call go on to
+  // the same call, or the next one still made (traffic.setLineSeq), never back to the start.
   prune() {
     for (const l of [...this.list]) {
       const keep = l.stops.filter((id) => this.traffic.place(id));
       if (keep.length === l.stops.length) continue;
       if (keep.length < 2) { this.remove(l); continue; }
-      l.stops = keep; l.bus.seq = callOrder(keep, l.loop);
+      l.stops = keep; this.traffic.setLineSeq(l.bus, callOrder(keep, l.loop));
     }
   }
   buses(l: Line) { return this.traffic.busesOn(l.id); }

@@ -1294,6 +1294,7 @@ function showBusInfo(id: number) {
   const l = lines.of(id);
   const facts: [string, string][] = [['Line', l ? `${l.num} · ${lines.title(l)}` : 'Not on a line'], ['Model', b.model || 'Bus']];
   if (l && b.next !== undefined) facts.push([b.dwelling ? 'At' : 'Next stop', lines.name(b.next)]);
+  if (b.waiting) facts.push(['Status', 'Waiting for room on the road']); // (in the depot: no road under it just now, traffic.ts)
   facts.push(['On board', `${people.aboard(id)}`], ['Speed', `${Math.round(b.speed * 2.237)} mph`]);
   if (l) showLine(l.bus.seq, l.stops);
   shell.openInfo({
