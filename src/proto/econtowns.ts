@@ -159,10 +159,14 @@ export function reviewTown(t: TState, c: TownCtx) {
   supplyB.office = T.local.visitors * t.base.office + t.supply.visitors / (T.visitsPerOfficeJobDay / 24);
   supplyB.works = T.local.materials * t.base.works + t.supply.materials / T.materialsPerWorksJobHour;
   // the same from last month's deliveries alone, without the town's memory of earlier months
-  const gotB = perUse(Infinity);
-  gotB.shop = T.local.goods * t.base.shop + t.got.goods / T.goodsPerShopJobHour;
-  gotB.office = T.local.visitors * t.base.office + t.got.visitors / (T.visitsPerOfficeJobDay / 24);
-  gotB.works = T.local.materials * t.base.works + t.got.materials / T.materialsPerWorksJobHour;
+  const gotB = fedJobs(t, T);
+  // A building the town has asked for and is waiting on counts as part of the town its people
+  // size their demand by, as decide() counts it as had: then how soon the game answers changes
+  // when things go up, not how much.
+  for (const u of GROWN) {
+    const pend = c.pendingCap(t, u);
+    if (pend > 0 && C[u] > 0) struct[u] *= (C[u] + pend) / C[u];
+  }
   // The town as the map made it is taken to be in balance, so it neither shrinks nor grows just
   // because of how it was laid out: one short of what its size needs is lifted, one with more
   // is held back, within limits (so a town far short, like an estate with no jobs in reach,
@@ -267,6 +271,17 @@ export function reviewTown(t: TState, c: TownCtx) {
     if (t.recent.built.length > 3) { t.recent.built.shift(); t.recent.lost.shift(); }
   }
   t.report = report(t, T);
+}
+
+// The jobs of each use that last month's deliveries (and what the town finds for itself) keep
+// going: the businesses standing beyond these have lost their supplies, whatever the town's
+// smoothed view still says.
+export function fedJobs(t: TState, T: Tune, got = t.got): PerUse {
+  const b = perUse(Infinity);
+  b.shop = T.local.goods * t.base.shop + got.goods / T.goodsPerShopJobHour;
+  b.office = T.local.visitors * t.base.office + got.visitors / (T.visitsPerOfficeJobDay / 24);
+  b.works = T.local.materials * t.base.works + got.materials / T.materialsPerWorksJobHour;
+  return b;
 }
 
 // capacity and occupied places by use in each zone; returns how many buildings stand abandoned
