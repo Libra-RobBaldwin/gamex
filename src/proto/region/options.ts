@@ -22,7 +22,7 @@ export interface RegionOptions {
   villages: number; // 0–12
   style: Style;
   relief: Relief;
-  size: number; // km across: 50 is the standard map (worldmap/, streamed), 6 the first region (made whole)
+  size: number; // km across: 50, the one map (worldmap/, streamed); an old 6 km address opens it too
   sea: boolean; // a coast along one edge, with the sea beyond (50 km maps)
   // (50 km maps: the land, worldmap/landform.ts)
   landform: Landform;
@@ -49,17 +49,13 @@ export const LANDFORMS: readonly LandformPreset[] = [
   { id: 'islands', name: 'Islands', note: 'An archipelago: islands big and small in a sheltered sea', options: { landform: 'islands', relief: 'rolling', sea: true, islands: 'archipelago' } },
 ];
 export const RELIEFS: readonly Relief[] = ['flat', 'lowland', 'rolling', 'upland', 'mountain'];
-export const LIMITS = { rivers: [0, 3], lakes: [0, 4], towns: [0, 6], villages: [0, 12] } as const;
-// A 50 km map holds far more (docs/streaming.md): about as many places as a real 50 km square of England.
-export const SIZES = [50, 6] as const;
+// A 50 km map holds about as many places as a real 50 km square of England (docs/streaming.md).
+export const SIZES = [50] as const;
 export const WORLD_LIMITS = { rivers: [0, 4], lakes: [0, 12], towns: [0, 30], villages: [0, 250] } as const;
-export const limitsFor = (size: number) => (size > 6 ? WORLD_LIMITS : LIMITS);
+export const limitsFor = (_size: number) => WORLD_LIMITS;
 
-// The defaults: the region as it was first made (one river, one or two lakes, a city, three towns, six to eight villages).
-export const DEFAULT_OPTIONS: RegionOptions = { seed: 7, rivers: 1, lakes: -1, city: true, towns: 3, villages: -1, style: 'temperate', relief: 'rolling', size: 50, sea: true, landform: 'coast', islands: 'none', hills: -1, water: -1, woods: -1 };
-// (a 50 km map's own defaults where they differ: two rivers, and the seed decides the towns)
-const WORLD_DEFAULTS: Partial<RegionOptions> = { rivers: 2, towns: -1 };
-// (−1: let the seed decide: one or two lakes, six to eight villages)
+// The defaults: two rivers, and the seed decides the lakes, towns and villages (−1).
+export const DEFAULT_OPTIONS: RegionOptions = { seed: 7, rivers: 2, lakes: -1, city: true, towns: -1, villages: -1, style: 'temperate', relief: 'rolling', size: 50, sea: true, landform: 'coast', islands: 'none', hills: -1, water: -1, woods: -1 };
 
 const clampInt = (v: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, Math.round(v)));
 
@@ -67,13 +63,13 @@ const clampInt = (v: number, [lo, hi]: readonly [number, number]) => Math.max(lo
 export function regionOptions(o: Partial<RegionOptions> = {}): RegionOptions {
   const size = (SIZES as readonly number[]).includes(Number(o.size)) ? Number(o.size) : DEFAULT_OPTIONS.size;
   const L = limitsFor(size);
-  const d = { ...DEFAULT_OPTIONS, ...(size > 6 ? WORLD_DEFAULTS : {}), ...o };
+  const d = { ...DEFAULT_OPTIONS, ...o };
   const out: RegionOptions = {
     seed: Number.isFinite(d.seed) ? Math.abs(Math.floor(d.seed)) % 2 ** 31 : DEFAULT_OPTIONS.seed,
     rivers: clampInt(Number.isFinite(d.rivers) ? d.rivers : 1, L.rivers),
     lakes: d.lakes === -1 ? -1 : clampInt(Number.isFinite(d.lakes) ? d.lakes : 1, L.lakes),
     city: d.city !== false,
-    towns: size > 6 && d.towns === -1 ? -1 : clampInt(Number.isFinite(d.towns) ? d.towns : 3, L.towns),
+    towns: d.towns === -1 ? -1 : clampInt(Number.isFinite(d.towns) ? d.towns : 3, L.towns),
     villages: d.villages === -1 ? -1 : clampInt(Number.isFinite(d.villages) ? d.villages : 7, L.villages),
     style: STYLES.includes(d.style) ? d.style : 'temperate',
     relief: RELIEFS.includes(d.relief) ? d.relief : 'rolling',
@@ -109,11 +105,8 @@ export function optionsFromQuery(q: URLSearchParams): RegionOptions {
 // And back: the query that makes this map again (only what differs from the defaults).
 export function optionsQuery(o: RegionOptions): string {
   const q = new URLSearchParams({ map: 'region' });
-  const base = { ...DEFAULT_OPTIONS, ...(o.size > 6 ? WORLD_DEFAULTS : {}) };
-  for (const k of Object.keys(DEFAULT_OPTIONS) as (keyof RegionOptions)[]) {
-    // (a 50 km map spells out every option: its address is shared and saved, and should make the same
-    // map whatever the defaults become)
-    if (k === 'seed' || k === 'size' || o.size > 6 || o[k] !== base[k]) q.set(k, k === 'city' || k === 'sea' ? (o[k] ? '1' : '0') : String(o[k]));
-  }
+  // (every option is spelt out: the address is shared and saved, and should make the same map
+  // whatever the defaults become)
+  for (const k of Object.keys(DEFAULT_OPTIONS) as (keyof RegionOptions)[]) q.set(k, k === 'city' || k === 'sea' ? (o[k] ? '1' : '0') : String(o[k]));
   return q.toString();
 }

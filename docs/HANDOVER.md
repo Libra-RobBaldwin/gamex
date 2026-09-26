@@ -26,6 +26,22 @@ branches keep all their work. The decisions are in `docs/briefs/PLAN.md`, top se
 - **Branches:** 52 of 61 remote branches are fully merged into integration and can be deleted once the user agrees.
 - **The repo's default branch** is still `claude/runescape-transport-puzzle-game-q1uhy8`, about 300 commits behind
   integration. Either make integration the default on GitHub, or merge integration into it.
+## Latest: one map, step 4: the 6 km code is gone (26 Sep 2026, evening)
+
+Branch `claude/work-onemap-4` (brief: `docs/briefs/onemap-4.md`). After #59 made the game one 50 km map,
+this deletes what only the old maps reached:
+- `interchange/region.ts`, `rail/region.ts` and `region/town.ts` and their tests. `region/generate.ts`
+  keeps what the 50 km plan uses (`KINDS`, `layStreets`, `suggestLinks`, `reach`); the 6 km map made
+  whole is now only a test fixture (`region/sixkm.fixture.ts`) for countryside's `fields.test.ts`.
+- `region/options.ts` has one size, 50 km, and the setup no longer branches on a 6 km map. Leaflet is
+  out of `package.json`.
+- Tests follow: `region.test.ts` runs the street layout, links and names on the 50 km plan; the
+  portal-traffic test lays its motorway and roads on a 50 km map's rim (`findPortals`; on the real map
+  the ways off are `worldPortals`, with no traffic on the Network yet).
+- Docs no longer describe the starter town, the sandbox, the 6 km region or Real Town Plans
+  (`docs/places.md` is gone; `docs/region.md` and `docs/regiongen.md` say what the region is now).
+- The start menu's pictures (`src/app/art/`) are the region's start town, taken with `e2e/art.mjs`
+  (retake them when the look changes: `node e2e/art.mjs`, with the dev server up).
 
 ## Latest: HUD, start menu and region work (25 Sep 2026)
 
@@ -104,8 +120,8 @@ Coordinator: https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. Integratio
   same in the coverage overlay. Stations stay at 800 m. The loop e2e's profit is unchanged.
 - **Roundabout entries** have painted chevrons, not green splitter islands (`jshape.ts`).
 - **Start menu (`src/app`):**
-  - Home is a picture of the starter town, drifting slowly (`src/app/art/`, taken from the game
-    with `e2e/.scratch/art.mjs`, a local script; retake the pictures when the look changes).
+  - Home is a picture of the map's start town, drifting slowly (`src/app/art/`, taken from the game
+    with `e2e/art.mjs`; retake the pictures when the look changes).
   - Over it: a Continue card for the last town with its map's picture, New game as the big
     button, and a row of tiles (How to play, Library, Settings, About).
   - New game has a card per map with its picture. Loading shows the map's picture and a tip.

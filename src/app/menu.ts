@@ -2,7 +2,7 @@
 // for each. Plain DOM with no three.js, so it paints at once; the game loads only when a map is
 // picked (main.ts). Brand: docs/hud.md (forest, lime, gold; League Spartan and Archivo; Tabler icons).
 // Like the start screens of the city builders it borrows from, home is the town itself: a picture of
-// the starter town (art/, taken from the game) drifting slowly behind a short stack of choices,
+// the region's start town (art/, taken from the game with e2e/art.mjs) drifting slowly behind a short stack of choices,
 // with the one that matters most (Continue, or New game) the biggest.
 
 import { GONE, MAPS, type MapInfo } from '../proto/maps';

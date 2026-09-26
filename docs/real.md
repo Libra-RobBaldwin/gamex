@@ -301,8 +301,7 @@ A footpath carries on from each dead end (`src/proto/game/paths.ts`):
 - **Drawing:** the paths are drawn as one draped tarmac mesh, 2 m wide, 6 cm above the ground.
 - **Edits:** worked out again with every road edit.
 
-Exeter has 526 of them, 108 running through to the next street. The starter town has 8. So the
-starter town now differs from before at its cul-de-sacs.
+Exeter has 526 of them, 108 running through to the next street. (The old starter town had 8.)
 
 Free OS data has no real footpaths. OSM's (`highway=footway`) would replace these where they exist.
 
@@ -314,8 +313,8 @@ Free OS data has no real footpaths. OSM's (`highway=footway`) would replace thes
 | | Measured | Used for |
 |---|---|---|
 | Street pattern | orientation order 0.01–0.05 in town cores, 0 in suburbs; junctions 65% T, 4% crossroads, 31% dead ends; streets 70–80 m between junctions (median) | `GRID_PLAN`: a grid plan only 5–20% of the time; an organic plan leaves out 31% of its side streets (it was 30%) |
-| Woods | 13–16% of the land outside places; 7–8 patches a km²; log-normal sizes, median 0.5 ha; shape index 1.7; 8% wooded on the flat, 33% at 20–30% slopes, 59% above 30%; nearer streams than the land | `woodSpots`: the generated region's woods are real-sized patches, sited by slope and drawn out along the contours |
-| Settlements | per 1,000 km²: 5–12 towns, 71–74 villages, 65–170 hamlets; nearest-neighbour medians 5.5–11 km (towns), 1.8 km (villages), 1.1–1.2 km (hamlets); rank–size exponent 0.8–1.3; extent r ≈ 24–47 · people^0.37–0.43 | `placesFor`, `radiusFor` for the 50 km maps (the 6 km generator keeps its options) |
+| Woods | 13–16% of the land outside places; 7–8 patches a km²; log-normal sizes, median 0.5 ha; shape index 1.7; 8% wooded on the flat, 33% at 20–30% slopes, 59% above 30%; nearer streams than the land | `woodSpots`: real-sized patches, sited by slope and drawn out along the contours (it sited the 6 km region's woods; the 50 km map's are countryside's) |
+| Settlements | per 1,000 km²: 5–12 towns, 71–74 villages, 65–170 hamlets; nearest-neighbour medians 5.5–11 km (towns), 1.8 km (villages), 1.1–1.2 km (hamlets); rank–size exponent 0.8–1.3; extent r ≈ 24–47 · people^0.37–0.43 | `placesFor`, `radiusFor` for the 50 km maps |
 | Roads | km/km²: minor 0.9–1.5, streets 0.2–0.9, B 0.13–0.18, A 0.08–0.15, primary 0.08–0.10 | the 50 km generator's road hierarchy |
 | Ribbon development | outside places, buildings are 2.5–3.5 times likelier within 60 m of an A or B road than the land is | the 50 km generator's roadside houses |
 | Coast | fractal dimension 1.15 (50 m–3.2 km); 96 km of tidal river inside the square, 12–213 m wide | `fractalCoast`, for the sea work |

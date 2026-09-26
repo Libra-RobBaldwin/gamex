@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PRIORS, fractalCoast, roadClimb, valleyPreference, placesFor, radiusFor, woodArea, woodShareAt, woodSpots } from './priors';
 import { rng } from './random';
-import { regionMap } from './index';
 
 describe('priors from real Britain', () => {
   it('big roads keep to the valleys and climb gently; lanes go over the hills', () => {
@@ -43,11 +42,5 @@ describe('priors from real Britain', () => {
     expect(radiusFor(130000)).toBeGreaterThan(2000);
     expect(radiusFor(500)).toBeLessThan(500); // (Open Names extents are generous: fields and gardens round a village count)
     expect(PRIORS.roads.junctions.tee).toBeGreaterThan(PRIORS.roads.junctions.cross * 5);
-  });
-  it('the generated region has its woods where the priors put them, and the same seed the same woods', () => {
-    const a = regionMap(7), b = regionMap(7);
-    expect(a.trees.spots!.length).toBeGreaterThan(1000);
-    expect(a.trees.spots).toEqual(b.trees.spots);
-    for (const s of a.settlements) expect(a.trees.spots!.some((p) => Math.hypot(p.x - s.x, p.z - s.z) < s.r)).toBe(false);
   });
 });

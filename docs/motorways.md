@@ -6,13 +6,13 @@ and `roaddraw.ts`.
 
 ## Try it
 
-- `/proto.html?map=town&junction=dumbbell`, `…=gsr`, `…=diamond`, `…=trumpet`, `…=cloverleaf`: one junction on its own.
+- `/proto.html?junction=dumbbell`, `…=gsr`, `…=diamond`, `…=trumpet`, `…=cloverleaf`: one junction on its own.
   - Add `&size=tight` for the town-sized version (see **Size** below).
   - Add `&slips=parallel` for slip roads with a long parallel lane.
-- `/proto.html?map=town&junction=blank`: a north–south dual carriageway on an empty map. Build a motorway
+- `/proto.html?junction=blank`: a north–south dual carriageway on an empty map. Build a motorway
   across it (Build › Roads › Motorway) and the blueprint card offers **Junction here**.
-- The starter town (`/proto.html?map=town`): its motorway along the south edge is now a pair of
-  carriageways (`pairUpMotorways`, run after the town's streets are built).
+- On the region, build a motorway (Build › Roads › Motorway) across a lane: the blueprint card
+  offers **Junction here**.
 
 ## One-way roads
 
@@ -49,7 +49,7 @@ and `roaddraw.ts`.
   enough for the bridges library to stand an overbridge's pier in the middle. With the verges
   touching, every overbridge became an 80 m steel truss.
 - `pairToNode` builds a pair that ends at a junction. The carriageways splay in over their last
-  stretch, so each has its own mouth on the roundabout. The starter town uses this.
+  stretch, so each has its own mouth on the roundabout.
 
 ## Slip roads: merges and diverges (`interchange/slips.ts`)
 
@@ -255,33 +255,12 @@ Every form comes in two sizes (`IxSize`, `SIZE` in `build.ts`).
   in any of its junctions, the lengths of its slip roads, and buttons to edit its roundabouts or
   give-ways in the junction designer.
 
-## The starter town
+## The region
 
-- The motorway is now a pair of carriageways, splaying into the roundabout at its end.
-- **There's no grade-separated junction there, because one doesn't fit:**
-  - at-grade, the bridge's ramps put the junction's roundabouts or give-ways 160–220 m either
-    side of the motorway;
-  - the estate's streets are 90 m north of it, and the map ends 50 m south of it.
-
-  One would fit with the motorway in a cutting, which is a job for the terrain step.
-- Screenshots (412×915) are in the PR.
-
-## The region (`interchange/region.ts`)
-
-`layRegionRoads(net, region)` takes `{ bound, settlements: { id, kind, x, z, r, gates? }[], links: { a,
-b, road: 'A' | 'B' }[] }`. That is the shape `src/proto/region` gives as `map.settlements` and
-`map.links`. It lays out:
-
-- **one motorway right across the map:** along the principal axis of the city and the towns, set
-  off to pass at least 300 m clear of every place, as close to the biggest as it can be;
-- **3–4 dumbbells,** level with the biggest places, 1.3 km apart and 650 m from the edges, each
-  with an A road to its place;
-- **A roads** (`rural-60`) between the city and the towns;
-- **B roads** (`rural-50`) to the villages. Where they cross the motorway they bridge it.
-
-It's tested on a made-up region: every place reaches every other, and one-way roads are respected.
-The generator has merged (`src/proto/region`); wiring `layRegionRoads` into `?map=region` is left to
-the region session, since this stream doesn't touch `src/proto/region/`.
+The map starts with only country lanes between places (`docs/world.md`): the motorways and their
+junctions are the player's to build, with the tools above. The 6 km region's laid-out motorway,
+dumbbells and A and B roads (`interchange/region.ts`) are gone with that map; the plan's own trunk
+routes (`worldmap/routes.ts`, its `full` mode) are off at the start.
 
 ## Tests
 

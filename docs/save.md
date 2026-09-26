@@ -18,9 +18,10 @@ kept in the browser's IndexedDB on the phone, so they're there offline and after
 - Each town has one save, made when it starts and kept up to date. A loaded town saves over the
   save it came from.
 
-A save is played at its map's address with `&save=<id>`, e.g. `/?map=town&save=…` or
-`/?map=region&seed=42&save=…`. A save that's gone, or one this version can't read, opens a new
-town with a hint saying why.
+A save is played at its map's address with `&save=<id>`, e.g. `/?map=region&seed=42&save=…`.
+A save that's gone, or one this version can't read, opens a new town with a hint saying why. A
+save from a map the game no longer has (the starter town, the sandbox, a 6 km region) is listed
+under Saved towns as made on a map that no longer exists, with only Delete.
 
 ## What's in a save (`src/proto/game/save.ts`, `GameSave`)
 
@@ -54,7 +55,7 @@ Not saved, because the game makes it again as it runs:
 
 ## Exactly as saved
 
-`game/save.test.ts` runs the starter town with two bus lines for five game days and saves part
+`game/save.test.ts` runs the traffic harness's town with two bus lines for five game days and saves part
 way through a day. It loads the save into a fresh world and runs both on for five more days. The
 economy's whole state, the purse, the buildings standing and the plots free must be identical. It
 also checks against a third copy that was never saved: saving mustn't change anything. It must
@@ -85,6 +86,6 @@ a small entry per town, for the lists.
 
 ## Cost
 
-In the starter town a save takes about 2 ms on the main thread, measured by `e2e/save.e2e.mjs`
-under SwiftShader. That covers the snapshot, the economy's round trip and IndexedDB copying it.
+A save takes about 2 ms on the main thread (measured on the old starter town by
+`e2e/save.e2e.mjs` under SwiftShader; the suite now runs on the region). That covers the snapshot, the economy's round trip and IndexedDB copying it.
 The write itself finishes in the background.

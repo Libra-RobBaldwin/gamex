@@ -5,8 +5,8 @@ stop only at its stops. People board, fares come in and running costs go out, an
 or shrinks with the service, shown on one town panel. Rail lines follow the same pattern. Nothing
 else starts until the bus loop plays well on a Pixel in portrait.
 
-Built from group A of the handover backlog. Scenery, Horley, the Real Town Plans page, ground
-polish and cyclists stay parked.
+Built from group A of the handover backlog. Scenery, Horley, ground polish and cyclists stay
+parked (the Real Town Plans page is gone: the game is one map).
 
 ## Milestones
 
