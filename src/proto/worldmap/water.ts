@@ -227,6 +227,8 @@ export class WorldWater extends MapWater {
   readonly world: WorldWaterSpec;
   // each river's half-width and level at each point
   private rh: Float32Array[]; private rl: Float32Array[];
+  // and its points, flat (for riverAt, which reads them the most)
+  private rx: Float64Array[]; private rz: Float64Array[];
   // the rivers' segments by bucket (river << 16 | segment), within their floor's reach
   private segs = new Map<number, number[]>();
   // distance to any water (m, negative in it) on the coarse grid: the quick "nowhere near"
@@ -243,6 +245,8 @@ export class WorldWater extends MapWater {
     for (const r of this.rivers) r.index = new LineIndex(r.spec.path, 250);
     this.rh = w.rivers.map((r) => Float32Array.from(r.widths, (v) => v / 2));
     this.rl = w.rivers.map((r) => Float32Array.from(r.levels ?? r.path.map(() => 0)));
+    this.rx = w.rivers.map((r) => Float64Array.from(r.path, (p) => p.x));
+    this.rz = w.rivers.map((r) => Float64Array.from(r.path, (p) => p.z));
     w.rivers.forEach((r, ri) => {
       for (let i = 1; i < r.path.length; i++) {
         const a = r.path[i - 1], b = r.path[i], R = this.rh[ri][i] + RIM + riverFloor(this.rh[ri][i]);
@@ -291,21 +295,21 @@ export class WorldWater extends MapWater {
   riverAt(x: number, z: number, reach = -1): { d: number; half: number; level: number; river: number } | null {
     const l = this.segs.get(key(Math.floor(x / G), Math.floor(z / G)));
     if (!l) return null;
-    let best: { d: number; half: number; level: number; river: number } | null = null, bs = Infinity;
-    for (const e of l) {
-      const ri = e >>> 16, i = e & 0xffff, P = this.world.rivers[ri].path, a = P[i - 1], b = P[i];
-      const ux = b.x - a.x, uz = b.z - a.z, L2 = ux * ux + uz * uz || 1;
-      const t = Math.max(0, Math.min(1, ((x - a.x) * ux + (z - a.z) * uz) / L2));
-      const d = Math.hypot(x - a.x - ux * t, z - a.z - uz * t);
-      const half = this.rh[ri][i - 1] + (this.rh[ri][i] - this.rh[ri][i - 1]) * t;
+    let bs = Infinity, bd = 0, bh = 0, bl = 0, br = -1;
+    for (let q = 0; q < l.length; q++) {
+      const e = l[q], ri = e >>> 16, i = e & 0xffff, X = this.rx[ri], Z = this.rz[ri], ax = X[i - 1], az = Z[i - 1];
+      const ux = X[i] - ax, uz = Z[i] - az, L2 = ux * ux + uz * uz || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * ux + (z - az) * uz) / L2));
+      const dx = x - ax - ux * t, dz = z - az - uz * t, d = Math.sqrt(dx * dx + dz * dz); // (not Math.hypot: 4× slower, and this is the hottest line in the ground)
+      const h = this.rh[ri], half = h[i - 1] + (h[i] - h[i - 1]) * t;
       const R = reach < 0 ? RIM + riverFloor(half) : reach;
       // (the one whose bank is nearest, as a share of its reach: a tributary's floor meets its river's)
       const s = (d - half) / R;
       if (d - half > R || s >= bs) continue;
-      bs = s;
-      best = { d, half, level: this.rl[ri][i - 1] + (this.rl[ri][i] - this.rl[ri][i - 1]) * t, river: ri };
+      const lv = this.rl[ri];
+      bs = s; bd = d; bh = half; bl = lv[i - 1] + (lv[i] - lv[i - 1]) * t; br = ri;
     }
-    return best;
+    return br < 0 ? null : { d: bd, half: bh, level: bl, river: br };
   }
   // The river width nearest a spot (for drawing), or 0 away from rivers.
   riverWidth(x: number, z: number, max = 80) {

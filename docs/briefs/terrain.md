@@ -59,12 +59,19 @@ or of a local build of the named commit.
   cut a canyon through it, up to 110 m deep in the mountains. It does this because its river surfaces may never
   climb downstream. The game doesn't draw those streams: it asks the water system for standing water only
   (`riverArea` 1e9). So only the library's demo and tests see it, and the demo avoids those spots.
+- **The land's `riverAt` is 2.7× faster** (on the branch, not yet pushed). It was slow near wide rivers because
+  of `Math.hypot`, not because of how many segments it looks at (about 21 per bucket). `Math.hypot` takes about
+  46 ns in V8, against 11 ns for `Math.sqrt(x * x + z * z)`.
+  - Measured on coast seed 7:
+    - heights for a 257² tile over the estuary take 56 ms, from 105 ms;
+    - that tile's water takes 170 ms, from 296 ms;
+    - other tiles are unchanged.
+  - Load to first frame didn't change measurably (estuary and coast, 13–19 s either way).
+  - Its answers change by less than 1e-9 m on 1.7% of 342,780 points checked, and never onto another river.
+  - **For other sessions:** `Math.hypot` in any hot loop costs the same.
 
 ## Not done
 
-- **A lead on speed:** the land's `riverAt` is slow in a wide estuary. There, each 100 m bucket lists about 230
-  segments of 4 m. So a water tile over the estuary on coast seed 7, tile (1, −11), takes 275 ms, against about
-  90 ms for other coast tiles. The game's tile builder asks for heights there too.
 - The coarse pass (about 0.65 s) runs on the main thread and in each tile worker. It isn't yet in a worker of
   its own.
 - Lowland maps have no lakes (reservoirs).
