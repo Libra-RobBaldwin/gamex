@@ -535,8 +535,7 @@ function showSite(s: IndustrySite) {
 }
 // the site under a tap: where the ray meets what's drawn (a tall building hides the ground behind it)
 function siteUnder(sx: number, sy: number, g: P) {
-  ray.setFromCamera(ndc(sx, sy), cam);
-  const hit = ray.intersectObjects(cityGroup.children, true)[0];
+  const hit = cityHit(sx, sy);
   return industries.at(hit ? { x: hit.point.x, z: hit.point.z } : g);
 }
 
@@ -1792,9 +1791,31 @@ const ray = new THREE.Raycaster();
 function ndc(sx: number, sy: number) {
   return new THREE.Vector2((sx / canvas.clientWidth) * 2 - 1, -(sy / canvas.clientHeight) * 2 + 1);
 }
-function pickBuilding(sx: number, sy: number) {
+// What the finger is on in the city's chunks (buildings and industry sites), or null. On a hilly
+// map every mesh is lifted by the ground's height in its shader (drape.ts), so a chunk's triangles
+// are still at height 0 while it's drawn, and its bounds widened, up on the hill: the ray would pass
+// through the drawn building and miss its triangles. Each chunk is put up where it's drawn for the
+// test (the ground's height under the finger, which is a building's within a metre or two), so the
+// ray meets its bounds and, brought down by the same amount, its triangles.
+const cityLift = new THREE.Matrix4();
+function cityHit(sx: number, sy: number) {
   ray.setFromCamera(ndc(sx, sy), cam);
-  const hit = ray.intersectObjects(cityGroup.children, true)[0];
+  if (!RELIEF) return ray.intersectObjects(cityGroup.children, true)[0] ?? null;
+  const g = nav.groundUnder(sx, sy);
+  cityLift.makeTranslation(0, RELIEF.heightAt(g.x, g.z), 0);
+  const hits: THREE.Intersection[] = [];
+  cityGroup.traverse((o) => {
+    if (!(o as THREE.Mesh).isMesh) return;
+    const was = o.matrixWorld.clone();
+    o.matrixWorld.multiplyMatrices(cityLift, was); // (drawn there, until the next frame puts it back)
+    o.raycast(ray, hits);
+    o.matrixWorld.copy(was);
+  });
+  hits.sort((a, b) => a.distance - b.distance);
+  return hits[0] ?? null;
+}
+function pickBuilding(sx: number, sy: number) {
+  const hit = cityHit(sx, sy);
   if (!hit) return null;
   // the building whose footprint (or failing that, plot) the hit is on
   const inside = (b: Built, pad: number, plot: boolean) => {

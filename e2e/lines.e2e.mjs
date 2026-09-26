@@ -124,8 +124,30 @@ await page.screenshot({ path: `${out}/m1-4-bus-sheet.png` });
 const title = await page.evaluate(() => document.querySelector('#sheet h2')?.textContent ?? '');
 console.log('sheet after tapping a bus:', title);
 if (!title.startsWith('Bus')) fail('tapping a bus did not open its sheet');
-await page.evaluate(() => window.proto.setSpeed(1));
 await page.tap('.close').catch(() => {});
+
+// tap a building: its sheet names it and says what it's used for (on the region's hills the chunks
+// are drawn lifted by the ground, and the tap has to find them where they're drawn)
+await page.evaluate(() => window.proto.focusOn({ x: 0, z: 0 }, 110));
+await page.waitForTimeout(1000);
+await settle();
+const spot = await page.evaluate(() => {
+  const P = window.proto;
+  // (clear of junctions, which a tap inspects first)
+  const nearJunction = (g) => [...P.junctions.values()].some((j) => { const n = P.net.node(j.node); return Math.hypot(n.x - g.x, n.z - g.z) < Math.max(10, j.R, P.net.nodeHalf(j.node)) + 2; });
+  for (let y = 160; y < 720; y += 40) for (let x = 40; x < 380; x += 40) { const b = P.pickBuilding(x, y); if (b && !b.region && !nearJunction(P.groundAt(x, y))) return { x, y, name: b.name }; }
+  return null;
+});
+console.log('a building under the finger:', JSON.stringify(spot));
+if (!spot) fail('no building can be picked in the town centre');
+else {
+  await page.touchscreen.tap(spot.x, spot.y);
+  const opened = await page.waitForFunction((n) => (document.querySelector('#sheet h2')?.textContent ?? '') === n && /Use/.test(document.querySelector('#sheet')?.textContent ?? ''), spot.name, { timeout: 10000 }).then(() => true, () => false);
+  await page.screenshot({ path: `${out}/m1-5-building-sheet.png` });
+  if (!opened) fail(`tapping a building did not open its sheet (${await page.evaluate(() => document.querySelector('#sheet h2')?.textContent ?? '')})`);
+  await page.tap('.close').catch(() => {});
+}
+await page.evaluate(() => window.proto.setSpeed(1));
 console.log('median frame ms (after)', (await frameMs()).toFixed(1));
 console.log('errors', JSON.stringify(errs));
 if (errs.length) fail('console errors');
