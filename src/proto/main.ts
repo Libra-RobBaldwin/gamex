@@ -867,7 +867,6 @@ function setMode(m: Mode) {
   mode = m;
   // each mode has its colourway (green roads, blue rail, orange stops); the HUD reads it from here
   document.body.dataset.mode = m === 'line' ? 'stop' : m;
-  if (m === 'rail' && opts.cross === 'junction') opts.cross = 'bridge';
   clearDraft();
 }
 function setKind(k: RoadKind) {
@@ -1104,7 +1103,7 @@ function bindRoadOptions(el: HTMLElement) {
     refreshOptions(); draftChanged();
     const sp = ROADS[opts.type].cls === 'rail' ? GRADES.rail : GRADES.road;
     hint({
-      junction: mode === 'rail' ? 'Track you cross joins up (points); roads are always bridged' : 'Roads you cross at the same height become junctions (they design themselves)',
+      junction: mode === 'rail' ? 'Track you cross joins up (points); a road you cross square-on gets a level crossing, up to 100 mph' : 'Roads you cross at the same height become junctions (they design themselves); a railway gets a level crossing',
       bridge: `Goes over what it crosses — ${sp.clear} m clearance over roads and rail, ${sp.water} m over water`,
       tunnel: `Goes under what it crosses — a cutting near the surface, a bored tunnel deeper, ${sp.under} m under water`,
     }[opts.cross]);
