@@ -81,18 +81,19 @@ export interface LandformParams {
   plateau: number; // flat-topped moorland (0–1)
   massif: number; // granite domes (0–1)
   glacial: number; // U-shaped valleys and ribbon lakes (0–1)
+  home: number; // m: how high the sides of the start town's valley rise above its floor, within a km or two
   sea: number; // how much of it the sea takes (0 inland; the share of the map's width, about)
   drown: number; // m: how far the sea has risen into its valleys
   rocks: Rock[]; // its rocks, low ground to high
 }
 export const LANDFORM_PARAMS: Record<Landform, LandformParams> = {
-  vale: { hills: 0.55, height: 130, swell: 0.8, ranges: 0.15, scarps: 0.35, plateau: 0, massif: 0, glacial: 0, sea: 0, drown: 0, rocks: ['clay', 'clay', 'sandstone', 'limestone'] },
-  downs: { hills: 0.3, height: 240, swell: 0.5, ranges: 0.1, scarps: 1, plateau: 0.2, massif: 0, glacial: 0, sea: 0.22, drown: 3, rocks: ['clay', 'chalk', 'chalk', 'chalk'] },
-  estuary: { hills: 0.4, height: 170, swell: 0.7, ranges: 0.25, scarps: 0.2, plateau: 0, massif: 0.1, glacial: 0, sea: 0.28, drown: 14, rocks: ['clay', 'sandstone', 'sandstone', 'granite'] },
-  uplands: { hills: 0.3, height: 520, swell: 0.6, ranges: 0.4, scarps: 0.5, plateau: 0.5, massif: 0.2, glacial: 0, sea: 0, drown: 0, rocks: ['sandstone', 'limestone', 'limestone', 'gritstone'] },
-  mountains: { hills: 0.25, height: 720, swell: 0.4, ranges: 1, scarps: 0.1, plateau: 0.15, massif: 0.5, glacial: 1, sea: 0, drown: 0, rocks: ['sandstone', 'slate', 'slate', 'granite'] },
-  coast: { hills: 0.3, height: 220, swell: 0.7, ranges: 0.35, scarps: 0.3, plateau: 0.2, massif: 0.25, glacial: 0, sea: 0.3, drown: 5, rocks: ['clay', 'sandstone', 'slate', 'granite'] },
-  islands: { hills: 0.35, height: 300, swell: 0.6, ranges: 0.45, scarps: 0.1, plateau: 0.2, massif: 0.45, glacial: 0.2, sea: 1, drown: 6, rocks: ['sandstone', 'slate', 'granite', 'granite'] },
+  vale: { home: 50, hills: 0.55, height: 130, swell: 0.8, ranges: 0.15, scarps: 0.35, plateau: 0, massif: 0, glacial: 0, sea: 0, drown: 0, rocks: ['clay', 'clay', 'sandstone', 'limestone'] },
+  downs: { home: 100, hills: 0.3, height: 240, swell: 0.5, ranges: 0.1, scarps: 1, plateau: 0.2, massif: 0, glacial: 0, sea: 0.22, drown: 3, rocks: ['clay', 'chalk', 'chalk', 'chalk'] },
+  estuary: { home: 75, hills: 0.4, height: 170, swell: 0.7, ranges: 0.25, scarps: 0.2, plateau: 0, massif: 0.1, glacial: 0, sea: 0.28, drown: 14, rocks: ['clay', 'sandstone', 'sandstone', 'granite'] },
+  uplands: { home: 160, hills: 0.3, height: 520, swell: 0.6, ranges: 0.4, scarps: 0.5, plateau: 0.5, massif: 0.2, glacial: 0, sea: 0, drown: 0, rocks: ['sandstone', 'limestone', 'limestone', 'gritstone'] },
+  mountains: { home: 280, hills: 0.25, height: 720, swell: 0.4, ranges: 1, scarps: 0.1, plateau: 0.15, massif: 0.5, glacial: 1, sea: 0, drown: 0, rocks: ['sandstone', 'slate', 'slate', 'granite'] },
+  coast: { home: 100, hills: 0.3, height: 220, swell: 0.7, ranges: 0.35, scarps: 0.3, plateau: 0.2, massif: 0.25, glacial: 0, sea: 0.3, drown: 5, rocks: ['clay', 'sandstone', 'slate', 'granite'] },
+  islands: { home: 80, hills: 0.35, height: 300, swell: 0.6, ranges: 0.45, scarps: 0.1, plateau: 0.2, massif: 0.45, glacial: 0.2, sea: 1, drown: 6, rocks: ['sandstone', 'slate', 'granite', 'granite'] },
 };
 // For OS's priors (region/priors.ts) or a test: change any of the tunables. The land is made again
 // only for maps made after this (coarseLand keeps no cache across a change).
@@ -223,6 +224,7 @@ function makeLand(o: LandOptions, half: number): CoarseLand {
   // ---- 2. the bones ----
   const A = F.height * hills;
   const strike = r() * Math.PI, cs = Math.cos(strike), sn = Math.sin(strike);
+  const homeA = r() * Math.PI, hc = Math.cos(homeA), hs = Math.sin(homeA); // (the start town's valley's line)
   const scarpN = F.scarps > 0.5 ? 2 : F.scarps > 0 ? 1 : 0, scarpAt = Array.from({ length: scarpN }, () => range(r, -0.35, 0.35) * W), scarpDir = Array.from({ length: scarpN }, () => (r() < 0.5 ? 1 : -1));
   const massifs = Array.from({ length: Math.round(F.massif * 4) }, () => ({ x: range(r, -0.8, 0.8) * half, z: range(r, -0.8, 0.8) * half, R: range(r, 2500, 6000) }));
   const h = new Float32Array(NN);
@@ -257,6 +259,13 @@ function makeLand(o: LandOptions, half: number): CoarseLand {
     else if (!islandsMode || islandsMode === 'none') e += A * 0.55 * (tiltA * x + tiltB * z + half * 1.2) / (2.4 * half);
     // plateaux: the tops cut flat (moorland), with a soft edge
     if (F.plateau) { const cap = A * (0.62 + 0.1 * N[8](x / 7000, z / 7000)); if (e > cap) e = cap + (e - cap) * (1 - 0.85 * F.plateau); }
+    // the start town's valley: its floor through the town, its sides rising within a kilometre or
+    // two either side (so the hills are there in the first view), easing back into the land by 8 km
+    {
+      const r0 = Math.hypot(x, z), across = Math.abs(-x * hs + z * hc + 320 * N[4](x / 3100 + 7.7, z / 3100 - 2.1));
+      const spur = 0.75 + 0.25 * N[5](x / 1300 - 4.4, z / 1300 + 9.2); // (spurs and re-entrants along its sides)
+      e += F.home * hills * spur * smooth(200, 1200, across) * (1 - smooth(4500, 8000, r0));
+    }
     // (the land stands a little up from the sea: cliffs and bluffs, with the valleys cut down through them)
     h[k] = Math.max(0.5, e + 4 + (8 + 0.12 * A) * Math.min(1, p * 3));
   }

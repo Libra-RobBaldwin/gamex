@@ -47,17 +47,17 @@ import { STD } from './standards';
 import { Loading } from './loading';
 import { Drape } from './drape';
 import { PlaceLabels, openPlaces } from './game/places';
-import { makeRelief, slopeLook } from './region/terrain';
+import { LIGHT_HILLS, makeRelief, slopeLook, SUN_HILLS, SWELL_AMP } from './region/terrain';
 import { RegionView, CELL as TILE_CELL, splitByTile } from './game/regionview'; // a big map streamed in tiles (docs/region.md R4)
 import { mapById as menuMap } from './maps';
 import { WorldGame } from './worldmap/game'; // a 50 km map: streamed scenery round a live play area (docs/streaming.md)
 import { layLiveRoutes } from './worldmap/live';
+import { LIVE_HALF } from './worldmap/plan';
 import { GROUND_SEED, countryFor, woodTrees } from './worldmap/country';
-import { isRealQuery, loadRealMap } from './real/load';
-import { clearOf, greenRegions, layReal, parkLeafiness, placeLots } from './real/lay';
+import { isOldRealSave, isRealQuery, realQuery, realWorldMap } from './real/worldmap';
+import { parkLeafiness } from './real/lay';
 import { DeadEndPaths } from './game/paths';
-import { LotStream, restorePack } from './real/live';
-import type { RealMap } from './real/map';
+import { LotStream, restorePack, type LivePack } from './real/live';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type MapSpec, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
 import { deleteSave, getSave, listSaves, putSave, saveSearch } from './game/savedb';
@@ -81,18 +81,20 @@ if (PARAMS.get('save')) {
 }
 // The map is data (region/mapspec.ts): ?map= picks it (a region with its options), the invented town by default.
 // A real region (public/regions, real/: Ordnance Survey data) is fetched first.
-const MAP_Q = SAVED ? new URLSearchParams(SAVED.map.query) : PARAMS;
-const MAP: MapSpec = isRealQuery(MAP_Q) ? await loadRealMap(MAP_Q) : mapFromQuery(MAP_Q);
-const REAL: { parks: Region[]; forms?: Map<number, { form: Form; slip: boolean }>; stream?: LotStream } | null = 'real' in MAP ? { parks: [] } : null; // (a real map: real/)
+// (a town saved on a real region before it was a 50 km map opens that region afresh: real/worldmap.ts)
+if (SAVED && isOldRealSave(SAVED.map.query)) { PARAMS.set('map', new URLSearchParams(SAVED.map.query).get('map')!); SAVED = null; saveProblem = 'That town was saved on the old 6 km map of this place · here it is as a 50 km map, new'; }
+const MAP_Q = SAVED ? new URLSearchParams(SAVED.map.query) : isRealQuery(PARAMS) ? realQuery(PARAMS) : PARAMS;
+const MAP: MapSpec = isRealQuery(MAP_Q) ? await realWorldMap(MAP_Q) : mapFromQuery(MAP_Q); // (a real region: the 50 km map from its bake, real/world.ts)
+const REAL: { parks: Region[]; forms?: Map<number, { form: Form; slip: boolean }>; stream?: LotStream } | null = 'livePack' in MAP ? { parks: [] } : null; // (a real region's live area, packed: real/live.ts)
 // (the query that makes this map, kept with its saves)
-const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(PARAMS); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
+const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(MAP_Q); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
 const WORLD = MAP.world ?? null; // (a 50 km map's plan: MAP is its live play area round the start town, the rest streams as scenery)
 if (WORLD) setRoundabouts('rare'); // (roundabouts where big roads meet, not at every lane junction: junction.ts)
 // (a generated map builds in its places' traditions; ?vern=cotswold, nordic, … sets one on any map)
 const VERN = new URLSearchParams(MAP_QUERY).get('vern') as Vern | null, vernForced = VERN && VERNS.includes(VERN) ? VERN : undefined;
 setParkedCars(false); // (parked cars are real ones: game/parking.ts)
-const vernReal = REAL ? REAL_VERN[(MAP as RealMap).real.region] : undefined; // (a real map: its region's tradition)
+const vernReal = MAP.world?.options.real ? REAL_VERN[MAP.world.options.real] : undefined; // (a real region: its tradition)
 if (MAP.generated || vernForced || vernReal) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.world?.settlements ?? MAP.settlements }, vernForced ?? vernReal)); // (a 50 km map: every place on it, as its scenery is dressed too: game/dress.ts)
 // the loading screen, while the map is built (it goes once the first frame is drawn)
 const loading = new Loading(MAP.name, mapLine());
@@ -133,8 +135,8 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(LOOK.sky);
 
-scene.add(new THREE.HemisphereLight('#e8f3ff', '#5d7040', 1.25));
-const sun = new THREE.DirectionalLight('#fff3dc', 2.3);
+scene.add(new THREE.HemisphereLight('#e8f3ff', '#5d7040', WORLD ? LIGHT_HILLS.hemi : 1.25)); // (a 50 km map: less sky light, more sun, so the hills' slopes show: region/terrain.ts)
+const sun = new THREE.DirectionalLight('#fff3dc', WORLD ? LIGHT_HILLS.sun : 2.3);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.bias = -0.0004;
@@ -155,7 +157,7 @@ const nav = new NavRig(cam, canvas, {
   view: { ...MAP.view, ...HOME },
   distance: 1200 * SCALE,
   limits: { hMin: 35, hMax: 900 * SCALE, elMin: EL_MIN, elMax: EL_MAX, bounds: { minX: -CAM, maxX: CAM, minZ: -CAM, maxZ: CAM } },
-  shadow: new SunFollow(sun, { dir: { x: -160, y: 260, z: 110 } }),
+  shadow: new SunFollow(sun, { dir: WORLD ? SUN_HILLS : { x: -160, y: 260, z: 110 } }), // (a 50 km map's sun lower in the south-west, so its hills show: region/terrain.ts)
 });
 const view = nav.view;
 // (and its depth range follows the zoom, so depth stays as fine as the town's)
@@ -174,10 +176,11 @@ gameGround.setStyle(LOOK);
 if (WORLD) gameGround.ground.uniforms.uSlope.value.set(...slopeLook()); // (the hills' rock and moor: region/terrain.ts, as the far tiles have it)
 if (WORLD?.terrain.geologyAt) setGeology(WORLD.terrain.geologyAt); // (the buildings' stone from the rock under them: worldmap/landform.ts)
 // (the water system's ground: flat, dipping into the lake's bed, in the plane's frame)
-const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined), gameGround.ground.material);
+const ground = new THREE.Mesh(gameWater.groundGeometry(gameWater.half * 2, RELIEF ?? undefined, WORLD ? SWELL_AMP : 0), gameGround.ground.material); // (a 50 km map's ground swells for the light: region/terrain.ts)
 ground.userData.noDrape = true; // (the hills are in its heights already)
 const drape = RELIEF ? new Drape(RELIEF) : null;
 setGround(RELIEF ? RELIEF.heightAt : null); // (buildings stand level on the hills, on plinths: buildgen.ts)
+if (drape && WORLD) drape.uniforms.uSwell.value = SWELL_AMP; // (and the fields drawn over it)
 if (RELIEF) nav.setGround(RELIEF.heightAt, [-1, RELIEF.max + 1]); // (the camera and taps find the ground on the hills)
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
@@ -239,7 +242,7 @@ const pines = new THREE.InstancedMesh(pineGeo, pineMat, MAXT);
 const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, MAXT);
 for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow = true; m.userData.surface = true; if (!BIG) scene.add(m); } // (a big map draws its woods a tile at a time: regionView; surface: the underground view needn't draw them twice)
 // a 50 km map: the rest of the map beyond the live area, streamed in tiles from workers (worldmap/)
-const worldGame = WORLD ? new WorldGame({ scene, plan: WORLD, field: RELIEF, drape, look: LOOK, trees: { crown: crownGeo, pine: pineGeo, trunk: trunkGeo, crownMat, pineMat, trunkMat }, live: SAVED?.world?.live ?? [WORLD.start] }) : null;
+const worldGame = WORLD ? new WorldGame({ scene, plan: WORLD, field: RELIEF, drape, look: LOOK, trees: { crown: crownGeo, pine: pineGeo, trunk: trunkGeo, crownMat, pineMat, trunkMat }, live: SAVED?.world?.live ?? (REAL ? WORLD.settlements.filter((st) => Math.max(Math.abs(st.x), Math.abs(st.z)) < LIVE_HALF).map((st) => st.id) : [WORLD.start]) }) : null; // (a real region's live area is all there from the start: its pack)
 const dresser = worldGame ? new Dresser({ scene, plan: WORLD!, make: generate, view: worldGame.view, trees: { crown: crownGeo, trunk: trunkGeo, crownMat, trunkMat } }) : null;
 
 // Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
@@ -672,12 +675,12 @@ function queuePlots(segs: number[]) {
 
 // ---------------- the map's roads and towns ----------------
 async function seedTown() {
-  // a real map (real/): its roads, railway and buildings as they are, through the OSM importer's
-  // stages; the junctions design themselves, and the town grows on plots between its buildings
-  const pack = (MAP as RealMap).real?.pack;
-  if (REAL && pack) {
-    // (packed ahead of time: the network restored, each junction designed in its packed form, every
-    // lot on the land, and the buildings near the start drawn now, the rest as the camera comes near)
+  // a real region's live area (real/live.ts): its roads, railway and buildings as they are, packed
+  // from the bake ahead of time (tools/os/pack.mjs): the network restored, each junction designed in
+  // its packed form, every lot on the land, and the buildings near the start drawn now, the rest as
+  // the camera comes near. (The rest of the 50 km streams as the plan's scenery, as a seeded map's.)
+  const pack = (MAP as { livePack?: LivePack }).livePack;
+  if (WORLD && REAL && pack) {
     await loading.stage('Laying out the roads and the railway', 0.08);
     const r = restorePack(net, pack);
     REAL.forms = r.forms;
@@ -689,24 +692,6 @@ async function seedTown() {
     const stream = (REAL.stream = new LotStream(r, (l) => spawnLot(l, false, true)));
     await loading.stage('Putting up the buildings round you', 0.3);
     stream.near(view.x, view.z, 1200);
-    return;
-  }
-  if (REAL) {
-    await loading.stage('Laying out the roads and the railway', 0.08);
-    const laid = layReal(net, (MAP as RealMap).real.overpass!, MAP.settlements);
-    commitRoads([...net.segs.keys()]);
-    footpaths.clear(net); // (the real buildings go up first; the dead ends' paths keep clear of them)
-    const lots = placeLots(net, laid.lots);
-    await loading.stage(`Putting up ${lots.length.toLocaleString('en-GB')} buildings`, 0.3);
-    const clear = clearOf(lots);
-    queue = queue.filter(clear);
-    for (const [i, l] of lots.entries()) {
-      net.lots.push(l);
-      spawnLot(l, false, true);
-      if (i % 64 === 0) await loading.tick(i / lots.length);
-    }
-    REAL!.parks = greenRegions(net, lots, (MAP as RealMap).real.green ?? []);
-    footpaths.update(net, net.lots);
     return;
   }
   // a generated region's railway first: a main line through the city and two towns, a branch to a
@@ -2287,7 +2272,7 @@ refreshTrees();
 // every building merged into its chunk before the first frame (not two a frame as it plays)
 await loading.stage('Finishing the buildings', 0.03);
 { const dirty = [...chunks.values()].filter((c) => c.dirty); for (const [i, c] of dirty.entries()) { rebuildChunk(c); await loading.tick(i / dirty.length); } }
-if (regionView) { await loading.stage('Drawing the map round you', 0.05); await regionView.settle(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), (f) => loading.tick(f)); }
+if (regionView) { await loading.stage('Drawing the map round you', 0.05); await regionView.settle(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), (f) => loading.tick(f), !!REAL); } // (a real region's whole live area, its far tiles too: thousands of building chunks drawn at once are too slow a frame to make them in)
 await loading.stage('Starting the traffic and the town', 0.15);
 
 // ---------------- clock and traffic ----------------
