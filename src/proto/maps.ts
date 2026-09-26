@@ -30,8 +30,10 @@ export interface MapInfo {
 
 export const MAPS: MapInfo[] = [
   { id: 'town', name: 'Starter town', blurb: 'A small market town by a lake, with a railway, an estate and room to grow.', icon: 'home', ready: true, guide: true },
-  { id: 'region', name: 'Region', blurb: 'Six kilometres of towns and villages, linked by motorways and railways.', icon: 'map', ready: true, setup: true },
-  { id: 'place', name: 'Real town', blurb: 'A real UK town from OpenStreetMap: Horley, or anywhere you pick.', icon: 'pin', ready: false, soon: 'Plans only for now', link: { href: './places.html', label: 'Open Real Town Plans' } },
+  { id: 'region', name: 'Region', blurb: 'Fifty kilometres of towns, villages, hills and coast, linked by motorways and railways.', icon: 'map', ready: true, setup: true },
+  { id: 'exe', name: 'Exeter', blurb: 'The real city and its river, railway and hills, from Ordnance Survey maps. The Exe estuary around it is 50 km of real Devon.', icon: 'building', ready: true },
+  { id: 'teme', name: 'Ludlow', blurb: 'A real market town on the Teme under its castle, from Ordnance Survey maps, in 50 km of the Shropshire Hills and the Welsh Marches.', icon: 'building', ready: true },
+  { id: 'place', name: 'Real town', blurb: 'A real UK town from OpenStreetMap, anywhere you pick.', icon: 'pin', ready: false, soon: 'Plans only for now', link: { href: './places.html', label: 'Open Real Town Plans' } },
   { id: 'sandbox', name: 'Sandbox', blurb: 'Empty land by the lake. Build a town from nothing.', icon: 'hammer', ready: true },
 ];
 

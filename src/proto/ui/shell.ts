@@ -42,6 +42,8 @@ export interface SheetSpec {
   fixed?: boolean;
   /** One row for the tabs and Close, no title block: for a sheet that should leave most of the map clear. */
   compact?: boolean;
+  /** A small card over the map (what a tap on something shows), not a sheet across the screen. */
+  peek?: boolean;
 }
 export interface BuildCategory { id: string; label: string; icon: Icon; disabled?: string; note?: string }
 export interface BuildItem {
@@ -168,6 +170,7 @@ export class Shell {
             <span class="sp"><span id="popc">${icon('users')}<b id="st-popc">0</b><i id="popdir"></i></span><span class="clk"><b id="st-clock">07:00</b><em id="st-rush"></em></span></span>
           </button>
           <span class="spd">
+            <button id="msbtn" hidden aria-label="Next milestone" title="Next milestone"><svg viewBox="0 0 44 44" aria-hidden="true"><circle class="trk" cx="22" cy="22" r="18"/><circle class="val" cx="22" cy="22" r="18" pathLength="100" stroke-dasharray="0 100"/></svg><b id="msn"></b></button>
             <button id="alertbtn" hidden aria-label="Alerts" title="Alerts">${icon('bell')}<b id="alertn"></b></button>
             <button id="sp-pause" aria-pressed="false" aria-label="Pause" title="Pause">${icon('pause')}</button>
             <button id="sp-rate" aria-label="Game speed 1×, tap for faster" title="Game speed">1×</button>
@@ -190,6 +193,7 @@ export class Shell {
         <div id="firstrun" role="status" hidden></div>
         <button id="goal" hidden></button>
       </div>
+      <a id="credit" target="_blank" rel="noopener" hidden></a>
       <section id="sheet" class="sheet facet" role="dialog" hidden></section>
       <div id="layers" class="facet" role="dialog" aria-label="Map layers" hidden></div>
       <div id="tpanel" class="facet" hidden></div>
@@ -207,6 +211,7 @@ export class Shell {
     this.$('#sp-pause').addEventListener('click', () => opts.onPause());
     this.$('#sp-rate').addEventListener('click', () => opts.onRate());
     this.$('#perfbtn').addEventListener('click', () => opts.onPerf());
+    this.$('#msbtn').addEventListener('click', () => this.ms?.onClick());
     this.$('#alertbtn').addEventListener('click', () => (this.sheet?.key === 'alerts' ? this.closeSheet() : this.openAlerts()));
     this.$('#townbtn').addEventListener('click', () => { this.toggleDrawer(false); opts.onTown?.(); });
     this.$('#ugbtn').addEventListener('click', () => opts.onUnderground?.());
@@ -281,6 +286,13 @@ export class Shell {
     d.className = dir > 0 ? 'up' : dir < 0 ? 'down' : '';
     d.textContent = dir > 0 ? '▲' : dir < 0 ? '▼' : '';
   }
+  /** A faint credit on the map (map data needs one wherever it's shown: a real region's OS data). */
+  setCredit(text: string | null, href: string | null = null) {
+    const a = this.$<HTMLAnchorElement>('#credit');
+    a.hidden = !text;
+    a.textContent = text ?? '';
+    if (href) a.href = href; else a.removeAttribute('href');
+  }
 
   /** Call when a map tap is about to open or change a sheet: swallows that tap's click. */
   guardTap(ms = 400) { this.guardUntil = performance.now() + ms; }
@@ -337,7 +349,7 @@ export class Shell {
     const keep = was && was.key === spec.key && !spec.fresh && body ? body.scrollTop : 0;
     this.sheet = spec;
     const compact = !!spec.compact && !!spec.tabs;
-    el.className = `sheet facet tone-${spec.tone ?? 'look'}${spec.fixed && !compact ? ' fixed' : ''}${compact ? ' compact' : ''}`;
+    el.className = `sheet facet tone-${spec.tone ?? 'look'}${spec.fixed && !compact ? ' fixed' : ''}${compact ? ' compact' : ''}${spec.peek ? ' peek' : ''}`;
     el.setAttribute('aria-label', spec.sub ? `${spec.title}: ${spec.sub}` : spec.title);
     const tabs = spec.tabs ? `<div class="stabs" role="tablist">${spec.tabs.map((t) => `<button role="tab" data-tab="${t.id}" aria-selected="${t.id === spec.tab}" ${t.disabled ? `disabled title="${esc(t.disabled)}"` : ''}>${t.icon ? icon(t.icon) : ''}<span>${esc(t.label)}</span></button>`).join('')}</div>` : '';
     const close = `<button class="close" aria-label="Close" title="Close">${icon('x')}</button>`;
@@ -379,11 +391,16 @@ export class Shell {
   }
   /** An info sheet for something tapped on the map: title, facts, a note and actions. */
   openInfo(i: Info) {
+    // (a tap on something shows a small card: its facts as label-over-value chips, two a row;
+    // a panel with its own content, like the town's, stays a full sheet)
+    const peek = !i.html;
     const stats = i.stats?.length ? `<div class="tiles">${i.stats.map(([k, v]) => `<div><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('')}</div>` : '';
-    const facts = stats + (i.facts?.length ? `<dl class="facts">${i.facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '');
+    const facts = stats + (i.facts?.length ? (peek
+      ? `<div class="chips">${i.facts.map(([k, v]) => `<div class="${v.length > 20 ? 'wide' : ''}"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`
+      : `<dl class="facts">${i.facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`) : '');
     const meter = i.meter === undefined ? '' : `<div class="meter" aria-hidden="true"><i style="width:${Math.round(Math.min(1, Math.max(0, i.meter)) * 100)}%"></i></div>`;
     return this.openSheet({
-      key: i.key ?? `info:${i.title}`, title: i.title, sub: i.sub, icon: i.icon ?? 'info', tone: i.tone, fresh: true,
+      key: i.key ?? `info:${i.title}`, title: i.title, sub: i.sub, icon: i.icon ?? 'info', tone: i.tone, fresh: true, peek,
       body: `${facts}${meter}${i.note ? `<p class="note">${esc(i.note)}</p>` : ''}${i.html ?? ''}`,
       actions: i.actions, onClose: i.onClose,
     });
@@ -453,6 +470,21 @@ export class Shell {
   }
   /** Re-render whichever transport tab is showing (e.g. after a vehicle is added). */
   refreshTransport() { if (this.sheet?.key.startsWith('transport:')) this.openTransport(this.ttab); }
+
+  // ---------------- milestones: a ring that fills towards the next one (like CS2's) ----------------
+  private ms: { n: number; frac: number; onClick: () => void } | null = null;
+  /** The ring by the speed buttons: milestone n, how far towards it (0..1); null hides it. */
+  setMilestone(m: { n: number; frac: number; title: string; onClick: () => void } | null) {
+    const b = this.$('#msbtn');
+    this.ms = m;
+    b.hidden = !m;
+    if (!m) return;
+    const pct = Math.round(Math.max(0, Math.min(1, m.frac)) * 100);
+    b.querySelector('.val')!.setAttribute('stroke-dasharray', `${pct} 100`);
+    this.$('#msn').textContent = String(m.n);
+    b.setAttribute('aria-label', `Milestone ${m.n}: ${m.title}, ${pct}%`);
+    b.title = `${m.title} · ${pct}%`;
+  }
 
   // ---------------- alerts: what wants attention, one tap from dealing with it ----------------
   private alerts: Alert[] = [];

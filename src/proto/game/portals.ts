@@ -19,9 +19,9 @@ import { pathLength, pointAt, type Lot, type Network, type P, type RSeg } from '
 import { icon } from '../ui/icons';
 import type { Shell } from '../ui/shell';
 import type { Railway } from '../rail/railway';
-import { beyondEdge } from './edge';
+import { beyondEdge, type EdgeCrossing } from './edge';
 
-export type PortalKind = 'motorway' | 'A' | 'B' | 'rail';
+export type PortalKind = 'motorway' | 'A' | 'B' | 'lane' | 'rail';
 export interface Portal {
   id: number; kind: PortalKind;
   side: number; // 0: east (+x), 1: south (+z), 2: west (-x), 3: north (-z)
@@ -42,14 +42,15 @@ const KINDS: Record<PortalKind, { people: number; jobs: number; miles: [number, 
   motorway: { people: 14000, jobs: 10000, miles: [16, 28], kmh: 105, word: 'Motorway' },
   A: { people: 5000, jobs: 3500, miles: [9, 17], kmh: 70, word: 'A road' },
   B: { people: 1600, jobs: 900, miles: [5, 9], kmh: 55, word: 'B road' },
+  lane: { people: 900, jobs: 450, miles: [3, 7], kmh: 45, word: 'Lane' },
   rail: { people: 18000, jobs: 14000, miles: [22, 40], kmh: 110, word: 'Railway' },
 };
 export const SIDE_WORD = ['east', 'south', 'west', 'north'];
 export const OUTSIDE_ID = 900; // the economy's towns off the map: OUTSIDE_ID + portal id
 const MERGE = 3000; // (m) ways off closer than this lead to the same place
 // vehicles a second each way at the busiest (demand() about 1.2), before the traffic setting
-const RATE: Record<PortalKind, number> = { motorway: 0.36, A: 0.07, B: 0.025, rail: 0 };
-const LORRIES: Record<PortalKind, number> = { motorway: 0.22, A: 0.1, B: 0.05, rail: 0 };
+const RATE: Record<PortalKind, number> = { motorway: 0.36, A: 0.07, B: 0.025, lane: 0.012, rail: 0 };
+const LORRIES: Record<PortalKind, number> = { motorway: 0.22, A: 0.1, B: 0.05, lane: 0.03, rail: 0 };
 const inward = (side: number): P => [{ x: -1, z: 0 }, { x: 0, z: -1 }, { x: 1, z: 0 }, { x: 0, z: 1 }][side];
 const sideOf = (p: P) => (Math.abs(p.x) >= Math.abs(p.z) ? (p.x >= 0 ? 0 : 2) : p.z >= 0 ? 1 : 3);
 const along = (side: number, p: P) => (side === 0 || side === 2 ? p.z : p.x);
@@ -101,13 +102,56 @@ export function findPortals(net: Network, edge: number, o: { seed: number; names
   });
   // Ways off close together (a railway and a motorway out the same way, within MERGE) lead to the same place:
   // the biggest way's (and the nearest of its miles)
-  const rank: Record<PortalKind, number> = { rail: 0, motorway: 1, A: 2, B: 3 };
+  const rank: Record<PortalKind, number> = { rail: 0, motorway: 1, A: 2, B: 3, lane: 4 };
   for (const p of [...out].sort((a, b) => rank[a.kind] - rank[b.kind])) {
     const q = out.find((x) => x !== p && x.town === x.id + OUTSIDE_ID && rank[x.kind] < rank[p.kind] && Math.hypot(x.at.x - p.at.x, x.at.z - p.at.z) < MERGE);
     if (q && p.town === p.id + OUTSIDE_ID) { p.place = q.place; p.town = q.town; p.people = q.people; p.jobs = q.jobs; }
   }
   return out;
 }
+// The ways off a 50 km map (worldmap/): where the plan's roads run off its rim (world50's exits:
+// `plan.roads` with no place at their far end) and its railways, if it has any. None of these are
+// on the game's Network unless the live area reaches the rim, so they carry no seg ids; their
+// traffic is the coarse economy's trips (worldmap/econ.ts). `names`: places beyond the rim, nearest
+// first for a point (a real map's, from OS Open Names); else they're made up, never a place on it.
+export interface WorldRoute { kind: 'motorway' | 'A' | 'B'; path: P[]; b: number | null }
+export function worldPortals(plan: { half: number; seed: number; roads: WorldRoute[]; rails?: { path: P[] }[]; settlements: { name: string }[] }, o: { seeded?: boolean; names?: (at: P) => string | undefined } = {}): Portal[] {
+  const E = plan.half, rand = rng(plan.seed * 7919 + 37), taken = new Set(plan.settlements.map((s) => s.name.toLowerCase()));
+  const out: Portal[] = [], used = new Set<string>();
+  const exit = (path: P[], kind: PortalKind) => {
+    // (the last point inside the rim, and where the path crosses it)
+    let i = path.length - 1;
+    while (i > 0 && Math.max(Math.abs(path[i].x), Math.abs(path[i].z)) >= E) i--;
+    if (i === path.length - 1) return;
+    const a = path[i], b = path[i + 1], ra = Math.max(Math.abs(a.x), Math.abs(a.z)), rb = Math.max(Math.abs(b.x), Math.abs(b.z)), t = (E - ra) / Math.max(1e-6, rb - ra);
+    const hit = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t }, side = sideOf(hit);
+    const at = { x: side === 0 ? E : side === 2 ? -E : hit.x, z: side === 1 ? E : side === 3 ? -E : hit.z };
+    const K = KINDS[kind], grow = Math.min(3, Math.max(1, Math.sqrt(E / 4500))), miles = Math.round(K.miles[0] + rand() * (K.miles[1] - K.miles[0]));
+    let route = '';
+    for (let k = 0; k < 20 && (kind === 'A' || kind === 'B' || kind === 'motorway') && (!route || used.has(route)); k++) route = kind === 'motorway' ? `M${Math.floor(4 + rand() * 60)}` : kind === 'A' ? `A${Math.floor(300 + rand() * 600)}` : `B${Math.floor(3000 + rand() * 1000)}`;
+    used.add(route);
+    // (the sign 80 m in along the road, on the left as you drive out)
+    const q = pointAt(path.slice(0, i + 1).concat([at]).reverse(), 80), n = inward(side);
+    const id = out.length + 1;
+    const place = o.names?.(at) ?? placeName(rand, kind === 'lane', taken);
+    out.push({
+      id, kind, side, at, look: { x: at.x + n.x * 220, z: at.z + n.z * 220 }, sign: { x: q.x - q.uz * 12, z: q.z + q.ux * 12 }, segs: [],
+      place, route, miles, people: Math.round(K.people * grow), jobs: Math.round(K.jobs * grow), offMin: (miles * 1.609 * 60) / K.kmh, town: OUTSIDE_ID + id,
+    });
+  };
+  // (on a seeded start the roads off the map are lanes, not B roads: worldmap/routes.ts)
+  for (const r of plan.roads) if (r.b === null) exit(r.path, r.kind === 'B' && o.seeded !== false ? 'lane' : r.kind);
+  for (const r of plan.rails ?? []) { exit(r.path, 'rail'); exit([...r.path].reverse(), 'rail'); }
+  return out;
+}
+// The cut face's roads and railways in section, where the ways off a 50 km map cross its rim.
+export function portalCrossings(portals: Portal[]): EdgeCrossing[] {
+  const W: Record<PortalKind, [number, number]> = { motorway: [18, 16], A: [6, 4], B: [5, 3.5], lane: [3.6, 2.6], rail: [5, 5] };
+  return portals.map((p) => ({ side: p.side, u: [-p.at.z, p.at.x, p.at.z, -p.at.x][p.side], half: W[p.kind][0], kerb: W[p.kind][1], y: 0, rail: p.kind === 'rail' }));
+}
+// Where the place a way off leads to stands: out beyond the rim, square to it, as far as the drive
+// there takes (a kilometre a minute over 1.3 times the straight line, as the economies reckon)
+export const offMapPoint = (p: Portal): P => { const n = inward(p.side), far = (p.offMin * 1000) / 1.3; return { x: p.at.x - n.x * far, z: p.at.z - n.z * far }; };
 // The places off the map, as the economy has them: one for each place the ways off lead to, out
 // beyond the way that reaches it by road as far as the drive there takes (the economy's cars go
 // about a kilometre a minute out of town, over 1.3 times the straight line), and `railMin` on by
@@ -133,7 +177,7 @@ export function outsidePlaces(portals: Portal[], _edge: number, stationAt: (id: 
   }
   return out;
 }
-export const portalTitle = (p: Portal) => (p.kind === 'rail' ? `Railway to ${p.place}` : `${p.route} to ${p.place}`);
+export const portalTitle = (p: Portal) => (p.kind === 'rail' ? `Railway to ${p.place}` : p.kind === 'lane' ? `Lane to ${p.place}` : `${p.route} to ${p.place}`);
 export const portalLine = (p: Portal) => `${KINDS[p.kind].word} off the map to the ${SIDE_WORD[p.side]} · ${p.miles} miles`;
 
 // ---------------- traffic in and out ----------------
@@ -271,7 +315,8 @@ const CSS = `
 .portal-sign .to small { font: 500 10.5px/1.1 'Archivo', system-ui, sans-serif; opacity: 0.9; margin-top: 2px; }
 .portal-sign.motorway { background: #1f5aa6; }
 .portal-sign.A { background: #0b6b3a; } .portal-sign.A .rt { color: #ffd200; }
-.portal-sign.B { background: #fff; color: #111; border-color: #111; }
+.portal-sign.B, .portal-sign.lane { background: #fff; color: #111; border-color: #111; }
+.portal-sign.lane .rt { display: none; } .portal-sign.lane .to { padding-left: 8px; }
 .portal-sign.rail { background: #fff; color: #0f3322; border-color: #0f3322; } .portal-sign.rail .rt { color: #c8102e; }
 .portal-sign::after { content: ''; position: absolute; left: calc(50% + var(--post, 0px)); bottom: -9px; width: 2px; height: 7px; margin-left: -1px; background: #fff; }
 `;
@@ -331,7 +376,7 @@ export function openPortal(shell: Shell, p: Portal, f: PortalFacts) {
   const n = (x: number) => Math.round(x).toLocaleString('en-GB');
   const rail = p.kind === 'rail';
   shell.openInfo({
-    key: `portal:${p.id}`, title: p.place, sub: `${rail ? 'Railway' : p.route} · ${SIDE_WORD[p.side]} · ${p.miles} miles off the map`, icon: rail ? 'train' : p.kind === 'motorway' ? 'motorway' : 'road',
+    key: `portal:${p.id}`, title: p.place, sub: `${rail ? 'Railway' : p.kind === 'lane' ? 'Lane' : p.route} · ${SIDE_WORD[p.side]} · ${p.miles} miles off the map`, icon: rail ? 'train' : p.kind === 'motorway' ? 'motorway' : 'road',
     stats: rail ? [['Trains running', n(f.trains ?? 0)], ['Trips a day', n(f.trips.all)], ['By your lines', n(f.trips.lines)]]
       : [['In a day', n(f.perDay)], ['Out a day', n(f.perDay)], ['Trips a day', n(f.trips.all)]],
     actions: f.action ? [{ label: f.action.label, icon: rail ? 'transport' : 'pin', kind: 'primary', onClick: f.action.onClick }] : undefined,

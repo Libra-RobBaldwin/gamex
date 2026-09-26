@@ -121,18 +121,23 @@ describe('a saved game', () => {
 describe('save versions', () => {
   const v1 = { v: 1, id: 'x' };
   it('reads a save of this version as it is, and copies it', () => {
-    const s = migrate(v1);
-    expect(s).toEqual(v1);
-    expect(s).not.toBe(v1);
-    expect(SAVE_VERSION).toBe(1);
-    expect(Object.keys(MIGRATIONS)).toEqual([]);
+    const v2 = { v: 2, id: 'x' };
+    const s = migrate(v2);
+    expect(s).toEqual(v2);
+    expect(s).not.toBe(v2);
+    expect(SAVE_VERSION).toBe(2);
+    expect(Object.keys(MIGRATIONS)).toEqual(['1']);
+  });
+  it('1 → 2: a region saved before 50 km maps opens on the 6 km region it was made on', () => {
+    expect(migrate({ v: 1, id: 'x', map: { id: 'region', query: 'map=region&seed=4' } })).toEqual({ v: 2, id: 'x', map: { id: 'region', query: 'map=region&seed=4&size=6' } });
+    expect(migrate({ v: 1, id: 'x', map: { id: 'town', query: 'map=town' } })).toEqual({ v: 2, id: 'x', map: { id: 'town', query: 'map=town' } });
   });
   it('brings an older save up to date one version at a time', () => {
     const steps = { 1: (s: Record<string, unknown>) => ({ ...s, speed: 1 }), 2: (s: Record<string, unknown>) => ({ ...s, rate: s.speed }) };
     expect(migrate(v1, steps, 3)).toEqual({ v: 3, id: 'x', speed: 1, rate: 1 });
   });
   it('refuses a save from a newer game, one with no way up, and one that is not a save', () => {
-    expect(() => migrate({ v: 2 })).toThrow(SaveError);
+    expect(() => migrate({ v: 3 })).toThrow(SaveError);
     expect(() => migrate({ v: 0 })).toThrow(/old version/);
     expect(() => migrate('hello')).toThrow(SaveError);
   });

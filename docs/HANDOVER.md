@@ -1,42 +1,86 @@
 # Handover: where everything stands
 
-## Latest: the map's edge, and ways off it (25 Sep 2026)
+## Latest: HUD, start menu and region work (25 Sep 2026)
 
-Session https://claude.ai/code/session_01RaCFKDUBqUzXicwJchgEUN, branch `claude/work-edge`, on the
-user's "the map edges look really bad... should be earth crust, and... out-of-map portals for
-traffic". **Read `docs/edge.md`.**
-- **Cut face on the region:** a slab of crust all round. The soil follows the ground, and below it
-  are rock beds folding across the country, down to a level base (about 2% of the half-width).
-  Water shows in section where a river or the sea meets the edge. It's cut exactly: no overlaps
-  (the test adds up the area) and no gap at the ground.
-- **Far country:** beyond and below the edge, a hazy lowland fading into the sky. It's a backdrop
-  that never hides the map, one draw call.
-- **Ways off:**
-  - the motorway runs on to the edge at both ends;
-  - an A road leaves by each other side;
-  - the main line runs through the face to a station 480 m past it, which isn't drawn.
-  Each leads to a named place off the map, with a UK-style sign; tapping the sign shows its flows.
-- **Traffic in and out** through them near the camera, by time of day: the motorway busiest and
-  mostly passing through. Vehicles are cut off cleanly at the face.
-- **The economy:** a town per place off the map, so trips to and from it are counted and good links
-  out to the edge carry them. A rail line can end at the station off the map. Another company's
-  trains run through between two railway portals.
-- **For 50 km maps** (the world50 session): the face is built a 1 km stretch at a time where
-  the camera can see it (`EdgeFace`), with one coarse face zoomed out. The far country and the
-  places' sizes scale with the half-width. The backdrop is a hazy lowland: an extended world at
-  the map's height was tried (`?far=level`), but it hid the cut (see edge.md).
-- **The portal card** is small: its name, three numbers, and at most one action.
-- **For the terrain session:**
-  - the face reads the ground through `surfaceAt` in `main.ts`
-    (`gameWater.shapes.ground + RELIEF.heightAt`), and `level` can be a function for a sea;
-  - `edgeDepth` and the far country scale with the ground's half-width.
-- **For the streaming session:** long roads are now cut into pieces of 450 m at most
-  (`splitLong`), because a road drawn by its middle's cell vanished when that cell was out of view.
-  The railway's straights are left whole, for stations. Every region road and track also gets a
-  point at least every 20 m (`densify`). With points 2 km apart, the drape drew the A and B roads
-  and the main line straight through the hills, under the ground.
+**PAUSED 25 Sep ~20:40 UTC for a credit limit. To resume:**
+1. All six region sessions were told to commit and push, write a note on where they stopped and
+   stop. Their check-ins were disabled, not deleted: `trig_01AyapkhwsVcMhAMAKQ9caju` (#42),
+   `trig_01Ek1SW3wQooCqKrBfHwT3j9` (#44), `trig_013GtCHP7rnmTLWuPbJjyB2r` (#43) and
+   `trig_01LkUZuKGwCSYrq9QoDTE41o` (#45). The coordinator's check-in is
+   `trig_01UboPgMjMc2T4TShqSC9vTi`. Re-enable them, or message each session to carry on.
+2. **Merged and live at the pause:** world50 (#42), vernacular (#45) and OS (#43, adds Exeter and
+   Ludlow). All tests were green. Exeter took 142 s to load under SwiftShader; check it on a phone.
+   **Still to merge:** countryside (#41) and edge (#44). Both were built on the old 6 km region's
+   `BIG` path, which world50's `WORLD` path has replaced for the region, so they conflict in
+   `main.ts` and `ground/game.ts`. Port them onto `WORLD`, not a text merge. Terrain has no branch
+   yet. The loop, lines, save, stations and rail suites take the address as their first argument
+   (`node e2e/loop.e2e.mjs http://localhost:5180/?map=town`). The menu suite takes it from `BASE=`.
+3. **The user's rules for the 50 km world (25 Sep, at the pause). Do these first, in the port of
+   countryside and edge:**
+   - **One field style everywhere:** straight-edged hedged fields in farm blocks, as world50
+     has. No curvy or warped fields left in any path (the region, the 50 km world, the town's
+     ground). Remove the old curvy generator, don't just hide it.
+   - **Every road respects the terrain, not only lanes:** motorways, A roads and railways too.
+     Follow valleys and contours, keep within a grade limit, curve round hills, woods and water
+     in sweeping bends, and bridge or tunnel only where it pays. No ruler-straight roads across
+     hills.
+   - **The whole map is playable:** seed towns, villages and industries right out to the corners
+     and edges, so no part of the 50 km is empty (for example a minimum per 10 km square,
+     scaled by terrain: fewer in mountains, some on the coast). Link them all into the road and
+     rail network, and have the edge portals carry the traffic that runs on off the map.
+   - **Also (the user, 25 Sep, late):**
+     - Fold the OS real regions into the Region flow as the alternative to a seeded map. Both use
+       one WORLD pipeline.
+     - Seeded maps as good as real ones, by learning from the OS data.
+     - Shopping complexes of variable size in town centres. Each is one coherent building with
+       its own walls, roof and look, not 20 buildings squashed together or overlapping.
+     - Less ugly buildings.
+   - **Overnight run:** every session writes `docs/briefs/<name>.md` first, listing everything asked
+     of it by the coordinator and by the user directly. At 01:45 UTC the coordinator dovetails the
+     briefs into `docs/briefs/PLAN.md` (the ownership map, requests, interfaces and merge order),
+     then merges hourly. Morning summary at 06:15 UTC.
+4. Then wire terrain's landform presets and islands into the region setup's first step, and do
+   HUD phase 3 (small tap cards for a bus, stop or building).
+5. The user's home town is still named in the repo in a few places, from before the privacy
+   rule (region names, vehicle brands, tests, docs). It's gone from the menu. Ask the user
+   before removing the rest.
 
-## Latest: saving and loading (24 Sep 2026, night)
+Coordinator: https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. Integration branch as before.
+- **HUD, second pass (`ui/shell.ts`, `proto.css`):** a rounded floating dock with a Build button
+  in the middle, and a status pill showing money with its trend, population, the clock and speed.
+  It also has an alert bell (`setAlerts`), a milestone ring that pays grants (`MILESTONES` in
+  `main.ts`, `purse.grant`), a Stats tab (money, lines, towns) and small cards when you tap
+  something. Overlays are Stop coverage and Traffic.
+- **Bus stops reach a three-minute walk (250 m), not 400 m:** `STOP_WALK_M` in `game/econ.ts`, the
+  same in the coverage overlay. Stations stay at 800 m. The loop e2e's profit is unchanged.
+- **Roundabout entries** have painted chevrons, not green splitter islands (`jshape.ts`).
+- **Start menu (`src/app`):**
+  - Home is a picture of the starter town, drifting slowly (`src/app/art/`, taken from the game
+    with `e2e/.scratch/art.mjs`, a local script; retake the pictures when the look changes).
+  - Over it: a Continue card for the last town with its map's picture, New game as the big
+    button, and a row of tiles (How to play, Library, Settings, About).
+  - New game has a card per map with its picture. Loading shows the map's picture and a tip.
+  - Region setup asks one question per step, then shows a summary (`regionsetup.ts`).
+  - Everything is rounded, like the HUD.
+- **Six region sessions (started 25 Sep afternoon):** terrain, countryside (PR #41), edge,
+  world50 (50 km maps, PR #42), OS open data (PR #43) and vernacular buildings. Merge each
+  into the integration branch as it's ready, and test.
+## Latest: buildings fit their place, and parked cars are real (25 Sep 2026)
+
+Branch `claude/work-vernacular`. **Read `docs/vernacular.md` and `docs/parking.md`.**
+- **Regional buildings:** on generated maps, houses, terraces, shops and village buildings are
+  built in their settlement's tradition, from the rock (Cotswold, Pennine, Lakeland, Cornish,
+  Scottish, flint, Midland brick, Wealden, Marches) or the climate (Nordic under snow, desert earth,
+  Mediterranean). The age of the street comes from its distance to the centre. `vernacular.ts` is
+  pure and takes the terrain's geology through `setGeology`. The town map is unchanged by it;
+  `?vern=` forces a tradition. Gallery: `/buildings-demo.html`.
+- **Finish, everywhere:** fascias, gutters, ridges, plinths, ambient occlusion, doors set into
+  their walls, textured garden walls and hedges, and layered garden trees.
+- **Parking:** drives and car parks hold the traffic's own vehicles (no extra draw calls). Trips end
+  by driving into a free space and start by pulling out of one. Plots fill and empty with the hour
+  off screen.
+
+## Earlier: saving and loading (24 Sep 2026, night)
 
 Session https://claude.ai/code/session_01PQ93PyRyTyLaPDoybw2MMw. **Read `docs/save.md`.**
 - **Save and load work:**

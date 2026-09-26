@@ -15,6 +15,25 @@ Code:
   `rail/game.ts` and `game/regionview.ts`. The town (`?map=town`) keeps its old slice, with the new
   rock beds, and nothing else changes there.
 
+## On the 50 km map (WORLD)
+
+- **The rim:** the crust stands at the map's real rim, `WORLD.half` (25 km).
+  - `EdgeFace` is its own group, reading the whole map's height field (the drape's field, which
+    world50 fills in from a worker). It's built once that's in (`worldGame.view.ready`).
+  - It stands 0.4 m out past the rim, clear of the scenery tiles' skirts, which lie in the same
+    plane there.
+  - The hazy far country lies beyond it.
+- **Portals** (`worldPortals`) are where world50's plan runs roads off the rim: `plan.roads` with no
+  place at their far end, plus its railways if it has any.
+  - A seeded start has lanes only, so these are lanes: white signs with no number.
+  - They're shown in section in the face (`portalCrossings`).
+  - A real map's names can be passed in (`names`, from OS Open Names).
+- **Trips to places off the map** come from world50's coarse economy (`CoarseEconomy.tripsOff`, a
+  small hook in `worldmap/econ.ts`). Each place stands beyond its portal, as far as the drive takes
+  (`offMapPoint`).
+- **Visible portal traffic** runs only where a portal is on the game's own roads, which on WORLD
+  means where the live area reaches the rim. That doesn't happen yet, so none runs.
+
 ## The cut face (`edgeMesh`)
 
 - **Layers:** turf, topsoil and subsoil hang from the ground. Below them the rock lies in beds

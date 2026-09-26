@@ -282,7 +282,12 @@ export class Network {
     }
     for (const f of C.fills) if (f) polys.push(f);
     for (const h of C.heads) if (h) polys.push(...h.claims);
-    this.land.claim(`road:${s.id}`, 'road', polys);
+    // (at a very sharp join the offsets can shoot off: a piece reaching far past the road's box is
+    // a spike, not land, and is left out: real track layouts, real/lay.ts, have such joins)
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const p of path) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
+    const M = 80, sane = (q: P[]) => q.every((p) => p.x > x0 - M && p.x < x1 + M && p.z > z0 - M && p.z < z1 + M);
+    this.land.claim(`road:${s.id}`, 'road', polys.every(sane) ? polys : polys.filter(sane));
   }
   // Is this polygon clear of every road, junction and island (bar the ones `skip` excuses)?
   clearOfWorks(poly: P[], skip?: (c: Claim) => boolean) { return this.land.free(poly, skip); }

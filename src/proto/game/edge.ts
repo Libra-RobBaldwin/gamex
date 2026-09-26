@@ -73,6 +73,7 @@ export interface EdgeOpts {
   // the water's level where the ground dips below it (a number, or per point: null where there's none)
   level?: number | ((x: number, z: number) => number | null);
   span?: { side: number; u0: number; u1: number }; // just this stretch of one side (EdgeFace builds it a stretch at a time)
+  out?: number; // (m) stood this far out past the edge: clear of anything else drawn right on it (a 50 km map's scenery tiles' skirts)
   coarse?: boolean; // columns only on the grid, however the ground bends between (seen from far off)
   material?: THREE.Material; // (shared by every stretch)
 }
@@ -101,8 +102,8 @@ export function edgeMesh(edge: number, crossings: EdgeCrossing[] = [], ground: (
   // a quad on side k from u0 to u1, heights ya0..ya1 at u0 and yb0..yb1 at u1
   const quad = (k: number, u0: number, u1: number, ya0: number, ya1: number, yb0: number, yb1: number, hex: string, hex2?: string, sa = 0, sb = 0) => {
     if (ya1 - ya0 < 1e-4 && yb1 - yb0 < 1e-4) return;
-    const [x0, z0] = P(k, u0), [x1, z1] = P(k, u1);
-    const a: number[] = [x0, ya0, z0], b = [x1, yb0, z1], e = [x1, yb1, z1], f = [x0, ya1, z0];
+    const [ox, oz] = out(k, opts.out ?? 0), [x0, z0] = P(k, u0), [x1, z1] = P(k, u1);
+    const a: number[] = [x0 + ox, ya0, z0 + oz], b = [x1 + ox, yb0, z1 + oz], e = [x1 + ox, yb1, z1 + oz], f = [x0 + ox, ya1, z0 + oz];
     for (const v of [a, b, e, a, e, f]) pos.push(v[0], v[1], v[2]);
     // lit as if tipped back towards the sky a little: a face turned from the sun would otherwise
     // be nearly black, and the slice should read from every side

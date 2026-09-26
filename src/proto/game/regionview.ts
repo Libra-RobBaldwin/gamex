@@ -204,7 +204,7 @@ export class RegionView {
         const im = new THREE.InstancedMesh(g, mat, arr.length);
         arr.forEach((x, i) => { place(x); im.setMatrixAt(i, m4.compose(v, q, sc)); });
         im.castShadow = true; im.receiveShadow = true;
-        im.computeBoundingSphere();
+        im.computeBoundingSphere(); im.userData.cull = true; // (its instances stay put: drape.ts keeps it culled)
         im.visible = false;
         this.root.add(im);
         t.trees[level].push(im);
@@ -217,10 +217,13 @@ export class RegionView {
     this.showTrees(t);
   }
   private showTrees(t: Tile) {
-    const low = t.shown === 'far';
-    for (const m of t.trees.full) m.visible = t.shown !== null && !low;
-    for (const m of t.trees.low) m.visible = t.shown !== null && low;
+    const low = t.shown === 'far', off = this.treesOff;
+    for (const m of t.trees.full) m.visible = t.shown !== null && !low && !off;
+    for (const m of t.trees.low) m.visible = t.shown !== null && low && !off;
   }
+  // (from this far out a tree is less than a pixel: the woods are the ground's own colour; a 50 km map's)
+  treesUntil = Infinity;
+  private treesOff = false;
 
   private tile(key: TileKey): Tile {
     let t = this.tiles.get(key);
@@ -256,6 +259,8 @@ export class RegionView {
     this.frameStart = performance.now();
     this.budget = budgetMs;
     this.band = this.bandFor(v.h);
+    const off = v.h > this.treesUntil;
+    if (off !== this.treesOff) { this.treesOff = off; for (const t of this.tiles.values()) this.showTrees(t); }
     const rings = this.ringsFor(this.band, this.reach(v, aspect));
     (this.stream.rings as Ring[]).splice(0, this.stream.rings.length, ...rings);
     // (the look-at point, the zoom as its span so a zoom re-picks the levels, and which way it looks)

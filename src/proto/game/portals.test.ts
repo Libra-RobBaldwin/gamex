@@ -99,3 +99,36 @@ describe('ways off the map', () => {
     expect(far.stats.in + far.stats.out).toBe(0);
   }, 60_000);
 });
+
+describe('ways off a 50 km map', () => {
+  // (a plan's roads as worldmap/routes.ts gives them: lanes off the edges have no place at their far end)
+  const H = 25000, lane = (from: { x: number; z: number }, to: { x: number; z: number }) => { const path = []; for (let t = 0; t <= 1.0001; t += 0.01) path.push({ x: from.x + (to.x - from.x) * t, z: from.z + (to.z - from.z) * t }); return path; };
+  const plan = {
+    half: H, seed: 3, settlements: [{ name: 'Oakby' }, { name: 'Fenmere' }],
+    roads: [
+      { kind: 'B' as const, path: lane({ x: 20000, z: 1000 }, { x: H + 30, z: 1500 }), b: null },
+      { kind: 'B' as const, path: lane({ x: -3000, z: -20000 }, { x: -3200, z: -H - 30 }), b: null },
+      { kind: 'B' as const, path: lane({ x: 0, z: 0 }, { x: 4000, z: 0 }), b: 1 },
+    ],
+  };
+  it('one for each road that runs off the rim, on the rim, as lanes on a seeded start, with names of their own', async () => {
+    const { worldPortals, portalCrossings, offMapPoint } = await import('./portals');
+    const ps = worldPortals(plan);
+    expect(ps.length).toBe(2);
+    expect(ps.map((p) => p.side).sort()).toEqual([0, 3]);
+    for (const p of ps) {
+      expect(p.kind).toBe('lane');
+      expect(Math.max(Math.abs(p.at.x), Math.abs(p.at.z))).toBeCloseTo(H, 5);
+      expect(['Oakby', 'Fenmere']).not.toContain(p.place);
+      expect(Math.max(Math.abs(p.sign.x), Math.abs(p.sign.z))).toBeLessThan(H); // (its sign on the map)
+      const o = offMapPoint(p);
+      expect(Math.max(Math.abs(o.x), Math.abs(o.z))).toBeGreaterThan(H); // (the place it leads to, beyond)
+    }
+    expect(ps[0].at.z).toBeCloseTo(1000 + 500 * ((H - 20000) / (H + 30 - 20000)), 0);
+    const xs = portalCrossings(ps);
+    expect(xs.length).toBe(2);
+    expect(xs.every((x) => !x.rail && x.half > x.kerb)).toBe(true);
+    // (a real map's names, where it gives them)
+    expect(worldPortals(plan, { names: () => 'Taunton' })[0].place).toBe('Taunton');
+  });
+});
