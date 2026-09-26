@@ -101,19 +101,37 @@ two levels:
 
 1. **The world plan** (`src/proto/worldmap/plan.ts`, pure, about 1.2 s): the coarse facts of the whole map.
    - **Where things are.** The places: the start town at (0, 0), two cities, a dozen market towns and
-     150 or so villages, each with its size, kind, name and seed.
+     150 or so villages, each with its size, kind, name and seed. The whole map is playable: after
+     the main placement, every 10 km square gets places in proportion to its land (`squareQuota`:
+     none only for the open sea), and a square with a coast gets villages along it.
    - **The water.** The coast along one edge with the sea beyond, rivers widening on their way down
      to it, and lakes (`water.ts`). A lake is never a circle: it's a chain of overlapping bowls of
      different sizes along a wandering line, with a bay or two off it.
    - **The roads the map starts with.** Only minor roads between places (`routes.ts`): each place
      joined to its neighbours, and a few lanes off the map's edges. There are no motorways, A roads
      or railways at the start: those are the player's to build. (`planRoutes(c, true)` still lays the
-     old trunk network, for maps that want one.)
+     trunk network, for maps that want one, and it's the same planner the player's own big roads
+     should use.)
 
      Each lane is found over the land: the cheapest path over a 125 m grid, where steep ground is
      dear, a river crossing dearer, and the sea, lakes and places it doesn't serve are out of bounds.
      Slow noise makes it wander as old lanes do. It's then smoothed into bends. A lane that would
      meet another side by side at a place forks off it square instead.
+
+     The trunk network is found the same way, each kind with its own `PROFILES` entry:
+
+     | Kind | Grade | Wander | Bridge cost | Keeps from places | Bends |
+     |---|---|---|---|---|---|
+     | Lane | 5% (soft: it just climbs) | full | 900 | 60 m | ~350 m |
+     | A road | 6% | 0.7 | 1,600 | 150 m | ~600 m |
+     | Motorway | 4% | 0.25 | 2,500 | 350 m, and out of the live area | ~1.1 km |
+     | Railway | 2% | 0.15 | 2,500 | 120 m | ~700 m |
+
+     A route steeper than its grade has to cut or tunnel, at `dig` times the cost a metre, so it
+     goes round a hill unless going through pays. A long move over the grid counts any crest it
+     passes over. Measured on seed 42: motorways are over 4% on about 3% of their length. Railways
+     are over 2% on about 20%, against 28% for the land as a whole; those stretches are for
+     cuttings and embankments.
    - **The hills.** A function of x, z (`terrain.ts`): broad downs up to about 120 m on a rolling map,
      and rolling hills of up to about 40 m on them.
 2. **Tiles** (`tilegen.ts`, pure, in workers: `tile.worker.ts`): everything fine, made a tile at a time as the
