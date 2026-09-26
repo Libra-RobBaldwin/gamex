@@ -1,7 +1,7 @@
 # Terrain library
 
-`src/proto/terrain/` gives the game real ground: a height source (procedural or real
-elevation data), road and rail profiles that cut, fill, bridge and tunnel through it,
+`src/proto/terrain/` gives the game real ground: a height source (the 50 km land, real
+elevation data, or any function), road and rail profiles that cut, fill, bridge and tunnel through it,
 building platforms on slopes, and tile meshes with levels of detail. Nothing in it touches
 three.js or the DOM. It's all pure functions of its inputs, so any of it can run in a Web
 Worker. Import everything from `./terrain` (`index.ts`).
@@ -18,7 +18,7 @@ steps below are done.
 - Gradients are rise over run (0.08 is 8%), as in `catalog.ts`.
 - Costs are in the catalogue's money. A street costs about 250 a metre to build.
 
-## 1. Height sources (`height.ts`, `procedural.ts`, `raster.ts`)
+## 1. Height sources (`height.ts`, `raster.ts`)
 
 ```ts
 interface HeightSource {
@@ -36,7 +36,7 @@ interface GridSpec { x0, z0, step, nx, nz }    // data[j * nx + i] is at (x0 + i
 |---|---|
 | `FlatHeight(h, isWater?)` | Level ground. `new FlatHeight(0, (x, z) => isWater({x, z}))` is today's world exactly, which makes it a safe first step. |
 | `FnHeight(f, water?)` | Any function. Handy for tests and hand-made scenes. |
-| `ProceduralTerrain(params)` | Seeded UK-like terrain (see below). |
+| `landSource(opts).source` | The game's 50 km land (`worldmap/land.ts`, see below). |
 | `TerrariumHeight(frame, zoom)` | Mapzen/AWS Terrain Tiles. `addTile(tx, ty, rgba)` takes a decoded PNG's RGBA bytes. `tilesFor(box)` says which tiles to fetch. |
 | `GridHeight(e0, n0)` | OS Terrain 50 or any ESRI ASCII grid on the British National Grid. `addAscii(text)`. World (0, 0) is at (E e0, N n0). |
 | `CachedHeight(src, size = 250, res = 2)` | Put this in front of any source. It fills a grid per 250 m tile with `sample()`, so `heightAt` costs about 45 ns. Call `invalidate(box)` after edits. |
@@ -47,30 +47,20 @@ x, z)` (bilinear), `decodeTerrarium` / `encodeTerrarium` / `decodeTerrainRgb`,
 `parseAsciiGrid`, `LocalFrame(lat0, lon0)` (local metres ↔ latitude/longitude),
 `mercatorPixel`, `tileFor`.
 
-### Procedural terrain
+### The 50 km land
+
+The game has one height generator, the 50 km map's (`worldmap/landform.ts` and
+`worldmap/terrain.ts`; docs/briefs/terrain.md). `landSource` in `worldmap/land.ts` wraps it as a
+height source, for this library's and the water library's own tests, benchmarks and demo:
 
 ```ts
-new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 })
+const { source, terrain, water } = landSource({ landform: 'uplands', seed: 7 });
 ```
 
-Presets: `flat`, `lowland` (Fens), `rolling` (Cotswolds, the default), `upland` (Peak
-District), `mountain` (Lake District). The parameters are all in metres except where noted:
-
-| Param | Meaning |
-|---|---|
-| `seed` | Everything follows from it. |
-| `scale` | Horizontal stretch (2 = everything twice as broad). Keep it at 0.5 or more. |
-| `baseHeight`, `base` | Floor of the regional surface, and its broad swell. |
-| `hills` | Rolling-hill amplitude. |
-| `upland` (0–1), `mountains` | Share of upland, and ridged relief at its heart. |
-| `warp` | How far the domain is pushed about (meanders, spurs). |
-| `rivers` (density), `riverWidth`, `riverDepth`, `valleyWidth` | River valleys. |
-| `lakes` (0–1) | Chance of a lake per 2 km cell. |
-| `sea` | Sea level, or `null` for an inland map. |
-
-The terrain is deterministic and seamless. The same seed gives the same height at the same
-point, whichever tile asks first. `sampleWater(grid)` gives the water surface on a grid
-(NaN where dry).
+`landform` is one of the presets in `region/options.ts` (`vale`, `downs`, `estuary`, `uplands`,
+`mountains`, `coast`, `islands`), and any other region option goes over it. Each land is made
+once (about a second) and kept. Out at sea the source's ground falls below 0, so a water system
+with `{ sea: 0 }` finds the land's sea.
 
 ## 2. Road and rail profiles (`align.ts`, `earthworks.ts`)
 
@@ -150,10 +140,10 @@ screen.
 ### Step 1: one height source in `main.ts`
 
 ```ts
-import { CachedHeight, FlatHeight, ProceduralTerrain, TERRAIN_PRESETS } from './terrain';
+import { CachedHeight, FlatHeight, FnHeight } from './terrain';
 // first: today's world, exactly
 const terrain = new FlatHeight(0, (x, z) => isWater({ x, z }), 0.1);
-// later: const terrain = new CachedHeight(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }));
+// later: const terrain = new CachedHeight(new FnHeight(plan.terrain.heightAt));
 ```
 
 Pass it into `new Network(...)`. Keep the `isWater(p)` constructor argument for now as
@@ -283,7 +273,7 @@ earthworkPolys(route, secs).forEach((e, k) => land.claim(`earth:${seg.id}:${k}`,
   5. Call `cache.invalidate(box)`.
 - **OS Terrain 50:** `const src = new GridHeight(e0, n0)`, then `src.addAscii(text)` for
   each 10 km tile.
-- Both go behind `CachedHeight` like the procedural terrain. Everything above is unchanged.
+- Both go behind `CachedHeight` like any other source. Everything above is unchanged.
 - Inland water isn't in elevation data. Pass `water: (x, z) => …` built from OpenStreetMap
   water polygons.
 

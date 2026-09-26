@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FnHeight, ProceduralTerrain, TERRAIN_PRESETS } from '../terrain';
+import { FnHeight } from '../terrain';
+import { landSource } from '../worldmap/land';
 import { Land, pointInPoly, type Owner } from '../land';
 import { claimWater, contours, waterClaims } from './claims';
 import { WaterSystem } from './water';
@@ -23,8 +24,8 @@ describe('contours', () => {
 
 describe('water claims', () => {
   it('cover the water and nothing else, and keep plots off it through the land registry', () => {
-    const w = new WaterSystem(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }));
-    const t = w.tile(2, 4), g = t.g;
+    const w = new WaterSystem(landSource({ landform: 'uplands', seed: 7 }).source);
+    const t = w.tile(0, 0), g = t.g;
     const cs = waterClaims(t);
     expect(cs.length).toBeGreaterThan(0);
     const polys = cs.flatMap((c) => c.polys);

@@ -36,7 +36,7 @@ export const NAV: Record<RiverClass | 'lake' | 'sea', NavRule> = {
 };
 
 export interface WaterParams {
-  sea: number | null; // sea level; defaults to the procedural terrain's, or none
+  sea: number | null; // sea level, or none
   // hydrology works on regions: `region` metres a side (a whole number of 1 km tiles), with
   // `margin` metres of ground either side so catchments reaching in from outside are counted,
   // on a grid `cell` metres apart

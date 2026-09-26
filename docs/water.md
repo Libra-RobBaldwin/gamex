@@ -6,8 +6,8 @@ ground: no circles, nothing placed by hand. The core is pure functions with no t
 so it can run in a Web Worker. Import it from `./water` (`index.ts`); the three.js materials are
 in `./water/material` so a worker never pulls in three.
 
-It's new files only, plus a few small additions to `terrain/procedural.ts` (marked "for the
-water system").
+It's new files only. Its tests, benchmark and demo run on the game's 50 km land
+(`worldmap/land.ts`).
 
 **In the game** (`src/proto/game/water.ts`, `GameWater`): steps 1, 2 and 5 below are done, on
 today's flat map.
@@ -34,13 +34,12 @@ over run. Speeds are metres a second.
 ## 1. The water system (`water.ts`, `region.ts`, `rivers.ts`, `flood.ts`)
 
 ```ts
-const water = new WaterSystem(new ProceduralTerrain({ ...TERRAIN_PRESETS.rolling, seed: 7 }));
+const water = new WaterSystem(landSource({ landform: 'uplands', seed: 7 }).source);
 const ground = new CachedHeight(water.terrain);   // the ground with river channels cut, and its water
 ```
 
-Pass the **raw** source (not a `CachedHeight`): on the procedural terrain the water system takes
-the ground without the terrain's own uniform river channel and cuts its own, which widen
-downstream. `water.terrain` is a `HeightSource` for everything else (meshing, alignment,
+Pass the **raw** source (not a `CachedHeight`): the water system samples each 8 km region
+coarsely (32 m), and a cache would fill every 2 m cell of it. `water.terrain` is a `HeightSource` for everything else (meshing, alignment,
 platforms, picking); put the cache in front of that.
 
 ### What it finds
@@ -51,8 +50,8 @@ from outside count) on a 32 m grid, the first time anything asks about it:
 | Water | How |
 |---|---|
 | **Sea** | Ground below `sea` connected to open water (the region's edge, or at least `seaArea` km²). An inland hollow below sea level is not sea. |
-| **Lakes** | Priority-flood (Barnes et al.) fills every closed hollow to its spill level. A hollow becomes a lake if it is deeper than `basinDepth + breach·√catchment` and bigger than `basinArea`; shallower ones are breached by the river running through (it cuts through the sill). A lake stands `drawdown` below its spill point. Water the source already has (the procedural terrain's lakes, OpenStreetMap water on real data) is kept as it is. |
-| **Rivers** | The same flood gives every cell a drainage direction (no pits, no loops) and the catchment of every cell. A stream starts at `riverArea` km². Reaches run from a source or confluence to the next confluence, the sea or the region's edge. On the procedural terrain a trench is scored along its river lines first, so drainage follows the valleys the terrain carved, and centre lines are snapped onto them. |
+| **Lakes** | Priority-flood (Barnes et al.) fills every closed hollow to its spill level. A hollow becomes a lake if it is deeper than `basinDepth + breach·√catchment` and bigger than `basinArea`; shallower ones are breached by the river running through (it cuts through the sill). A lake stands `drawdown` below its spill point. Water the source already has (OpenStreetMap water on real data) is kept as it is. |
+| **Rivers** | The same flood gives every cell a drainage direction (no pits, no loops) and the catchment of every cell. A stream starts at `riverArea` km². Reaches run from a source or confluence to the next confluence, the sea or the region's edge. |
 | **Widths** | Hydraulic geometry: width `widthK·A^widthExp`, depth `depthK·A^depthExp` (A in km²), scaled up so rivers read at the game's scale: 5 m at the source (the least that shows on a 4 m raster), 14 m at 20 km², 25 m at 60 km². |
 | **Meanders** | On flat floors, sine-generated curves (the direction swings as ω·sin(2πs/M), M ≈ 11 widths), limited by the room on the floor, off on steep valleys, fading to nothing at confluences. |
 | **Levels** | The surface never climbs downstream; it stays under the ground (with a freeboard), is smoothed along the reach, and tributaries meet the main river's level. Flow speed is Manning's formula on the surface slope. |
@@ -97,19 +96,16 @@ water.reaches(rx, rz)          // the river network of a region
 
 ### Parameters (`WaterParams`, defaults in `DEFAULT_WATER`)
 
-`sea` (from the procedural terrain, else none), `region` 8000, `margin` 2000, `cell` 32,
+`sea` (none by default), `region` 8000, `margin` 2000, `cell` 32,
 `riverArea` 0.5 km², `widthK` 3.2 / `widthExp` 0.5, `depthK` 0.45 / `depthExp` 0.4, `maxWidth` 120,
 `bankSlope` 0.6, `basinDepth` 4 m, `basinArea` 0.1 km², `breach` 1.2, `drawdown` 0.3 m, `seaArea`
 2 km², `estuaryRise` 3 m, `estuaryLength` 2500, `estuaryMouth` 420, `estuaryArea` 4 km²,
 `manning` 0.035, `meander` 1.
 
-### A coast for procedural terrain (`coast.ts`)
+### A coast
 
-`ProceduralTerrain` has a sea level but no fall to the sea, so it only floods low valleys.
-`new Coastal(terrain, { dir, at, width, fall, deep, sea, wobble })` lowers the land towards one
-side: `fall` (about the valley floors' height) drowns the valleys into rias and estuaries, `deep`
-more takes it out to open sea. Keep the inner terrain's `lakes: 0` (their levels are set before
-the fall).
+Give the source ground below sea level out at sea and pass `{ sea: 0 }`: the 50 km land's source
+does (`landSource({ landform: 'coast' })`), and so does real elevation.
 
 ### Real elevation
 
@@ -190,8 +186,8 @@ Replace `LAKE` and `isWater`:
 
 ```ts
 import { WaterSystem } from './water';
-// with the terrain library's step 1: a procedural source (or FnHeight for a hand-made scene)
-const water = new WaterSystem(new ProceduralTerrain({ ...TERRAIN_PRESETS.lowland, seed: 7 }));
+// with the terrain library's step 1: the land's heights (or FnHeight for a hand-made scene)
+const water = new WaterSystem(new FnHeight(plan.terrain.heightAt));
 const ground = new CachedHeight(water.terrain);
 const isWater = (p: P) => water.isWater(p.x, p.z);
 const net = new Network(isWater, BOUND, 11);   // and net.ground = ground (terrain step 1)
