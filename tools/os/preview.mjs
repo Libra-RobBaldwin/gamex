@@ -37,7 +37,8 @@ for (const t of T) { const h = t.heights; if (!h) continue;
   for (let j = 0; j < h.n - 1; j++) for (let i = 0; i < h.n - 1; i++) {
     const k = j * h.n + i, v = h.h[k], dx = h.h[k + 1] - v, dz = h.h[k + h.n] - v, sh = Math.max(0, Math.min(1, 0.55 - (dx + dz) / h.step * 1.6));
     const e = Math.max(0, Math.min(1, v / 450)), r = 200 - 60 * e, gg = 214 - 40 * e, b = 170 - 50 * e;
-    g.fillStyle = 'rgb(' + (r * (0.55 + sh * 0.6) | 0) + ',' + (gg * (0.55 + sh * 0.6) | 0) + ',' + (b * (0.55 + sh * 0.6) | 0) + ')';
+    // (at sea level or below is the sea, as the game reads it: OpenMap Local's tidal water stops near the shore)
+    g.fillStyle = v <= 0.2 ? '#8fb8d8' : 'rgb(' + (r * (0.55 + sh * 0.6) | 0) + ',' + (gg * (0.55 + sh * 0.6) | 0) + ',' + (b * (0.55 + sh * 0.6) | 0) + ')';
     g.fillRect(X(h.x0 + i * h.step), Z(h.z0 + j * h.step), h.step * s + 1, h.step * s + 1);
   } }
 const poly = (L, fill) => { for (const t of T) for (const f of t.L[L] ?? []) { g.beginPath(); for (const p of f.p) { g.moveTo(X(p[0]), Z(p[1])); for (let k = 2; k < p.length; k += 2) g.lineTo(X(p[k]), Z(p[k + 1])); g.closePath(); } g.fillStyle = typeof fill === 'function' ? fill(f.c) : fill; g.fill('evenodd'); } };

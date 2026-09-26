@@ -23,8 +23,12 @@ await wait(3000);
 const info = await page.evaluate(() => { const P = window.proto, M = P.map; return { name: M.name, places: M.settlements.map((s) => s.name), segs: P.net.segs.size, lots: P.net.lots.length, credit: document.querySelector('#credit')?.textContent ?? '', towns: P.town.reportFor ? M.settlements.map((s) => P.town.reportFor(s.id + 1)?.residents ?? null) : null }; });
 console.log('map', JSON.stringify(info));
 if (!info.places.includes('Exeter')) fail('Exeter is not a place on the map');
+// (the 50 km map, from the bake: real/world.ts, through the one WORLD pipeline)
+const world = await page.evaluate(() => { const W = window.proto.map.world; return W && { source: W.source, half: W.half, places: W.settlements.length, sea: !!W.water.world.sea }; });
+console.log('world', JSON.stringify(world));
+if (world?.source !== 'real' || world.half < 24000) fail('not the 50 km map of the real region');
 if (info.lots < 10000) fail(`only ${info.lots} buildings`);
-if (!/Contains OS data © Crown copyright/.test(info.credit)) fail('no OS data credit on the map');
+if (!/Contains OS data © Crown copyright and database right \d{4}/.test(info.credit)) fail('no OS data credit on the map');
 await page.screenshot({ path: `${out}/real-0-start.png` });
 
 // two stops on real streets a kilometre apart (placed as the stop tool does), and a line between them by touch
@@ -60,7 +64,7 @@ if (bus.lines !== 1) fail('the bus line was not created');
 await page.evaluate(() => { window.proto.purse.balance = 6_000_000; });
 const stations = await page.evaluate(() => {
   const P = window.proto, R = P.railway, net = P.net, out = [];
-  const points = P.map.real.stations;
+  const points = P.map.livePack.stations;
   for (const want of ["Exeter St David's", 'Exeter St Thomas', 'Exeter Central', "St James' Park", 'Polsloe Bridge']) {
     if (out.length === 2) break;
     const p = points.find((q) => q.name === want);

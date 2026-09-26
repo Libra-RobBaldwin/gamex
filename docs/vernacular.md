@@ -84,6 +84,7 @@ view is below 700 m, the near tiles close under it are **dressed**:
 - Terraces along a street side become one row, and runs of shops a parade.
 - The work is metered at 5 ms a frame, or 20% of a slow frame up to 30 ms. A 1 km town tile takes
   a few seconds on a phone.
+- Residential and main streets get trees on their verges, a seeded 13–21 m apart with gaps, clear of junctions and buildings (two instanced draw calls a tile).
 - Each tile is merged into one mesh per material, and only then are the tile's plain buildings
   (their own `bld` mesh, near detail only) hidden, in the same frame.
 - Dressed tiles more than 2.5 km from the view are let go.

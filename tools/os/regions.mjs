@@ -4,8 +4,9 @@
 export const REGIONS = {
   exe: {
     name: 'Exe Estuary',
-    blurb: 'Exeter and its cathedral, the Exe and Teign estuaries, Dartmoor’s eastern edge and the Haldon Hills, the coast from Sidmouth to Torbay',
-    e: 265000, n: 50000, size: 50000,
+    blurb: 'Exeter and its cathedral at the middle, the Exe estuary down to Exmouth and Dawlish, Dartmoor’s eastern edge, the Haldon Hills, the Culm valley and the coast to Sidmouth',
+    // (centred on Exeter: a 50 km map's home place is its middle, worldmap/source.ts)
+    e: 267000, n: 67500, size: 50000,
     home: 'Exeter',
   },
   teme: {

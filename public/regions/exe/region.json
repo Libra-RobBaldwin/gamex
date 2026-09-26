@@ -2,555 +2,645 @@
  "format": 1,
  "id": "exe",
  "name": "Exe Estuary",
- "blurb": "Exeter and its cathedral, the Exe and Teign estuaries, Dartmoor’s eastern edge and the Haldon Hills, the coast from Sidmouth to Torbay",
+ "blurb": "Exeter and its cathedral at the middle, the Exe estuary down to Exmouth and Dawlish, Dartmoor’s eastern edge, the Haldon Hills, the Culm valley and the coast to Sidmouth",
  "size": 50000,
  "tile": 5000,
  "n": 10,
  "step": 50,
  "grid": {
-  "e": 290000,
-  "n": 75000
+  "e": 292000,
+  "n": 92500
  },
  "centre": {
-  "lat": 50.56436,
-  "lon": -3.55448
+  "lat": 50.72205,
+  "lon": -3.53136
  },
  "places": [
   {
    "name": "Exeter",
    "kind": "city",
-   "x": 1914,
-   "z": -17560,
+   "x": -86,
+   "z": -60,
    "r": 3505,
-   "buildings": 18161,
-   "people": 122120,
-   "area": 5129011
-  },
-  {
-   "name": "Torquay",
-   "kind": "town",
-   "x": 1415,
-   "z": 10657,
-   "r": 3132,
-   "buildings": 10889,
-   "people": 70010,
-   "area": 2940397
-  },
-  {
-   "name": "Paignton",
-   "kind": "town",
-   "x": -1242,
-   "z": 14250,
-   "r": 3365,
-   "buildings": 10264,
-   "people": 56100,
-   "area": 2356408
+   "buildings": 18114,
+   "people": 120880,
+   "area": 5076921
   },
   {
    "name": "Exmouth",
    "kind": "town",
-   "x": 10176,
-   "z": -5844,
+   "x": 8176,
+   "z": 11656,
    "r": 2197,
-   "buildings": 7132,
-   "people": 37810,
-   "area": 1587917
+   "buildings": 7235,
+   "people": 38100,
+   "area": 1600338
   },
   {
    "name": "Newton Abbot",
    "kind": "town",
-   "x": -3977,
-   "z": 3666,
+   "x": -5977,
+   "z": 21166,
    "r": 2114,
-   "buildings": 5960,
-   "people": 33430,
-   "area": 1404098
+   "buildings": 5963,
+   "people": 33460,
+   "area": 1405470
   },
   {
-   "name": "Brixham",
+   "name": "Tiverton",
    "kind": "town",
-   "x": 2346,
-   "z": 18984,
-   "r": 1941,
-   "buildings": 4009,
-   "people": 20570,
-   "area": 863731
+   "x": 3420,
+   "z": -19994,
+   "r": 2308,
+   "buildings": 4288,
+   "people": 26440,
+   "area": 1110280
   },
   {
    "name": "Teignmouth",
    "kind": "town",
-   "x": 4125,
-   "z": 2139,
+   "x": 2125,
+   "z": 19639,
    "r": 1458,
-   "buildings": 3644,
-   "people": 18200,
-   "area": 764378
+   "buildings": 3646,
+   "people": 18220,
+   "area": 765394
+  },
+  {
+   "name": "Honiton",
+   "kind": "town",
+   "x": 24300,
+   "z": -8184,
+   "r": 1548,
+   "buildings": 2596,
+   "people": 14460,
+   "area": 607143
   },
   {
    "name": "Sidmouth",
    "kind": "town",
-   "x": 22606,
-   "z": -12690,
+   "x": 20606,
+   "z": 4810,
    "r": 1633,
-   "buildings": 2804,
+   "buildings": 2829,
    "people": 13610,
-   "area": 571759
+   "area": 571410
   },
   {
    "name": "Dawlish",
    "kind": "town",
-   "x": 6051,
-   "z": -1829,
+   "x": 4051,
+   "z": 15671,
    "r": 1378,
-   "buildings": 2706,
+   "buildings": 2719,
    "people": 12920,
-   "area": 542690
+   "area": 542506
   },
   {
    "name": "Kingsteignton",
    "kind": "town",
-   "x": -2985,
-   "z": 1938,
+   "x": -4985,
+   "z": 19438,
    "r": 1285,
-   "buildings": 2647,
-   "people": 12350,
-   "area": 518572
+   "buildings": 2668,
+   "people": 12340,
+   "area": 518238
   },
   {
-   "name": "Totnes",
+   "name": "Crediton",
    "kind": "town",
-   "x": -9719,
-   "z": 14575,
-   "r": 1402,
-   "buildings": 2067,
-   "people": 11780,
-   "area": 494928
+   "x": -8788,
+   "z": -7812,
+   "r": 1189,
+   "buildings": 1952,
+   "people": 11410,
+   "area": 479035
+  },
+  {
+   "name": "Cullompton",
+   "kind": "town",
+   "x": 10062,
+   "z": -14612,
+   "r": 1177,
+   "buildings": 2147,
+   "people": 9680,
+   "area": 406729
   },
   {
    "name": "Bovey Tracey",
    "kind": "town",
-   "x": -8435,
-   "z": -3468,
+   "x": -10435,
+   "z": 14032,
    "r": 1271,
-   "buildings": 1999,
+   "buildings": 2009,
    "people": 8430,
-   "area": 354048
+   "area": 353913
   },
   {
    "name": "Ottery St Mary",
    "kind": "town",
-   "x": 19861,
-   "z": -20396,
+   "x": 17861,
+   "z": -2896,
    "r": 1042,
-   "buildings": 1573,
-   "people": 7810,
-   "area": 328205
-  },
-  {
-   "name": "Dartmouth",
-   "kind": "town",
-   "x": -2302,
-   "z": 23625,
-   "r": 1129,
-   "buildings": 1308,
-   "people": 7690,
-   "area": 322774
+   "buildings": 1554,
+   "people": 7820,
+   "area": 328417
   },
   {
    "name": "Budleigh Salterton",
    "kind": "town",
-   "x": 16237,
-   "z": -6934,
+   "x": 14237,
+   "z": 10566,
    "r": 993,
-   "buildings": 1358,
-   "people": 6390,
-   "area": 268328
+   "buildings": 1372,
+   "people": 6380,
+   "area": 268148
   },
   {
-   "name": "Kingskerswell",
+   "name": "Willand",
    "kind": "village",
-   "x": -2146,
-   "z": 7178,
-   "r": 929,
-   "buildings": 1558,
-   "people": 6370,
-   "area": 267385
+   "x": 11647,
+   "z": -17952,
+   "r": 852,
+   "buildings": 1069,
+   "people": 6130,
+   "area": 257282
   },
   {
    "name": "Heathfield",
    "kind": "village",
-   "x": -7104,
-   "z": -871,
+   "x": -9104,
+   "z": 16629,
    "r": 826,
    "buildings": 533,
    "people": 5880,
-   "area": 246839
+   "area": 246860
   },
   {
    "name": "Ashburton",
    "kind": "town",
-   "x": -14374,
-   "z": 5102,
+   "x": -16374,
+   "z": 22602,
    "r": 1139,
-   "buildings": 1147,
+   "buildings": 1140,
    "people": 5720,
-   "area": 240330
+   "area": 240427
   },
   {
    "name": "Topsham",
    "kind": "town",
-   "x": 6558,
-   "z": -13128,
+   "x": 4558,
+   "z": 4372,
    "r": 1092,
-   "buildings": 1092,
+   "buildings": 1094,
    "people": 5690,
-   "area": 239066
+   "area": 239056
   },
   {
    "name": "Chudleigh",
    "kind": "town",
-   "x": -3162,
-   "z": -4585,
+   "x": -5162,
+   "z": 12915,
    "r": 1078,
-   "buildings": 1280,
+   "buildings": 1286,
    "people": 5410,
-   "area": 227185
+   "area": 227053
   },
   {
    "name": "West Hill",
    "kind": "village",
-   "x": 16976,
-   "z": -18858,
+   "x": 14976,
+   "z": -1358,
    "r": 1018,
-   "buildings": 1225,
+   "buildings": 1235,
    "people": 5290,
-   "area": 222334
+   "area": 222265
   },
   {
    "name": "Clyst Honiton",
    "kind": "village",
-   "x": 8401,
-   "z": -18500,
+   "x": 6401,
+   "z": -1000,
    "r": 754,
-   "buildings": 623,
+   "buildings": 625,
    "people": 4640,
    "area": 194987
   },
   {
    "name": "Cranbrook",
    "kind": "village",
-   "x": 10605,
-   "z": -20104,
+   "x": 8605,
+   "z": -2604,
    "r": 971,
-   "buildings": 890,
+   "buildings": 885,
    "people": 4550,
-   "area": 191014
+   "area": 191111
   },
   {
-   "name": "Buckfastleigh",
-   "kind": "town",
-   "x": -16061,
-   "z": 8887,
-   "r": 1133,
-   "buildings": 920,
-   "people": 4370,
-   "area": 183377
+   "name": "Kingskerswell",
+   "kind": "village",
+   "x": -4146,
+   "z": 24678,
+   "r": 929,
+   "buildings": 1007,
+   "people": 4250,
+   "area": 178519
   },
   {
    "name": "Exminster",
    "kind": "village",
-   "x": 4473,
-   "z": -12706,
+   "x": 2473,
+   "z": 4794,
    "r": 726,
-   "buildings": 947,
+   "buildings": 951,
    "people": 4130,
-   "area": 173338
+   "area": 173326
   },
   {
    "name": "Sidford",
    "kind": "suburb",
-   "x": 22686,
-   "z": -14979,
+   "x": 20686,
+   "z": 2521,
    "r": 575,
-   "buildings": 1087,
+   "buildings": 1081,
    "people": 3970,
-   "area": 166607
+   "area": 166745
   },
   {
    "name": "Bishopsteignton",
    "kind": "village",
-   "x": 832,
-   "z": 1202,
+   "x": -1168,
+   "z": 18702,
    "r": 795,
-   "buildings": 975,
+   "buildings": 974,
    "people": 3940,
    "area": 165630
   },
   {
-   "name": "Ipplepen",
-   "kind": "village",
-   "x": -6388,
-   "z": 8301,
-   "r": 623,
-   "buildings": 804,
-   "people": 3670,
-   "area": 154253
-  },
-  {
    "name": "West Clyst",
    "kind": "village",
-   "x": 6991,
-   "z": -20215,
+   "x": 4991,
+   "z": -2715,
    "r": 680,
    "buildings": 977,
-   "people": 3480,
-   "area": 146084
+   "people": 3470,
+   "area": 145822
+  },
+  {
+   "name": "Uffculme",
+   "kind": "village",
+   "x": 14743,
+   "z": -20190,
+   "r": 794,
+   "buildings": 622,
+   "people": 3290,
+   "area": 138044
   },
   {
    "name": "Monkerton",
    "kind": "suburb",
-   "x": 6467,
-   "z": -18914,
+   "x": 4467,
+   "z": -1414,
    "r": 370,
-   "buildings": 646,
+   "buildings": 647,
    "people": 3090,
    "area": 129814
   },
   {
-   "name": "South Brent",
-   "kind": "village",
-   "x": -20211,
-   "z": 14874,
-   "r": 818,
-   "buildings": 757,
-   "people": 3020,
-   "area": 126772
-  },
-  {
    "name": "Woodbury",
    "kind": "village",
-   "x": 11141,
-   "z": -12292,
+   "x": 9141,
+   "z": 5208,
    "r": 750,
-   "buildings": 625,
+   "buildings": 627,
    "people": 2840,
-   "area": 119392
+   "area": 119333
   },
   {
    "name": "Exton",
    "kind": "village",
-   "x": 8339,
-   "z": -11458,
+   "x": 6339,
+   "z": 6042,
    "r": 815,
    "buildings": 438,
    "people": 2710,
    "area": 113728
   },
   {
-   "name": "Marldon",
+   "name": "Feniton",
    "kind": "village",
-   "x": -3141,
-   "z": 11670,
-   "r": 631,
-   "buildings": 574,
-   "people": 2510,
-   "area": 105240
+   "x": 17687,
+   "z": -6912,
+   "r": 626,
+   "buildings": 456,
+   "people": 2540,
+   "area": 106472
+  },
+  {
+   "name": "Witheridge",
+   "kind": "village",
+   "x": -11526,
+   "z": -21978,
+   "r": 673,
+   "buildings": 582,
+   "people": 2470,
+   "area": 103650
   },
   {
    "name": "Lympstone",
    "kind": "village",
-   "x": 8889,
-   "z": -9066,
+   "x": 6889,
+   "z": 8434,
    "r": 712,
-   "buildings": 605,
-   "people": 2510,
-   "area": 105459
-  },
-  {
-   "name": "Feniton",
-   "kind": "village",
-   "x": 19687,
-   "z": -24412,
-   "r": 626,
-   "buildings": 458,
-   "people": 2510,
-   "area": 105539
+   "buildings": 589,
+   "people": 2470,
+   "area": 103668
   },
   {
    "name": "Dawlish Warren",
    "kind": "village",
-   "x": 7823,
-   "z": -3545,
+   "x": 5823,
+   "z": 13955,
    "r": 740,
-   "buildings": 478,
+   "buildings": 481,
    "people": 2460,
-   "area": 103257
+   "area": 103216
   },
   {
-   "name": "Stoke Gabriel",
+   "name": "Dunkeswell",
    "kind": "village",
-   "x": -5113,
-   "z": 17803,
-   "r": 568,
-   "buildings": 589,
+   "x": 22077,
+   "z": -15364,
+   "r": 826,
+   "buildings": 345,
    "people": 2380,
-   "area": 99804
+   "area": 99771
   },
   {
-   "name": "Galmpton",
-   "kind": "suburb",
-   "x": -1060,
-   "z": 18710,
-   "r": 561,
-   "buildings": 521,
-   "people": 2360,
-   "area": 99009
-  },
-  {
-   "name": "Dartington",
+   "name": "Hemyock",
    "kind": "village",
-   "x": -11200,
-   "z": 13292,
-   "r": 654,
-   "buildings": 477,
+   "x": 21727,
+   "z": -20780,
+   "r": 574,
+   "buildings": 517,
    "people": 2320,
-   "area": 97648
+   "area": 97527
   },
   {
    "name": "Coldeast",
    "kind": "village",
-   "x": -8318,
-   "z": 149,
+   "x": -10318,
+   "z": 17649,
    "r": 483,
    "buildings": 444,
    "people": 2290,
-   "area": 96304
-  },
-  {
-   "name": "Modbury",
-   "kind": "village",
-   "x": -24148,
-   "z": 23385,
-   "r": 569,
-   "buildings": 477,
-   "people": 2240,
-   "area": 93892
+   "area": 96282
   },
   {
    "name": "Whimple",
    "kind": "village",
-   "x": 14406,
-   "z": -22183,
+   "x": 12406,
+   "z": -4683,
    "r": 632,
-   "buildings": 524,
+   "buildings": 525,
    "people": 2210,
-   "area": 92817
+   "area": 92824
+  },
+  {
+   "name": "Bradninch",
+   "kind": "village",
+   "x": 7937,
+   "z": -11495,
+   "r": 616,
+   "buildings": 467,
+   "people": 2200,
+   "area": 92401
   },
   {
    "name": "Moretonhampstead",
    "kind": "town",
-   "x": -14642,
-   "z": -11082,
+   "x": -16642,
+   "z": 6418,
    "r": 626,
-   "buildings": 422,
+   "buildings": 418,
    "people": 2180,
-   "area": 91431
+   "area": 91498
   },
   {
    "name": "Shaldon",
    "kind": "village",
-   "x": 3136,
-   "z": 2775,
+   "x": 1136,
+   "z": 20275,
    "r": 736,
-   "buildings": 450,
+   "buildings": 452,
    "people": 2180,
    "area": 91629
   },
   {
+   "name": "Sampford Peverell",
+   "kind": "village",
+   "x": 10856,
+   "z": -21790,
+   "r": 617,
+   "buildings": 452,
+   "people": 2160,
+   "area": 90703
+  },
+  {
+   "name": "Stoneyford",
+   "kind": "village",
+   "x": 10862,
+   "z": -15322,
+   "r": 509,
+   "buildings": 150,
+   "people": 2100,
+   "area": 88387
+  },
+  {
+   "name": "Halberton",
+   "kind": "village",
+   "x": 8439,
+   "z": -20280,
+   "r": 628,
+   "buildings": 371,
+   "people": 1970,
+   "area": 82886
+  },
+  {
+   "name": "Chulmleigh",
+   "kind": "village",
+   "x": -23299,
+   "z": -21738,
+   "r": 500,
+   "buildings": 451,
+   "people": 1960,
+   "area": 82364
+  },
+  {
    "name": "Newton Poppleford",
    "kind": "village",
-   "x": 18640,
-   "z": -14752,
+   "x": 16640,
+   "z": 2748,
    "r": 736,
-   "buildings": 529,
+   "buildings": 528,
    "people": 1930,
    "area": 81270
   },
   {
-   "name": "Abbotskerswell",
-   "kind": "village",
-   "x": -4306,
-   "z": 6215,
-   "r": 428,
-   "buildings": 444,
-   "people": 1920,
-   "area": 80702
-  },
-  {
    "name": "Clyst St Mary",
    "kind": "village",
-   "x": 7349,
-   "z": -16037,
+   "x": 5349,
+   "z": 1463,
    "r": 518,
    "buildings": 367,
    "people": 1920,
    "area": 80582
   },
   {
+   "name": "Abbotskerswell",
+   "kind": "village",
+   "x": -6306,
+   "z": 23715,
+   "r": 428,
+   "buildings": 439,
+   "people": 1910,
+   "area": 80311
+  },
+  {
+   "name": "Bow",
+   "kind": "village",
+   "x": -19805,
+   "z": -9238,
+   "r": 562,
+   "buildings": 352,
+   "people": 1900,
+   "area": 79936
+  },
+  {
    "name": "Chagford",
    "kind": "town",
-   "x": -19942,
-   "z": -12524,
+   "x": -21942,
+   "z": 4976,
    "r": 627,
-   "buildings": 422,
+   "buildings": 424,
    "people": 1870,
-   "area": 78418
+   "area": 78406
+  },
+  {
+   "name": "Silverton",
+   "kind": "village",
+   "x": 3599,
+   "z": -10489,
+   "r": 536,
+   "buildings": 411,
+   "people": 1770,
+   "area": 74368
+  },
+  {
+   "name": "Lapford",
+   "kind": "village",
+   "x": -18784,
+   "z": -15868,
+   "r": 656,
+   "buildings": 385,
+   "people": 1760,
+   "area": 73997
   },
   {
    "name": "Rockbeare",
    "kind": "village",
-   "x": 11993,
-   "z": -20075,
+   "x": 9993,
+   "z": -2575,
    "r": 456,
-   "buildings": 481,
+   "buildings": 489,
    "people": 1700,
-   "area": 71580
+   "area": 71400
   },
   {
    "name": "Starcross",
    "kind": "village",
-   "x": 7719,
-   "z": -6779,
+   "x": 5719,
+   "z": 10721,
    "r": 444,
-   "buildings": 349,
+   "buildings": 350,
    "people": 1640,
-   "area": 68987
+   "area": 68981
   },
   {
    "name": "Tedburn St Mary",
    "kind": "village",
-   "x": -8544,
-   "z": -19159,
+   "x": -10544,
+   "z": -1659,
    "r": 614,
-   "buildings": 350,
+   "buildings": 351,
    "people": 1510,
-   "area": 63457
+   "area": 63414
+  },
+  {
+   "name": "Highfield",
+   "kind": "suburb",
+   "x": 22130,
+   "z": -14309,
+   "r": 403,
+   "buildings": 389,
+   "people": 1500,
+   "area": 63090
+  },
+  {
+   "name": "Thorverton",
+   "kind": "village",
+   "x": 389,
+   "z": -9571,
+   "r": 746,
+   "buildings": 315,
+   "people": 1450,
+   "area": 60913
+  },
+  {
+   "name": "Copplestone",
+   "kind": "village",
+   "x": -14936,
+   "z": -10120,
+   "r": 619,
+   "buildings": 330,
+   "people": 1430,
+   "area": 59966
+  },
+  {
+   "name": "Morchard Bishop",
+   "kind": "village",
+   "x": -15023,
+   "z": -15023,
+   "r": 622,
+   "buildings": 272,
+   "people": 1380,
+   "area": 58036
   },
   {
    "name": "Broadclyst",
    "kind": "village",
-   "x": 8306,
-   "z": -22270,
+   "x": 6306,
+   "z": -4770,
    "r": 601,
    "buildings": 291,
    "people": 1380,
-   "area": 57763
+   "area": 57760
+  },
+  {
+   "name": "Cheriton Fitzpaine",
+   "kind": "village",
+   "x": -4826,
+   "z": -13757,
+   "r": 490,
+   "buildings": 271,
+   "people": 1310,
+   "area": 54916
   },
   {
    "name": "Kenton",
    "kind": "village",
-   "x": 5906,
-   "z": -8299,
+   "x": 3906,
+   "z": 9201,
    "r": 526,
    "buildings": 329,
    "people": 1300,
@@ -559,158 +649,138 @@
   {
    "name": "Denbury",
    "kind": "village",
-   "x": -7785,
-   "z": 6144,
+   "x": -9785,
+   "z": 23644,
    "r": 380,
-   "buildings": 247,
+   "buildings": 251,
    "people": 1280,
-   "area": 53786
-  },
-  {
-   "name": "East Budleigh",
-   "kind": "village",
-   "x": 16669,
-   "z": -9619,
-   "r": 488,
-   "buildings": 307,
-   "people": 1280,
-   "area": 53876
-  },
-  {
-   "name": "Holcombe",
-   "kind": "village",
-   "x": 5497,
-   "z": -73,
-   "r": 422,
-   "buildings": 329,
-   "people": 1270,
-   "area": 53489
-  },
-  {
-   "name": "Colaton Raleigh",
-   "kind": "village",
-   "x": 17712,
-   "z": -12361,
-   "r": 589,
-   "buildings": 241,
-   "people": 1270,
-   "area": 53459
-  },
-  {
-   "name": "Buckfast",
-   "kind": "village",
-   "x": -15932,
-   "z": 7752,
-   "r": 492,
-   "buildings": 161,
-   "people": 1250,
-   "area": 52318
-  },
-  {
-   "name": "Heathpark",
-   "kind": "suburb",
-   "x": 24929,
-   "z": -24908,
-   "r": 316,
-   "buildings": 207,
-   "people": 1250,
-   "area": 52300
-  },
-  {
-   "name": "Sandygate",
-   "kind": "suburb",
-   "x": -2912,
-   "z": -89,
-   "r": 411,
-   "buildings": 321,
-   "people": 1190,
-   "area": 50125
-  },
-  {
-   "name": "Newton St Cyres",
-   "kind": "village",
-   "x": -2021,
-   "z": -23137,
-   "r": 545,
-   "buildings": 227,
-   "people": 1180,
-   "area": 49653
-  },
-  {
-   "name": "Fordton",
-   "kind": "village",
-   "x": -6077,
-   "z": -24288,
-   "r": 250,
-   "buildings": 180,
-   "people": 1160,
-   "area": 48588
-  },
-  {
-   "name": "Chudleigh Knighton",
-   "kind": "village",
-   "x": -5396,
-   "z": -2438,
-   "r": 401,
-   "buildings": 318,
-   "people": 1140,
-   "area": 47884
-  },
-  {
-   "name": "Christow",
-   "kind": "village",
-   "x": -6775,
-   "z": -10223,
-   "r": 516,
-   "buildings": 314,
-   "people": 1140,
-   "area": 48043
-  },
-  {
-   "name": "Otterton",
-   "kind": "village",
-   "x": 18408,
-   "z": -10332,
-   "r": 500,
-   "buildings": 233,
-   "people": 1090,
-   "area": 45959
-  },
-  {
-   "name": "Broadhempston",
-   "kind": "village",
-   "x": -9984,
-   "z": 8767,
-   "r": 429,
-   "buildings": 240,
-   "people": 1050,
-   "area": 44234
+   "area": 53784
   },
   {
    "name": "Maidencombe",
    "kind": "suburb",
-   "x": 2238,
-   "z": 6133,
+   "x": 238,
+   "z": 23633,
    "r": 604,
-   "buildings": 281,
-   "people": 1040,
-   "area": 43815
+   "buildings": 336,
+   "people": 1280,
+   "area": 53824
+  },
+  {
+   "name": "East Budleigh",
+   "kind": "village",
+   "x": 14669,
+   "z": 7881,
+   "r": 488,
+   "buildings": 310,
+   "people": 1280,
+   "area": 53904
+  },
+  {
+   "name": "Holcombe",
+   "kind": "village",
+   "x": 3497,
+   "z": 17427,
+   "r": 422,
+   "buildings": 328,
+   "people": 1270,
+   "area": 53491
+  },
+  {
+   "name": "Colaton Raleigh",
+   "kind": "village",
+   "x": 15712,
+   "z": 5139,
+   "r": 589,
+   "buildings": 242,
+   "people": 1270,
+   "area": 53391
+  },
+  {
+   "name": "Sandygate",
+   "kind": "suburb",
+   "x": -4912,
+   "z": 17411,
+   "r": 411,
+   "buildings": 318,
+   "people": 1190,
+   "area": 50118
+  },
+  {
+   "name": "Newton St Cyres",
+   "kind": "village",
+   "x": -4021,
+   "z": -5637,
+   "r": 545,
+   "buildings": 229,
+   "people": 1180,
+   "area": 49653
+  },
+  {
+   "name": "Chudleigh Knighton",
+   "kind": "village",
+   "x": -7396,
+   "z": 15062,
+   "r": 401,
+   "buildings": 324,
+   "people": 1140,
+   "area": 47844
+  },
+  {
+   "name": "Christow",
+   "kind": "village",
+   "x": -8775,
+   "z": 7277,
+   "r": 516,
+   "buildings": 311,
+   "people": 1140,
+   "area": 48081
+  },
+  {
+   "name": "Otterton",
+   "kind": "village",
+   "x": 16408,
+   "z": 7168,
+   "r": 500,
+   "buildings": 234,
+   "people": 1100,
+   "area": 46015
   },
   {
    "name": "Lustleigh",
    "kind": "village",
-   "x": -11529,
-   "z": -6264,
+   "x": -13529,
+   "z": 11236,
    "r": 549,
    "buildings": 299,
    "people": 1000,
    "area": 42209
   },
   {
+   "name": "Hele",
+   "kind": "village",
+   "x": 7319,
+   "z": -9976,
+   "r": 333,
+   "buildings": 86,
+   "people": 990,
+   "area": 41780
+  },
+  {
+   "name": "Culmstock",
+   "kind": "village",
+   "x": 18127,
+   "z": -21392,
+   "r": 460,
+   "buildings": 227,
+   "people": 980,
+   "area": 41208
+  },
+  {
    "name": "Jack-in-the-Green",
    "kind": "suburb",
-   "x": 11586,
-   "z": -20409,
+   "x": 9586,
+   "z": -2909,
    "r": 261,
    "buildings": 206,
    "people": 970,
@@ -719,8 +789,8 @@
   {
    "name": "Yeoford",
    "kind": "village",
-   "x": -11697,
-   "z": -23758,
+   "x": -13697,
+   "z": -6258,
    "r": 477,
    "buildings": 154,
    "people": 960,
@@ -729,8 +799,8 @@
   {
    "name": "Ebford",
    "kind": "village",
-   "x": 8608,
-   "z": -12965,
+   "x": 6608,
+   "z": 4535,
    "r": 454,
    "buildings": 185,
    "people": 950,
@@ -739,38 +809,58 @@
   {
    "name": "Cheriton Bishop",
    "kind": "village",
-   "x": -12667,
-   "z": -18129,
+   "x": -14667,
+   "z": -629,
    "r": 450,
-   "buildings": 226,
+   "buildings": 227,
    "people": 940,
-   "area": 39549
+   "area": 39518
   },
   {
    "name": "East Ogwell",
    "kind": "village",
-   "x": -6030,
-   "z": 4940,
+   "x": -8030,
+   "z": 22440,
    "r": 398,
-   "buildings": 236,
+   "buildings": 231,
    "people": 940,
-   "area": 39467
+   "area": 39522
+  },
+  {
+   "name": "Kentisbeare",
+   "kind": "village",
+   "x": 14596,
+   "z": -15677,
+   "r": 353,
+   "buildings": 195,
+   "people": 930,
+   "area": 38855
   },
   {
    "name": "Stokeinteignhead",
    "kind": "village",
-   "x": 1664,
-   "z": 4863,
+   "x": -336,
+   "z": 22363,
    "r": 631,
    "buildings": 234,
    "people": 930,
-   "area": 39198
+   "area": 38956
+  },
+  {
+   "name": "Sandford",
+   "kind": "village",
+   "x": -9153,
+   "z": -9916,
+   "r": 353,
+   "buildings": 194,
+   "people": 910,
+   "area": 38091
   },
   {
    "name": "Stoke Canon",
    "kind": "village",
-   "x": 3758,
-   "z": -22969,
+   "x": 1758,
+   "z": -5469,
    "r": 321,
    "buildings": 150,
    "people": 910,
@@ -779,8 +869,8 @@
   {
    "name": "Sidbury",
    "kind": "village",
-   "x": 23730,
-   "z": -16611,
+   "x": 21730,
+   "z": 889,
    "r": 505,
    "buildings": 209,
    "people": 910,
@@ -789,8 +879,8 @@
   {
    "name": "Poltimore",
    "kind": "village",
-   "x": 6617,
-   "z": -21843,
+   "x": 4617,
+   "z": -4343,
    "r": 427,
    "buildings": 130,
    "people": 900,
@@ -799,98 +889,98 @@
   {
    "name": "Kennford",
    "kind": "village",
-   "x": 1467,
-   "z": -10927,
+   "x": -533,
+   "z": 6573,
    "r": 400,
    "buildings": 183,
    "people": 900,
    "area": 37877
   },
   {
+   "name": "Talaton",
+   "kind": "village",
+   "x": 14852,
+   "z": -7052,
+   "r": 450,
+   "buildings": 148,
+   "people": 900,
+   "area": 37684
+  },
+  {
    "name": "Knowle",
    "kind": "village",
-   "x": 15160,
-   "z": -7723,
+   "x": 13160,
+   "z": 9777,
    "r": 412,
-   "buildings": 263,
+   "buildings": 262,
    "people": 900,
-   "area": 37796
+   "area": 37798
   },
   {
    "name": "Woodbury Salterton",
    "kind": "village",
-   "x": 11297,
-   "z": -13841,
+   "x": 9297,
+   "z": 3659,
    "r": 527,
    "buildings": 218,
    "people": 880,
    "area": 36822
   },
   {
-   "name": "Harbertonford",
-   "kind": "village",
-   "x": -11549,
-   "z": 18747,
-   "r": 418,
-   "buildings": 167,
-   "people": 860,
-   "area": 35945
-  },
-  {
    "name": "Tipton St John",
    "kind": "village",
-   "x": 19371,
-   "z": -16791,
+   "x": 17371,
+   "z": 709,
    "r": 397,
-   "buildings": 188,
+   "buildings": 189,
    "people": 860,
-   "area": 36169
+   "area": 36250
   },
   {
-   "name": "Wrangaton",
-   "kind": "hamlet",
-   "x": -22138,
-   "z": 16951,
-   "r": 516,
-   "buildings": 133,
+   "name": "Westleigh",
+   "kind": "village",
+   "x": 13905,
+   "z": -24645,
+   "r": 532,
+   "buildings": 191,
    "people": 820,
-   "area": 34415
+   "area": 34485
   },
   {
    "name": "Burrow",
    "kind": "suburb",
-   "x": 17591,
-   "z": -14719,
+   "x": 15591,
+   "z": 2781,
    "r": 348,
-   "buildings": 220,
+   "buildings": 222,
+   "people": 820,
+   "area": 34243
+  },
+  {
+   "name": "Chawleigh",
+   "kind": "village",
+   "x": -20706,
+   "z": -19733,
+   "r": 526,
+   "buildings": 181,
    "people": 810,
-   "area": 34219
+   "area": 33997
   },
   {
    "name": "Haytor Vale",
    "kind": "village",
-   "x": -12893,
-   "z": -1783,
+   "x": -14893,
+   "z": 15717,
    "r": 710,
-   "buildings": 203,
+   "buildings": 204,
    "people": 800,
-   "area": 33500
-  },
-  {
-   "name": "Blackawton",
-   "kind": "village",
-   "x": -9650,
-   "z": 24109,
-   "r": 338,
-   "buildings": 190,
-   "people": 800,
-   "area": 33460
+   "area": 33455
   },
   {
    "name": "Brampford Speke",
    "kind": "village",
-   "x": 2610,
-   "z": -23468,
+   "x": 610,
+   "z": -5968,
    "r": 522,
    "buildings": 159,
    "people": 780,
@@ -899,308 +989,328 @@
   {
    "name": "Dunchideock",
    "kind": "village",
-   "x": -2032,
-   "z": -11917,
+   "x": -4032,
+   "z": 5583,
    "r": 723,
-   "buildings": 185,
+   "buildings": 189,
    "people": 780,
-   "area": 32730
-  },
-  {
-   "name": "Talaton",
-   "kind": "village",
-   "x": 16852,
-   "z": -24552,
-   "r": 450,
-   "buildings": 136,
-   "people": 780,
-   "area": 32740
-  },
-  {
-   "name": "Dittisham",
-   "kind": "village",
-   "x": -3689,
-   "z": 20244,
-   "r": 449,
-   "buildings": 197,
-   "people": 770,
-   "area": 32394
+   "area": 32702
   },
   {
    "name": "Dog Village",
    "kind": "suburb",
-   "x": 8505,
-   "z": -21515,
+   "x": 6505,
+   "z": -4015,
    "r": 250,
    "buildings": 143,
    "people": 770,
    "area": 32392
   },
   {
-   "name": "Kingswear",
+   "name": "Payhembury",
    "kind": "village",
-   "x": -1815,
-   "z": 23975,
-   "r": 511,
-   "buildings": 156,
+   "x": 16691,
+   "z": -9148,
+   "r": 346,
+   "buildings": 155,
    "people": 760,
-   "area": 32058
+   "area": 31813
   },
   {
-   "name": "Hillhead",
+   "name": "Ide",
    "kind": "village",
-   "x": 409,
-   "z": 21155,
-   "r": 261,
-   "buildings": 158,
-   "people": 730,
-   "area": 30730
+   "x": -1847,
+   "z": 1852,
+   "r": 360,
+   "buildings": 153,
+   "people": 750,
+   "area": 31515
   },
   {
    "name": "Pathfinder Village",
    "kind": "village",
-   "x": -6010,
-   "z": -18193,
+   "x": -8010,
+   "z": -693,
    "r": 279,
    "buildings": 313,
    "people": 700,
    "area": 29435
   },
   {
-   "name": "Ugborough",
+   "name": "Fordton",
    "kind": "village",
-   "x": -22293,
-   "z": 19179,
+   "x": -8077,
+   "z": -6788,
    "r": 250,
-   "buildings": 142,
+   "buildings": 77,
+   "people": 690,
+   "area": 29182
+  },
+  {
+   "name": "Zeal Monachorum",
+   "kind": "village",
+   "x": -20085,
+   "z": -11513,
+   "r": 388,
+   "buildings": 149,
+   "people": 680,
+   "area": 28559
+  },
+  {
+   "name": "Awliscombe",
+   "kind": "village",
+   "x": 21553,
+   "z": -9147,
+   "r": 442,
+   "buildings": 134,
    "people": 640,
-   "area": 26941
+   "area": 26723
+  },
+  {
+   "name": "Aunk",
+   "kind": "hamlet",
+   "x": 12875,
+   "z": -7814,
+   "r": 328,
+   "buildings": 55,
+   "people": 630,
+   "area": 26293
+  },
+  {
+   "name": "Clyst Hydon",
+   "kind": "village",
+   "x": 11564,
+   "z": -9086,
+   "r": 331,
+   "buildings": 99,
+   "people": 630,
+   "area": 26360
   },
   {
    "name": "Westwood",
    "kind": "hamlet",
-   "x": 11725,
-   "z": -23921,
+   "x": 9725,
+   "z": -6421,
    "r": 304,
-   "buildings": 37,
+   "buildings": 38,
    "people": 630,
-   "area": 26496
-  },
-  {
-   "name": "Combeinteignhead",
-   "kind": "village",
-   "x": -74,
-   "z": 3326,
-   "r": 553,
-   "buildings": 168,
-   "people": 610,
-   "area": 25579
+   "area": 26479
   },
   {
    "name": "Hamlet",
    "kind": "suburb",
-   "x": 24356,
-   "z": -24875,
+   "x": 22356,
+   "z": -7375,
    "r": 250,
-   "buildings": 145,
+   "buildings": 149,
+   "people": 620,
+   "area": 26105
+  },
+  {
+   "name": "Combeinteignhead",
+   "kind": "village",
+   "x": -2074,
+   "z": 20826,
+   "r": 553,
+   "buildings": 167,
    "people": 610,
-   "area": 25497
+   "area": 25579
   },
   {
    "name": "Clyst St George",
    "kind": "village",
-   "x": 8198,
-   "z": -13738,
+   "x": 6198,
+   "z": 3762,
    "r": 340,
    "buildings": 125,
    "people": 600,
    "area": 25065
   },
   {
-   "name": "Staverton",
+   "name": "Ashill",
    "kind": "village",
-   "x": -10745,
-   "z": 10929,
-   "r": 344,
-   "buildings": 123,
+   "x": 16715,
+   "z": -18834,
+   "r": 282,
+   "buildings": 135,
    "people": 590,
-   "area": 24795
+   "area": 24681
+  },
+  {
+   "name": "Bickleigh",
+   "kind": "village",
+   "x": 2062,
+   "z": -14706,
+   "r": 523,
+   "buildings": 137,
+   "people": 580,
+   "area": 24499
   },
   {
    "name": "Aylesbeare",
    "kind": "village",
-   "x": 13888,
-   "z": -16746,
+   "x": 11888,
+   "z": 754,
    "r": 368,
    "buildings": 135,
    "people": 580,
    "area": 24326
   },
   {
-   "name": "Moorhaven Village",
-   "kind": "village",
-   "x": -23037,
-   "z": 17727,
-   "r": 321,
-   "buildings": 97,
-   "people": 570,
-   "area": 24059
-  },
-  {
    "name": "Whiddon Down",
    "kind": "village",
-   "x": -20931,
-   "z": -17487,
+   "x": -22931,
+   "z": 13,
    "r": 461,
-   "buildings": 124,
+   "buildings": 126,
    "people": 570,
-   "area": 23979
+   "area": 23945
   },
   {
    "name": "Dunsford",
    "kind": "village",
-   "x": -9274,
-   "z": -14305,
+   "x": -11274,
+   "z": 3195,
    "r": 455,
    "buildings": 135,
    "people": 560,
    "area": 23441
   },
   {
-   "name": "Bittaford",
+   "name": "Weston",
+   "kind": "hamlet",
+   "x": 24097,
+   "z": 3128,
+   "r": 404,
+   "buildings": 117,
+   "people": 560,
+   "area": 23727
+  },
+  {
+   "name": "Nomansland",
    "kind": "village",
-   "x": -23291,
-   "z": 18071,
-   "r": 401,
-   "buildings": 161,
+   "x": -8250,
+   "z": -21401,
+   "r": 304,
+   "buildings": 108,
    "people": 550,
-   "area": 22931
+   "area": 22919
+  },
+  {
+   "name": "Uplowman",
+   "kind": "village",
+   "x": 9587,
+   "z": -22632,
+   "r": 320,
+   "buildings": 96,
+   "people": 530,
+   "area": 22373
   },
   {
    "name": "Manaton",
    "kind": "village",
-   "x": -14997,
-   "z": -6168,
+   "x": -16997,
+   "z": 11332,
    "r": 518,
    "buildings": 150,
    "people": 530,
-   "area": 22459
-  },
-  {
-   "name": "Collaton St Mary",
-   "kind": "village",
-   "x": -4349,
-   "z": 14978,
-   "r": 648,
-   "buildings": 116,
-   "people": 530,
-   "area": 22426
+   "area": 22463
   },
   {
    "name": "Metcombe",
    "kind": "village",
-   "x": 18833,
-   "z": -16808,
+   "x": 16833,
+   "z": 692,
    "r": 494,
    "buildings": 122,
    "people": 530,
-   "area": 22258
+   "area": 22176
   },
   {
-   "name": "Ashprington",
-   "kind": "village",
-   "x": -8133,
-   "z": 17936,
-   "r": 271,
-   "buildings": 112,
+   "name": "Nicholashayne",
+   "kind": "hamlet",
+   "x": 18193,
+   "z": -23562,
+   "r": 288,
+   "buildings": 53,
    "people": 520,
-   "area": 21925
+   "area": 21762
   },
   {
    "name": "Ideford",
    "kind": "village",
-   "x": -750,
-   "z": -2304,
+   "x": -2750,
+   "z": 15196,
    "r": 357,
-   "buildings": 122,
+   "buildings": 124,
    "people": 520,
    "area": 21728
   },
   {
-   "name": "Ide",
+   "name": "Plymtree",
    "kind": "village",
-   "x": 153,
-   "z": -15648,
-   "r": 360,
-   "buildings": 109,
-   "people": 520,
-   "area": 21954
+   "x": 13143,
+   "z": -10440,
+   "r": 265,
+   "buildings": 120,
+   "people": 510,
+   "area": 21409
   },
   {
    "name": "Coffinswell",
    "kind": "village",
-   "x": -1316,
-   "z": 6180,
+   "x": -3316,
+   "z": 23680,
    "r": 395,
    "buildings": 109,
    "people": 510,
    "area": 21547
   },
   {
-   "name": "Avonwick",
+   "name": "Buckerell",
    "kind": "village",
-   "x": -18790,
-   "z": 16780,
-   "r": 367,
-   "buildings": 128,
+   "x": 20162,
+   "z": -7996,
+   "r": 381,
+   "buildings": 88,
    "people": 500,
-   "area": 21129
-  },
-  {
-   "name": "Cornworthy",
-   "kind": "village",
-   "x": -7336,
-   "z": 19380,
-   "r": 348,
-   "buildings": 138,
-   "people": 500,
-   "area": 21028
+   "area": 20843
   },
   {
    "name": "Kenn",
    "kind": "village",
-   "x": 1989,
-   "z": -10480,
+   "x": -11,
+   "z": 7020,
    "r": 343,
-   "buildings": 131,
+   "buildings": 132,
    "people": 500,
    "area": 20881
   },
   {
    "name": "Spreyton",
    "kind": "village",
-   "x": -19906,
-   "z": -21713,
+   "x": -21906,
+   "z": -4213,
    "r": 319,
-   "buildings": 117,
+   "buildings": 116,
    "people": 490,
-   "area": 20596
+   "area": 20652
   },
   {
    "name": "Cockwood",
    "kind": "village",
-   "x": 7530,
-   "z": -5537,
+   "x": 5530,
+   "z": 11963,
    "r": 392,
-   "buildings": 126,
+   "buildings": 125,
    "people": 480,
    "area": 20354
   },
   {
    "name": "Doddiscombsleigh",
    "kind": "village",
-   "x": -4459,
-   "z": -11607,
+   "x": -6459,
+   "z": 5893,
    "r": 414,
    "buildings": 137,
    "people": 470,
@@ -1209,38 +1319,58 @@
   {
    "name": "Hennock",
    "kind": "village",
-   "x": -6847,
-   "z": -5762,
+   "x": -8847,
+   "z": 11738,
    "r": 372,
    "buildings": 126,
    "people": 470,
    "area": 19881
   },
   {
-   "name": "South Zeal",
+   "name": "Colebrooke",
    "kind": "village",
-   "x": -24907,
-   "z": -18579,
-   "r": 586,
-   "buildings": 86,
-   "people": 460,
-   "area": 19163
+   "x": -14919,
+   "z": -7521,
+   "r": 311,
+   "buildings": 84,
+   "people": 440,
+   "area": 18687
+  },
+  {
+   "name": "Shobrooke",
+   "kind": "village",
+   "x": -5671,
+   "z": -8845,
+   "r": 413,
+   "buildings": 87,
+   "people": 440,
+   "area": 18624
+  },
+  {
+   "name": "Old Beat",
+   "kind": "hamlet",
+   "x": 16364,
+   "z": -23088,
+   "r": 250,
+   "buildings": 73,
+   "people": 440,
+   "area": 18653
   },
   {
    "name": "Liverton",
    "kind": "village",
-   "x": -9374,
-   "z": -147,
+   "x": -11374,
+   "z": 17353,
    "r": 317,
-   "buildings": 98,
+   "buildings": 96,
    "people": 440,
    "area": 18643
   },
   {
    "name": "Shillingford St George",
    "kind": "village",
-   "x": 439,
-   "z": -12955,
+   "x": -1561,
+   "z": 4545,
    "r": 298,
    "buildings": 102,
    "people": 440,
@@ -1249,78 +1379,78 @@
   {
    "name": "Allercombe",
    "kind": "hamlet",
-   "x": 14941,
-   "z": -19577,
+   "x": 12941,
+   "z": -2077,
    "r": 250,
-   "buildings": 62,
+   "buildings": 60,
    "people": 440,
-   "area": 18495
+   "area": 18527
   },
   {
    "name": "Longdown",
    "kind": "village",
-   "x": -3832,
-   "z": -15877,
+   "x": -5832,
+   "z": 1623,
    "r": 535,
    "buildings": 114,
    "people": 430,
    "area": 18143
   },
   {
+   "name": "Rewe",
+   "kind": "village",
+   "x": 2711,
+   "z": -7231,
+   "r": 440,
+   "buildings": 92,
+   "people": 430,
+   "area": 18029
+  },
+  {
    "name": "Yettington",
    "kind": "village",
-   "x": 15361,
-   "z": -10693,
+   "x": 13361,
+   "z": 6807,
    "r": 325,
    "buildings": 57,
    "people": 430,
    "area": 17871
   },
   {
-   "name": "Moreleigh",
+   "name": "Coldridge",
    "kind": "village",
-   "x": -13363,
-   "z": 22211,
+   "x": -22289,
+   "z": -15128,
    "r": 250,
-   "buildings": 100,
-   "people": 420,
-   "area": 17495
-  },
-  {
-   "name": "Diptford",
-   "kind": "village",
-   "x": -17220,
-   "z": 18216,
-   "r": 345,
-   "buildings": 103,
-   "people": 420,
-   "area": 17573
-  },
-  {
-   "name": "Rewe",
-   "kind": "village",
-   "x": 4711,
-   "z": -24731,
-   "r": 440,
-   "buildings": 88,
+   "buildings": 80,
    "people": 410,
-   "area": 17019
+   "area": 17409
+  },
+  {
+   "name": "Poughill",
+   "kind": "village",
+   "x": -6514,
+   "z": -15955,
+   "r": 301,
+   "buildings": 86,
+   "people": 410,
+   "area": 17016
   },
   {
    "name": "Bickington",
    "kind": "village",
-   "x": -10427,
-   "z": 2516,
+   "x": -12427,
+   "z": 20016,
    "r": 346,
    "buildings": 116,
    "people": 400,
-   "area": 16946
+   "area": 16939
   },
   {
    "name": "Upton Pyne",
    "kind": "village",
-   "x": 978,
-   "z": -22510,
+   "x": -1022,
+   "z": -5010,
    "r": 317,
    "buildings": 92,
    "people": 400,
@@ -1329,8 +1459,8 @@
   {
    "name": "Bridford",
    "kind": "village",
-   "x": -8309,
-   "z": -11422,
+   "x": -10309,
+   "z": 6078,
    "r": 250,
    "buildings": 111,
    "people": 400,
@@ -1339,18 +1469,48 @@
   {
    "name": "Wiggaton",
    "kind": "village",
-   "x": 20104,
-   "z": -18678,
+   "x": 18104,
+   "z": -1178,
    "r": 359,
    "buildings": 91,
    "people": 400,
-   "area": 16807
+   "area": 16814
+  },
+  {
+   "name": "West Sandford",
+   "kind": "hamlet",
+   "x": -10761,
+   "z": -10098,
+   "r": 250,
+   "buildings": 35,
+   "people": 390,
+   "area": 16586
+  },
+  {
+   "name": "Pennymoor",
+   "kind": "village",
+   "x": -5532,
+   "z": -18731,
+   "r": 292,
+   "buildings": 70,
+   "people": 390,
+   "area": 16470
+  },
+  {
+   "name": "Clyst William",
+   "kind": "hamlet",
+   "x": 15112,
+   "z": -10418,
+   "r": 331,
+   "buildings": 67,
+   "people": 390,
+   "area": 16273
   },
   {
    "name": "Alfington",
    "kind": "village",
-   "x": 21507,
-   "z": -22972,
+   "x": 19507,
+   "z": -5472,
    "r": 287,
    "buildings": 88,
    "people": 390,
@@ -1359,98 +1519,128 @@
   {
    "name": "Taleford",
    "kind": "village",
-   "x": 19117,
-   "z": -22008,
+   "x": 17117,
+   "z": -4508,
    "r": 299,
    "buildings": 67,
    "people": 390,
    "area": 16210
   },
   {
-   "name": "Harberton",
+   "name": "Black Dog",
    "kind": "village",
-   "x": -12625,
-   "z": 16317,
-   "r": 329,
+   "x": -11429,
+   "z": -17251,
+   "r": 348,
+   "buildings": 70,
+   "people": 380,
+   "area": 15969
+  },
+  {
+   "name": "Bolham",
+   "kind": "village",
+   "x": 3166,
+   "z": -22347,
+   "r": 322,
+   "buildings": 81,
+   "people": 380,
+   "area": 16038
+  },
+  {
+   "name": "Millhayes",
+   "kind": "village",
+   "x": 21930,
+   "z": -21521,
+   "r": 256,
    "buildings": 99,
    "people": 380,
-   "area": 16092
+   "area": 16097
+  },
+  {
+   "name": "Withleigh",
+   "kind": "village",
+   "x": -1071,
+   "z": -20117,
+   "r": 324,
+   "buildings": 92,
+   "people": 370,
+   "area": 15549
   },
   {
    "name": "Ilsington",
    "kind": "village",
-   "x": -11653,
-   "z": -1153,
+   "x": -13653,
+   "z": 16347,
    "r": 310,
    "buildings": 97,
    "people": 370,
    "area": 15712
   },
   {
-   "name": "Woolston Green",
+   "name": "Down St Mary",
    "kind": "village",
-   "x": -12281,
-   "z": 8837,
-   "r": 258,
-   "buildings": 88,
-   "people": 370,
-   "area": 15682
-  },
-  {
-   "name": "Compton",
-   "kind": "village",
-   "x": -3074,
-   "z": 10376,
-   "r": 318,
-   "buildings": 70,
-   "people": 370,
-   "area": 15378
-  },
-  {
-   "name": "Rattery",
-   "kind": "village",
-   "x": -15960,
-   "z": 13337,
-   "r": 299,
-   "buildings": 108,
+   "x": -17666,
+   "z": -11958,
+   "r": 270,
+   "buildings": 85,
    "people": 360,
-   "area": 15029
+   "area": 15088
   },
   {
-   "name": "Warfleet",
-   "kind": "village",
-   "x": -1901,
-   "z": 24610,
-   "r": 287,
-   "buildings": 92,
+   "name": "Up Exe",
+   "kind": "hamlet",
+   "x": 2087,
+   "z": -9693,
+   "r": 313,
+   "buildings": 85,
    "people": 360,
-   "area": 15089
+   "area": 15169
+  },
+  {
+   "name": "Brithem Bottom",
+   "kind": "hamlet",
+   "x": 8901,
+   "z": -17797,
+   "r": 304,
+   "buildings": 57,
+   "people": 360,
+   "area": 14984
+  },
+  {
+   "name": "Fordmoor",
+   "kind": "hamlet",
+   "x": 13741,
+   "z": -10680,
+   "r": 250,
+   "buildings": 40,
+   "people": 360,
+   "area": 15245
   },
   {
    "name": "Perkin's Village",
    "kind": "hamlet",
-   "x": 12603,
-   "z": -16547,
+   "x": 10603,
+   "z": 953,
    "r": 250,
    "buildings": 61,
    "people": 360,
    "area": 15018
   },
   {
-   "name": "Tigley",
+   "name": "Appledore",
    "kind": "hamlet",
-   "x": -14102,
-   "z": 14577,
-   "r": 286,
-   "buildings": 80,
+   "x": 14755,
+   "z": -21978,
+   "r": 287,
+   "buildings": 61,
    "people": 350,
-   "area": 14734
+   "area": 14765
   },
   {
    "name": "Holne",
    "kind": "village",
-   "x": -19545,
-   "z": 5610,
+   "x": -21545,
+   "z": 23110,
    "r": 282,
    "buildings": 87,
    "people": 350,
@@ -1459,18 +1649,18 @@
   {
    "name": "Two Mile Oak Cross",
    "kind": "hamlet",
-   "x": -5375,
-   "z": 6912,
+   "x": -7375,
+   "z": 24412,
    "r": 250,
-   "buildings": 70,
+   "buildings": 69,
    "people": 350,
    "area": 14886
   },
   {
    "name": "Preston",
    "kind": "hamlet",
-   "x": -4356,
-   "z": 295,
+   "x": -6356,
+   "z": 17795,
    "r": 250,
    "buildings": 41,
    "people": 350,
@@ -1479,38 +1669,88 @@
   {
    "name": "Whitestone",
    "kind": "village",
-   "x": -3044,
-   "z": -18484,
+   "x": -5044,
+   "z": -984,
    "r": 250,
    "buildings": 98,
    "people": 350,
-   "area": 14536
+   "area": 14535
   },
   {
-   "name": "Dainton",
-   "kind": "hamlet",
-   "x": -4744,
-   "z": 8317,
-   "r": 271,
-   "buildings": 68,
+   "name": "Kerswell",
+   "kind": "village",
+   "x": 16026,
+   "z": -13561,
+   "r": 254,
+   "buildings": 88,
    "people": 340,
-   "area": 14185
+   "area": 14451
+  },
+  {
+   "name": "Harcombe",
+   "kind": "hamlet",
+   "x": 23546,
+   "z": 1915,
+   "r": 270,
+   "buildings": 64,
+   "people": 340,
+   "area": 14164
+  },
+  {
+   "name": "Langford",
+   "kind": "hamlet",
+   "x": 10585,
+   "z": -10513,
+   "r": 250,
+   "buildings": 29,
+   "people": 330,
+   "area": 13768
+  },
+  {
+   "name": "Rosemary Lane",
+   "kind": "hamlet",
+   "x": 23825,
+   "z": -22019,
+   "r": 250,
+   "buildings": 51,
+   "people": 330,
+   "area": 13689
+  },
+  {
+   "name": "Sheldon",
+   "kind": "village",
+   "x": 19937,
+   "z": -16056,
+   "r": 317,
+   "buildings": 89,
+   "people": 330,
+   "area": 13723
+  },
+  {
+   "name": "Nymet Rowland",
+   "kind": "village",
+   "x": -20724,
+   "z": -15706,
+   "r": 306,
+   "buildings": 74,
+   "people": 320,
+   "area": 13311
   },
   {
    "name": "Luton",
    "kind": "hamlet",
-   "x": 123,
-   "z": -1949,
+   "x": -1877,
+   "z": 15551,
    "r": 259,
    "buildings": 45,
    "people": 320,
-   "area": 13485
+   "area": 13486
   },
   {
    "name": "Blackpool",
    "kind": "hamlet",
-   "x": -8688,
-   "z": 918,
+   "x": -10688,
+   "z": 18418,
    "r": 250,
    "buildings": 51,
    "people": 320,
@@ -1519,168 +1759,228 @@
   {
    "name": "Uton",
    "kind": "hamlet",
-   "x": -7219,
-   "z": -23557,
+   "x": -9219,
+   "z": -6057,
    "r": 250,
    "buildings": 21,
    "people": 320,
    "area": 13267
   },
   {
-   "name": "Dean",
-   "kind": "suburb",
-   "x": -16877,
-   "z": 10232,
-   "r": 278,
-   "buildings": 42,
+   "name": "Puddington",
+   "kind": "village",
+   "x": -8689,
+   "z": -18104,
+   "r": 274,
+   "buildings": 86,
    "people": 310,
-   "area": 13224
+   "area": 13201
   },
   {
    "name": "Drewsteignton",
    "kind": "village",
-   "x": -16289,
-   "z": -15837,
+   "x": -18289,
+   "z": 1663,
    "r": 255,
    "buildings": 79,
    "people": 310,
    "area": 13189
   },
   {
-   "name": "Berry Pomeroy",
-   "kind": "village",
-   "x": -7233,
-   "z": 13922,
-   "r": 250,
-   "buildings": 46,
-   "people": 310,
-   "area": 13039
-  },
-  {
-   "name": "North Whilborough",
-   "kind": "hamlet",
-   "x": -2969,
-   "z": 8578,
-   "r": 257,
-   "buildings": 78,
-   "people": 310,
-   "area": 13064
-  },
-  {
    "name": "Trusham",
    "kind": "village",
-   "x": -4565,
-   "z": -7117,
+   "x": -6565,
+   "z": 10383,
    "r": 312,
    "buildings": 87,
    "people": 310,
    "area": 12857
   },
   {
+   "name": "Burlescombe",
+   "kind": "hamlet",
+   "x": 15492,
+   "z": -24126,
+   "r": 266,
+   "buildings": 56,
+   "people": 300,
+   "area": 12580
+  },
+  {
+   "name": "Blackborough",
+   "kind": "village",
+   "x": 17686,
+   "z": -16311,
+   "r": 303,
+   "buildings": 66,
+   "people": 300,
+   "area": 12637
+  },
+  {
+   "name": "Upton",
+   "kind": "hamlet",
+   "x": 17844,
+   "z": -10027,
+   "r": 250,
+   "buildings": 41,
+   "people": 300,
+   "area": 12782
+  },
+  {
+   "name": "Wolverstone",
+   "kind": "hamlet",
+   "x": 20420,
+   "z": -11592,
+   "r": 250,
+   "buildings": 27,
+   "people": 300,
+   "area": 12569
+  },
+  {
    "name": "Forder Green",
    "kind": "hamlet",
-   "x": -11204,
-   "z": 7311,
+   "x": -13204,
+   "z": 24811,
    "r": 250,
    "buildings": 40,
    "people": 300,
-   "area": 12602
+   "area": 12484
   },
   {
-   "name": "Throwleigh",
-   "kind": "village",
-   "x": -23194,
-   "z": -15774,
-   "r": 376,
-   "buildings": 82,
-   "people": 300,
-   "area": 12725
-  },
-  {
-   "name": "Littlehempston",
+   "name": "Knowle",
    "kind": "hamlet",
-   "x": -8916,
-   "z": 12056,
-   "r": 315,
-   "buildings": 82,
-   "people": 300,
-   "area": 12807
-  },
-  {
-   "name": "Three Horse Shoes",
-   "kind": "village",
-   "x": 393,
-   "z": -21115,
+   "x": -13733,
+   "z": -9028,
    "r": 250,
-   "buildings": 52,
-   "people": 300,
-   "area": 12421
-  },
-  {
-   "name": "Dean Prior",
-   "kind": "hamlet",
-   "x": -17053,
-   "z": 11524,
-   "r": 250,
-   "buildings": 20,
+   "buildings": 50,
    "people": 290,
-   "area": 12191
+   "area": 12263
   },
   {
-   "name": "Gatcombe Mill",
+   "name": "Stockleigh Pomeroy",
    "kind": "hamlet",
-   "x": -7742,
-   "z": 12457,
-   "r": 250,
-   "buildings": 59,
+   "x": -4072,
+   "z": -11159,
+   "r": 252,
+   "buildings": 70,
    "people": 290,
-   "area": 12009
+   "area": 12292
+  },
+  {
+   "name": "Chettiscombe",
+   "kind": "hamlet",
+   "x": 4594,
+   "z": -22320,
+   "r": 322,
+   "buildings": 39,
+   "people": 290,
+   "area": 12237
+  },
+  {
+   "name": "Craze Lowman",
+   "kind": "hamlet",
+   "x": 6490,
+   "z": -21676,
+   "r": 250,
+   "buildings": 85,
+   "people": 290,
+   "area": 12375
+  },
+  {
+   "name": "Westcott",
+   "kind": "hamlet",
+   "x": 10019,
+   "z": -11933,
+   "r": 301,
+   "buildings": 76,
+   "people": 290,
+   "area": 12175
+  },
+  {
+   "name": "Luton",
+   "kind": "hamlet",
+   "x": 16265,
+   "z": -10297,
+   "r": 254,
+   "buildings": 65,
+   "people": 290,
+   "area": 12181
   },
   {
    "name": "Clapham",
    "kind": "hamlet",
-   "x": -326,
-   "z": -11838,
+   "x": -2326,
+   "z": 5662,
    "r": 284,
-   "buildings": 71,
+   "buildings": 70,
    "people": 290,
    "area": 12274
   },
   {
-   "name": "Postbridge",
-   "kind": "hamlet",
-   "x": -24782,
-   "z": -4252,
-   "r": 456,
-   "buildings": 69,
+   "name": "Newbuildings",
+   "kind": "village",
+   "x": -12480,
+   "z": -11020,
+   "r": 250,
+   "buildings": 57,
    "people": 280,
-   "area": 11964
+   "area": 11637
+  },
+  {
+   "name": "Shute",
+   "kind": "hamlet",
+   "x": -2909,
+   "z": -7917,
+   "r": 275,
+   "buildings": 52,
+   "people": 280,
+   "area": 11855
+  },
+  {
+   "name": "Butterleigh",
+   "kind": "village",
+   "x": 5456,
+   "z": -15687,
+   "r": 255,
+   "buildings": 56,
+   "people": 280,
+   "area": 11695
+  },
+  {
+   "name": "Clyst St Lawrence",
+   "kind": "village",
+   "x": 11129,
+   "z": -7619,
+   "r": 276,
+   "buildings": 50,
+   "people": 280,
+   "area": 11770
   },
   {
    "name": "Teigngrace",
    "kind": "hamlet",
-   "x": -5093,
-   "z": 1181,
+   "x": -7093,
+   "z": 18681,
    "r": 250,
-   "buildings": 51,
+   "buildings": 52,
    "people": 280,
-   "area": 11818
+   "area": 11885
   },
   {
    "name": "Sowton",
    "kind": "village",
-   "x": 7695,
-   "z": -17635,
+   "x": 5695,
+   "z": -135,
    "r": 423,
    "buildings": 57,
    "people": 280,
-   "area": 11679
+   "area": 11659
   },
   {
    "name": "Shillingford Abbot",
    "kind": "village",
-   "x": 966,
-   "z": -13892,
+   "x": -1034,
+   "z": 3608,
    "r": 250,
    "buildings": 58,
    "people": 280,
@@ -1689,48 +1989,168 @@
   {
    "name": "Gosford",
    "kind": "hamlet",
-   "x": 19719,
-   "z": -22196,
+   "x": 17719,
+   "z": -4696,
    "r": 250,
    "buildings": 28,
    "people": 280,
    "area": 11624
   },
   {
-   "name": "Week",
-   "kind": "village",
-   "x": -12032,
-   "z": 12607,
-   "r": 269,
-   "buildings": 78,
+   "name": "East Leigh",
+   "kind": "hamlet",
+   "x": -22140,
+   "z": -12800,
+   "r": 278,
+   "buildings": 36,
    "people": 270,
-   "area": 11202
+   "area": 11296
   },
   {
-   "name": "Taw Green",
+   "name": "East Village",
    "kind": "hamlet",
-   "x": -24570,
-   "z": -21889,
-   "r": 255,
+   "x": -7840,
+   "z": -12588,
+   "r": 250,
+   "buildings": 42,
+   "people": 270,
+   "area": 11297
+  },
+  {
+   "name": "Way Village",
+   "kind": "hamlet",
+   "x": -3304,
+   "z": -17835,
+   "r": 250,
+   "buildings": 43,
+   "people": 270,
+   "area": 11472
+  },
+  {
+   "name": "Mutterton",
+   "kind": "hamlet",
+   "x": 10881,
+   "z": -12509,
+   "r": 338,
+   "buildings": 52,
+   "people": 270,
+   "area": 11429
+  },
+  {
+   "name": "Woodgate",
+   "kind": "hamlet",
+   "x": 18294,
+   "z": -22678,
+   "r": 250,
+   "buildings": 46,
+   "people": 270,
+   "area": 11168
+  },
+  {
+   "name": "Ash Thomas",
+   "kind": "village",
+   "x": 8498,
+   "z": -18692,
+   "r": 263,
+   "buildings": 73,
+   "people": 270,
+   "area": 11250
+  },
+  {
+   "name": "Daccombe",
+   "kind": "hamlet",
+   "x": -1825,
+   "z": 24440,
+   "r": 260,
+   "buildings": 77,
+   "people": 270,
+   "area": 11233
+  },
+  {
+   "name": "Three Horse Shoes",
+   "kind": "village",
+   "x": -1607,
+   "z": -3615,
+   "r": 250,
    "buildings": 48,
    "people": 270,
-   "area": 11366
+   "area": 11216
   },
   {
    "name": "Farringdon",
    "kind": "hamlet",
-   "x": 11778,
-   "z": -16119,
+   "x": 9778,
+   "z": 1381,
    "r": 270,
    "buildings": 59,
    "people": 270,
    "area": 11154
   },
   {
+   "name": "Kennerleigh",
+   "kind": "hamlet",
+   "x": -10004,
+   "z": -14903,
+   "r": 285,
+   "buildings": 42,
+   "people": 260,
+   "area": 10827
+  },
+  {
+   "name": "Aller",
+   "kind": "hamlet",
+   "x": 13316,
+   "z": -14077,
+   "r": 278,
+   "buildings": 25,
+   "people": 260,
+   "area": 11024
+  },
+  {
+   "name": "Great Fossend",
+   "kind": "village",
+   "x": 15078,
+   "z": -24489,
+   "r": 258,
+   "buildings": 70,
+   "people": 260,
+   "area": 11003
+  },
+  {
+   "name": "Broadhembury",
+   "kind": "village",
+   "x": 18097,
+   "z": -12291,
+   "r": 331,
+   "buildings": 77,
+   "people": 260,
+   "area": 10802
+  },
+  {
+   "name": "Combe Raleigh",
+   "kind": "village",
+   "x": 23912,
+   "z": -9870,
+   "r": 268,
+   "buildings": 53,
+   "people": 260,
+   "area": 10977
+  },
+  {
+   "name": "Weston",
+   "kind": "village",
+   "x": 22157,
+   "z": -7803,
+   "r": 258,
+   "buildings": 72,
+   "people": 260,
+   "area": 10824
+  },
+  {
    "name": "Goodstone",
    "kind": "hamlet",
-   "x": -11306,
-   "z": 3158,
+   "x": -13306,
+   "z": 20658,
    "r": 250,
    "buildings": 51,
    "people": 260,
@@ -1739,58 +2159,58 @@
   {
    "name": "North Bovey",
    "kind": "village",
-   "x": -16013,
-   "z": -8870,
+   "x": -18013,
+   "z": 8630,
    "r": 274,
    "buildings": 67,
    "people": 260,
    "area": 10796
   },
   {
-   "name": "Tuckenhay",
-   "kind": "village",
-   "x": -8175,
-   "z": 18952,
-   "r": 267,
-   "buildings": 52,
-   "people": 260,
-   "area": 10874
-  },
-  {
    "name": "South Knighton",
    "kind": "hamlet",
-   "x": -8963,
-   "z": 2421,
+   "x": -10963,
+   "z": 19921,
    "r": 250,
-   "buildings": 50,
+   "buildings": 53,
    "people": 260,
    "area": 10729
   },
   {
    "name": "Half Moon Village",
    "kind": "hamlet",
-   "x": -478,
-   "z": -22346,
+   "x": -2478,
+   "z": -4846,
    "r": 250,
    "buildings": 64,
    "people": 260,
-   "area": 11113
+   "area": 11085
+  },
+  {
+   "name": "Smithincott",
+   "kind": "hamlet",
+   "x": 14355,
+   "z": -19054,
+   "r": 250,
+   "buildings": 51,
+   "people": 250,
+   "area": 10665
   },
   {
    "name": "Widecombe in the Moor",
    "kind": "hamlet",
-   "x": -18186,
-   "z": -1775,
+   "x": -20186,
+   "z": 15725,
    "r": 256,
    "buildings": 72,
    "people": 250,
-   "area": 10679
+   "area": 10634
   },
   {
    "name": "Green Lane",
    "kind": "hamlet",
-   "x": -11678,
-   "z": -2093,
+   "x": -13678,
+   "z": 15407,
    "r": 250,
    "buildings": 53,
    "people": 250,
@@ -1799,78 +2219,88 @@
   {
    "name": "Brimley",
    "kind": "village",
-   "x": -10037,
-   "z": -2044,
+   "x": -12037,
+   "z": 15456,
    "r": 348,
-   "buildings": 73,
+   "buildings": 71,
    "people": 250,
    "area": 10557
   },
   {
-   "name": "East Cornworthy",
-   "kind": "hamlet",
-   "x": -5263,
-   "z": 19749,
-   "r": 250,
-   "buildings": 48,
-   "people": 250,
-   "area": 10428
-  },
-  {
    "name": "Netherton",
    "kind": "hamlet",
-   "x": -844,
-   "z": 3681,
+   "x": -2844,
+   "z": 21181,
    "r": 355,
    "buildings": 68,
    "people": 250,
    "area": 10632
   },
   {
-   "name": "Daccombe",
-   "kind": "hamlet",
-   "x": 175,
-   "z": 6940,
-   "r": 260,
-   "buildings": 69,
-   "people": 250,
-   "area": 10356
-  },
-  {
-   "name": "Higher Blagdon",
-   "kind": "hamlet",
-   "x": -4729,
-   "z": 13695,
-   "r": 250,
-   "buildings": 41,
-   "people": 250,
-   "area": 10678
-  },
-  {
    "name": "Venny Tedburn",
    "kind": "hamlet",
-   "x": -7881,
-   "z": -22483,
+   "x": -9881,
+   "z": -4983,
    "r": 295,
    "buildings": 43,
    "people": 250,
-   "area": 10683
+   "area": 10671
   },
   {
    "name": "Harpford",
    "kind": "village",
-   "x": 19107,
-   "z": -15301,
+   "x": 17107,
+   "z": 2199,
    "r": 332,
-   "buildings": 67,
+   "buildings": 66,
    "people": 250,
-   "area": 10423
+   "area": 10425
+  },
+  {
+   "name": "Higher Tale",
+   "kind": "hamlet",
+   "x": 14562,
+   "z": -9110,
+   "r": 281,
+   "buildings": 39,
+   "people": 240,
+   "area": 10271
+  },
+  {
+   "name": "Hollis Green",
+   "kind": "hamlet",
+   "x": 16468,
+   "z": -15862,
+   "r": 250,
+   "buildings": 32,
+   "people": 240,
+   "area": 10068
+  },
+  {
+   "name": "Simonsburrow",
+   "kind": "hamlet",
+   "x": 22533,
+   "z": -23713,
+   "r": 282,
+   "buildings": 42,
+   "people": 240,
+   "area": 9872
+  },
+  {
+   "name": "Bodmiscombe",
+   "kind": "hamlet",
+   "x": 18856,
+   "z": -17404,
+   "r": 250,
+   "buildings": 36,
+   "people": 240,
+   "area": 9969
   },
   {
    "name": "Hillerton",
    "kind": "hamlet",
-   "x": -17418,
-   "z": -23088,
+   "x": -19418,
+   "z": -5588,
    "r": 292,
    "buildings": 55,
    "people": 240,
@@ -1879,28 +2309,18 @@
   {
    "name": "Easton",
    "kind": "hamlet",
-   "x": -18101,
-   "z": -13797,
+   "x": -20101,
+   "z": 3703,
    "r": 251,
-   "buildings": 57,
+   "buildings": 58,
    "people": 240,
-   "area": 10001
-  },
-  {
-   "name": "Aish",
-   "kind": "hamlet",
-   "x": -5752,
-   "z": 16062,
-   "r": 284,
-   "buildings": 51,
-   "people": 240,
-   "area": 10044
+   "area": 9964
   },
   {
    "name": "Newtown",
    "kind": "suburb",
-   "x": 16569,
-   "z": -24130,
+   "x": 14569,
+   "z": -6630,
    "r": 250,
    "buildings": 40,
    "people": 240,
@@ -1909,8 +2329,8 @@
   {
    "name": "Woodmanton",
    "kind": "hamlet",
-   "x": 11133,
-   "z": -10949,
+   "x": 9133,
+   "z": 6551,
    "r": 250,
    "buildings": 27,
    "people": 240,
@@ -1919,118 +2339,158 @@
   {
    "name": "Marsh Green",
    "kind": "hamlet",
-   "x": 14194,
-   "z": -18660,
+   "x": 12194,
+   "z": -1160,
    "r": 250,
    "buildings": 49,
    "people": 240,
    "area": 10259
   },
   {
-   "name": "Brownston",
-   "kind": "hamlet",
-   "x": -20178,
-   "z": 22291,
-   "r": 250,
-   "buildings": 59,
+   "name": "Morchard Road",
+   "kind": "village",
+   "x": -16863,
+   "z": -12384,
+   "r": 273,
+   "buildings": 62,
    "people": 230,
-   "area": 9729
+   "area": 9693
   },
   {
-   "name": "Ludbrook",
+   "name": "Templeton",
    "kind": "hamlet",
-   "x": -24063,
-   "z": 20678,
+   "x": -3283,
+   "z": -21468,
    "r": 250,
-   "buildings": 34,
+   "buildings": 54,
    "people": 230,
-   "area": 9811
+   "area": 9619
+  },
+  {
+   "name": "Cadeleigh",
+   "kind": "hamlet",
+   "x": -588,
+   "z": -15488,
+   "r": 258,
+   "buildings": 47,
+   "people": 230,
+   "area": 9814
+  },
+  {
+   "name": "Ayshford",
+   "kind": "hamlet",
+   "x": 12834,
+   "z": -22644,
+   "r": 250,
+   "buildings": 28,
+   "people": 230,
+   "area": 9771
   },
   {
    "name": "Hittisleigh",
    "kind": "hamlet",
-   "x": -16758,
-   "z": -20037,
+   "x": -18758,
+   "z": -2537,
    "r": 400,
    "buildings": 58,
    "people": 230,
-   "area": 9490
-  },
-  {
-   "name": "South Tawton",
-   "kind": "village",
-   "x": -24593,
-   "z": -19448,
-   "r": 250,
-   "buildings": 65,
-   "people": 230,
-   "area": 9650
+   "area": 9507
   },
   {
    "name": "Crockernwell",
    "kind": "village",
-   "x": -14679,
-   "z": -17386,
+   "x": -16679,
+   "z": 114,
    "r": 250,
    "buildings": 63,
    "people": 230,
-   "area": 9633
-  },
-  {
-   "name": "Capton",
-   "kind": "hamlet",
-   "x": -6305,
-   "z": 21848,
-   "r": 259,
-   "buildings": 54,
-   "people": 230,
-   "area": 9753
+   "area": 9608
   },
   {
    "name": "Fenny Bridges",
    "kind": "village",
-   "x": 21340,
-   "z": -23489,
+   "x": 19340,
+   "z": -5989,
    "r": 250,
    "buildings": 64,
    "people": 230,
    "area": 9720
   },
   {
-   "name": "Halwell",
+   "name": "Coleford",
    "kind": "village",
-   "x": -12333,
-   "z": 21943,
+   "x": -14803,
+   "z": -8574,
    "r": 250,
-   "buildings": 53,
+   "buildings": 56,
    "people": 220,
-   "area": 9058
+   "area": 9242
   },
   {
-   "name": "Brownston",
+   "name": "Woolfardisworthy",
    "kind": "hamlet",
-   "x": -14877,
-   "z": 12371,
+   "x": -9141,
+   "z": -16183,
    "r": 250,
-   "buildings": 31,
+   "buildings": 40,
    "people": 220,
-   "area": 9077
+   "area": 9432
   },
   {
-   "name": "Huxham's Cross Estate",
-   "kind": "village",
-   "x": -11643,
-   "z": 11903,
+   "name": "Berrysbridge",
+   "kind": "hamlet",
+   "x": 310,
+   "z": -8716,
    "r": 250,
-   "buildings": 61,
+   "buildings": 39,
    "people": 220,
-   "area": 9409
+   "area": 9090
+  },
+  {
+   "name": "Upham",
+   "kind": "hamlet",
+   "x": -3806,
+   "z": -15726,
+   "r": 261,
+   "buildings": 46,
+   "people": 220,
+   "area": 9237
+  },
+  {
+   "name": "Luppitt",
+   "kind": "hamlet",
+   "x": 24916,
+   "z": -14149,
+   "r": 282,
+   "buildings": 41,
+   "people": 220,
+   "area": 9346
+  },
+  {
+   "name": "Abbey",
+   "kind": "hamlet",
+   "x": 22090,
+   "z": -18154,
+   "r": 250,
+   "buildings": 56,
+   "people": 220,
+   "area": 9141
+  },
+  {
+   "name": "Hillmoor",
+   "kind": "hamlet",
+   "x": 18624,
+   "z": -20885,
+   "r": 250,
+   "buildings": 47,
+   "people": 220,
+   "area": 9150
   },
   {
    "name": "Caton",
    "kind": "hamlet",
-   "x": -11863,
-   "z": 3116,
+   "x": -13863,
+   "z": 20616,
    "r": 250,
    "buildings": 39,
    "people": 220,
@@ -2039,118 +2499,238 @@
   {
    "name": "Stowford",
    "kind": "hamlet",
-   "x": 21454,
-   "z": -14724,
+   "x": 19454,
+   "z": 2776,
    "r": 250,
    "buildings": 59,
    "people": 220,
    "area": 9078
   },
   {
-   "name": "Cheston",
+   "name": "Filleigh",
    "kind": "hamlet",
-   "x": -21768,
-   "z": 16566,
-   "r": 250,
-   "buildings": 40,
+   "x": -17774,
+   "z": -17962,
+   "r": 285,
+   "buildings": 19,
    "people": 210,
-   "area": 8709
+   "area": 8952
+  },
+  {
+   "name": "Stockwell",
+   "kind": "hamlet",
+   "x": 5394,
+   "z": -10122,
+   "r": 250,
+   "buildings": 48,
+   "people": 210,
+   "area": 8697
+  },
+  {
+   "name": "Washford Pyne",
+   "kind": "hamlet",
+   "x": -10693,
+   "z": -19217,
+   "r": 250,
+   "buildings": 23,
+   "people": 210,
+   "area": 8912
+  },
+  {
+   "name": "Washfield",
+   "kind": "hamlet",
+   "x": 1649,
+   "z": -22834,
+   "r": 250,
+   "buildings": 52,
+   "people": 210,
+   "area": 8697
+  },
+  {
+   "name": "Loxbeare",
+   "kind": "hamlet",
+   "x": -908,
+   "z": -23502,
+   "r": 250,
+   "buildings": 32,
+   "people": 210,
+   "area": 8695
+  },
+  {
+   "name": "Dulford",
+   "kind": "hamlet",
+   "x": 15200,
+   "z": -13267,
+   "r": 268,
+   "buildings": 56,
+   "people": 210,
+   "area": 8842
+  },
+  {
+   "name": "Whitnage",
+   "kind": "hamlet",
+   "x": 10757,
+   "z": -23195,
+   "r": 250,
+   "buildings": 47,
+   "people": 210,
+   "area": 8891
+  },
+  {
+   "name": "Higher Rocombe",
+   "kind": "hamlet",
+   "x": -755,
+   "z": 23685,
+   "r": 250,
+   "buildings": 48,
+   "people": 210,
+   "area": 8859
   },
   {
    "name": "Humber",
    "kind": "hamlet",
-   "x": 174,
-   "z": -695,
+   "x": -1826,
+   "z": 16805,
    "r": 274,
    "buildings": 42,
    "people": 210,
-   "area": 8713
+   "area": 8726
   },
   {
    "name": "Bowd",
    "kind": "village",
-   "x": 20839,
-   "z": -14955,
+   "x": 18839,
+   "z": 2545,
    "r": 276,
-   "buildings": 63,
+   "buildings": 61,
    "people": 210,
-   "area": 8905
+   "area": 8927
   },
   {
    "name": "Gittisham",
    "kind": "village",
-   "x": 23389,
-   "z": -23425,
+   "x": 21389,
+   "z": -5925,
    "r": 257,
    "buildings": 52,
    "people": 210,
    "area": 8965
   },
   {
+   "name": "Brushford",
+   "kind": "hamlet",
+   "x": -24418,
+   "z": -15130,
+   "r": 256,
+   "buildings": 32,
+   "people": 200,
+   "area": 8531
+  },
+  {
+   "name": "West Worlington",
+   "kind": "hamlet",
+   "x": -14977,
+   "z": -20913,
+   "r": 250,
+   "buildings": 36,
+   "people": 200,
+   "area": 8222
+  },
+  {
+   "name": "Yondercott",
+   "kind": "village",
+   "x": 15489,
+   "z": -20081,
+   "r": 298,
+   "buildings": 58,
+   "people": 200,
+   "area": 8446
+  },
+  {
    "name": "Neopardy",
    "kind": "hamlet",
-   "x": -10494,
-   "z": -23906,
+   "x": -12494,
+   "z": -6406,
    "r": 250,
-   "buildings": 35,
+   "buildings": 34,
    "people": 200,
    "area": 8553
   },
   {
    "name": "Murchington",
    "kind": "hamlet",
-   "x": -21426,
-   "z": -13296,
+   "x": -23426,
+   "z": 4204,
    "r": 250,
    "buildings": 35,
    "people": 200,
    "area": 8291
   },
   {
-   "name": "Higher Rocombe",
-   "kind": "hamlet",
-   "x": 1245,
-   "z": 6185,
-   "r": 250,
-   "buildings": 44,
-   "people": 200,
-   "area": 8442
-  },
-  {
    "name": "West Ogwell",
    "kind": "hamlet",
-   "x": -7808,
-   "z": 4992,
+   "x": -9808,
+   "z": 22492,
    "r": 250,
-   "buildings": 38,
+   "buildings": 35,
    "people": 200,
-   "area": 8527
+   "area": 8502
   },
   {
    "name": "Venn Ottery",
    "kind": "hamlet",
-   "x": 17967,
-   "z": -16193,
+   "x": 15967,
+   "z": 1307,
    "r": 253,
    "buildings": 45,
    "people": 200,
    "area": 8284
   },
   {
-   "name": "North Huish",
+   "name": "Clannaborough",
    "kind": "hamlet",
-   "x": -18801,
-   "z": 18462,
-   "r": 279,
-   "buildings": 40,
+   "x": -17092,
+   "z": -10027,
+   "r": 250,
+   "buildings": 15,
    "people": 190,
-   "area": 8011
+   "area": 7854
+  },
+  {
+   "name": "Nomansland",
+   "kind": "hamlet",
+   "x": -6195,
+   "z": -9555,
+   "r": 250,
+   "buildings": 31,
+   "people": 190,
+   "area": 8151
+  },
+  {
+   "name": "Ponsford",
+   "kind": "hamlet",
+   "x": 8178,
+   "z": -14901,
+   "r": 250,
+   "buildings": 29,
+   "people": 190,
+   "area": 8024
+  },
+  {
+   "name": "Norman's Green",
+   "kind": "village",
+   "x": 13579,
+   "z": -11062,
+   "r": 250,
+   "buildings": 48,
+   "people": 190,
+   "area": 7868
   },
   {
    "name": "Sigford",
    "kind": "hamlet",
-   "x": -12290,
-   "z": 1090,
+   "x": -14290,
+   "z": 18590,
    "r": 250,
    "buildings": 44,
    "people": 190,
@@ -2159,108 +2739,168 @@
   {
    "name": "Venton",
    "kind": "hamlet",
-   "x": -20687,
-   "z": -16136,
+   "x": -22687,
+   "z": 1364,
    "r": 250,
    "buildings": 33,
    "people": 190,
    "area": 7916
   },
   {
-   "name": "True Street",
+   "name": "Calverleigh",
    "kind": "hamlet",
-   "x": -7928,
-   "z": 14410,
-   "r": 250,
-   "buildings": 43,
-   "people": 190,
-   "area": 7800
+   "x": 128,
+   "z": -21950,
+   "r": 280,
+   "buildings": 49,
+   "people": 180,
+   "area": 7580
   },
   {
-   "name": "Aish",
-   "kind": "village",
-   "x": -20790,
-   "z": 14378,
-   "r": 405,
-   "buildings": 59,
+   "name": "Northcott",
+   "kind": "hamlet",
+   "x": 17451,
+   "z": -20140,
+   "r": 250,
+   "buildings": 36,
    "people": 180,
-   "area": 7505
+   "area": 7521
+  },
+  {
+   "name": "Red Ball",
+   "kind": "hamlet",
+   "x": 16812,
+   "z": -24553,
+   "r": 250,
+   "buildings": 42,
+   "people": 180,
+   "area": 7446
   },
   {
    "name": "Cowley",
    "kind": "village",
-   "x": 554,
-   "z": -20808,
+   "x": -1446,
+   "z": -3308,
    "r": 250,
-   "buildings": 36,
+   "buildings": 35,
    "people": 180,
-   "area": 7488
+   "area": 7400
   },
   {
    "name": "Higher Ashton",
    "kind": "hamlet",
-   "x": -4387,
-   "z": -9651,
+   "x": -6387,
+   "z": 7849,
    "r": 258,
    "buildings": 57,
    "people": 180,
    "area": 7379
   },
   {
-   "name": "Hutcherleigh",
+   "name": "Eastington",
    "kind": "hamlet",
-   "x": -11730,
-   "z": 24642,
+   "x": -17407,
+   "z": -16535,
    "r": 250,
-   "buildings": 32,
+   "buildings": 24,
    "people": 170,
-   "area": 7008
+   "area": 7214
+  },
+  {
+   "name": "West Leigh",
+   "kind": "hamlet",
+   "x": -23279,
+   "z": -13058,
+   "r": 250,
+   "buildings": 25,
+   "people": 170,
+   "area": 7129
+  },
+  {
+   "name": "Penstone",
+   "kind": "hamlet",
+   "x": 6243,
+   "z": -8996,
+   "r": 250,
+   "buildings": 28,
+   "people": 170,
+   "area": 6996
+  },
+  {
+   "name": "Chevithorne",
+   "kind": "hamlet",
+   "x": 5440,
+   "z": -22831,
+   "r": 251,
+   "buildings": 34,
+   "people": 170,
+   "area": 7268
+  },
+  {
+   "name": "Budlake",
+   "kind": "hamlet",
+   "x": 6467,
+   "z": -7662,
+   "r": 250,
+   "buildings": 38,
+   "people": 170,
+   "area": 7235
+  },
+  {
+   "name": "Uppincott",
+   "kind": "hamlet",
+   "x": -3225,
+   "z": -9962,
+   "r": 261,
+   "buildings": 22,
+   "people": 170,
+   "area": 7253
+  },
+  {
+   "name": "Craddock",
+   "kind": "hamlet",
+   "x": 16629,
+   "z": -19809,
+   "r": 264,
+   "buildings": 41,
+   "people": 170,
+   "area": 7264
+  },
+  {
+   "name": "Saint Hill",
+   "kind": "hamlet",
+   "x": 17133,
+   "z": -15671,
+   "r": 250,
+   "buildings": 37,
+   "people": 170,
+   "area": 7099
+  },
+  {
+   "name": "Culm Davy",
+   "kind": "hamlet",
+   "x": 20382,
+   "z": -22606,
+   "r": 250,
+   "buildings": 39,
+   "people": 170,
+   "area": 7063
   },
   {
    "name": "Scorriton",
    "kind": "hamlet",
-   "x": -19559,
-   "z": 6528,
+   "x": -21559,
+   "z": 24028,
    "r": 250,
    "buildings": 51,
    "people": 170,
    "area": 7181
   },
   {
-   "name": "Didworthy",
-   "kind": "hamlet",
-   "x": -21499,
-   "z": 12786,
-   "r": 250,
-   "buildings": 51,
-   "people": 170,
-   "area": 7203
-  },
-  {
-   "name": "Bow",
-   "kind": "hamlet",
-   "x": -8762,
-   "z": 18391,
-   "r": 250,
-   "buildings": 45,
-   "people": 170,
-   "area": 7052
-  },
-  {
-   "name": "Lower Blagdon",
-   "kind": "hamlet",
-   "x": -4262,
-   "z": 14213,
-   "r": 250,
-   "buildings": 40,
-   "people": 170,
-   "area": 6938
-  },
-  {
    "name": "Teign Village",
    "kind": "village",
-   "x": -6183,
-   "z": -6004,
+   "x": -8183,
+   "z": 11496,
    "r": 250,
    "buildings": 39,
    "people": 170,
@@ -2269,38 +2909,88 @@
   {
    "name": "Larkbeare",
    "kind": "hamlet",
-   "x": 17004,
-   "z": -22568,
+   "x": 15004,
+   "z": -5068,
    "r": 250,
-   "buildings": 24,
+   "buildings": 25,
    "people": 170,
    "area": 7175
   },
   {
    "name": "Southerton",
    "kind": "hamlet",
-   "x": 17671,
-   "z": -15518,
+   "x": 15671,
+   "z": 1982,
    "r": 250,
    "buildings": 45,
    "people": 170,
    "area": 7043
   },
   {
-   "name": "Curtisknowle",
+   "name": "Week",
    "kind": "hamlet",
-   "x": -16389,
-   "z": 21131,
-   "r": 252,
-   "buildings": 33,
+   "x": -18340,
+   "z": -24205,
+   "r": 331,
+   "buildings": 29,
    "people": 160,
-   "area": 6608
+   "area": 6644
+  },
+  {
+   "name": "Lurley",
+   "kind": "hamlet",
+   "x": 369,
+   "z": -22334,
+   "r": 274,
+   "buildings": 40,
+   "people": 160,
+   "area": 6620
+  },
+  {
+   "name": "Chitterley",
+   "kind": "hamlet",
+   "x": 2283,
+   "z": -11975,
+   "r": 250,
+   "buildings": 21,
+   "people": 160,
+   "area": 6929
+  },
+  {
+   "name": "Colebrook",
+   "kind": "hamlet",
+   "x": 8712,
+   "z": -13574,
+   "r": 253,
+   "buildings": 34,
+   "people": 160,
+   "area": 6699
+  },
+  {
+   "name": "Higher Weaver",
+   "kind": "hamlet",
+   "x": 13033,
+   "z": -12219,
+   "r": 253,
+   "buildings": 27,
+   "people": 160,
+   "area": 6783
+  },
+  {
+   "name": "Bolham Water",
+   "kind": "hamlet",
+   "x": 24798,
+   "z": -19610,
+   "r": 262,
+   "buildings": 42,
+   "people": 160,
+   "area": 6709
   },
   {
    "name": "Michelcombe",
    "kind": "hamlet",
-   "x": -20337,
-   "z": 6038,
+   "x": -22337,
+   "z": 23538,
    "r": 250,
    "buildings": 35,
    "people": 160,
@@ -2309,28 +2999,18 @@
   {
    "name": "Great Weeke",
    "kind": "hamlet",
-   "x": -18537,
-   "z": -12602,
+   "x": -20537,
+   "z": 4898,
    "r": 250,
-   "buildings": 31,
+   "buildings": 32,
    "people": 160,
    "area": 6875
   },
   {
-   "name": "Torbryan",
-   "kind": "hamlet",
-   "x": -7935,
-   "z": 8168,
-   "r": 262,
-   "buildings": 38,
-   "people": 160,
-   "area": 6861
-  },
-  {
    "name": "Coombe",
    "kind": "hamlet",
-   "x": -6352,
-   "z": -8953,
+   "x": -8352,
+   "z": 8547,
    "r": 302,
    "buildings": 41,
    "people": 160,
@@ -2339,8 +3019,8 @@
   {
    "name": "Columbjohn",
    "kind": "hamlet",
-   "x": 5811,
-   "z": -24656,
+   "x": 3811,
+   "z": -7156,
    "r": 265,
    "buildings": 21,
    "people": 160,
@@ -2349,8 +3029,8 @@
   {
    "name": "Lower Ashton",
    "kind": "hamlet",
-   "x": -5550,
-   "z": -9221,
+   "x": -7550,
+   "z": 8279,
    "r": 250,
    "buildings": 44,
    "people": 160,
@@ -2359,98 +3039,198 @@
   {
    "name": "Cotford",
    "kind": "hamlet",
-   "x": 24175,
-   "z": -17240,
+   "x": 22175,
+   "z": 260,
    "r": 250,
-   "buildings": 48,
+   "buildings": 49,
    "people": 160,
    "area": 6848
   },
   {
-   "name": "Lutton",
+   "name": "Salcombe Regis",
    "kind": "hamlet",
-   "x": -20376,
-   "z": 13738,
+   "x": 22834,
+   "z": 3618,
+   "r": 305,
+   "buildings": 52,
+   "people": 160,
+   "area": 6800
+  },
+  {
+   "name": "Weeke",
+   "kind": "hamlet",
+   "x": -15842,
+   "z": -13712,
    "r": 250,
-   "buildings": 23,
+   "buildings": 26,
    "people": 150,
-   "area": 6400
+   "area": 6408
+  },
+  {
+   "name": "Penstone",
+   "kind": "hamlet",
+   "x": -14509,
+   "z": -7873,
+   "r": 250,
+   "buildings": 42,
+   "people": 150,
+   "area": 6471
   },
   {
    "name": "Woodland Head",
    "kind": "hamlet",
-   "x": -12076,
-   "z": -21589,
+   "x": -14076,
+   "z": -4089,
    "r": 254,
    "buildings": 41,
    "people": 150,
    "area": 6503
   },
   {
+   "name": "Netherexe",
+   "kind": "hamlet",
+   "x": 1355,
+   "z": -7491,
+   "r": 250,
+   "buildings": 18,
+   "people": 150,
+   "area": 6397
+  },
+  {
    "name": "Huxham",
    "kind": "hamlet",
-   "x": 4705,
-   "z": -22902,
+   "x": 2705,
+   "z": -5402,
    "r": 250,
    "buildings": 21,
    "people": 150,
    "area": 6342
   },
   {
+   "name": "Ellicombe",
+   "kind": "hamlet",
+   "x": -17563,
+   "z": -12642,
+   "r": 250,
+   "buildings": 19,
+   "people": 140,
+   "area": 5744
+  },
+  {
+   "name": "East Worlington",
+   "kind": "hamlet",
+   "x": -14597,
+   "z": -21295,
+   "r": 250,
+   "buildings": 32,
+   "people": 140,
+   "area": 5778
+  },
+  {
+   "name": "Madford",
+   "kind": "hamlet",
+   "x": 22585,
+   "z": -18580,
+   "r": 250,
+   "buildings": 34,
+   "people": 140,
+   "area": 6014
+  },
+  {
+   "name": "Clayhidon",
+   "kind": "hamlet",
+   "x": 24149,
+   "z": -23035,
+   "r": 250,
+   "buildings": 41,
+   "people": 140,
+   "area": 5960
+  },
+  {
    "name": "Preston",
    "kind": "hamlet",
-   "x": -14987,
-   "z": -15334,
+   "x": -16987,
+   "z": 2166,
    "r": 250,
-   "buildings": 31,
+   "buildings": 30,
    "people": 140,
    "area": 5805
   },
   {
    "name": "Hawkmoor Parke",
    "kind": "hamlet",
-   "x": -9694,
-   "z": -5900,
+   "x": -11694,
+   "z": 11600,
    "r": 250,
    "buildings": 38,
    "people": 140,
-   "area": 5673
+   "area": 5679
   },
   {
    "name": "Hookway",
    "kind": "hamlet",
-   "x": -5056,
-   "z": -23739,
+   "x": -7056,
+   "z": -6239,
    "r": 315,
-   "buildings": 47,
-   "people": 140,
-   "area": 5765
-  },
-  {
-   "name": "Salcombe Regis",
-   "kind": "hamlet",
-   "x": 24834,
-   "z": -13882,
-   "r": 305,
    "buildings": 46,
    "people": 140,
-   "area": 5939
+   "area": 5710
+  },
+  {
+   "name": "Trow",
+   "kind": "hamlet",
+   "x": 23395,
+   "z": 3115,
+   "r": 250,
+   "buildings": 28,
+   "people": 140,
+   "area": 5903
   },
   {
    "name": "Kersbrook",
    "kind": "hamlet",
-   "x": 16709,
-   "z": -8087,
+   "x": 14709,
+   "z": 9413,
    "r": 250,
-   "buildings": 40,
+   "buildings": 41,
    "people": 140,
-   "area": 5831
+   "area": 5812
+  },
+  {
+   "name": "Lower Creedy",
+   "kind": "hamlet",
+   "x": -7735,
+   "z": -10147,
+   "r": 250,
+   "buildings": 18,
+   "people": 130,
+   "area": 5367
+  },
+  {
+   "name": "Lower Tale",
+   "kind": "hamlet",
+   "x": 14781,
+   "z": -9365,
+   "r": 259,
+   "buildings": 32,
+   "people": 130,
+   "area": 5613
+  },
+  {
+   "name": "Colestocks",
+   "kind": "hamlet",
+   "x": 17089,
+   "z": -8024,
+   "r": 250,
+   "buildings": 32,
+   "people": 130,
+   "area": 5560
   },
   {
    "name": "Buckland in the Moor",
    "kind": "hamlet",
-   "x": -17916,
-   "z": 1888,
+   "x": -19916,
+   "z": 19388,
    "r": 270,
    "buildings": 40,
    "people": 130,
@@ -2459,38 +3239,28 @@
   {
    "name": "Ponsworthy",
    "kind": "hamlet",
-   "x": -19967,
-   "z": 1212,
+   "x": -21967,
+   "z": 18712,
    "r": 277,
-   "buildings": 38,
+   "buildings": 37,
    "people": 130,
    "area": 5403
   },
   {
-   "name": "Harbourneford",
-   "kind": "hamlet",
-   "x": -18327,
-   "z": 12760,
-   "r": 250,
-   "buildings": 26,
-   "people": 130,
-   "area": 5292
-  },
-  {
    "name": "Poundsgate",
    "kind": "hamlet",
-   "x": -19438,
-   "z": 2964,
+   "x": -21438,
+   "z": 20464,
    "r": 250,
-   "buildings": 32,
+   "buildings": 33,
    "people": 130,
    "area": 5575
   },
   {
    "name": "Bonehill",
    "kind": "hamlet",
-   "x": -17560,
-   "z": -2474,
+   "x": -19560,
+   "z": 15026,
    "r": 250,
    "buildings": 33,
    "people": 130,
@@ -2499,68 +3269,58 @@
   {
    "name": "Westcott",
    "kind": "hamlet",
-   "x": -11031,
-   "z": -12053,
+   "x": -13031,
+   "z": 5447,
    "r": 250,
    "buildings": 29,
    "people": 130,
-   "area": 5652
+   "area": 5633
   },
   {
    "name": "Doccombe",
    "kind": "hamlet",
-   "x": -12318,
-   "z": -11813,
+   "x": -14318,
+   "z": 5687,
    "r": 250,
    "buildings": 31,
    "people": 130,
    "area": 5350
   },
   {
-   "name": "Woodford",
+   "name": "Nymet Tracey",
    "kind": "hamlet",
-   "x": -10233,
-   "z": 24109,
+   "x": -19208,
+   "z": -8065,
    "r": 250,
-   "buildings": 29,
+   "buildings": 24,
    "people": 120,
-   "area": 4883
+   "area": 5178
   },
   {
-   "name": "Teigncombe",
+   "name": "Cadbury",
    "kind": "hamlet",
-   "x": -22811,
-   "z": -12143,
+   "x": -860,
+   "z": -12463,
    "r": 250,
-   "buildings": 39,
+   "buildings": 41,
    "people": 120,
-   "area": 5164
+   "area": 5126
   },
   {
-   "name": "Ramsley",
-   "kind": "suburb",
-   "x": -24899,
-   "z": -18227,
-   "r": 250,
-   "buildings": 42,
-   "people": 120,
-   "area": 5086
-  },
-  {
-   "name": "Southdown",
+   "name": "Well Town",
    "kind": "hamlet",
-   "x": 1802,
-   "z": 21035,
+   "x": -1436,
+   "z": -17073,
    "r": 250,
-   "buildings": 35,
+   "buildings": 25,
    "people": 120,
-   "area": 5143
+   "area": 5149
   },
   {
    "name": "Middle Rocombe",
    "kind": "hamlet",
-   "x": 913,
-   "z": 5600,
+   "x": -1087,
+   "z": 23100,
    "r": 250,
    "buildings": 29,
    "people": 120,
@@ -2569,18 +3329,48 @@
   {
    "name": "Coombe",
    "kind": "hamlet",
-   "x": 20065,
-   "z": -16960,
+   "x": 18065,
+   "z": 540,
    "r": 250,
    "buildings": 28,
    "people": 120,
    "area": 5036
   },
   {
+   "name": "Stockleigh English",
+   "kind": "hamlet",
+   "x": -7034,
+   "z": -13853,
+   "r": 250,
+   "buildings": 24,
+   "people": 110,
+   "area": 4427
+  },
+  {
+   "name": "West Raddon",
+   "kind": "hamlet",
+   "x": -2933,
+   "z": -9723,
+   "r": 250,
+   "buildings": 13,
+   "people": 110,
+   "area": 4464
+  },
+  {
+   "name": "Higher Cheriton",
+   "kind": "hamlet",
+   "x": 18029,
+   "z": -8146,
+   "r": 250,
+   "buildings": 24,
+   "people": 110,
+   "area": 4707
+  },
+  {
    "name": "Woodland",
    "kind": "hamlet",
-   "x": -10794,
-   "z": 6088,
+   "x": -12794,
+   "z": 23588,
    "r": 250,
    "buildings": 22,
    "people": 110,
@@ -2589,28 +3379,18 @@
   {
    "name": "Combe",
    "kind": "hamlet",
-   "x": -19685,
-   "z": 6890,
+   "x": -21685,
+   "z": 24390,
    "r": 250,
    "buildings": 32,
    "people": 110,
    "area": 4505
   },
   {
-   "name": "Hexworthy",
-   "kind": "hamlet",
-   "x": -24479,
-   "z": 2360,
-   "r": 278,
-   "buildings": 41,
-   "people": 110,
-   "area": 4586
-  },
-  {
    "name": "Hittisleigh Barton",
    "kind": "suburb",
-   "x": -16574,
-   "z": -20417,
+   "x": -18574,
+   "z": -2917,
    "r": 250,
    "buildings": 19,
    "people": 110,
@@ -2619,28 +3399,58 @@
   {
    "name": "Combe",
    "kind": "hamlet",
-   "x": -2660,
-   "z": -921,
+   "x": -4660,
+   "z": 16579,
    "r": 250,
    "buildings": 34,
    "people": 110,
    "area": 4688
   },
   {
-   "name": "Salmonhutch",
+   "name": "Leigh Cross",
    "kind": "hamlet",
-   "x": -7278,
-   "z": -24007,
+   "x": -22083,
+   "z": -12253,
    "r": 250,
    "buildings": 22,
-   "people": 110,
-   "area": 4560
+   "people": 100,
+   "area": 4093
+  },
+  {
+   "name": "Oldborough",
+   "kind": "hamlet",
+   "x": -14710,
+   "z": -13863,
+   "r": 250,
+   "buildings": 32,
+   "people": 100,
+   "area": 4019
+  },
+  {
+   "name": "Prescott",
+   "kind": "hamlet",
+   "x": 16821,
+   "z": -21797,
+   "r": 250,
+   "buildings": 27,
+   "people": 100,
+   "area": 4384
+  },
+  {
+   "name": "Knowle",
+   "kind": "hamlet",
+   "x": 8356,
+   "z": -14668,
+   "r": 250,
+   "buildings": 16,
+   "people": 100,
+   "area": 4128
   },
   {
    "name": "Venton",
    "kind": "hamlet",
-   "x": -17827,
-   "z": -1074,
+   "x": -19827,
+   "z": 16426,
    "r": 250,
    "buildings": 22,
    "people": 100,
@@ -2649,28 +3459,28 @@
   {
    "name": "Lower Town",
    "kind": "hamlet",
-   "x": -18842,
-   "z": 2057,
+   "x": -20842,
+   "z": 19557,
    "r": 250,
    "buildings": 35,
    "people": 100,
    "area": 4325
   },
   {
-   "name": "Deancombe",
+   "name": "Teigncombe",
    "kind": "hamlet",
-   "x": -17707,
-   "z": 10623,
+   "x": -24811,
+   "z": 5357,
    "r": 250,
-   "buildings": 16,
+   "buildings": 30,
    "people": 100,
-   "area": 4043
+   "area": 4086
   },
   {
    "name": "Ashcombe",
    "kind": "hamlet",
-   "x": 1344,
-   "z": -4587,
+   "x": -656,
+   "z": 12913,
    "r": 261,
    "buildings": 17,
    "people": 100,
@@ -2679,78 +3489,88 @@
   {
    "name": "Lower Rocombe",
    "kind": "hamlet",
-   "x": 966,
-   "z": 4895,
+   "x": -1034,
+   "z": 22395,
    "r": 250,
-   "buildings": 33,
+   "buildings": 32,
    "people": 100,
    "area": 4237
   },
   {
    "name": "Nadderwater",
    "kind": "village",
-   "x": -529,
-   "z": -18164,
+   "x": -2529,
+   "z": -664,
    "r": 260,
    "buildings": 30,
    "people": 100,
    "area": 4009
   },
   {
-   "name": "Belsford",
+   "name": "East Butterleigh",
    "kind": "hamlet",
-   "x": -13411,
-   "z": 15641,
+   "x": 6290,
+   "z": -16367,
+   "r": 250,
+   "buildings": 23,
+   "people": 90,
+   "area": 3629
+  },
+  {
+   "name": "Lower Cheriton",
+   "kind": "hamlet",
+   "x": 18116,
+   "z": -8532,
+   "r": 250,
+   "buildings": 26,
+   "people": 90,
+   "area": 3784
+  },
+  {
+   "name": "Stoford Water",
+   "kind": "hamlet",
+   "x": 16020,
+   "z": -15953,
    "r": 250,
    "buildings": 21,
    "people": 90,
-   "area": 3826
-  },
-  {
-   "name": "Shelly",
-   "kind": "suburb",
-   "x": -24611,
-   "z": -18418,
-   "r": 250,
-   "buildings": 22,
-   "people": 90,
-   "area": 3729
-  },
-  {
-   "name": "Gidleigh",
-   "kind": "hamlet",
-   "x": -22876,
-   "z": -13394,
-   "r": 250,
-   "buildings": 24,
-   "people": 90,
-   "area": 3706
-  },
-  {
-   "name": "Allaleigh",
-   "kind": "hamlet",
-   "x": -9084,
-   "z": 21315,
-   "r": 250,
-   "buildings": 43,
-   "people": 90,
-   "area": 3765
+   "area": 3859
   },
   {
    "name": "Powderham",
    "kind": "hamlet",
-   "x": 6648,
-   "z": -9344,
+   "x": 4648,
+   "z": 8156,
    "r": 315,
    "buildings": 22,
    "people": 90,
-   "area": 3762
+   "area": 3752
+  },
+  {
+   "name": "East Mere",
+   "kind": "hamlet",
+   "x": 7699,
+   "z": -23638,
+   "r": 250,
+   "buildings": 14,
+   "people": 80,
+   "area": 3406
+  },
+  {
+   "name": "Upton Hellions",
+   "kind": "hamlet",
+   "x": -7791,
+   "z": -10795,
+   "r": 250,
+   "buildings": 22,
+   "people": 80,
+   "area": 3462
   },
   {
    "name": "Stormsdown",
    "kind": "hamlet",
-   "x": -12752,
-   "z": 2276,
+   "x": -14752,
+   "z": 19776,
    "r": 250,
    "buildings": 20,
    "people": 80,
@@ -2759,299 +3579,289 @@
   {
    "name": "Higher Coombe",
    "kind": "hamlet",
-   "x": -19977,
-   "z": 6902,
+   "x": -21977,
+   "z": 24402,
    "r": 250,
    "buildings": 19,
    "people": 80,
    "area": 3232
   },
   {
-   "name": "Bellever",
+   "name": "Gidleigh",
    "kind": "hamlet",
-   "x": -24487,
-   "z": -2349,
+   "x": -24876,
+   "z": 4106,
    "r": 250,
-   "buildings": 21,
+   "buildings": 20,
    "people": 80,
-   "area": 3267
+   "area": 3293
   },
   {
    "name": "Holcombe Burnell",
    "kind": "hamlet",
-   "x": -4114,
-   "z": -16564,
+   "x": -6114,
+   "z": 936,
    "r": 250,
    "buildings": 13,
    "people": 80,
    "area": 3327
   },
   {
-   "name": "Dartmeet",
-   "kind": "hamlet",
-   "x": -22853,
-   "z": 1825,
-   "r": 250,
-   "buildings": 19,
-   "people": 70,
-   "area": 2831
-  },
-  {
    "name": "Lettaford",
    "kind": "hamlet",
-   "x": -19824,
-   "z": -9067,
+   "x": -21824,
+   "z": 8433,
    "r": 250,
    "buildings": 23,
    "people": 70,
    "area": 2733
   },
   {
-   "name": "Netherexe",
+   "name": "Salmonhutch",
    "kind": "hamlet",
-   "x": 3355,
-   "z": -24991,
+   "x": -9278,
+   "z": -6507,
    "r": 250,
-   "buildings": 5,
+   "buildings": 18,
+   "people": 70,
+   "area": 2890
+  },
+  {
+   "name": "Frost",
+   "kind": "hamlet",
+   "x": -14936,
+   "z": -14402,
+   "r": 250,
+   "buildings": 20,
    "people": 60,
-   "area": 2384
+   "area": 2702
+  },
+  {
+   "name": "Livingshayes",
+   "kind": "hamlet",
+   "x": 4288,
+   "z": -11036,
+   "r": 250,
+   "buildings": 17,
+   "people": 60,
+   "area": 2312
+  },
+  {
+   "name": "Dartmeet",
+   "kind": "hamlet",
+   "x": -24853,
+   "z": 19325,
+   "r": 250,
+   "buildings": 17,
+   "people": 60,
+   "area": 2699
   },
   {
    "name": "Fairmile",
    "kind": "hamlet",
-   "x": 18722,
-   "z": -22134,
+   "x": 16722,
+   "z": -4634,
    "r": 250,
    "buildings": 16,
    "people": 60,
    "area": 2698
   },
   {
+   "name": "Chenson",
+   "kind": "hamlet",
+   "x": -21786,
+   "z": -17058,
+   "r": 250,
+   "buildings": 18,
+   "people": 50,
+   "area": 2266
+  },
+  {
+   "name": "Cruwys Morchard",
+   "kind": "hamlet",
+   "x": -4662,
+   "z": -19627,
+   "r": 250,
+   "buildings": 10,
+   "people": 50,
+   "area": 2287
+  },
+  {
    "name": "Leusdon",
    "kind": "hamlet",
-   "x": -19167,
-   "z": 1781,
+   "x": -21167,
+   "z": 19281,
    "r": 267,
    "buildings": 15,
    "people": 50,
    "area": 2082
   },
   {
-   "name": "Longcause",
-   "kind": "hamlet",
-   "x": -10824,
-   "z": 13811,
-   "r": 250,
-   "buildings": 16,
-   "people": 50,
-   "area": 2213
-  },
-  {
    "name": "Halford",
    "kind": "hamlet",
-   "x": -8826,
-   "z": 482,
+   "x": -10826,
+   "z": 17982,
    "r": 250,
    "buildings": 15,
    "people": 50,
    "area": 2093
-  },
-  {
-   "name": "Cott",
-   "kind": "suburb",
-   "x": -11215,
-   "z": 13194,
-   "r": 251,
-   "buildings": 8,
-   "people": 40,
-   "area": 1716
   }
  ],
  "stations": [
   {
+   "name": "Copplestone",
+   "x": -15281,
+   "z": -10608
+  },
+  {
+   "name": "Morchard Road",
+   "x": -16988,
+   "z": -12585
+  },
+  {
+   "name": "Lapford",
+   "x": -19332,
+   "z": -15441
+  },
+  {
+   "name": "Eggesford",
+   "x": -23754,
+   "z": -18962
+  },
+  {
+   "name": "Honiton",
+   "x": 24440,
+   "z": -7853
+  },
+  {
+   "name": "Tiverton Parkway",
+   "x": 12516,
+   "z": -21453
+  },
+  {
    "name": "Newton St Cyres",
-   "x": -1949,
-   "z": -23895
+   "x": -3949,
+   "z": -6395
   },
   {
    "name": "Yeoford",
-   "x": -11686,
-   "z": -23912
+   "x": -13686,
+   "z": -6412
   },
   {
    "name": "Crediton",
-   "x": -5983,
-   "z": -24473
-  },
-  {
-   "name": "Buckfastleigh",
-   "x": -15382,
-   "z": 8726
-  },
-  {
-   "name": "Staverton",
-   "x": -11606,
-   "z": 11229
-  },
-  {
-   "name": "Totnes",
-   "x": -9844,
-   "z": 14084
-  },
-  {
-   "name": "Totnes",
-   "x": -9603,
-   "z": 13674
+   "x": -7983,
+   "z": -6973
   },
   {
    "name": "Newton Abbot",
-   "x": -3245,
-   "z": 3756
-  },
-  {
-   "name": "Kingswear",
-   "x": -1800,
-   "z": 23935
-  },
-  {
-   "name": "Greenway Halt",
-   "x": -1771,
-   "z": 19797
-  },
-  {
-   "name": "Paignton",
-   "x": -1046,
-   "z": 14422
-  },
-  {
-   "name": "Queen's Park",
-   "x": -1014,
-   "z": 14410
-  },
-  {
-   "name": "Goodrington Sands",
-   "x": -858,
-   "z": 15437
-  },
-  {
-   "name": "Churston",
-   "x": -566,
-   "z": 18695
-  },
-  {
-   "name": "Torre",
-   "x": 354,
-   "z": 10164
-  },
-  {
-   "name": "Torquay",
-   "x": 550,
-   "z": 11483
+   "x": -5245,
+   "z": 21256
   },
   {
    "name": "Exeter St David's",
-   "x": 1158,
-   "z": -18311
+   "x": -842,
+   "z": -811
   },
   {
    "name": "Exeter St Thomas",
-   "x": 1444,
-   "z": -16975
+   "x": -556,
+   "z": 525
   },
   {
    "name": "Exeter Central",
-   "x": 1851,
-   "z": -17978
+   "x": -149,
+   "z": -478
   },
   {
    "name": "Marsh Barton",
-   "x": 2636,
-   "z": -15560
+   "x": 636,
+   "z": 1940
   },
   {
    "name": "St James' Park",
-   "x": 2636,
-   "z": -18474
+   "x": 636,
+   "z": -974
   },
   {
    "name": "Polsloe Bridge",
-   "x": 4129,
-   "z": -18472
+   "x": 2129,
+   "z": -972
   },
   {
    "name": "Teignmouth",
-   "x": 4198,
-   "z": 1881
+   "x": 2198,
+   "z": 19381
   },
   {
    "name": "Digby and Sowton",
-   "x": 6063,
-   "z": -16484
+   "x": 4063,
+   "z": 1016
   },
   {
    "name": "Newcourt",
-   "x": 6107,
-   "z": -15291
+   "x": 4107,
+   "z": 2209
   },
   {
    "name": "Pinhoe",
-   "x": 6373,
-   "z": -19165
+   "x": 4373,
+   "z": -1665
   },
   {
    "name": "Dawlish",
-   "x": 6409,
-   "z": -1673
+   "x": 4409,
+   "z": 15827
   },
   {
    "name": "Topsham",
-   "x": 6669,
-   "z": -13390
+   "x": 4669,
+   "z": 4110
   },
   {
    "name": "Starcross",
-   "x": 7701,
-   "z": -6903
+   "x": 5701,
+   "z": 10597
   },
   {
    "name": "Dawlish Warren",
-   "x": 7936,
-   "z": -3614
+   "x": 5936,
+   "z": 13886
   },
   {
    "name": "Exton",
-   "x": 8040,
-   "z": -11373
+   "x": 6040,
+   "z": 6127
   },
   {
    "name": "Lympstone Commando",
-   "x": 8251,
-   "z": -10756
+   "x": 6251,
+   "z": 6744
   },
   {
    "name": "Lympstone",
-   "x": 8898,
-   "z": -9207
+   "x": 6898,
+   "z": 8293
   },
   {
    "name": "Cranbrook",
-   "x": 9888,
-   "z": -20471
+   "x": 7888,
+   "z": -2971
   },
   {
    "name": "Feniton",
-   "x": 19486,
-   "z": -24356
+   "x": 17486,
+   "z": -6856
   },
   {
    "name": "Exmouth",
-   "x": 10010,
-   "z": -6170
+   "x": 8010,
+   "z": 11330
   },
   {
    "name": "Whimple",
-   "x": 14610,
-   "z": -22361
+   "x": 12610,
+   "z": -4861
   }
  ],
  "home": "Exeter",
@@ -3064,22 +3874,22 @@
   "OS Open Greenspace"
  ],
  "stats": {
-  "roads": 40036,
-  "rail": 1306,
-  "buildings": 157265,
-  "buildings:named": 2089,
-  "water": 3878,
-  "streams": 19817,
-  "sea": 82,
-  "foreshore": 319,
-  "woods": 14703,
-  "rivers": 1954,
-  "sites": 362,
-  "green": 1662,
+  "roads": 37837,
+  "rail": 1099,
+  "buildings": 150017,
+  "buildings:named": 1972,
+  "water": 4987,
+  "streams": 24905,
+  "sea": 70,
+  "foreshore": 171,
+  "woods": 16924,
+  "rivers": 2310,
+  "sites": 322,
+  "green": 1642,
   "heightsMissing": 0,
   "heightMin": -41.400001525878906,
   "heightMax": 529.7750244140625,
-  "sea:open": 14
+  "sea:open": 2
  },
  "tiles": [
   "0-0",
@@ -3183,5 +3993,5 @@
   "8-9",
   "9-9"
  ],
- "bytes": 5788045
+ "bytes": 5972932
 }
