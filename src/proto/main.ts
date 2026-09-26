@@ -887,7 +887,7 @@ function hint(text?: string, ic?: Icon) {
   if (t === undefined) {
     if (!tool) return shell.hint(null);
     if (mode === 'stop') t = stopPreview ? '' : 'Tap a road, on the side you want the stop'; // (with a blueprint down, the card says it all)
-    else if (mode === 'bulldoze') t = doomed ? '' : 'Tap a road or a bus stop to take it away';
+    else if (mode === 'bulldoze') t = doomed ? '' : 'Tap a road, a railway or a bus stop to take it away';
     else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : ''; // (then the card says what next)
     else if (draft && slipPlan) t = 'A slip road: drag ahead and out to leave the motorway, back and out to join it · then Build';
     else if (draft) t = ''; // (the blueprint's card says what to do)
@@ -941,8 +941,8 @@ function startBulldozeTool() {
 }
 function bulldozeTap(p: P) {
   const hit = stopAt(p);
-  const q = hit ? null : net.nearestSeg(p, 14, (x) => net.def(x).cls === 'road');
-  if (!hit && !q) { doomed = null; drawGhost(); tool?.setPanel(null); tool?.setPrimary(null); hint('Tap a road or a bus stop', 'alert'); return; }
+  const q = hit ? null : net.nearestSeg(p, 14, (x) => net.def(x).cls === 'road' || net.def(x).cls === 'rail');
+  if (!hit && !q) { doomed = null; drawGhost(); tool?.setPanel(null); tool?.setPrimary(null); hint('Tap a road, a railway or a bus stop', 'alert'); return; }
   const seg = hit ? hit.seg : q!.seg, calls = (id: number) => lines.list.filter((l) => l.stops.some((x) => lines.same(x, id)));
   doomed = { seg, stop: hit?.stop };
   drawGhost();
@@ -956,7 +956,10 @@ function bulldozeTap(p: P) {
     what = `${d.label.split(' · ')[0]} · ${Math.round(len)} m`;
     refund = paid.has(seg.id) ? Math.round(price(d.cost * len) / 2) : 0; // (a road the map gave cost nothing, so refunds nothing: the review's bug 4)
     const lined = seg.stops.flatMap((st) => calls(st.id));
-    if (buildings.some((b) => !b.dying && b.lot.seg === seg.id)) why = 'Buildings face this road, and it’s their only way in';
+    // (a railway: not under a station, which comes away from its own sheet; a mis-drawn line is otherwise the player's to take back)
+    const underStation = d.cls === 'rail' && railway.stations.find((st) => net.nearestSeg({ x: st.x, z: st.z }, st.len / 2 + 12, (x) => x.id === seg.id));
+    if (underStation) why = `${underStation.name} station stands on it · demolish the station first`;
+    else if (buildings.some((b) => !b.dying && b.lot.seg === seg.id)) why = 'Buildings face this road, and it’s their only way in';
     else if (lined.length) why = `Line ${[...new Set(lined.map((l) => l.num))].join(' and ')} calls at a stop on it · withdraw the line first`;
     else if (interchanges.some((ix) => ix.segs.includes(seg.id))) why = 'Part of a motorway junction, which comes away as a whole (not yet)';
   }
@@ -1154,7 +1157,7 @@ shell.addBuildCategory({ id: 'stops', label: 'Stops', icon: 'busStop' }); // (bu
 shell.addBuildItem('stops', { id: 'bus-stop', label: 'Bus stop', spec: 'On any road; a lay-by where there is room', short: 'On any road', icon: 'busStop', tone: 'stop', onPick: () => startStopTool() });
 shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight, level run of track', short: 'On straight track', icon: 'train', tone: 'rail', onPick: () => { endTool(); railGame.startStationTool(); } });
 shell.addBuildCategory({ id: 'bulldoze', label: 'Bulldoze', icon: 'bulldozer' });
-shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Take away a road or a bus stop; half a road’s price comes back', short: 'Roads and stops', icon: 'bulldozer', tone: 'bulldoze', onPick: () => startBulldozeTool() });
+shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Take away a road, a railway or a bus stop; half of what you paid for a road comes back', short: 'Roads, rail and stops', icon: 'bulldozer', tone: 'bulldoze', onPick: () => startBulldozeTool() });
 
 // ---- the Layers pop-over: overlays (none are in the game yet) and the view ----
 shell.addLayer({ id: 'catchment', label: 'Stop coverage', icon: 'busStop', on: false, onToggle: (on) => { coverOn = on; coverSig = '-'; if (on) hint('Stop coverage: blue is within a three-minute walk of a bus stop (a longer one to a station) · build stops where it isn’t', 'busStop'); } });
