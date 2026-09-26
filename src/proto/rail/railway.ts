@@ -111,15 +111,17 @@ export class Railway {
   // ---------- lines ----------
   // A line calling at these stations in order (and back, or round again if `loop`), run by these
   // trains from a depot siding by its first station (laid if there's room). A reason if it can't.
-  addLine(stops: number[], loop: boolean, trains: TrainDef[], o: { offer?: string; colour?: string; depot?: boolean } = {}): RailLine | string {
+  // (`other`: another company's, numbered apart from the player's lines: game/portals.ts)
+  addLine(stops: number[], loop: boolean, trains: TrainDef[], o: { offer?: string; colour?: string; depot?: boolean; other?: string } = {}): RailLine | string {
     if (stops.length < 2) return 'A line needs two stations at least';
     for (const s of stops) if (!this.shapes.has(s)) return `${this.station(s)?.name ?? 'A station'} isn’t on the track`;
-    const line: RailLine = { id: this.nextLine++, num: 0, stops: [...stops], loop, offer: o.offer, colour: o.colour };
+    const line: RailLine = { id: o.other ? 900 + this.lines.filter((l) => l.other).length : this.nextLine++, num: 0, stops: [...stops], loop, offer: o.offer, colour: o.colour };
+    if (o.other) line.other = o.other;
     line.num = line.id;
     if (o.depot !== false) line.depot = this.depotFor(stops[0]);
     for (const t of trains) {
       const why = this.sim.fits(t, t.cars * t.carLen + (t.cars - 1) * 0.9, line);
-      if (why) { this.nextLine--; return why; }
+      if (why) { if (!o.other) this.nextLine--; return why; }
     }
     this.sim.lines.push(line);
     for (const t of trains.slice(0, this.sim.capacity(line))) this.sim.addTrain(t, line);

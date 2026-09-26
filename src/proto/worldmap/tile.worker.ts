@@ -1,26 +1,26 @@
 // The world's tiles, made off the main thread (docs/streaming.md, "The worker"). Each worker makes
-// the plan itself from the map's options (the same options always make the same plan, so it agrees
-// with the main thread's to the bit), then serves tiles (tilegen.ts) and the height field, handing
+// the plan itself from the map's options (the same options always make the same plan, from the same
+// source, seeded or real: worldmap/source.ts, so it agrees with the main thread's to the bit), then serves tiles (tilegen.ts) and the height field, handing
 // their typed arrays over without copying.
 import { serveLoader, type Port } from '../world/worker';
 import type { LoadRequest } from '../world/stream';
 import type { RegionOptions } from '../region/options';
-import { planWorld, type WorldPlan } from './plan';
+import { loadPlan, type WorldPlan } from './plan';
 import { generateTile, type TileData, type TileRequest } from './tilegen';
 
 export interface WorkerRequest extends TileRequest { options: RegionOptions; field?: number } // field: the height field's step, instead of a tile
 export interface FieldData { field: true; x0: number; z0: number; step: number; n: number; h: Float32Array; max: number; ms: number }
 
-let plan: WorldPlan | null = null, planKey = '';
+let plan: Promise<WorldPlan> | null = null, planKey = '';
 function planFor(o: RegionOptions) {
   const k = JSON.stringify(o);
-  if (!plan || k !== planKey) { plan = planWorld(o); planKey = k; }
+  if (!plan || k !== planKey) { plan = loadPlan(o); planKey = k; }
   return plan;
 }
 
 const self_ = self as unknown as Port;
-serveLoader<TileData | FieldData>(self_, (raw: LoadRequest) => {
-  const req = raw as unknown as WorkerRequest, p = planFor(req.options);
+serveLoader<TileData | FieldData>(self_, async (raw: LoadRequest) => {
+  const req = raw as unknown as WorkerRequest, p = await planFor(req.options);
   if (req.field) {
     const t0 = performance.now(), f = p.terrain.field(req.field)!;
     return { field: true, x0: f.x0, z0: f.z0, step: f.step, n: f.n, h: f.h, max: f.max, ms: performance.now() - t0 };

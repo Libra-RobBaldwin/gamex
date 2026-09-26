@@ -38,8 +38,16 @@ export interface TownHooks {
   purse?: Purse; // fares and running costs go here as they happen (game/money.ts)
   rail?: RailHooks; // the railway's stations and lines (rail/game.ts), alongside the bus stops and lines
   towns?: PlaceIn[]; // a map with many places: each is a town of its own (else it's all the one town)
+  outside?: OutsideIn[]; // places off the map, each reached by a way off it (game/portals.ts)
   byEdge?: boolean; // a point belongs to the town whose edge it's nearest, not its middle (a real map: a city's suburbs are the city's)
 }
+// A place off the map, as the economy sees it: a town of fixed size standing out beyond the way off
+// the map that reaches it (as far off as the drive there takes: so trips to it go out that way,
+// and it's too far to walk to), `railMin` minutes on by train from its station at the way off (the
+// railway's), which the economy takes to be there with it.
+export interface OutsideIn { id: number; name: string; x: number; z: number; people: number; jobs: number; offMin: number; railMin?: number; station?: number; carExtra?: number }
+const OUTSIDE_ZONE = 990000; // (zone ids for the places off the map: never a grid cell's)
+const OUTSIDE_BUILDING = -5_000_000; // (and their buildings: never a lot's)
 // A place on the map as the economy sees it: each zone belongs to the place whose middle it's nearest.
 export interface PlaceIn { id: number; name: string; x: number; z: number; r: number }
 // The railway as the economy sees it: stations as stops and rail lines as lines (their ids kept
@@ -91,6 +99,7 @@ export class TownEconomy {
   readonly towns: PlaceIn[]; // the economy's towns (ids as the economy has them)
   readonly home: number; // the one the game starts in (nearest the middle of the map)
   private many: boolean;
+  readonly outside: OutsideIn[]; // the places off the map (their towns are outside `towns`)
 
   // `from`: a saved game's town (save() below), which carries on exactly where it was
   constructor(private h: TownHooks, private seed = 1, from?: TownSave) {
@@ -98,10 +107,11 @@ export class TownEconomy {
     // (ids from 1: a settlement's id + 1)
     this.towns = this.many ? h.towns!.map((t) => ({ ...t, id: t.id + 1 })) : [{ id: TOWN_ID, name: TOWN_NAME, x: 0, z: 0, r: 0 }];
     this.home = this.townAt(0, 0);
+    this.outside = this.many ? h.outside ?? [] : [];
     if (from) this.econ = this.resume(from);
     else {
       const zones = this.zoneList();
-      const buildings = h.standing().map((l) => { this.lotById.set(l.id, l); return { id: l.id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) * unitsOf(l) }; });
+      const buildings = h.standing().map((l) => { this.lotById.set(l.id, l); return { id: l.id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) * unitsOf(l) }; }).concat(this.outsideBuildings());
       // Until freight is in the game the town finds its own goods and building materials; and it
       // finds most of its visitors itself, so the starter line about holds it steady and more
       // service is what tips it into growth.
@@ -117,12 +127,26 @@ export class TownEconomy {
     for (const t of this.towns) { const d = Math.hypot(x - t.x, z - t.z) - (this.h.byEdge ? t.r : 0); if (d < bd) { bd = d; best = t.id; } }
     return best;
   }
-  townName(id: number) { return this.towns.find((t) => t.id === id)?.name ?? TOWN_NAME; }
+  townName(id: number) { return this.towns.find((t) => t.id === id)?.name ?? this.outside.find((t) => t.id === id)?.name ?? TOWN_NAME; }
   reportFor(id: number) { return id === this.home ? this.report : this.econ.town(id); }
   // where a town's people go a day, busiest first (only with more than one town)
   trips(id: number) { return this.econ.townTrips(id); }
 
-  private world(zones: ZoneIn[]) { return { towns: this.towns.map((t) => ({ id: t.id, name: t.name, x: t.x, z: t.z, carShare: 0.45 })), zones, stops: this.stopList(), lines: this.lineList() }; }
+  private world(zones: ZoneIn[]) { return { towns: [...this.towns, ...this.outside].map((t) => ({ id: t.id, name: t.name, x: t.x, z: t.z, carShare: 0.45 })), zones, stops: this.stopList(), lines: this.lineList() }; }
+  // Each place off the map: one zone at its way off, with no room to grow, and its homes and jobs
+  // as a few big buildings (it's there to be travelled to, not built)
+  private outsideZones(): ZoneIn[] { return this.outside.map((t, i) => ({ id: OUTSIDE_ZONE + i, town: t.id, x: t.x, z: t.z, r: CELL / 2, plots: 0 })); }
+  private outsideBuildings() {
+    return this.outside.flatMap((t, i) => {
+      const z = OUTSIDE_ZONE + i, out = [];
+      for (let k = 0, n = Math.ceil(t.people / BUILDINGS.tower.cap); k < n; k++) out.push({ id: OUTSIDE_BUILDING - i * 1000 - k, zone: z, x: t.x, z: t.z, kind: 'tower' as const, capacity: BUILDINGS.tower.cap });
+      for (let k = 0, n = Math.ceil(t.jobs / BUILDINGS.office.cap); k < n; k++) out.push({ id: OUTSIDE_BUILDING - i * 1000 - 500 - k, zone: z, x: t.x, z: t.z, kind: 'office' as const, capacity: BUILDINGS.office.cap });
+      return out;
+    });
+  }
+  private isOutside(zone: number) { const i = zone - OUTSIDE_ZONE; return i >= 0 && i < this.outside.length; }
+  // (the drive to a place further off than it stands: it's kept within the economy's reach, 25 km)
+  private carExtra(zone: number) { return this.isOutside(zone) ? this.outside[zone - OUTSIDE_ZONE].carExtra ?? 0 : 0; }
   private opts() { return { seed: this.seed, calibrate: true, clock: this.h.clock() % 1440, tune: GAME_TUNE }; }
 
   // ---------- what the game tells the economy ----------
@@ -139,6 +163,7 @@ export class TownEconomy {
       out.push(z);
       this.zones.set(id, z);
     }
+    for (const z of this.outsideZones()) { out.push(z); this.zones.set(z.id, z); }
     return out;
   }
   // one stop per place (a stop and the one facing it), keyed by the lower of their ids
@@ -152,7 +177,8 @@ export class TownEconomy {
       const p = this.h.net.path(seg), q = p[Math.min(p.length - 1, Math.max(0, Math.round((st.s / Math.max(1, this.h.net.length(seg))) * (p.length - 1))))];
       out.push({ id: k, kind: 'bus_stop', x: q.x, z: q.z, name: this.h.lines.name(k), radius: STOP_WALK_M });
     }
-    if (this.h.rail) out.push(...this.h.rail.stops());
+    // (a station at a way off the map stands, for the economy, in the place it leads to)
+    if (this.h.rail) out.push(...this.h.rail.stops().map((s) => { const o = this.outside.find((t) => t.station === s.id); return o ? { ...s, x: o.x, z: o.z } : s; }));
     return out;
   }
   private lineList(): LineIn[] {
@@ -167,7 +193,8 @@ export class TownEconomy {
       // along the roads the buses take, at a town pace
       travelTime: (a, b, v) => {
         const rail = this.h.rail?.time(a, b, v);
-        if (rail !== undefined) return rail;
+        // (a train to the station at a way off the map goes on beyond it to the place it reaches)
+        if (rail !== undefined) return rail + this.outside.reduce((t, o) => t + (o.station !== undefined && (o.station === a || o.station === b) ? o.railMin ?? o.offMin : 0), 0);
         const k = `${a}>${b}`;
         let m = this.travel.get(k);
         if (m === undefined) {
@@ -184,7 +211,9 @@ export class TownEconomy {
         const road = Math.hypot(p.x - q.x, p.z - q.z) * 1.3;
         if (!this.many) return road / ((TOWN_KMH * 1000) / 60) + 1;
         const near = Math.min(road, IN_TOWN_M);
-        return near / ((TOWN_KMH * 1000) / 60) + (road - near) / ((OPEN_KMH * 1000) / 60) + 1;
+        // (from one place off the map to another isn't through the map at all)
+        if (this.isOutside(a) && this.isOutside(b)) return Infinity;
+        return near / ((TOWN_KMH * 1000) / 60) + (road - near) / ((OPEN_KMH * 1000) / 60) + 1 + this.carExtra(a) + this.carExtra(b);
       },
     };
   }
@@ -193,7 +222,7 @@ export class TownEconomy {
   // through them), free plots per zone, stops and lines. Cheap; call it every second or two.
   sync() {
     const now = new Map(this.h.standing().map((l) => [l.id, l]));
-    for (const id of this.econ.buildingIds()) if (!now.has(id)) { this.econ.removeBuilding(id); this.lotById.delete(id); }
+    for (const id of this.econ.buildingIds()) if (!now.has(id) && id > OUTSIDE_BUILDING + 1000) { this.econ.removeBuilding(id); this.lotById.delete(id); }
     const zl = this.zoneList();
     for (const z of zl) this.econ.setZone(z);
     for (const [id, l] of now) if (!this.lotById.has(id)) { this.lotById.set(id, l); this.econ.addBuilding({ id, zone: zoneKey(l.x, l.z), x: l.x, z: l.z, kind: kindOf(l.kind), capacity: capOf(l.kind) * unitsOf(l) }); }
@@ -273,6 +302,8 @@ export class TownEconomy {
     } else if (a.t === 'demolish') {
       const l = this.lotById.get(a.building);
       if (l) { this.h.clear(l); this.lotById.delete(l.id); this.stats.cleared++; }
+      // (a place off the map stays the size it is)
+      else { const b = this.outsideBuildings().find((x) => x.id === a.building); if (b) this.econ.addBuilding(b); }
     }
     // vacate, abandon and restore are the economy's own books; the panel and sheets show them
   }

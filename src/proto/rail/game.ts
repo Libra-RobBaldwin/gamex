@@ -315,7 +315,7 @@ export class RailGame {
   // ---------- sheets ----------
   showStation(st: Station) {
     const { railway, shell } = this.c;
-    const lines = railway.lines.filter((l) => l.stops.includes(st.id));
+    const lines = railway.lines.filter((l) => l.stops.includes(st.id) && !l.other);
     const sh = railway.shapes.get(st.id);
     const use = (sh?.platforms ?? []).map((_, i) => this.c.people.platformUse(`plat:${st.id}:${i}`)).reduce((a, u) => ({ waiting: a.waiting + u.waiting, boarded: a.boarded + u.boarded, alighted: a.alighted + u.alighted }), { waiting: 0, boarded: 0, alighted: 0 });
     const n = st.tracks ?? (st.loop ? 2 : 1), lay = `${n} track${n === 1 ? '' : 's'}${st.loop ? ' (a passing loop)' : ''} · ${st.layout === 'side' ? 'side platforms' : st.layout === 'island' ? 'island' : 'platforms both sides'} · ${st.style === 'modern' ? 'glass hall' : st.style === 'halt' ? 'halt' : 'brick hall'}${st.structure === 'viaduct' ? ' · stairs and lifts to the street' : st.structure === 'underground' ? ` · ${Math.round(-(sh?.mid.y ?? 0))} m down, lifts and escalators` : (sh?.platforms.length ?? 0) > 1 || n > 1 ? ` · ${st.access === 'subway' ? 'subway' : 'footbridge'}` : ''}`;
@@ -361,20 +361,20 @@ export class RailGame {
   }
   // Transport > Railway: the lines and stations
   renderTab(el: HTMLElement) {
-    const { railway } = this.c;
-    el.innerHTML = `<p class="note">${railway.lines.length ? 'Trains call only at their line’s stations. Tap a line to see it.' : 'No rail lines yet. Build two stations on a railway (Build > Stops), then a line between them.'}</p>
-      ${railway.lines.map((l, i) => `<button class="lrow tone-rail" data-rline="${i}"><span class="num">${l.num}</span><b>${esc(l.stops.map((s) => railway.station(s)?.name ?? '?').join(' – '))}</b><span>${l.stops.length} stations · ${railway.trainsOn(l).length} trains · ${l.loop ? 'circular' : 'there and back'}</span></button>`).join('')}
+    const { railway } = this.c, mine = railway.lines.filter((l) => !l.other), others = railway.lines.filter((l) => l.other); // (another company's trains through the map: game/portals.ts)
+    el.innerHTML = `<p class="note">${mine.length ? 'Trains call only at their line’s stations. Tap a line to see it.' : 'No rail lines yet. Build two stations on a railway (Build > Stops), then a line between them.'}${others.length ? ` ${others.map((l) => `${l.other} runs trains through between ${l.stops.map((s) => railway.station(s)?.name ?? '?').join(' and ')}.`).join(' ')}` : ''}</p>
+      ${mine.map((l, i) => `<button class="lrow tone-rail" data-rline="${i}"><span class="num">${l.num}</span><b>${esc(l.stops.map((s) => railway.station(s)?.name ?? '?').join(' – '))}</b><span>${l.stops.length} stations · ${railway.trainsOn(l).length} trains · ${l.loop ? 'circular' : 'there and back'}</span></button>`).join('')}
       <div class="acts"><button class="act primary tone-rail" data-rnew="1" ${railway.shapes.size < 2 ? 'disabled' : ''}>${icon('transport')}<span>New rail line</span></button><button class="act" data-rstation="1">${icon('plus')}<span>Add a station</span></button></div>
       <div class="grp"><span class="tab">Stations</span><small>${railway.stations.length ? `${railway.stations.length} station${railway.stations.length === 1 ? '' : 's'}` : 'There are no stations yet.'}</small>
-      ${railway.stations.map((s, i) => `<button class="lrow tone-rail" data-rst="${i}"><span class="num">${icon('train')}</span><b>${esc(s.name)}</b><span>${s.len} m platforms · ${railway.lines.filter((l) => l.stops.includes(s.id)).length} lines</span></button>`).join('')}</div>`;
+      ${railway.stations.map((s, i) => `<button class="lrow tone-rail" data-rst="${i}"><span class="num">${icon('train')}</span><b>${esc(s.name)}</b><span>${s.len} m platforms · ${mine.filter((l) => l.stops.includes(s.id)).length} lines</span></button>`).join('')}</div>`;
     el.querySelector('[data-rnew]')?.addEventListener('click', () => { this.c.shell.closeSheet(); this.startLineTool(); });
     el.querySelector('[data-rstation]')?.addEventListener('click', () => { this.c.shell.closeSheet(); this.startStationTool(); });
-    el.querySelectorAll<HTMLButtonElement>('[data-rline]').forEach((b) => b.addEventListener('click', () => this.showLine(railway.lines[+b.dataset.rline!])));
+    el.querySelectorAll<HTMLButtonElement>('[data-rline]').forEach((b) => b.addEventListener('click', () => this.showLine(mine[+b.dataset.rline!])));
     el.querySelectorAll<HTMLButtonElement>('[data-rst]').forEach((b) => b.addEventListener('click', () => { const s = railway.stations[+b.dataset.rst!]; this.showStation(s); this.c.focusOn(s, 300, { x: s.hx, z: s.hz }); }));
   }
   // Transport > Buy vehicles: a train for the line last looked at (or the first)
   buyTrain(def: TrainDef, name: string) {
-    const { railway } = this.c, l = this.lastLine && railway.lines.includes(this.lastLine) ? this.lastLine : railway.lines[0];
+    const { railway } = this.c, l = this.lastLine && railway.lines.includes(this.lastLine) ? this.lastLine : railway.lines.find((x) => !x.other);
     if (!l) { this.c.hint('Build two stations and a rail line first · then trains can run it', 'alert'); return; }
     const r = this.buy(l, def);
     this.c.hint(typeof r === 'string' ? `${name}: ${r}` : `${name} joins line ${l.num}`, typeof r === 'string' ? 'alert' : 'train');
@@ -385,7 +385,7 @@ export class RailGame {
     const rw = this.c.railway;
     return {
       stops: (): StopIn[] => [...rw.shapes.keys()].map((id) => { const s = rw.station(id)!; return { id: RAIL_ID + id, kind: 'rail_station', x: s.x, z: s.z, name: s.name }; }),
-      lines: (): LineIn[] => rw.lines.map((l) => { const ts = rw.trainsOn(l); return { id: RAIL_ID + l.id, name: `Rail line ${l.num}`, stops: callOrder(l.stops, l.loop).map((s) => RAIL_ID + s), vehicle: kindOf(ts[0]?.def ?? TRAINS.dmu), count: ts.length }; }),
+      lines: (): LineIn[] => rw.lines.filter((l) => !l.other).map((l) => { const ts = rw.trainsOn(l); return { id: RAIL_ID + l.id, name: `Rail line ${l.num}`, stops: callOrder(l.stops, l.loop).map((s) => RAIL_ID + s), vehicle: kindOf(ts[0]?.def ?? TRAINS.dmu), count: ts.length }; }),
       // (along the track, which runs about as straight as the stations are apart, at most of the train's speed, with a stop)
       time: (a, b, v) => {
         if (a < RAIL_ID || b < RAIL_ID) return undefined;
