@@ -38,6 +38,16 @@ removed and ignored. Typecheck clean; the full unit suite passes except the econ
    draw a line, watch the town) and written down what's wrong. That review is the next stream, and its fixes
    are small PRs into integration.
 
+6. **Realism stream (the user, 21:40, to the onemap-4 session): seeded places and roads that look like real UK
+   ones, with rules learned from OS data.** The hero picture showed a rotated grid town with stub streets
+   ending in fields, a square edge, and lanes joining at whatever angle the router arrived. The onemap-4 session
+   takes this on after its step 4 PR is open, as `docs/briefs/realism.md`: measure radials, entry angles,
+   edge shape, junction shares and village forms on the baked OS regions (more bakes if the container can
+   fetch OS OpenData), write them into `region/priors.ts`, then make the road network come first and the
+   streets grow along the radials (`worldmap/routes.ts`, `layStreets`, `worldmap/towns.ts`), with side-by-side
+   seeded-against-real screenshots as the evidence. Second priority: lanes too gentle and too few
+   (`docs/reports/os/seeded-vs-real.md`).
+
 ## Honesty rule (unchanged)
 
 Every session keeps `docs/briefs/<name>.md` current: what's left, done or not done, and nothing reported as done
