@@ -72,7 +72,7 @@ export function placeLots(net: Network, lots: Lot[], why: Record<string, number>
     const poly = rectCorners(l.x, l.z, l.rot, l.w + 0.6, l.d + 0.6);
     if (poly.some((p) => net.isWater(p) || Math.abs(p.x) > net.bound || Math.abs(p.z) > net.bound)) { why.water = (why.water ?? 0) + 1; return null; }
     if (!net.land.free(poly)) { why.land = (why.land ?? 0) + 1; return null; }
-    const foot = rectCorners(l.x, l.z, l.rot, l.w - 1.2, l.d - 1.2); // (a real footprint's rectangle overshoots it a little)
+    const foot = rectCorners(l.x, l.z, l.rot, l.w - 0.2, l.d - 0.2); // (as drawn: neighbours may touch, as a terrace's houses do, but not cross)
     for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (const o of grid.get(`${Math.floor(l.x / C) + di},${Math.floor(l.z / C) + dj}`) ?? []) if (polysOverlap(foot, o)) { why.overlap = (why.overlap ?? 0) + 1; return null; }
     return foot;
   };

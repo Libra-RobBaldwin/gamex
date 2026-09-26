@@ -157,7 +157,7 @@ describe('segsAt (the index of each node\'s segments)', () => {
   const same = (n: Network) => { for (const id of n.nodes.keys()) expect(n.segsAt(id)).toEqual(scan(n, id)); };
   it('matches a scan of every segment as roads are built, split, removed and replaced', () => {
     const n = new Network();
-    const id = (x: number, z: number) => { const k = n.nextId++; n.nodes.set(k, { id: k, x, z }); return k; };
+    const id = (x: number, z: number) => { const k = n.nextId++; n.nodes.set(k, { id: k, x, z, y: 0 }); return k; };
     const a = id(0, 0), b = id(100, 0), c = id(100, 100), d = id(0, 100);
     const ab = n.addSeg(a, b), bc = n.addSeg(b, c);
     same(n); // (the index built on first asking)
