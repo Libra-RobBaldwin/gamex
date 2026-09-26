@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { readRegion } from '../../src/proto/real/node.ts';
+import { LIVE_HALF } from '../../src/proto/worldmap/plan.ts';
 import { realMap } from '../../src/proto/real/map.ts';
 import { layReal, placeLots, greenRegions, clearOf } from '../../src/proto/real/lay.ts';
 import { Network, rng } from '../../src/proto/roads.ts';
@@ -28,8 +29,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const id = args.find((a) => !a.startsWith('--') && !/^\d/.test(a) && args[args.indexOf(a) - 1]?.startsWith('--') !== true) ?? 'exe';
-// (6 km while the real map plays on the region path; 8 km once it rides the 50 km world's live area)
-const half = Number(opt('--half', 3000));
+const half = Number(opt('--half', LIVE_HALF)); // (a 50 km map's live play area: worldmap/plan.ts)
 const t0 = performance.now(), times = {};
 const lap = (k) => { times[k] = Math.round(performance.now() - (lap.t ?? t0)); lap.t = performance.now(); };
 
@@ -68,9 +68,6 @@ lap('buildings');
 const parks = greenRegions(net, lots, map.real.green);
 const paths = deadEndPaths(net, net.lots);
 lap('parks and paths');
-// (the relief as whole decimetres: it's the ground everything stands on)
-const g = map.ground, dm = new Int16Array(g.h.length);
-for (let k = 0; k < dm.length; k++) dm[k] = Math.round(g.h[k] * 10);
 const r2 = (v) => Math.round(v * 100) / 100, r3 = (v) => Math.round(v * 1000) / 1000;
 const TILE = 1000, tileOf = (x, z) => `${Math.floor(x / TILE)},${Math.floor(z / TILE)}`;
 // lots as columns, each with the 1 km tile it stands in (the game puts a tile's up as it comes near)
@@ -87,7 +84,6 @@ const lotCols = cols(net.lots, true);
 const types = [...new Set([...net.segs.values()].map((s) => s.type))];
 const out = {
   format: 2, region: id, centre: map.real.centre, name: map.name, half, tile: TILE,
-  map: { ...map, real: undefined, ground: { x0: g.x0, z0: g.z0, step: g.step, n: g.n, max: g.max, dm: Buffer.from(dm.buffer).toString('base64') }, trees: { count: map.trees.count, spots: map.trees.spots.map((p) => [Math.round(p.x), Math.round(p.z)]) } },
   nextId: net.nextId, rand: net.randState,
   nodes: [...net.nodes.values()].map((n) => [n.id, r2(n.x), r2(n.z), r2(n.y ?? 0)]),
   types, segs: [...net.segs.values()].map((s) => [s.id, s.a, s.b, types.indexOf(s.type), s.mid.flatMap((p) => [r2(p.x), r2(p.z)]), s.oneway ? 1 : 0]),

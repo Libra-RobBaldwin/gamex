@@ -30,6 +30,7 @@ export interface RegionOptions {
   hills: number; // how hilly, 0–100 (50: the landform as it is; −1 the same)
   water: number; // how wet: rivers and lakes, 0–100 (50 as it is; −1 the same)
   woods: number; // how wooded, 0–100 (50 as it is; −1 the same: the countryside's to read)
+  real?: string; // a real region's id (public/regions/<id>, real/world.ts): the map is that region, not made up
 }
 
 export const STYLES: readonly Style[] = ['temperate', 'desert', 'arctic'];
@@ -84,6 +85,7 @@ export function regionOptions(o: Partial<RegionOptions> = {}): RegionOptions {
     water: d.water === -1 ? -1 : clampInt(Number.isFinite(d.water) ? d.water : 50, [0, 100]),
     woods: d.woods === -1 ? -1 : clampInt(Number.isFinite(d.woods) ? d.woods : 50, [0, 100]),
   };
+  if (typeof d.real === 'string' && /^[a-z0-9-]+$/.test(d.real)) out.real = d.real;
   // (a map needs somewhere to start: with nothing asked for, one village)
   if (!out.city && out.towns === 0 && out.villages === 0) out.villages = 1;
   return out;
@@ -100,6 +102,7 @@ export function optionsFromQuery(q: URLSearchParams): RegionOptions {
   if (q.has('sea')) o.sea = q.get('sea') !== '0' && q.get('sea') !== 'false';
   if (q.has('style')) o.style = q.get('style') as Style;
   if (q.has('relief')) o.relief = q.get('relief') as Relief;
+  if (q.has('real')) o.real = q.get('real')!;
   return regionOptions(o);
 }
 

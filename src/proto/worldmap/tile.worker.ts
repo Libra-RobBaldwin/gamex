@@ -7,6 +7,7 @@ import type { LoadRequest } from '../world/stream';
 import type { RegionOptions } from '../region/options';
 import { loadPlan, type WorldPlan } from './plan';
 import { generateTile, type TileData, type TileRequest } from './tilegen';
+import '../real/world'; // (a real region's plan comes from its bake: worldmap/source.ts)
 
 export interface WorkerRequest extends TileRequest { options: RegionOptions; field?: number } // field: the height field's step, instead of a tile
 export interface FieldData { field: true; x0: number; z0: number; step: number; n: number; h: Float32Array; max: number; ms: number }

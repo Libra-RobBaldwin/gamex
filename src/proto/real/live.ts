@@ -1,22 +1,22 @@
-// A real region's live area, packed ahead of time (tools/os/pack.mjs) and restored in the game
-// (docs/real.md, "Speed"). The pack holds the map (relief, water, trees, places), the network, each
-// junction's chosen form, every building's lot by 1 km tile, the parks and the dead ends' paths. So
-// the game lays out nothing: it restores the network (its land claims come back from the roads),
-// designs each junction in its packed form (without trying the others), puts every lot on the
-// land at once (the economy, the paths and the land registry see the whole town from the start)
-// and draws the buildings a tile at a time, nearest the camera first (LotStream).
+// A real region's live play area, packed ahead of time from the bake (tools/os/pack.mjs) and
+// restored in the game (docs/real.md, "On the 50 km map"): the 8 km square round its home place that
+// the game's own network, buildings, traffic and economy run, as the rest of the 50 km streams as
+// the plan's scenery (real/world.ts). The pack holds the network, each junction's chosen form,
+// every building's lot by 1 km tile, the plots the town grows on, the parks and the dead ends'
+// paths. So the game lays out nothing: it restores the network (its land claims come back from the
+// roads), designs each junction in its packed form (without trying the others), puts every lot on
+// the land at once (the economy, the paths and the land registry see the whole town from the
+// start) and draws the buildings a tile at a time, nearest the camera first (LotStream).
 import type { Lot, LotKind, Network, RNode, RSeg } from '../roads';
 import type { Region } from '../infill';
 import type { RegionKind } from '../buildgen';
 import type { Form } from '../junction';
-import type { MapSpec } from '../region/mapspec';
 import type { FootPath } from '../game/paths';
 import type { ComplexLot } from '../complexes';
 
 export interface LivePack {
   format: 2; region: string; name: string; half: number; tile: number;
   centre: { x: number; z: number };
-  map: Omit<MapSpec, 'ground' | 'trees'> & { ground: { x0: number; z0: number; step: number; n: number; max: number; dm: string }; trees: { count: number; spots: [number, number][] } };
   nextId: number; rand: number;
   nodes: [number, number, number, number][];
   types: string[]; segs: [number, number, number, number, number[], number][];
@@ -31,15 +31,6 @@ export interface LivePack {
 }
 type LotCols = Record<'id' | 'x' | 'z' | 'rot' | 'w' | 'd' | 'h' | 'front' | 'back' | 'px' | 'pw' | 'kind' | 'arch' | 'seg' | 'seed' | 'row', number[]> & { units?: number[] }; // (units: a shopping complex's shops, complexes.ts)
 export const packUrl = (base: string, region: string, home: string) => `${base}${region}/live/${home.toLowerCase().replace(/[^a-z]+/g, '-')}.json`;
-
-// The map the pack was made for (its relief decoded).
-export function packMap(p: LivePack): MapSpec & { pack: LivePack } {
-  const g = p.map.ground, bin = atob(g.dm), dm = new Int16Array(bin.length / 2);
-  for (let k = 0; k < dm.length; k++) dm[k] = (bin.charCodeAt(2 * k) | (bin.charCodeAt(2 * k + 1) << 8)) << 16 >> 16;
-  const h = new Float32Array(dm.length);
-  for (let k = 0; k < h.length; k++) h[k] = dm[k] / 10;
-  return { ...p.map, ground: { x0: g.x0, z0: g.z0, step: g.step, n: g.n, max: g.max, h }, trees: { count: p.map.trees.count, spots: p.map.trees.spots.map(([x, z]) => ({ x, z })) }, pack: p };
-}
 
 export interface Restored { forms: Map<number, { form: Form; slip: boolean }>; lots: Lot[]; queue: Lot[]; byTile: Lot[][]; tiles: { x: number; z: number }[]; parks: Region[]; paths: FootPath[] }
 // Put the pack's network into a fresh network (made for its map, so its water is claimed), and
