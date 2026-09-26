@@ -22,7 +22,7 @@ const none = await page.evaluate(() => ({ lines: window.proto.lines.list.length,
 if (none.lines || none.stops) fail('the game starts with stops or lines already built');
 await page.evaluate(() => {
   const P = window.proto, net = P.net;
-  for (const q of [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }]) {
+  for (const q of [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: -110, z: 30 }]) {
     const n = net.nearestSeg(q, 80, (s) => net.def(s).cls === 'road' && net.def(s).family !== 'Motorway' && net.def(s).family !== 'Rural');
     if (n) for (const side of [1, -1]) for (const d of [0, 15, -15, 30, -30]) { const { plans } = net.planStop(n.seg.id, n.s + d, side); const pl = plans.find((x) => x.ok && x.kind === 'kerb') ?? plans.find((x) => x.ok); if (pl) { net.addStop(n.seg.id, n.s + d, side, pl); break; } }
   }
@@ -55,7 +55,7 @@ await page.tap('[data-newline]');
 await page.evaluate(() => window.proto.focusOn({ x: 0, z: -60 }, 900));
 await page.waitForTimeout(1000);
 await settle();
-const targets = [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }];
+const targets = [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: -110, z: 30 }];
 const pickOf = (q) => page.evaluate((q) => {
   const P = window.proto, places = P.markers.places();
   const b = places.map((m) => ({ m, d: Math.hypot(m.p.x - q.x, m.p.z - q.z) })).sort((a, b) => a.d - b.d)[0].m, s = P.toScreen(b.p);
