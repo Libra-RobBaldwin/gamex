@@ -1,7 +1,19 @@
 # Brief: vehicles (the review's vehicle rows)
 
-Session https://claude.ai/code/session_01EKUWb6f3c3TYr6jHSTbTjp, branch `claude/work-vehicles-fixes`, PR
-into `claude/cloud-session-history-rvqkm1`. Written 26 Sep 2026, 21:20 UTC, before any fix.
+Session https://claude.ai/code/session_01EKUWb6f3c3TYr6jHSTbTjp, branch `claude/work-vehicles-fixes`.
+PR #64 (the five review rows below) merged into `claude/cloud-session-history-rvqkm1` at 22:59 UTC.
+A second PR, the coordinator's follow-ups (23:18 UTC), is in the section at the end.
+
+# Round 2: the coordinator's follow-ups (asked 23:18 UTC)
+
+| # | Ask | Status |
+|---|---|---|
+| R1 | A stop kept across a split standing hard against the new junction: move it clear along its road, the same distance a new stop must keep from a junction, rather than a bus holding the junction slot while it dwells. | **Done** (roads.ts `split`: the pair moves together until its lay-by is the road's half-width and 6 m clear of the new node; stays put only on a half too short for that) |
+| R2 | The suspected U-turn deletion of a line bus at a junction it has no path through (`pathFor` null for next === seg): build the case with a street ending into motorway-only legs; a line bus never counts as a give-up. | **Done** (traffic.ts `stepLane`: with no way on but back, the bus turns at the junction's stop line as at a dead end; test builds a street into a one-way motorway pair, 7 minutes, no give-up, both stops called, never in the junction) |
+| R3 | The "stop just past a junction's stop line" lap detour: confirm planStop refuses those placements, and if not, fix. | **Done, it didn't**: planStop's rule (half-width + 6 m) is looser than a roundabout's or a big junction's reach. `Network.stopRange`, set by the traffic from its start and end guards, now makes planStop refuse them ("Too close to the junction — a bus couldn't pull up here clear of it"); the test found such places on the roundabout scenario. Also a bus still calls at a stop it comes to rest up to 4 m past (`BEHIND`). |
+| R4 | Only if R1–R3 are done: the simplest anti-bunching a phone player would notice: a bus holds at a stop for up to a minute when the bus ahead is less than a third of the loop away, behind a per-line toggle default on; measure on the lines e2e that headways even out. | Not started |
+
+Written 26 Sep 2026, 21:20 UTC, before any fix.
 
 ## What's asked (the coordinator, from `docs/reports/review-2026-09-26.md`)
 
