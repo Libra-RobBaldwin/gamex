@@ -60,7 +60,7 @@ if (bus.lines !== 1) fail('the bus line was not created');
 await page.evaluate(() => { window.proto.purse.balance = 6_000_000; });
 const stations = await page.evaluate(() => {
   const P = window.proto, R = P.railway, net = P.net, out = [];
-  const points = P.map.real.overpass.elements.filter((e) => e.type === 'node' && e.tags?.railway === 'station').map((e) => ({ name: e.tags.name, x: e.lon, z: e.lat }));
+  const points = P.map.real.stations;
   for (const want of ["Exeter St David's", 'Exeter St Thomas', 'Exeter Central', "St James' Park", 'Polsloe Bridge']) {
     if (out.length === 2) break;
     const p = points.find((q) => q.name === want);

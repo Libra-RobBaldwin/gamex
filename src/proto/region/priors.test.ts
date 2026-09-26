@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { PRIORS, fractalCoast, placesFor, radiusFor, woodArea, woodShareAt, woodSpots } from './priors';
+import { PRIORS, fractalCoast, roadClimb, valleyPreference, placesFor, radiusFor, woodArea, woodShareAt, woodSpots } from './priors';
 import { rng } from './random';
 import { regionMap } from './index';
 
 describe('priors from real Britain', () => {
+  it('big roads keep to the valleys and climb gently; lanes go over the hills', () => {
+    expect(valleyPreference('motorway')).toBeLessThan(0.5);
+    expect(valleyPreference('minor')).toBeGreaterThan(valleyPreference('a'));
+    expect(roadClimb('a').maxGrade).toBeGreaterThan(0.08);
+    expect(roadClimb('a').maxGrade).toBeLessThan(0.12);
+    expect(roadClimb('motorway').maxGrade).toBeLessThan(roadClimb('minor').maxGrade);
+    expect(roadClimb('b').acrossSlope).toBeGreaterThan(0.4);
+    expect(roadClimb('b').acrossSlope).toBeLessThan(0.7);
+  });
   it('woods keep to the steep ground', () => {
     expect(woodShareAt(0)).toBeLessThan(0.1);
     expect(woodShareAt(0.4)).toBeGreaterThan(0.5);

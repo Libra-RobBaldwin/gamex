@@ -156,9 +156,9 @@ export function endKind(net: Network, s: RSeg, node: number): EndKind {
   if (n === 2) return 'join';
   const p = net.pathFrom(s, node);
   if (offEdge(net, p[0], unit(p[0], p[1]))) return 'edge';
-  // (a stub too short to hold a turning head clear of whatever it leaves just ends: a turning head
-  // there would swallow the junction it comes off)
-  return turnsRound(net.def(s)) && net.length(s) >= STD.turningHead.minRoad ? 'head' : 'end';
+  // (a dead end just stops, unless the network asks for turning circles; even then a stub too short
+  // to hold one clear of whatever it leaves just ends: a turning head there would swallow the junction)
+  return net.turningHeads && turnsRound(net.def(s)) && net.length(s) >= STD.turningHead.minRoad ? 'head' : 'end';
 }
 const lerp2 = (a: Section2, b: Section2, f: number): Section2 => ({
   median: a.median + (b.median - a.median) * f, hatched: a.hatched, lanes: a.lanes + (b.lanes - a.lanes) * f, lane: a.lane + (b.lane - a.lane) * f,

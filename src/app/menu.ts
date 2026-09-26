@@ -6,6 +6,7 @@
 // with the one that matters most (Continue, or New game) the biggest.
 
 import { MAPS, type MapInfo } from '../proto/maps';
+import { REAL_REGION_LIST } from '../proto/real/list';
 import { NAME, markSvg } from '../proto/ui/brand';
 import { icon, type Icon } from '../proto/ui/icons';
 import { EXPLORERS, libraryHref } from './library';
@@ -35,7 +36,7 @@ export interface MenuHost {
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
 // a picture of each map, for its card (and a saved town's); a map without one shows its icon
-const MAP_ART: Record<string, string> = { town: mapTown, region: mapRegion, place: mapPlace, sandbox: mapSandbox };
+const MAP_ART: Record<string, string> = { town: mapTown, region: mapRegion, place: mapPlace, sandbox: mapSandbox, ...Object.fromEntries(REAL_REGION_LIST.map((r) => [r.id, `${import.meta.env.BASE_URL}${r.thumb}`])) }; // (the real regions: their baked map, proto/real/list.ts)
 const artFor = (id: string) => MAP_ART[id];
 // a saved town's map: its query names it (the sandbox is saved on the town's map)
 const savedMap = (e: SaveEntry) => new URLSearchParams(e.map.query).get('map') ?? e.map.id;
