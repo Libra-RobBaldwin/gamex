@@ -1,82 +1,67 @@
-# Brief: country (countryside session)
+# Brief: country (the countryside session, second run)
 
-Session https://claude.ai/code/session_01NfUwLYbN2dwfppCiaRHfHK, branch `claude/work-country`, PR #41
-(into `claude/cloud-session-history-rvqkm1`). Written 26 Sep 2026, 01:20 UTC, before any port.
+Session https://claude.ai/code/session_016uD19qC4yiFZR8AhPrtiib, branch `claude/work-country-2`, one PR into
+`claude/cloud-session-history-rvqkm1`. Written 26 Sep 2026, 21:00 UTC. Coordinator:
+https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, decision 1).
 
-## (a) Every request made to this session
+## The state, honestly
 
-### From the user (standing rules, given at the start)
-| # | Request (close paraphrase) | Status |
-|---|---|---|
-| U1 | Region feedback: "Fields look warped and awful – this isn't how the countryside should look… should be more uniform, and missing forests etc." | **Done on the old 6 km `BIG` path** (PR #41). **Not started on `WORLD`.** |
-| U2 | Same feedback, other parts: map edges should be earth crust, out-of-map traffic portals, sea and lakes, hills, map 10× the size. | Not mine (edge, terrain and world50 sessions); nothing done by me. |
-| U3 | UK countryside: hedged fields, woods, villages; drive on the left; brand colours and fonts; no emoji. | Followed. |
-| U4 | Test at 412×915, DPR 2, touch, SwiftShader. No flicker or z-fighting. Measure draw calls, triangles and load time before and after. Judge my own screenshots as a player would. | Done for PR #41 (the numbers are in the PR). |
-| U5 | Before a push: tsc, vitest (only the known economy failure allowed), the six phone e2es. Town map byte-identical. Timing budgets through `test/speed.ts`. | Done for every push to PR #41. |
-| U6 | Keep sub-agents to a minimum, keep shared-file edits small, and list them in the PR. | Done. |
+**Done, live on the branch and checked on 412×915 screenshots (DPR 2, SwiftShader):**
 
-### From the user, directly in this session
-| # | Request | Status |
-|---|---|---|
-| U7 | "Fields look good... But maps still look flat and roads are still pin straight." | **Partly done.** B roads and new village lanes wind (`region/lanes.ts`, old `BIG` path only). Flat maps are the terrain session's. The coordinator kept motorways and A roads out of my scope. |
+1. **PR #52 is back on today's head**, commit by commit: the plain re-apply of a19e89f (the one field and
+   woods generator, high ground ranked among the map's land, the canopy's edges on the woods' outlines,
+   the setup's woods option), with the conflict in `region/fields.test.ts` resolved to #52's version. That
+   version lays the fields out from `planWorld`, the game's own plan, so it needs neither `region/terrain.ts`
+   (#57 deleted it and put a stand-in height function in the test; the stand-in is not needed) nor
+   `region/generate.ts` (being deleted).
+2. **"Lines each block up with the road beside it" passes genuinely, the test unchanged.** Why it failed:
+   the map's B roads now wind over the land (world50's router on #57's relief): a lane turns 16° across a
+   farm block half the time, 50° one time in ten (measured over seed 7's roads). #52 gave each block one
+   direction, the lane's heading at the block's middle, so half the fields beside a lane ran more than 8°
+   off it. Now, as a block is cut, a piece within 150 m of a lane turns to the lane once the lane has bent
+   more than 11° from the grain the piece was cut in (`COUNTRYSIDE.follow`), so the fields along a winding
+   lane fan round its bends. A turned field's corners against its parent's cut are off by the bend, and a
+   block's boundary corners were never square (half of all corners: the Voronoi edges meet the fields at any
+   angle), so farm blocks grow from 650 m to 800 m (about 64 ha, an English farm), which halves the boundary
+   corners per field. Field sizes are unchanged. On 6 km squares of seeds 7, 42 and 3: fields beside a lane
+   within 8.6° of it, 52 / 56 / 45% before, 90 / 92 / 89% after; corners within 6.9° of square, 62 / 62 / 66%
+   before, 66 / 67 / 63% after. The alternatives tried and dropped: the lane's mean course through the block
+   (no better: the bends are too big), fanning every piece (aligned 97%, square 52%), and cuts tilted halfway
+   between a turned piece and its neighbour (worse still). Ten of ten fields tests pass.
+3. **The first view is not blank.** `e2e/firstview.e2e.mjs` on `?map=region&seed=42`, six cold starts at
+   DPR 2: worst 0% blank on every shot through the first 20 s, each start settles on the town, no page errors,
+   scenery tiles asked for once. So #58's fix holds with #52 applied.
+4. **The two things #52 fixed are fixed again**, on 412×915 screenshots before (integration head 7f9b21e)
+   and after, in `docs/reports/country/`: `before-town-far.jpg` / `after-town-far.jpg` (2.6 km over the start
+   town: much less rough grazing and wood round it, and the fields beside the winding lane follow it);
+   `before-country-far.jpg` / `after-country-far.jpg` (3 km over the country: the woods' edges were grid
+   steps, now they run along the fields' outlines). `firstview-settled.jpg` is the settled first view.
+5. **Draw calls and triangles**, same views, before → after: start view 295 / 601k → 298 / 648k; 900 m over
+   the town 384 / 737k → 372 / 757k; 2.6 km 399 / 528k → 386 / 581k; 5 km 431 / 568k → 418 / 623k; 3 km over
+   the country 48 / 226k → 37 / 198k; 500 m 36 / 273k → 35 / 232k. Load to the first frame under SwiftShader:
+   about 10–14 s (the first-view runs), as before.
+6. Docs: `docs/regiongen.md` (the block size and the follow rule); this brief.
 
-### From the coordinator
-| # | Request | Status |
-|---|---|---|
-| C1 | The first brief: make the region's countryside look like real UK farmland. <br>• Coherent patchwork: 2–10 ha, mostly four-sided with near-right angles, laid out in blocks that follow roads, lanes, rivers and contours; almost every field hedged, with hedgerow trees. <br>• Calmer palette, crops in plausible proportions. <br>• Farmsteads where the lanes are. <br>• Woods: ancient woodland in valleys and on steep slopes, copses, shelter belts, upland conifer plantations, riverside woodland. Cheap: instanced trees near, canopy or clumps mid and far, streamed within the draw-call budgets. <br>• Rough grazing and moor on high ground; react to the height field and water. <br>• Own `src/proto/ground/*` and the layout (`region/fields.ts`, `region/woods.ts`). <br>• Measure; screenshot out, mid and near; PR into the integration branch. | **Done on the old `BIG` path.** Includes fields, woods, the canopy, farms and tracks, and the hedge foot line. **Not ported to `WORLD`.** |
-| C2 | Maps will be 50 km. Make the field, hedge and woodland layout lazy per tile: deterministic, fast (a few ms per km), worker-friendly, seamless at tile borders. Give far tiles a cheap look. Keep every parameter in one tunable place for the OS data. | **Done as a library** (`Countryside.near`, `tileCover`, `COUNTRYSIDE`). **Not wired into `WORLD`**, because world50 wrote its own `worldmap/country.ts` on the ground grid instead. |
-| C3 | The terrain session is running; don't wait for it. Read height, slope and water through the API, with a flat fallback. | Done in the layout: `heightAt`, `waterDist`, `hMax`. |
-| C4 | Make country roads wind: B roads and below, between villages and farms, following field boundaries, contours and streams, with hedges both sides. Leave the motorway, A roads and railways (world50) and the edges (edge session) alone. Keep it in my own module, pure and per-tile friendly. | **Done on the old `BIG` path** (`region/lanes.ts`, `interchange/region.ts` `route`). Not on `WORLD`: world50's `routes.ts` plans its own B roads and lanes. |
-| C5 | Merge the integration branch before a push. | Done each time up to `dd5c7c7`. The merge now conflicts. |
-| C6 | Pause: commit, push, add a "where I stopped" note, delete check-ins. | Done. |
-| C7 | Resume. Write this brief first, push it with "brief: country", and don't port into shared files before about 01:45 UTC. | This file. |
-| C8 | Then the scope, which may be adjusted: <br>• Port the countryside onto `WORLD`: hedges, woods as a canopy, farmsteads and farm tracks. <br>• One field style: straight-edged hedged fields in farm blocks, as world50 draws them; drop the curvy or warped part. <br>• Lanes and farm tracks follow the terrain; world50 owns main roads and rail. <br>• Phone first, no flicker. <br>• tsc, vitest, e2es; check `?map=region` by eye. <br>• Push, update PR #41 with before/after screenshots, hourly check-ins until merged. | Not started. |
-| C9 | From the handover, the user's rules for the 50 km world: <br>• one field style everywhere, removing the old curvy generator; <br>• every road respects the terrain; <br>• the whole map is playable. | Field style: part of C8. Roads and whole-map playability: world50's, except lanes and tracks. |
+**Checks before the push**, on the branch merged with the integration head 58ec61a (PR #60, the economy
+fix): `tsc` clean; `vitest run --no-file-parallelism` 117 files, 1104 passed, 8 skipped, no failures (the
+economy growth test passes with #60 in); the phone e2es on `?map=region&seed=42`: firstview (six starts
+before the merge, three after, 0% blank on every shot), lines, loop, rail, save, stations and the menu
+e2e all pass, before the merge and after it.
 
-## (b) Files and modules I own or expect to change
+## Not done
 
-**Own (PR #41):**
-- `src/proto/ground/*`:
-  - `plan.ts`, `canopy.ts`, `farms.ts`: new;
-  - `layout.ts`, `paint.ts`, `hedgerows.ts`, `index.ts`, `game.ts`: the plan branches.
-- `src/proto/region/`: `fields.ts`, `woods.ts`, `lanes.ts`, `countryside.ts` and their tests.
-- `src/proto/game/country.ts`.
+- **world50 (e) findings**, not started: `ground/paint.ts` CoverMap scratch pools (about 205 MB) should be
+  dropped after a paint over about 1M texels; hedges beside a lane that run straight while the lane curves
+  (probably the hedge follows the lane's `GroundInput.lanes` centre line at a coarser step than the road;
+  to be measured at 700 m over the live area).
+- **Wood edges up close:** the canopy's crowns still make a sawtooth along a straight wood edge from far out
+  (the domes' tips at the outline). Not a staircase, and #52 had the same; a smoother edge row is possible.
+- **Farmsteads per km² fell** with the bigger blocks (about one farm a block, and blocks are 1.5× the area).
+  `COUNTRYSIDE.farms.none` could come down from 0.35 to keep the old density; not judged on screen yet.
 
-**Expect to change for the port:**
-- `src/proto/worldmap/country.ts`: world50's file, where a tile asks for fields, woods, hedges and farms. The heart of the port; needs world50's agreement.
-- `worldmap/tilegen.ts`: the canopy, with the tile's trees in one mesh; farm tracks.
-- `worldmap/view.ts`: a canopy mesh per tile level.
-- `ground/game.ts`: resolve the conflict with world50's `extra`.
-- A few lines in `main.ts`.
-- Lanes and farm tracks on terrain: either `region/lanes.ts` fed to `worldmap/routes.ts` for the B roads and lanes, or tracks only in `worldmap/country.ts`.
+## Files touched
 
-**Expect to remove:** my parts on the old `BIG` path that `WORLD` replaced:
-- the `setPlan` calls in `main.ts`;
-- the `route` option in `interchange/region.ts`, if the old region is gone.
-
-## (c) Overlaps with other sessions
-- **world50:**
-  - Its `worldmap/country.ts` already does fields, woods, trees, hedges and farms per tile, on the ground grid with `STRAIGHT_FIELDS` (it added `setParcelStyle` to my `ground/layout.ts`).
-  - Its `routes.ts` plans B roads and lanes ("lanes that follow the land").
-  - So farm blocks, lanes and farm placement overlap directly.
-  - Who owns `worldmap/country.ts` after the port is the main question.
-- **terrain** (`claude/work-terrain-2`, not pushed yet):
-  - my woods on slopes, rough grazing on high ground, contour-following blocks and lane routing all read `heightAt`;
-  - world50's `worldmap/terrain.ts` says the terrain session can replace it.
-- **edge:** farms and lanes near the map edge, and portals. No direct overlap beyond keeping clear of the edge.
-- **OS** (real regions):
-  - real woodland and field shapes replace or tune my generated ones;
-  - `COUNTRYSIDE` is the tuning point;
-  - on OS maps I should draw real woods as the canopy.
-- **vernacular:** farmhouse and barn styles. My `ground/farms.ts` uses plain colours; vernacular could give them regional walls and roofs.
-
-## (d) Open questions
-1. **Field style.**
-   - "Straight-edged hedged fields in farm blocks, as world50 draws them": world50 draws them with the ground's jittered grid (`STRAIGHT_FIELDS`), not with my farm blocks (`region/fields.ts`).
-   - Mine are straight-edged too, square-cornered, and follow roads and contours.
-   - Which one do we keep everywhere? I'd suggest my blocks laid out per tile (`Countryside.near`), which are already lazy and seamless. Or is the grid the choice, and I delete `region/fields.ts`?
-   - Also: does "remove the old curvy generator" mean the swirl and bend in `ground/layout.ts` for the town too? That changes the town's look, though not its world state.
-2. **`worldmap/country.ts` ownership.** Should I take it over, or hand world50 an interface (`countryInput` and `hedges` from my modules)?
-3. **Lanes.** Should world50's B roads and lanes (`routes.ts`) use my `laneRoute`, or do I only add farm tracks?
-4. **The canopy in far tiles.** The `WORLD` path's far and vast tiles use world50's cover maps. Is a canopy mesh per 4 km tile within world50's draw-call budget?
-5. **PR #41.** Do we rework it into the port on the same branch, or close it and open a new PR? It's built on the old `BIG` path.
+Own: `src/proto/region/fields.ts`, `countryside.ts`, `woods.ts`, `lanes.ts`, their tests,
+`src/proto/worldmap/country.ts`, `src/proto/ground/canopy.ts`, `docs/ground.md`, `docs/regiongen.md`,
+`docs/briefs/country.md`, `docs/reports/country/*`. Shared files: none (no `main.ts`, no `worldmap/*` other
+than `country.ts`, no `region/generate.ts`).

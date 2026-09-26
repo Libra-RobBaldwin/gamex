@@ -98,6 +98,8 @@ const loading = new Loading(MAP.name, mapLine());
 function mapLine() {
   const o = MAP.options, n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   if (!o) return '';
+  // (a 50 km map counts the whole map's places and rivers, not the live area's)
+  if (WORLD) return [`seed ${o.seed}`, n(WORLD.settlements.length, 'place', 'places'), n(WORLD.water.rivers.length, 'river', 'rivers'), o.style].join(' · ');
   return [`seed ${o.seed}`, n(MAP.settlements.length, 'place', 'places'), n(MAP.water.rivers.length, 'river', 'rivers'), n(MAP.water.lakes.length, 'lake', 'lakes'), o.style].join(' · ');
 }
 await loading.stage(MAP.relief !== 'flat' ? 'Raising the hills and filling the rivers' : MAP.water.rivers.length ? 'Filling the rivers and lakes' : 'Filling the lake', 0.08);
@@ -535,8 +537,7 @@ function showSite(s: IndustrySite) {
 }
 // the site under a tap: where the ray meets what's drawn (a tall building hides the ground behind it)
 function siteUnder(sx: number, sy: number, g: P) {
-  ray.setFromCamera(ndc(sx, sy), cam);
-  const hit = ray.intersectObjects(cityGroup.children, true)[0];
+  const hit = cityHit(sx, sy);
   return industries.at(hit ? { x: hit.point.x, z: hit.point.z } : g);
 }
 
@@ -868,7 +869,6 @@ function setMode(m: Mode) {
   mode = m;
   // each mode has its colourway (green roads, blue rail, orange stops); the HUD reads it from here
   document.body.dataset.mode = m === 'line' ? 'stop' : m;
-  if (m === 'rail' && opts.cross === 'junction') opts.cross = 'bridge';
   clearDraft();
 }
 function setKind(k: RoadKind) {
@@ -995,12 +995,17 @@ function startLineTool() {
   tool = shell.startTool({ name: 'New line', spec: 'Tap stops in order', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
   setMode('line');
   lineChanged();
-  // (every stop and station in view, so they can all be tapped without hunting for them)
+  // (every stop and station in view, so they can all be tapped without hunting for them: as far
+  // apart as they are on the screen now, zoomed out until they all fit the part of the screen the
+  // chrome leaves clear, with room for their badges, and no closer than the view is now)
   const pts = markers.places().map((m) => m.p);
   if (pts.length) {
-    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-    for (const q of pts) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z); }
-    focusOn({ x: (x0 + x1) / 2, z: (z0 + z1) / 2 }, Math.min(1400, Math.max(view.h, 160, (Math.max(x1 - x0, z1 - z0) + 120) * 1.1)));
+    const c = shell.clearRect(), M = 44; // px round the badges
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const q of pts) { const s = toScreen(q); x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y); }
+    const k = Math.max(1, (x1 - x0 + 2 * M) / (c.right - c.left), (y1 - y0 + 2 * M) / (c.bottom - c.top)); // (an orthographic view: distances on screen scale with 1/h)
+    const mid = nav.screenToGround((x0 + x1) / 2, (y0 + y1) / 2);
+    focusOn(mid ? { x: mid.x, z: mid.z } : pts[0], Math.min(1400, view.h * k));
   }
 }
 function lineChanged() {
@@ -1105,7 +1110,7 @@ function bindRoadOptions(el: HTMLElement) {
     refreshOptions(); draftChanged();
     const sp = ROADS[opts.type].cls === 'rail' ? GRADES.rail : GRADES.road;
     hint({
-      junction: mode === 'rail' ? 'Track you cross joins up (points); roads are always bridged' : 'Roads you cross at the same height become junctions (they design themselves)',
+      junction: mode === 'rail' ? 'Track you cross joins up (points); a road you cross square-on gets a level crossing, up to 100 mph' : 'Roads you cross at the same height become junctions (they design themselves); a railway gets a level crossing',
       bridge: `Goes over what it crosses — ${sp.clear} m clearance over roads and rail, ${sp.water} m over water`,
       tunnel: `Goes under what it crosses — a cutting near the surface, a bored tunnel deeper, ${sp.under} m under water`,
     }[opts.cross]);
@@ -1294,6 +1299,7 @@ function showBusInfo(id: number) {
   const l = lines.of(id);
   const facts: [string, string][] = [['Line', l ? `${l.num} · ${lines.title(l)}` : 'Not on a line'], ['Model', b.model || 'Bus']];
   if (l && b.next !== undefined) facts.push([b.dwelling ? 'At' : 'Next stop', lines.name(b.next)]);
+  if (b.waiting) facts.push(['Status', 'Waiting for room on the road']); // (in the depot: no road under it just now, traffic.ts)
   facts.push(['On board', `${people.aboard(id)}`], ['Speed', `${Math.round(b.speed * 2.237)} mph`]);
   if (l) showLine(l.bus.seq, l.stops);
   shell.openInfo({
@@ -1792,9 +1798,31 @@ const ray = new THREE.Raycaster();
 function ndc(sx: number, sy: number) {
   return new THREE.Vector2((sx / canvas.clientWidth) * 2 - 1, -(sy / canvas.clientHeight) * 2 + 1);
 }
-function pickBuilding(sx: number, sy: number) {
+// What the finger is on in the city's chunks (buildings and industry sites), or null. On a hilly
+// map every mesh is lifted by the ground's height in its shader (drape.ts), so a chunk's triangles
+// are still at height 0 while it's drawn, and its bounds widened, up on the hill: the ray would pass
+// through the drawn building and miss its triangles. Each chunk is put up where it's drawn for the
+// test (the ground's height under the finger, which is a building's within a metre or two), so the
+// ray meets its bounds and, brought down by the same amount, its triangles.
+const cityLift = new THREE.Matrix4();
+function cityHit(sx: number, sy: number) {
   ray.setFromCamera(ndc(sx, sy), cam);
-  const hit = ray.intersectObjects(cityGroup.children, true)[0];
+  if (!RELIEF) return ray.intersectObjects(cityGroup.children, true)[0] ?? null;
+  const g = nav.groundUnder(sx, sy);
+  cityLift.makeTranslation(0, RELIEF.heightAt(g.x, g.z), 0);
+  const hits: THREE.Intersection[] = [];
+  cityGroup.traverse((o) => {
+    if (!(o as THREE.Mesh).isMesh) return;
+    const was = o.matrixWorld.clone();
+    o.matrixWorld.multiplyMatrices(cityLift, was); // (drawn there, until the next frame puts it back)
+    o.raycast(ray, hits);
+    o.matrixWorld.copy(was);
+  });
+  hits.sort((a, b) => a.distance - b.distance);
+  return hits[0] ?? null;
+}
+function pickBuilding(sx: number, sy: number) {
+  const hit = cityHit(sx, sy);
   if (!hit) return null;
   // the building whose footprint (or failing that, plot) the hit is on
   const inside = (b: Built, pad: number, plot: boolean) => {

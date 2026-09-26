@@ -130,6 +130,8 @@ body.paused #st-rush { color: var(--gold); }
 #firstrun .ic { width: 18px; height: 18px; color: var(--lime); }
 /* the next step, under the status strip on the left: one line, tap to do it */
 #goal { position: absolute; top: calc(var(--tap) + 10px); left: 0; max-width: calc(100% - var(--tap) - 16px); min-height: var(--tap); display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 9px; background: var(--panel); box-shadow: inset 3px 0 0 var(--gold), 0 1px 3px rgba(0, 0, 0, 0.3); color: var(--paper); font-size: 13px; line-height: 1.25; text-align: left; }
+/* (the guided start says what the goal strip would: one set of steps at a time) */
+body:has(#guide) #goal { display: none; }
 #goal > .ic { flex: none; width: 20px; height: 20px; color: var(--gold); }
 #goal span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 #goal small { font: 700 10px/1.1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold-text); }
