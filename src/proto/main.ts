@@ -2504,8 +2504,10 @@ function updateGoal() {
   const nLines = lines.list.length + railway.lines.filter((l) => !l.other).length;
   if (!nLines) {
     firstLineAt = null;
-    let stops = 0;
-    for (const sg of net.segs.values()) stops += sg.stops.length;
+    // (places a line could join: a stop and the one facing it across the road are one place)
+    const places = new Set<number>();
+    for (const sg of net.segs.values()) for (const st of sg.stops) { const p = traffic.place(st.id); places.add(p ? Math.min(...p.stops.map((x) => x.id)) : st.id); }
+    const stops = places.size;
     shell.goal(stops < 2
       ? { step: `Step 1 of 3 · ${stops} of 2 stops`, text: 'Build bus stops where people live and work', icon: 'busStop', onClick: () => startStopTool() }
       : { step: 'Step 2 of 3', text: 'Draw a bus line through your stops', icon: 'transport', onClick: () => startLineTool() });
