@@ -9,11 +9,10 @@ Code:
 - `src/proto/game/edge.ts`: the face, the far country, `beyondEdge`.
 - `src/proto/game/portals.ts`: finding the ways off, their places, traffic, signs and sheet, the
   station off the map.
-- Roads laid out to the edge: `interchange/region.ts` (`roadsOut`, `splitLong`, the motorway run
-  on) and `rail/region.ts` (`plan.out`).
+- The ways off a 50 km map: `worldPortals` in `game/portals.ts`, from the plan's lanes that run
+  off the rim (`worldmap/routes.ts`).
 - A few lines in `main.ts`, `game/econ.ts`, `traffic.ts`, `rail/draw.ts`, `rail/railway.ts`,
-  `rail/game.ts` and `game/regionview.ts`. The town (`?map=town`) keeps its old slice, with the new
-  rock beds, and nothing else changes there.
+  `rail/game.ts` and `game/regionview.ts`.
 
 ## On the 50 km map (WORLD)
 
@@ -39,8 +38,7 @@ Code:
 - **Layers:** turf, topsoil and subsoil hang from the ground. Below them the rock lies in beds
   (clay, sandstone, mudstone, limestone, then bedrock) that fold gently across the country. They
   rise under the hills, since the hills are made of the rock. The beds go down to a level base,
-  `edgeDepth(edge)`: the town's 26 m, and a big map's about 2% of its half-width (99 m on the 6 km
-  region, 260 m at most). So from right out the map reads as a slab of crust. The face darkens a
+  `edgeDepth(edge)`: about 2% of the map's half-width, 260 m at most. So from right out the map reads as a slab of crust. The face darkens a
   little with depth.
 - **It follows the ground exactly.** The face's columns fall on the height field's grid lines
   (`RELIEF.step`), and it is 0.5 m columns wherever the ground between two grid lines isn't straight
@@ -98,21 +96,14 @@ A backdrop round the map, so the sky doesn't just start at the rim:
 
 ## Ways off the map (`findPortals`)
 
-- **Roads out** (`layRegionRoads` with `edge`):
-  - The motorway runs on to the ground's edge at both ends. Its junctions still keep to the map.
-  - An A road leaves by each side the motorway doesn't. It starts from the town (or the city) that
-    can reach that side most directly, and runs straight out from its gate, clear of every other
-    place. A village takes a B road out where no town can.
-  - Then every long road is cut into pieces of 450 m at most (`splitLong`). The map is drawn a cell
-    at a time, each road by the cell its middle is in, so a road kilometres long vanished when that
-    cell went out of sight.
-  - And every road and track on the region gets a point at least every 20 m (`densify`: points on
-    the same line, so nothing moves). The hills are added as it's drawn, vertex by vertex, and the
-    A and B roads and the main line had points up to 2 km apart, so they were drawn straight
-    through the hills, under the ground, with only their markings showing.
-- **The railway** (`planRegionRail` with `edge`): the main line runs straight on from each end
-  station, through the face and 480 m past it (`OFF_MAP`), with a join exactly on the edge. Nothing
-  wholly past the edge is drawn (`beyondEdge`): not its track, ballast, signals or station.
+- **Roads out.** On a 50 km map the ways off are where the plan's roads run off the rim
+  (`worldPortals`): lanes on a seeded start, since the map starts with only country lanes between
+  places, and a real region's roads as they are. They aren't on the game's Network unless the live
+  area reaches the rim, so their traffic is the coarse economy's trips (`worldmap/econ.ts`).
+  `findPortals(net, edge)` still finds every road or track on the Network that ends at the ground's
+  edge, for when the player's roads reach it; the 6 km region's laid-out motorway and A roads, which
+  it was written for, are gone. The railway off the map went with them: the map starts with no
+  railway.
 - **Portals:**
   - Every dead end on the ground's edge (or track through it) is found, and grouped where they run
     out together. A motorway's two carriageways are one portal.

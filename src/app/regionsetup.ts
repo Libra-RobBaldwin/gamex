@@ -17,7 +17,7 @@ const STYLE_NAMES: Record<Style, [string, string]> = {
 /** The options last started (or the defaults). */
 export function lastRegion(): RegionOptions {
   const q = load(KEYS.region);
-  // (every new region is 50 km: a remembered 6 km setup from before comes back at 50 km)
+  // (a remembered setup from before the game was one 50 km map comes back at 50 km)
   return q ? regionOptions({ ...optionsFromQuery(new URLSearchParams(q)), size: 50 }) : regionOptions();
 }
 
@@ -28,41 +28,28 @@ const COUNTS: [Counted, string, string][] = [
   ['towns', 'Market towns', ''],
   ['villages', 'Villages', ''],
 ];
-// lakes and villages can be left to the seed (−1), and on a 50 km map the towns too
-const AUTO: Partial<Record<Counted, true>> = { lakes: true, villages: true };
-const auto = (k: Counted, o: RegionOptions) => !!AUTO[k] || (k === 'towns' && o.size > 6);
+// lakes, towns and villages can be left to the seed (−1)
+const AUTO: Partial<Record<Counted, true>> = { lakes: true, towns: true, villages: true };
+const auto = (k: Counted, _o: RegionOptions) => !!AUTO[k];
 
 // The setup is a few simple steps, one question each, a tap on a card answering it and moving
 // on (the user: "simple, easy to follow steps", not everything on one screen), then a summary
 // with the one big button, and the finer settings folded away under More options.
-// Kinds of place (landforms: region/options.ts will carry more as the generator grows them)
+// Kinds of place: the terrain's landforms (region/options.ts LANDFORMS: vale, downs, estuary, uplands,
+// mountains, coast, islands)
 interface Pick { id: string; name: string; note: string; ic: Parameters<typeof icon>[0]; patch: Partial<RegionOptions> }
-const PLACES: Pick[] = [
-  { id: 'rolling', name: 'Rolling country', note: 'Gentle hills, a river through the valley, woods and farms', ic: 'trees', patch: { relief: 'rolling', rivers: 1, lakes: -1 } },
-  { id: 'vale', name: 'Wide vale', note: 'Flat, open farmland with slow rivers', ic: 'wheat', patch: { relief: 'lowland', rivers: 2, lakes: 1 } },
-  { id: 'uplands', name: 'Hills and lakes', note: 'High ground, deep valleys, lakes in the hollows', ic: 'mountain', patch: { relief: 'upland', rivers: 1, lakes: 3 } },
-  { id: 'mountains', name: 'Mountains', note: 'Big peaks and passes; towns squeeze into the valleys', ic: 'mountain', patch: { relief: 'mountain', rivers: 1, lakes: 2 } },
-];
-// on a 50 km map the kinds of place are the terrain's landforms (region/options.ts LANDFORMS: vale,
-// downs, estuary, uplands, mountains, coast, islands); the old 6 km map keeps its four
 const LANDFORM_ICONS: Record<string, Parameters<typeof icon>[0]> = { vale: 'wheat', downs: 'trees', estuary: 'droplet', uplands: 'mountain', mountains: 'mountain', coast: 'droplet', islands: 'map' };
-const placesFor = (o: RegionOptions): Pick[] => o.size > 6
-  ? LANDFORMS.map((l) => ({ id: l.id, name: l.name, note: l.note, ic: LANDFORM_ICONS[l.id] ?? 'map', patch: l.options }))
-  : PLACES;
+const placesFor = (_o: RegionOptions): Pick[] => LANDFORMS.map((l) => ({ id: l.id, name: l.name, note: l.note, ic: LANDFORM_ICONS[l.id] ?? 'map', patch: l.options }));
 const CLIMATES: [Style, string, string, Parameters<typeof icon>[0]][] = [
   ['temperate', 'Temperate', 'Green fields, woods and hedgerows', 'trees'],
   ['arctic', 'Cold', 'Snow, and dark pine woods', 'mountain'],
   ['desert', 'Dry', 'Sun-baked land with few trees', 'sparkles'],
 ];
-// (on a 50 km map the same choices, for fifty kilometres of country: the seed decides the counts)
-const sizesFor = (o: RegionOptions): Pick[] => o.size > 6 ? [
+// (the same three choices, for fifty kilometres of country: the seed decides the counts)
+const sizesFor = (_o: RegionOptions): Pick[] => [
   { id: 'villages', name: 'Villages', note: 'Market towns few and far between, and lots of villages to link up', ic: 'home', patch: { city: false, towns: 5, villages: -1 } },
   { id: 'towns', name: 'Market towns', note: 'A dozen towns and the villages round them', ic: 'building', patch: { city: false, towns: -1, villages: -1 } },
   { id: 'city', name: 'Cities and towns', note: 'Two cities, a dozen towns, and villages between', ic: 'building', patch: { city: true, towns: -1, villages: -1 } },
-] : [
-  { id: 'villages', name: 'Villages', note: 'A market town and lots of small places to link up', ic: 'home', patch: { city: false, towns: 1, villages: 10 } },
-  { id: 'towns', name: 'Market towns', note: 'A few towns and the villages round them', ic: 'building', patch: { city: false, towns: 4, villages: -1 } },
-  { id: 'city', name: 'A city and towns', note: 'A city in the middle, where the lines meet', ic: 'building', patch: { city: true, towns: 3, villages: -1 } },
 ];
 const STEPS = ['Kind of place', 'Climate', 'Towns', 'Ready'];
 let step = 0;
@@ -106,15 +93,15 @@ export function regionBody(o: RegionOptions) {
       <button data-goto="1">${icon(clim[3])}<span><small>Climate</small><b>${clim[1]}</b></span>${icon('chevronDown', 'go')}</button>
       <button data-goto="2">${icon(size?.ic ?? 'building')}<span><small>Towns</small><b>${size?.name ?? 'Your own mix'}</b></span>${icon('chevronDown', 'go')}</button>
     </div>
-    <p class="fine">${o.size > 6 ? 'The map is 50 km across. You start in a market town in the middle, with only country lanes between places: the main roads, motorways and railways are yours to build.' : 'A 6 km region, all built before you start.'}</p>
+    <p class="fine">The map is 50 km across. You start in a market town in the middle, with only country lanes between places: the main roads, motorways and railways are yours to build.</p>
     <button class="act primary wide big" data-start>${icon('play')}<span>Make this region</span></button>
     <details class="more"><summary>${icon('adjustments')}<span>More options</span></summary>
       <div class="seedrow"><input id="rg-seed" type="number" inputmode="numeric" min="0" value="${o.seed}" aria-label="Seed">
         <button class="act" data-shuffle>${icon('refresh')}<span>New seed</span></button></div>
       <p class="fine">The same seed and choices always make the same map, so a seed is a way to share one.</p>
       <div class="opts" role="radiogroup" aria-label="Climate" hidden>${STYLES.map((st) => `<label class="opt"><input type="radio" name="rg-style" value="${st}" ${o.style === st ? 'checked' : ''}><span><b>${STYLE_NAMES[st][0]}</b></span></label>`).join('')}</div>
-      ${o.size > 6 ? `<label class="opt"><input type="checkbox" id="rg-sea" ${o.sea ? 'checked' : ''}><span><b>A coast</b><small>The sea along one edge, and the rivers running down to it</small></span></label>` : ''}
-      <label class="opt"><input type="checkbox" id="rg-city" ${o.city ? 'checked' : ''}><span><b>${o.size > 6 ? 'Cities' : 'A city in the middle'}</b><small>${o.size > 6 ? 'Two, the biggest places' : 'The biggest place, where the lines meet'}</small></span></label>
+      <label class="opt"><input type="checkbox" id="rg-sea" ${o.sea ? 'checked' : ''}><span><b>A coast</b><small>The sea along one edge, and the rivers running down to it</small></span></label>
+      <label class="opt"><input type="checkbox" id="rg-city" ${o.city ? 'checked' : ''}><span><b>Cities</b><small>Two, the biggest places</small></span></label>
       ${COUNTS.map(([k, l, n]) => count(k, l, n)).join('')}
       <button class="act wide lib-link" data-defaults>${icon('restore')}<span>Back to the defaults</span></button>
     </details>

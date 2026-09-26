@@ -1,10 +1,9 @@
 # The region streamed in tiles (R4)
 
-The 6 km region (`/?map=region`) is drawn a tile at a time around the camera, at a level of detail
-picked from the zoom. An edit re-derives only what it touched. Traffic is only near the camera.
-The invented town (`/?map=town`) is drawn and simulated exactly as before: all of this is behind
-`BIG` in `main.ts`, and a test compares the town's state after loading with the integration
-branch's.
+The live area of the region (`/?map=region`) is drawn a tile at a time around the camera, at a level
+of detail picked from the zoom. An edit re-derives only what it touched. Traffic is only near the
+camera. (This was written for the 6 km region; the 50 km map, below, runs the same live area, and the
+tiles beyond it are the plan's scenery.)
 
 Code: `src/proto/game/regionview.ts` (the tiles), the `regionView` parts of `src/proto/main.ts`
 (edits, traffic, trees, infill), and small additions to `roaddraw.ts` (draw only some roads),
@@ -46,8 +45,8 @@ just beyond the view, mid a ring further), so a zoom or a pan mostly just swaps.
 The river beds and the map's cut edge are cut into a mesh a tile too, so only what's in view is
 drawn.
 
-Precision: nothing on the 6 km map is more than 4.5 km from the origin, where a float32 steps in
-half a millimetre. It needs no floating origin; `world/origin.ts` is for the 30 km map.
+Precision: nothing in the live area is more than a few kilometres from the origin, where a float32
+steps in half a millimetre. It needs no floating origin.
 
 ## Edits
 
@@ -94,8 +93,8 @@ table; `node e2e/perf.e2e.mjs <base url> town,region 0,1,2,3,4 out.json` reprodu
 
 # 50 km maps: a world plan and tiles made as you go (work-world50)
 
-Every map is 50 km across now (`?map=region`, `size=50`, the setup screen's default; the 6 km region
-is still there as `size=6`, and saves made on it open on it). A real 50 km square of England holds
+Every map is 50 km across (`?map=region`, `size=50`; an old 6 km address opens the 50 km map, and a
+save made on the 6 km region is listed as made on a map that no longer exists). A real 50 km square of England holds
 hundreds of thousands of buildings, so nothing fine is made for the whole map up front. There are
 two levels:
 
@@ -187,7 +186,7 @@ So the map is always covered exactly once, with no holes and nothing fighting.
 - **The fields.** A 50 km map's ground has its own seed with straight-edged, near-square fields
   (`ground/layout.ts` `setParcelStyle`, `STRAIGHT_FIELDS`). It's the same field grid, but it bends
   only over kilometres, not in swirls, so each field's hedges run straight while farms still face
-  different ways. The starter town's fields are as they were.
+  different ways.
 
 - The thresholds have 12% of slack.
 - Heights come from one field on a 50 m grid that everything drawn follows (`drape.ts`). A worker makes
@@ -228,7 +227,8 @@ MapSpec the game gets is that square (`worldMapSpec`); the plan rides along as `
   - which places had come to life (`world.live`);
   - the Network and the rest as before, for the live area only.
 
-  A save from before (version 1) with no size in its query was made on the 6 km region, and opens on it.
+  A save from before (version 1) with no size in its query was made on the 6 km region, which is gone:
+  Saved towns lists it as made on a map that no longer exists, with only Delete.
 
 ## Sources: seeded or real (`source.ts`)
 

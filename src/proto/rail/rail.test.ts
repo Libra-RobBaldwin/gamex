@@ -5,8 +5,6 @@ import { DEFAULT_OPTS, Network, rng } from '../roads';
 import { TRAINS } from '../catalog';
 import { Traffic, type Places } from '../traffic';
 import { Railway } from './railway';
-import { planRegionRail, layRegionRail, type RailSettlement } from './region';
-import { callOrder } from './sim';
 
 const rail = (net: Network, a: { x: number; z: number }, b: { x: number; z: number }, type = 'rail-main', o: Partial<typeof DEFAULT_OPTS> = {}) =>
   net.build(net.snapStart(a, 2, 'rail'), net.snapStart(b, 2, 'rail'), undefined, { ...DEFAULT_OPTS, type, cross: 'bridge', grade: 0.03, ...o });
@@ -211,44 +209,5 @@ describe('level crossings', () => {
     if (dp !== undefined) for (const q of rw.graph.pieces[dp].pts) expect(Math.hypot(q.x - c.x, q.z - c.z)).toBeGreaterThan(15);
     const sh = rw.shapes.get(s.id)!;
     if (sh.depot) expect(sh.land.slice(-sh.depot.pts.length).some((poly) => net.land.hits(poly, (k) => k.key === `road:${seg.id}` || k.key === `station:${s.id}`).length)).toBe(false);
-  });
-});
-
-describe('the region’s railway', () => {
-  // a fake region: a city between two towns, a village off to one side, and some villages elsewhere
-  const region: RailSettlement[] = [
-    { id: 'c', name: 'Easterby', kind: 'city', x: 0, z: 0, r: 600 },
-    { id: 't1', name: 'Wendle', kind: 'town', x: -1900, z: 300, r: 350 },
-    { id: 't2', name: 'Carrow', kind: 'town', x: 2000, z: -200, r: 350 },
-    { id: 't3', name: 'Hapsby', kind: 'town', x: 300, z: 2400, r: 300 },
-    { id: 'v1', name: 'Oxlow', kind: 'village', x: 1500, z: 1500, r: 150 },
-    { id: 'v2', name: 'Pinmere', kind: 'village', x: -1500, z: -2200, r: 150 },
-  ];
-  it('lays a main line through the city and two towns, a branch to a village, and a line on each', () => {
-    const plan = planRegionRail(region, { bound: 3000 })!;
-    expect(plan).not.toBeNull();
-    expect(plan.stations.filter((s) => s.route === 'main').map((s) => s.settlement.id)).toEqual(['t1', 'c', 't2']);
-    expect(plan.stations.find((s) => s.route === 'branch')?.settlement.id).toBe('v1');
-    const net = new Network(() => false, 3000);
-    const rw = new Railway(net);
-    const made = layRegionRail(rw, plan);
-    expect(made.problems, JSON.stringify(plan)).toEqual([]);
-    expect(made.stations.length).toBe(4);
-    expect(made.lines.length).toBe(2);
-    // and the trains run them, calling at each station in order
-    for (let i = 0; i < (360 * 3) / 0.1; i++) rw.update(0.1);
-    expect(rw.sim.stats.redPassed).toBe(0);
-    for (const l of made.lines) {
-      const order = callOrder(l.stops, false);
-      for (const t of rw.trainsOn(l)) {
-        const seq = rw.sim.log.filter((c) => c.train === t.id).map((c) => c.station);
-        expect(seq.length, `train ${t.id} on line ${l.num}`).toBeGreaterThanOrEqual(3);
-        const start = order.indexOf(seq[0]);
-        seq.forEach((s, k) => expect(s).toBe(order[(start + k) % order.length]));
-      }
-    }
-  }, 120_000);
-  it('is the same railway for the same region', () => {
-    expect(JSON.stringify(planRegionRail(region, { bound: 3000 }))).toBe(JSON.stringify(planRegionRail(region, { bound: 3000 })));
   });
 });

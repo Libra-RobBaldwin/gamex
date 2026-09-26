@@ -8,9 +8,7 @@ a stream with review and fixes takes 45–90 minutes, and a merge about 5.
 ## Everything left
 
 ### 1. A map big enough to test on (under way)
-- [ ] **The region map (R1):** 6 × 6 km, about 33 times today's area, with a dozen towns, a
-  motorway, A and B roads, a main line and a branch line (`docs/region.md`,
-  `claude/work-region`).
+- [x] **The region map:** it became the one map, 50 km across (`docs/region.md`, `docs/world.md`).
 - [ ] **One-way roads, slip roads and motorway junctions (R2):** `claude/work-motorways`.
 - [ ] **Signalling:** blocks at stations and junctions, points set by route, passing loops, level
   crossings (R3, `claude/work-rail`). This replaces the loop's interim rule that keeps trains

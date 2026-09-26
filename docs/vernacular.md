@@ -1,8 +1,7 @@
 # Buildings that fit their place (`vernacular.ts`, `buildgen.ts`)
 
 On a generated map every house, terrace, shop and village building is built in the tradition of the
-place it stands in, and of the age of its street. The town map (`?map=town`) is unchanged, bit for
-bit, unless `?vern=` asks for a tradition.
+place it stands in, and of the age of its street. `?vern=` forces a tradition.
 
 ## Where the tradition comes from
 
@@ -101,6 +100,6 @@ The building style resolver sees every place on the map, so a far town takes its
 
 - `/buildings-demo.html?vern=cotswold`: one tradition, a street per era plus the civic buildings;
   the arrows step through the traditions.
-- `?map=region&seed=7&vern=scots` forces a tradition on a region; `?map=town&vern=nordic` on the town.
+- `?map=region&seed=7&vern=scots` forces a tradition on a region.
 - `vernacular.test.ts` checks determinism, one tradition per settlement, every British tradition
   turning up across forty seeds, climates, eras and the geology hook.
