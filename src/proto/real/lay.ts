@@ -115,6 +115,11 @@ export function clearOf(lots: Lot[], gap = 14) {
 // sites over 40 ha are left to the ground painter.
 export interface Green { c: number; rings: XZ[][]; holes: boolean[] }
 const GREEN_KIND: Record<(typeof GREEN_CLASSES)[number], RegionKind> = { park: 'park', playing: 'park', golf: 'park', allotment: 'allotments', cemetery: 'grounds', religious: 'grounds', play: 'playground', sport: 'park', bowls: 'park', tennis: 'park', other: 'park' };
+// How thickly a real park is planted (buildgen's makeRegion `leafy`): the generator's parks are
+// small gaps between houses, planted as thickly as a garden (a tree on every third 5 m cell); a real
+// park is hectares of open lawn with its trees dotted about and round the edge, so the bigger it
+// is the thinner (a 1 ha park as the generator's; a 14 ha one a tree every 400 m² or so).
+export const parkLeafiness = (cells: number) => Math.min(1, Math.sqrt(400 / Math.max(1, cells)));
 export function greenRegions(net: Network, lots: Lot[], greens: Green[]): Region[] {
   const taken = new Set<string>(), key = (x: number, z: number) => `${Math.round(x / CELL)},${Math.round(z / CELL)}`;
   for (const l of lots) {

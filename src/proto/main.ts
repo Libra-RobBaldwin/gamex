@@ -51,8 +51,9 @@ import { WorldGame } from './worldmap/game'; // a 50 km map: streamed scenery ro
 import { layLiveRoutes } from './worldmap/live';
 import { GROUND_SEED, woodTrees } from './worldmap/country';
 import { isRealQuery, loadRealMap } from './real/load';
-import { clearOf, greenRegions, layReal, placeLots } from './real/lay';
+import { clearOf, greenRegions, layReal, parkLeafiness, placeLots } from './real/lay';
 import { DeadEndPaths } from './game/paths';
+import { LotStream, restorePack } from './real/live';
 import type { RealMap } from './real/map';
 import { STYLE_LOOKS, buildStreets, centrality, centreDistance, inCentre, mapFromQuery, plotCentre, settlementAt, zoneOf, type MapSpec, type SettlementInfo } from './region'; // maps as data (docs/region.md)
 import { SAVE_VERSION, SaveError, describe as describeSave, restoreNetwork, saveNetwork, when, type GameSave } from './game/save'; // saved towns (docs/production.md §4)
@@ -79,7 +80,7 @@ if (PARAMS.get('save')) {
 // A real region (public/regions, real/: Ordnance Survey data) is fetched first.
 const MAP_Q = SAVED ? new URLSearchParams(SAVED.map.query) : PARAMS;
 const MAP: MapSpec = isRealQuery(MAP_Q) ? await loadRealMap(MAP_Q) : mapFromQuery(MAP_Q);
-const REAL: { parks: Region[] } | null = 'real' in MAP ? { parks: [] } : null; // (a real map: real/)
+const REAL: { parks: Region[]; forms?: Map<number, { form: Form; slip: boolean }>; stream?: LotStream } | null = 'real' in MAP ? { parks: [] } : null; // (a real map: real/)
 // (the query that makes this map, kept with its saves)
 const MAP_QUERY = SAVED?.map.query ?? (() => { const q = new URLSearchParams(PARAMS); q.delete('save'); q.delete('guide'); return q.toString() || `map=${MAP.id}`; })();
 const LOOK = STYLE_LOOKS[MAP.style]; // (its ground palette, woods and sky: region/styles.ts)
@@ -306,7 +307,7 @@ const geoFor = (node: number) => ({ fits: (polys: P[][]) => landFits(net, node, 
 // which form each of its own junctions takes (its roundabouts, give-ways, merges and diverges)
 const interchanges: Interchange[] = [];
 // (an interchange's junctions take the form it built them for, without slip lanes of their own)
-const preferAt = (node: number) => { for (const ix of interchanges) if (ix.prefer[node]) return { form: ix.prefer[node], slip: false }; return undefined; };
+const preferAt = (node: number) => { const f = REAL?.forms?.get(node); if (f) return f; for (const ix of interchanges) if (ix.prefer[node]) return { form: ix.prefer[node], slip: false }; return undefined; }; // (a real map's packed junctions keep their forms: real/live.ts)
 function redesignJunctions() {
   for (const id of [...junctions.keys()]) if (!net.nodes.has(id) || legsAt(net, id).length < 3) junctions.delete(id);
   for (const n of net.nodes.values()) {
@@ -596,7 +597,7 @@ function refreshInfill() {
   gameGround.invalidate();
 }
 function addInfill(r: Region) {
-  const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges });
+  const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges, leafy: REAL ? parkLeafiness(r.cells.length) : undefined });
   const lot: Lot = { id: -1, x: r.centre.x, z: r.centre.z, rot: 0, w: 0, d: 0, h: 0, kind: 'civic', seg: -1, seed: r.seed, row: 0, front: 0, back: 0, px: 0, pw: 0, arch: r.kind };
   const b: Built = { lot, born: 0, height: shape.height, name: shape.name, detail: shape.detail, parts: bakeGroup(shape.group), solo: null, chunk: null, region: r };
   toChunk(b);
@@ -657,9 +658,26 @@ function queuePlots(segs: number[]) {
 async function seedTown() {
   // a real map (real/): its roads, railway and buildings as they are, through the OSM importer's
   // stages; the junctions design themselves, and the town grows on plots between its buildings
+  const pack = (MAP as RealMap).real?.pack;
+  if (REAL && pack) {
+    // (packed ahead of time: the network restored, each junction designed in its packed form, every
+    // lot on the land, and the buildings near the start drawn now, the rest as the camera comes near)
+    await loading.stage('Laying out the roads and the railway', 0.08);
+    const r = restorePack(net, pack);
+    REAL.forms = r.forms;
+    commitRoads(); // (the plots the town grows on come packed, already clear of the buildings)
+    queue = r.queue;
+    net.lots.push(...r.lots);
+    footpaths.set(net, r.paths);
+    REAL.parks = r.parks;
+    const stream = (REAL.stream = new LotStream(r, (l) => spawnLot(l, false, true)));
+    await loading.stage('Putting up the buildings round you', 0.3);
+    stream.near(view.x, view.z, 1200);
+    return;
+  }
   if (REAL) {
     await loading.stage('Laying out the roads and the railway', 0.08);
-    const laid = layReal(net, (MAP as RealMap).real.overpass, MAP.settlements);
+    const laid = layReal(net, (MAP as RealMap).real.overpass!, MAP.settlements);
     commitRoads([...net.segs.keys()]);
     footpaths.clear(net); // (the real buildings go up first; the dead ends' paths keep clear of them)
     const lots = placeLots(net, laid.lots);
@@ -671,7 +689,7 @@ async function seedTown() {
       spawnLot(l, false, true);
       if (i % 64 === 0) await loading.tick(i / lots.length);
     }
-    REAL!.parks = greenRegions(net, lots, (MAP as RealMap).real.green);
+    REAL!.parks = greenRegions(net, lots, (MAP as RealMap).real.green ?? []);
     footpaths.update(net, net.lots);
     return;
   }
@@ -2390,7 +2408,7 @@ const town = new TownEconomy({
   net, traffic, lines, industrial: INDUSTRIAL, clock: () => clock, purse, rail: railGame.econ(),
   towns: MAP.settlements.length > 1 ? MAP.settlements : undefined, // (each place a town of its own: docs/region.md R5)
   byEdge: MAP.placeBy === 'edge',
-  standing: () => buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot),
+  standing: () => (REAL?.stream ? net.lots.filter((l) => l.id >= 0) : buildings.filter((b) => !b.dying && !b.region && b.lot.id >= 0).map((b) => b.lot)), // (a real map's town is all its lots, drawn or not yet: real/live.ts)
   free: () => queue,
   build: (l) => { queue = queue.filter((x) => x !== l); if (!net.lotFree(l)) return; spawnLot(l); refreshTrees(l); gameGround.built(l); regionView?.groundChanged([{ x0: l.x - 40, z0: l.z - 40, x1: l.x + 40, z1: l.z + 40 }]); },
   rebuild: (l, kind) => { const b = buildings.find((x) => x.lot === l && !x.dying); if (!b) return; l.kind = kind; regenerate(b); placesDirty = true; },
@@ -2657,6 +2675,7 @@ function frame(now: number) {
   const t0 = performance.now();
   perf.frames++; perf.frameMs += rawMs; perf.worst = Math.max(perf.worst, rawMs);
   nav.update(dt, now);
+  REAL?.stream?.tick(view.x, view.z, 4); // (a real map's buildings, a tile at a time, nearest first: real/live.ts)
   if (gameGround.sync()) renderer.shadowMap.needsUpdate = true;
   // keep blueprint handles a finger's width wide at any zoom
   if ((draft || picks.length) && Math.abs(view.h - lastH) > view.h * 0.08) { lastH = view.h; drawGhost(); }

@@ -19,8 +19,10 @@ export interface RealMap extends MapSpec {
     region: string; // the region's id (public/regions/<id>)
     centre: XZ; // where the window's centre is in the region
     heights: HeightGrid; // the ground's real height (m), over the window and its margin
-    overpass: ReturnType<typeof toOverpass>; // roads, railways, stations and buildings, for the importer
-    green: { c: number; rings: XZ[][]; holes: boolean[] }[]; // OS Open Greenspace in the window: its parks (real/lay.ts greenRegions)
+    overpass?: ReturnType<typeof toOverpass>; // roads, railways, stations and buildings, for the importer (made in the page when there's no pack)
+    pack?: import('./live').LivePack; // the live area packed ahead of time (tools/os/pack.mjs, real/live.ts)
+    green?: { c: number; rings: XZ[][]; holes: boolean[] }[];
+    stations: { name: string; x: number; z: number }[]; // OS's railway stations in the window // OS Open Greenspace in the window: its parks (real/lay.ts greenRegions)
   };
 }
 
@@ -79,6 +81,7 @@ export function realMap(R: RealRegion, o: { home?: string; half?: number } = {})
     real: {
       region: M.id, centre: c,
       heights, overpass, green: greenIn(R, c, half),
+      stations: M.stations.map((st) => ({ name: st.name, x: st.x - c.x, z: st.z - c.z })).filter((st) => Math.abs(st.x) < half && Math.abs(st.z) < half),
     },
   };
 }

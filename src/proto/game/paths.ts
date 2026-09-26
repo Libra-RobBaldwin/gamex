@@ -84,10 +84,22 @@ export class DeadEndPaths {
     this.mesh.frustumCulled = false; // (spread over the whole map; one small mesh)
   }
   // Take them all away (their land too): before a real map's buildings go up, which the paths then avoid.
-  clear(net: Network) { net.land.releaseWhere((k) => k.startsWith('path:')); this.sig = '#'; this.list = []; }
+  clear(net: Network) { net.land.releaseWhere((k) => k.startsWith('path:')); this.sig = '#'; this.roads = ''; this.list = []; }
   // Work them out again (claims released and made again; the mesh rebuilt only if they changed).
+  private roads = '';
   update(net: Network, lots: Iterable<Lot>) {
-    const next = deadEndPaths(net, lots);
+    // (only when the roads have changed since: a path depends on the dead ends and what's round them,
+    // and buildings keep off the paths' land anyway)
+    let n = 0, sx = 0, sz = 0;
+    for (const s of net.segs.values()) { n++; const a = net.node(s.a), b = net.node(s.b); sx += s.id * 0.37 + a.x + b.x + s.mid.length; sz += a.z + b.z; }
+    const roads = `${n}:${sx.toFixed(1)}:${sz.toFixed(1)}`;
+    if (roads === this.roads) return false;
+    this.roads = roads;
+    return this.set(net, deadEndPaths(net, lots));
+  }
+  // Take these paths (a real map's, worked out ahead of time: real/live.ts), as update would.
+  set(net: Network, next: FootPath[], roads?: string) {
+    if (roads !== undefined) this.roads = roads;
     const sig = next.map((p) => `${p.node}:${p.b.x.toFixed(1)},${p.b.z.toFixed(1)}`).join('|');
     if (sig === this.sig) return false;
     this.sig = sig;
