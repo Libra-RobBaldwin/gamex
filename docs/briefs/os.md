@@ -69,8 +69,7 @@ Session https://claude.ai/code/session_01G4sVhwPzBo4cJhQ5dTvHKG. Branch `claude/
     - the paths claim their land and are drawn as one draped mesh;
     - Exeter has 526 of them (108 through), the town 8.
     - **Not done:** real footpaths. OS OpenData has none; they need OSM `highway=footway`.
-    - **Not yet checked:** a clean run of the loop and lines e2es on this. The last run was cut
-      short by a dev-server reload during a merge. Save, stations, rail, menu and real passed.
+    - **Checked:** all seven phone e2es pass on it, with loop and lines re-run cleanly at 01:35.
 
 ### From the coordinator (the resume, 26 Sep 01:15), from the user
 
@@ -92,9 +91,14 @@ Session https://claude.ai/code/session_01G4sVhwPzBo4cJhQ5dTvHKG. Branch `claude/
     follow the land. Make the generator sample from them, and show seeded and real side by side.
     **Partly:**
     - **Done:** the priors are measured.
+    - **Done (26 Sep, 01:40):** how roads follow the land, in `PRIORS.follow`, `roadClimb` and
+      `valleyPreference`.
+      - Grade: A roads have a median of 3% and a 90th percentile of 9–11%.
+      - On slopes a road climbs at about half the ground's steepest slope.
+      - Valleys: motorways run 13 m above the valley floor, A roads 24–32 m, lanes 36–48 m, against
+        40–51 m for the land. Places stand at 22–29 m.
     - **Not done:**
       - wiring them into world50's `planWorld`;
-      - measuring how roads follow the land (grade, curvature against slope);
       - a side-by-side view.
 15. "Never use the user's home area, or anywhere near it." **Done.** Neither region is near it.
 16. Phone first, no flicker or z-fighting; tsc, vitest and the phone e2es; a new PR with

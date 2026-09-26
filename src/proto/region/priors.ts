@@ -44,6 +44,22 @@ export const PRIORS = {
     // against the share of the land that close; lift = how many times likelier a building is there
     ribbon: { buildings: [0.07, 0.11], land: [0.03, 0.03], lift: [2.46, 3.53] },
   },
+  // ---------------- how roads follow the land (OpenMap Local roads over Terrain 50) ----------------
+  // every 50 m along each class: its grade (median, 90th percentile, share over 10%), and on ground
+  // steeper than 4% its grade over the ground's steepest slope (1: straight up the hill, 0: along
+  // the contour); and how far it runs above the lowest ground within 1 km. The bigger the road,
+  // the lower it runs: trunk roads and motorways keep to the valleys, lanes go over the hills.
+  follow: {
+    motorway: { gradeMedian: 0.018, gradeP90: 0.064, over10: 0.043, gradeOverSlope: 0.45, aboveValleyM: 13 }, // (Exe only: the M5)
+    primary: { gradeMedian: [0.032, 0.02], gradeP90: [0.092, 0.074], over10: [0.072, 0.044], gradeOverSlope: [0.49, 0.46], aboveValleyM: [30, 16] },
+    a: { gradeMedian: [0.034, 0.028], gradeP90: [0.106, 0.094], over10: [0.11, 0.082], gradeOverSlope: [0.52, 0.53], aboveValleyM: [32, 24] },
+    b: { gradeMedian: [0.032, 0.026], gradeP90: [0.106, 0.088], over10: [0.113, 0.071], gradeOverSlope: [0.54, 0.52], aboveValleyM: [37, 28] },
+    minor: { gradeMedian: [0.042, 0.032], gradeP90: [0.126, 0.102], over10: [0.169, 0.104], gradeOverSlope: [0.6, 0.6], aboveValleyM: [48, 36] },
+    local: { gradeMedian: [0.04, 0.032], gradeP90: [0.122, 0.104], over10: [0.158, 0.107], gradeOverSlope: [0.61, 0.63], aboveValleyM: [34, 33] },
+    // the land itself, and where places stand (they sit low, by rivers and in valleys)
+    land: { aboveValleyM: [51, 40], slopeMedian: [0.094, 0.07] },
+    placesAboveValleyM: [22, 29],
+  },
   // ---------------- the coast (OS OpenMap Local tidal water) ----------------
   coast: {
     // box-counting dimension of the high-water line over boxes of 50 m to 3.2 km (Exe only)
@@ -153,6 +169,19 @@ export function woodSpots(r: Rand, box: { x0: number; z0: number; x1: number; z1
   }
   return out;
 }
+
+// How a road of this class should climb, from the real ones: the grade it keeps under most of the
+// way (its 90th percentile, the generator's limit), and how directly it takes a slope (the share of
+// the ground's steepest slope it climbs at: about half, so a road angles across the contours).
+export type FollowClass = 'motorway' | 'primary' | 'a' | 'b' | 'minor' | 'local';
+export function roadClimb(c: FollowClass, t = 0.5) {
+  const f = PRIORS.follow[c] as { gradeP90: number | readonly number[]; gradeOverSlope: number | readonly number[]; aboveValleyM: number | readonly number[] };
+  const v = (x: number | readonly number[]) => (typeof x === 'number' ? x : between(x, t));
+  return { maxGrade: v(f.gradeP90), acrossSlope: v(f.gradeOverSlope), aboveValleyM: v(f.aboveValleyM) };
+}
+// How much a route of this class should prefer low ground: its height above the valley against the
+// land's (0.3 for a motorway, which keeps to the valleys, near 1 for a lane).
+export const valleyPreference = (c: FollowClass, t = 0.5) => roadClimb(c, t).aboveValleyM / between(PRIORS.follow.land.aboveValleyM, t);
 
 // A coastline between two points, as rough as the real one: midpoint displacement with the
 // roughness the measured fractal dimension gives (Hurst exponent 2 − D), down to `step` metres.
