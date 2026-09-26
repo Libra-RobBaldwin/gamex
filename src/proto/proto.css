@@ -144,6 +144,9 @@ body.tooling #goal, #drawer:not([hidden]) ~ #goal { display: none; }
 #hint span { min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* ---------------- bottom bar ---------------- */
+/* the map-data credit (a real region's OS data): faint, small, bottom right of the map, above the bar */
+#credit { position: absolute; right: calc(4px + var(--safe-r)); bottom: calc(var(--chrome-b) + 3px); padding: 1px 5px; font-size: 10px; line-height: 1.4; color: rgba(20, 30, 25, 0.78); background: rgba(255, 255, 255, 0.5); text-decoration: none; pointer-events: auto; }
+body.tooling #credit { opacity: 0.6; }
 #bar { position: absolute; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px calc(8px + var(--safe-r)) calc(4px + var(--safe-b)) calc(8px + var(--safe-l)); background: var(--panel); border-top: 2px solid var(--gold); }
 #bar button { height: 52px; flex-direction: column; gap: 4px; padding: 0; font: 700 10.5px/1 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 #bar button .ic { width: 24px; height: 24px; }
@@ -500,3 +503,5 @@ body.tooling #goal, #drawer:not([hidden]) ~ #goal { display: none; }
 .msrow .cost { font-size: 12.5px; }
 .msmeter { height: 10px; border-radius: 5px; overflow: hidden; margin-top: 4px; }
 .msmeter i { background: var(--gold); border-radius: 5px; }
+/* the map-data credit over the floating dock: two short lines at the right, clear of the Build button */
+#credit { bottom: calc(76px + var(--safe-b)); right: calc(10px + var(--safe-r)); max-width: 150px; text-align: right; border-radius: 6px; }

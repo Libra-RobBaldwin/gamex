@@ -8,14 +8,40 @@
    `trig_01Ek1SW3wQooCqKrBfHwT3j9` (#44), `trig_013GtCHP7rnmTLWuPbJjyB2r` (#43) and
    `trig_01LkUZuKGwCSYrq9QoDTE41o` (#45). The coordinator's check-in is
    `trig_01UboPgMjMc2T4TShqSC9vTi`. Re-enable them, or message each session to carry on.
-2. Merge order: world50 (PR #42) first. It merged cleanly onto `a024fca` in a trial and passed tsc.
-   Then #41 (countryside), #44 (edge), #43 (OS), #45 (vernacular) and terrain. Run tsc, vitest,
-   the six phone e2es and `?map=region` by eye after each, then push and archive the session.
-   The loop, lines, save, stations and rail suites take the address as their first argument
+2. **Merged and live at the pause:** world50 (#42), vernacular (#45) and OS (#43, adds Exeter and
+   Ludlow). All tests were green. Exeter took 142 s to load under SwiftShader; check it on a phone.
+   **Still to merge:** countryside (#41) and edge (#44). Both were built on the old 6 km region's
+   `BIG` path, which world50's `WORLD` path has replaced for the region, so they conflict in
+   `main.ts` and `ground/game.ts`. Port them onto `WORLD`, not a text merge. Terrain has no branch
+   yet. The loop, lines, save, stations and rail suites take the address as their first argument
    (`node e2e/loop.e2e.mjs http://localhost:5180/?map=town`). The menu suite takes it from `BASE=`.
-3. Then wire terrain's landform presets and islands into the region setup's first step, and do
+3. **The user's rules for the 50 km world (25 Sep, at the pause). Do these first, in the port of
+   countryside and edge:**
+   - **One field style everywhere:** straight-edged hedged fields in farm blocks, as world50
+     has. No curvy or warped fields left in any path (the region, the 50 km world, the town's
+     ground). Remove the old curvy generator, don't just hide it.
+   - **Every road respects the terrain, not only lanes:** motorways, A roads and railways too.
+     Follow valleys and contours, keep within a grade limit, curve round hills, woods and water
+     in sweeping bends, and bridge or tunnel only where it pays. No ruler-straight roads across
+     hills.
+   - **The whole map is playable:** seed towns, villages and industries right out to the corners
+     and edges, so no part of the 50 km is empty (for example a minimum per 10 km square,
+     scaled by terrain: fewer in mountains, some on the coast). Link them all into the road and
+     rail network, and have the edge portals carry the traffic that runs on off the map.
+   - **Also (the user, 25 Sep, late):**
+     - Fold the OS real regions into the Region flow as the alternative to a seeded map. Both use
+       one WORLD pipeline.
+     - Seeded maps as good as real ones, by learning from the OS data.
+     - Shopping complexes of variable size in town centres. Each is one coherent building with
+       its own walls, roof and look, not 20 buildings squashed together or overlapping.
+     - Less ugly buildings.
+   - **Overnight run:** every session writes `docs/briefs/<name>.md` first, listing everything asked
+     of it by the coordinator and by the user directly. At 01:45 UTC the coordinator dovetails the
+     briefs into `docs/briefs/PLAN.md` (the ownership map, requests, interfaces and merge order),
+     then merges hourly. Morning summary at 06:15 UTC.
+4. Then wire terrain's landform presets and islands into the region setup's first step, and do
    HUD phase 3 (small tap cards for a bus, stop or building).
-4. The user's home town is still named in the repo in a few places, from before the privacy
+5. The user's home town is still named in the repo in a few places, from before the privacy
    rule (region names, vehicle brands, tests, docs). It's gone from the menu. Ask the user
    before removing the rest.
 
@@ -39,6 +65,20 @@ Coordinator: https://claude.ai/code/session_01KCA5Gq42qr3TFSD5KvUoT8. Integratio
 - **Six region sessions (started 25 Sep afternoon):** terrain, countryside (PR #41), edge,
   world50 (50 km maps, PR #42), OS open data (PR #43) and vernacular buildings. Merge each
   into the integration branch as it's ready, and test.
+## Latest: buildings fit their place, and parked cars are real (25 Sep 2026)
+
+Branch `claude/work-vernacular`. **Read `docs/vernacular.md` and `docs/parking.md`.**
+- **Regional buildings:** on generated maps, houses, terraces, shops and village buildings are
+  built in their settlement's tradition, from the rock (Cotswold, Pennine, Lakeland, Cornish,
+  Scottish, flint, Midland brick, Wealden, Marches) or the climate (Nordic under snow, desert earth,
+  Mediterranean). The age of the street comes from its distance to the centre. `vernacular.ts` is
+  pure and takes the terrain's geology through `setGeology`. The town map is unchanged by it;
+  `?vern=` forces a tradition. Gallery: `/buildings-demo.html`.
+- **Finish, everywhere:** fascias, gutters, ridges, plinths, ambient occlusion, doors set into
+  their walls, textured garden walls and hedges, and layered garden trees.
+- **Parking:** drives and car parks hold the traffic's own vehicles (no extra draw calls). Trips end
+  by driving into a free space and start by pulling out of one. Plots fill and empty with the hour
+  off screen.
 
 ## Earlier: saving and loading (24 Sep 2026, night)
 

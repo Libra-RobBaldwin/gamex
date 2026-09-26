@@ -31,6 +31,7 @@ export interface ReliefInput {
   seed: number;
   water: WaterSpec;
   settlements: { x: number; z: number; r: number; kind: Kind }[];
+  ground?: { x0: number; z0: number; step: number; n: number; h: Float32Array; max: number }; // a real map's own relief (real/map.ts)
 }
 
 const smooth = (a: number, b: number, v: number) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -56,6 +57,7 @@ function noise2(seed: number) {
 // The hills for a map, over a square `half` metres each way from the centre (the ground's
 // extent), or null for a flat map.
 export function makeRelief(m: ReliefInput, half: number): ReliefField | null {
+  if (m.ground) return field(m.ground.x0, m.ground.z0, m.ground.step, m.ground.n, m.ground.h, m.ground.max);
   const A = RELIEF_HEIGHT[m.relief];
   if (!A) return null;
   const n1 = noise2(mix(m.seed, 11)), n2 = noise2(mix(m.seed, 12)), n3 = noise2(mix(m.seed, 13));
