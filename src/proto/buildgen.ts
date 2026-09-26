@@ -891,7 +891,8 @@ function flats(k: Kit, l: Lot, r: () => number) {
   } else if (arch === 'scandi') {
     L = look(r, 'timber', 'picture', '#2d3338');
     k.block(0, 0, W, D, 0, floors, fh, 4, fm(L), fm(L), fm(L));
-    if (r() < 0.5) { k.gable(0, 0, W, D, top, D * 0.35, 0.4, plain(METAL[0]), fm(L)); roofName = METAL[1]; }
+    // (a steep metal roof suits a low block; a tall one keeps its flat top)
+    if (r() < 0.5 && floors <= 6) { k.gable(0, 0, W, D, top, Math.min(4.5, D * 0.3), 0.4, plain(METAL[0]), blank(L)); roofName = METAL[1]; }
     else flatRoof(k, 0, 0, W, D, top, blank(L), r);
     balconies(k, -W / 2, W / 2, zf, 1, floors, fh, 4, 1, plain('#3a3a3a'));
     extras.push('staggered balconies');
