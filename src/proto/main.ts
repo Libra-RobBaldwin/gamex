@@ -993,12 +993,17 @@ function startLineTool() {
   tool = shell.startTool({ name: 'New line', spec: 'Tap stops in order', icon: 'transport', tone: 'stop', onUndo: () => { if (lineLoop) lineLoop = false; else lineDraft.pop(); lineChanged(); }, onDone: endTool, onCancel: endTool });
   setMode('line');
   lineChanged();
-  // (every stop and station in view, so they can all be tapped without hunting for them)
+  // (every stop and station in view, so they can all be tapped without hunting for them: as far
+  // apart as they are on the screen now, zoomed out until they all fit the part of the screen the
+  // chrome leaves clear, with room for their badges, and no closer than the view is now)
   const pts = markers.places().map((m) => m.p);
   if (pts.length) {
-    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-    for (const q of pts) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z); }
-    focusOn({ x: (x0 + x1) / 2, z: (z0 + z1) / 2 }, Math.min(1400, Math.max(view.h, 160, (Math.max(x1 - x0, z1 - z0) + 120) * 1.1)));
+    const c = shell.clearRect(), M = 44; // px round the badges
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const q of pts) { const s = toScreen(q); x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y); }
+    const k = Math.max(1, (x1 - x0 + 2 * M) / (c.right - c.left), (y1 - y0 + 2 * M) / (c.bottom - c.top)); // (an orthographic view: distances on screen scale with 1/h)
+    const mid = nav.screenToGround((x0 + x1) / 2, (y0 + y1) / 2);
+    focusOn(mid ? { x: mid.x, z: mid.z } : pts[0], Math.min(1400, view.h * k));
   }
 }
 function lineChanged() {
