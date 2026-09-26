@@ -30,6 +30,7 @@ import { kerbOf, type Lot, type Network, type P, type RSeg } from '../roads';
 import type { Junction } from '../junction';
 import { Hedges } from '../ground/hedges';
 import type { HedgeTree, Piece } from '../ground/hedgerows';
+import { beyondEdge } from './edge';
 
 export const CELL = 250; // a road cell: a tile is 4 × 4 of them (and the building chunks are cells)
 const PER = TILE / CELL;
@@ -513,7 +514,7 @@ export class RegionView {
       const d = net.def(s), path = net.path(s).map((p) => ({ x: p.x, z: p.z, y: Math.max(0, p.y ?? 0) }));
       if (net.path(s).every((p) => (p.y ?? 0) < -9)) continue; // (a bored tunnel: nothing on the surface)
       const half = net.half(s), kerb = kerbOf(d);
-      if (d.cls === 'rail') { ballast.ribbon(path, kerb, 0.17); continue; }
+      if (d.cls === 'rail') { if (!beyondEdge(net.edge, path)) ballast.ribbon(path, kerb, 0.17); continue; } // (none off the map: game/edge.ts)
       asph.ribbon(path, kerb, 0.22);
       if (d.pave > 0) pave.ribbon(path, Math.min(half, kerb + d.pave), 0.12);
       if (path.some((p) => p.y > 0.05)) structures(path, body, null, half, s.bridges ? s.bridges.map((b) => [b.s0, b.s1] as [number, number]) : path.every((p) => p.y <= 6) ? [] : undefined);

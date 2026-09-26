@@ -34,6 +34,13 @@ export class CoarseEconomy {
     const A = this.plan.settlements[a], B = this.plan.settlements[b], d = Math.max(1500, Math.hypot(A.x - B.x, A.z - B.z));
     return Math.round((0.9e6 * this.pop(a, day) * this.pop(b, day)) / (d * d) / 1000);
   }
+  // Trips a day between the map's places and one off it (beyond a way off the map: the edge
+  // session's game/portals.ts), by the same gravity: its people, where it stands past the rim.
+  tripsOff(o: { x: number; z: number; pop: number }, day: number) {
+    let t = 0;
+    for (const s of this.plan.settlements) { const d = Math.max(1500, Math.hypot(s.x - o.x, s.z - o.z)); t += (0.9e6 * this.pop(s.id, day) * o.pop) / (d * d) / 1000; }
+    return Math.round(t);
+  }
   // everyone on the map
   total(day: number) { let t = 0; for (const s of this.plan.settlements) t += this.pop(s.id, day); return t; }
 }
