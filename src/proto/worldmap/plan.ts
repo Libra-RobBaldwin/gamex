@@ -22,12 +22,15 @@ import type { LakeSpec, XZ } from '../region/water';
 import { WorldWater, type Sea, type WorldRiver, type WorldWaterSpec } from './water';
 import { planRoutes, type Rail, type Route } from './routes';
 import { WorldTerrain } from './terrain';
+import { realOf, realSource, type Box, type WorldHeights, type WorldSource } from './source';
 
 export interface WorldSettlement extends Settlement {
   pop: number; // people living there at the start (the coarse economy's)
   reach: number; // how far its land reaches from its centre (built-up area and industrial edge)
 }
 export interface WorldPlan {
+  source: WorldSource['kind']; // where it came from (worldmap/source.ts): nothing downstream should need it
+  id: string; // the source's id: 'seed:<n>' or a real region's
   seed: number;
   options: RegionOptions;
   size: number; // metres across
@@ -38,7 +41,8 @@ export interface WorldPlan {
   links: Link[]; // which places the A and B roads join
   roads: Route[];
   rails: Rail[];
-  terrain: WorldTerrain;
+  terrain: WorldHeights;
+  woods?: (box: Box) => XZ[][]; // the woods, where the source knows them (a real region's)
   grid: SettlementGrid; // settlements by 2 km cell, for "what's near here"
   ms: number; // how long it took to make
 }
@@ -91,19 +95,46 @@ export const LIVE_HALF = 4000;
 
 export function planWorld(opts: Partial<RegionOptions> = {}): WorldPlan {
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+  const plan = planFrom(seededSource(opts));
+  if (t0) plan.ms = performance.now() - t0;
+  return plan;
+}
+
+// The plan for a map's options, from whichever source they name: a real region's (loaded, from its
+// bake) or a seeded one. The same options always make the same plan, on any thread.
+export async function loadPlan(opts: Partial<RegionOptions> = {}): Promise<WorldPlan> {
+  const o = regionOptions({ ...opts, size: opts.size ?? 50 }), id = realOf({ ...o, ...opts } as RegionOptions);
+  if (!id) return planWorld(opts);
+  const load = realSource();
+  if (!load) throw new Error(`no real source is loaded for the region ${id} (import real/world.ts)`);
+  return planFrom(await load(id, o));
+}
+
+// A map made up from the region options: its water, then its places, then its hills round them.
+export function seededSource(opts: Partial<RegionOptions> = {}): WorldSource {
   const o = regionOptions({ ...opts, size: opts.size ?? 50 }), seed = o.seed;
   const half = (o.size * 1000) / 2;
-  const spec = makeWater(rng(mix(seed, 202)), half, o);
-  const water = new WorldWater(spec);
+  const water = new WorldWater(makeWater(rng(mix(seed, 202)), half, o));
   const settlements = placeSettlements(rng(mix(seed, 203)), seed, half, water, o);
+  return { kind: 'seeded', id: `seed:${seed}`, seed, options: o, half, water, settlements, heights: (grid) => new WorldTerrain({ seed, relief: o.relief, half, water, grid }) };
+}
+
+// The world plan from either source (worldmap/source.ts): the places' streets (for where roads
+// meet them), and the roads the map starts with, the source's or the plan's own lanes.
+export function planFrom(src: WorldSource): WorldPlan {
+  const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+  const { seed, half, water, settlements } = src;
   const grid = new SettlementGrid(settlements);
-  const terrain = new WorldTerrain({ seed, relief: o.relief, half, water, grid });
+  const terrain = src.heights(grid);
   // (exact gates for the places the roads meet: the ends of their high streets, from their own street layout)
-  for (const s of settlements) layStreets(s, water, half);
-  const links = suggestLinks(settlements, water).filter((l) => !crossesSea(water, settlements[l.a], settlements[l.b]));
-  const { roads, rails } = planRoutes({ seed, half, settlements, links, water, grid, heightAt: terrain.heightAt });
+  for (const s of settlements) if (!s.gates.length) layStreets(s, water, half);
+  let routes = src.routes?.(grid, terrain);
+  if (!routes) {
+    const links = suggestLinks(settlements, water).filter((l) => !crossesSea(water, settlements[l.a], settlements[l.b]));
+    routes = { links, ...planRoutes({ seed, half, settlements, links, water, grid, heightAt: terrain.heightAt }) };
+  }
   const ms = typeof performance !== 'undefined' ? performance.now() - t0 : 0;
-  return { seed, options: o, size: half * 2, half, water, settlements, start: 0, links, roads, rails, terrain, grid, ms };
+  return { source: src.kind, id: src.id, seed, options: src.options, size: half * 2, half, water, settlements, start: 0, links: routes.links, roads: routes.roads, rails: routes.rails, terrain, woods: src.woods, grid, ms };
 }
 
 function crossesSea(w: WorldWater, a: XZ, b: XZ) {

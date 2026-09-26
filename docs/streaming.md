@@ -213,6 +213,32 @@ MapSpec the game gets is that square (`worldMapSpec`); the plan rides along as `
 
   A save from before (version 1) with no size in its query was made on the 6 km region, and opens on it.
 
+## Sources: seeded or real (`source.ts`)
+
+There is one plan type, `WorldPlan`, with two sources. A `WorldSource` gives the coarse facts, and
+`planFrom(source)` makes the plan. Everything downstream takes only the plan: the tiles, the view,
+the live area, activation, the coarse economy and saves. So a real region is drawn and played through
+the same code as a seeded map.
+
+| Field | Seeded (`seededSource`, plan.ts) | Real (`real/world.ts`, the OS session's) |
+|---|---|---|
+| `kind`, `id` | `'seeded'`, `seed:<n>` | `'real'`, the region's id |
+| `half` | 25 km | 25 km (the bake's square) |
+| `water` | made up (the terrain session owns it) | the bake's sea, rivers and lakes, as a `WorldWater` |
+| `settlements` | placed (index = id; 0 is the start town at 0, 0) | the bake's places, shifted so the home place is at 0, 0 |
+| `heights(grid)` | `WorldTerrain` (the terrain session's): levelled under places | the bake's heights, through the same `WorldHeights` shape |
+| `routes?(grid, heights)` | none: the plan lays lanes (`routes.ts`) | the real roads and railways at the start |
+| `woods?(box)` | none: the countryside paints woods | the real woods (OS VectorMap) |
+
+A settlement's `gates` may be empty; the plan lays its streets to find where roads meet them.
+
+**Loading:** `loadPlan(options)` picks the source by the options' `real` field. A real source
+registers its loader with `setRealSource(load)` when `real/world.ts` is imported. That import has
+to be on the main thread (`main.ts`) and in `tile.worker.ts`, because each worker makes the plan
+itself from the options, so the loader must give the same plan on every thread. The live play area
+is 8 km across for both sources. `source.test.ts` shows a small real source going through the
+plan and the tiles.
+
 ## Interfaces for the sessions working alongside
 
 Each of these is where a neighbouring session's work plugs in; keep the shapes and the rest follows.
