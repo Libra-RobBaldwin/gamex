@@ -3,7 +3,7 @@
 Session: world50, branch `claude/work-world50`. PR #42 is merged into the integration branch and live.
 Written 26 Sep 2026, ~01:20 UTC, after merging the integration branch in (b57164e).
 
-## Status now (26 Sep, ~12:30 UTC)
+## Status now (26 Sep, ~16:00 UTC)
 
 This section wins over the tables below, which are the brief as first written.
 
@@ -27,35 +27,42 @@ locally" means it isn't live yet.
 - Still high: the live area's heap settles at about 800 MB on the region against about 180 MB for the old town. Worth measuring on a phone next.
 - Not live until that PR merges.
 
-### In progress: one map (PLAN.md, top section)
-Local commits, which go up once #51 has merged.
+### One map, steps 1–3: in a PR from `claude/work-world50` (not live until it merges)
+**Checked on 412×915 screenshots:**
+- The home screen has one New game button, which opens the Region setup.
+- An old or unknown map link opens the setup with a notice ("There's no map called …").
+- The guide runs in the region's start town. Its card is now opaque, and the game's goal strip waits under it, where before both "Step …" counters showed at once.
+- Old saves (the starter town, a 6 km region) are listed as "Made on a map that no longer exists", with only Delete. Continue skips them.
 
-**Done locally:**
+**Done and tested:**
 - `maps.ts` lists one map, with real places inside it.
-- New game goes straight to the Region setup, and the guide is set to run in the region's start town. I haven't checked the guide on a screenshot yet.
-- Old `?map=town`, `?map=sandbox` and `?place=` links open the Region setup with a notice.
-- Old saves are shown as "made on a map that no longer exists", with Delete, and Continue skips them. This isn't checked on a screenshot yet.
 - `main.ts` has lost the starter town's, the sandbox's and the 6 km map's own branches.
+- Real Town Plans is deleted (`src/places`, its e2e). `places.html` now only redirects old links to the start menu.
+- PR #22 is closed.
 
-**Bugs found and fixed along the way (local):**
+**Bugs found and fixed along the way:**
 - `focusOn` aimed at height 0, so on the hills every "go to" framed the wrong spot.
 - The underground view crashed on 50 km maps: the scenery tiles free their vertex arrays, and the view needed their bounding boxes.
+- A loaded region town drifted from the saved one. Its growth plots were filtered at load, where the town map kept them, so its economy counted fewer free plots.
+- A town saved from a deep link wasn't offered by Continue. A 50 km map's saved query now says `size=50`.
 
-**e2e suites on `proto.html?map=region&seed=42`:**
+**e2e suites on `proto.html?map=region&seed=42`**, all passing locally with tsc and vitest (only the known economy failure):
 
-| Suite | State |
+| Suite | Notes |
 |---|---|
-| loop | passes |
-| lines | passes |
-| stations | builds all four stations and the line; the train run ran out of memory (the leak above, now fixed), rerun pending |
-| save | not run yet |
-| rail | not run yet |
-| menu | rewritten (New game > Region, the guide, gone links, the DPR 2 first view); not run yet |
+| firstview | new: 4 cold starts at DPR 2, no blank screen, each scenery tile asked for once |
+| loop | the decline is checked as the status turning, see the economy note |
+| lines | |
+| stations | the underground pair is 450 m apart, clear of the start town's streets; the train is given 300 s |
+| save | the branch is at z 540, and a one-way dual carriageway bridges it (the region starts with neither) |
+| rail | the branch just north of the start town crosses the lane north on the level |
+| menu | New game > Region, the guide, gone links, the DPR 2 first view |
 
-**Not started:**
-- Deleting the dead code: the 6 km parts of `region/generate.ts`, `interchange/region.ts`, `rail/region.ts`, `region/town.ts` (the town map), `places.html` and `osm/` (unless OS uses them).
-- Updating the docs that describe the deleted maps.
-- Closing PR #22.
+**Not done yet (step 4, a follow-up PR):**
+- Delete the 6 km parts: `region/generate.ts`, `interchange/region.ts`, `rail/region.ts` and `region/town.ts` (the town map). Their tests go too: the portal-traffic test has to move onto a 50 km map's portals first.
+- The regionsetup's 6 km wording.
+- Leaflet in `package.json` (only Real Town Plans used it).
+- The docs that describe the deleted maps.
 - The start menu's hero pictures still show the old starter town. They need retaking from the region.
 
 ### Not done, and waiting on others
