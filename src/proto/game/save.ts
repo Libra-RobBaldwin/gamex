@@ -54,6 +54,7 @@ export interface GameSave {
   town: TownSave;
   purse: PurseSave;
   paid?: number[]; // the roads the player paid for (by segment id), which the bulldozer refunds; the map's own refund nothing
+  goal?: { done: boolean; firstLineAt: number | null }; // the goal card's progress, so a load doesn't show step 3 again
   // A 50 km map (worldmap/): the save is what differs from what the seed makes. The map itself,
   // its scenery and the places not yet live are made again from the query; this says which places
   // of the live play area had come to life, and the network above holds everything built there.

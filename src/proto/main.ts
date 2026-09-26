@@ -1285,7 +1285,8 @@ function showLineInfo(l: Line) {
     key: `line:${l.id}`, title: `Line ${l.num}`, sub: `${lines.title(l)} · ${l.loop ? 'circular' : 'there and back'}`, icon: 'transport', tone: 'stop',
     stats: [['Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
     facts: [['Stops', l.stops.map((id) => lines.name(id)).join(' · ')]],
-    note: `Each rider pays £2${books.lastRunning ? `; the buses cost ${money(books.lastRunning)} a day to run` : ', and the buses cost a little each day to run'}.`,
+    // (the economy's own verdict on the line comes first when it can't run it: no route between its stops, say)
+    note: `${st && !st.ok && st.problem ? `This line isn't carrying anyone: ${st.problem}. ` : ''}Each rider pays £2${books.lastRunning ? `; the buses cost ${money(books.lastRunning)} a day to run` : ', and the buses cost a little each day to run'}.`,
     actions: [
       { label: `Bus · ${money(busPrice(l.offer))}`, title: `Add a bus for ${money(busPrice(l.offer))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(busPrice(l.offer)), onClick: () => { buyBus(l); showLineInfo(l); } },
       { label: 'Sell', title: `Sell a bus for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`Bus sold for ${money(sell)}`, 'bus'); setTimeout(() => showLineInfo(l), 50); } },
@@ -2498,7 +2499,7 @@ people.numbers = town.numbers();
 // The game starts with nothing of the player's, so a card under the status strip says what to
 // do next, and tapping it gets on with it: stops, then a line through them, then the town panel
 // to watch it grow. It goes once the first line has run a couple of days (or the panel's opened).
-let goalDone = false, firstLineAt: number | null = null;
+let goalDone = SAVED?.goal?.done ?? false, firstLineAt: number | null = SAVED?.goal?.firstLineAt ?? null;
 function updateGoal() {
   if (goalDone) return;
   const nLines = lines.list.length + railway.lines.filter((l) => !l.other).length;
@@ -2526,7 +2527,7 @@ let syncAt = 2;
 // A loaded town goes on saving over the save it came from. (The junction pages are demos: no saves.)
 const SAVE_ID = SAVED?.id ?? (globalThis.crypto?.randomUUID?.() ?? `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
 // (named as the start menu lists it)
-const SAVE_NAME = SAVED?.name ?? menuMap(new URLSearchParams(MAP_QUERY).get('map'))?.name ?? MAP.name;
+const SAVE_NAME = SAVED?.name ?? (REAL ? MAP.name : menuMap(new URLSearchParams(MAP_QUERY).get('map'))?.name ?? MAP.name); // (a real region's town is named after its place, not "Region")
 const AUTOSAVE_EVERY = 4 * 60; // game minutes
 const canSave = !demo;
 let autoAt = clock + AUTOSAVE_EVERY, lastSaved = SAVED?.savedAt ?? 0, saving: Promise<boolean> | null = null;
@@ -2538,7 +2539,7 @@ function snapshot(): GameSave {
     clock, speed, rate, rand: rand.state,
     net: saveNetwork(net), queue,
     junctions: [...junctions.values()].filter((j) => !j.auto), interchanges,
-    industries: industries.save(), railway: railway.save(), lines: lines.save(), town: t, purse: purse.save(), paid: [...paid],
+    industries: industries.save(), railway: railway.save(), lines: lines.save(), town: t, purse: purse.save(), paid: [...paid], goal: { done: goalDone, firstLineAt },
     ...(worldGame ? { world: { live: worldGame.towns.liveIds } } : {}), // (a 50 km map: which places had come to life)
   };
 }
