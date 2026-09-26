@@ -134,18 +134,3 @@ export function laneRoute(a: XZ, b: XZ, ctx: LaneContext, o: { minR: number; ste
   p = resample(p, step);
   return tightest(p) >= o.minR ? p : [a, b];
 }
-
-// The lanes a map has besides its A and B roads: each village to the nearest place it has no road
-// to yet (and not too far), so the country between the main roads has its lanes too.
-export function minorLinks(settlements: { id: number; x: number; z: number; kind: string }[], links: { a: number; b: number }[]): { a: number; b: number; road: 'lane' }[] {
-  const M = COUNTRYSIDE.lanes.minor, has = new Set(links.map((l) => `${Math.min(l.a, l.b)}|${Math.max(l.a, l.b)}`)), out: { a: number; b: number; road: 'lane' }[] = [];
-  for (const v of settlements) {
-    if (v.kind !== 'village') continue;
-    const others = settlements.filter((o) => o.id !== v.id && !has.has(`${Math.min(o.id, v.id)}|${Math.max(o.id, v.id)}`)).map((o) => ({ o, d: Math.hypot(o.x - v.x, o.z - v.z) })).filter((x) => x.d < M.reach).sort((p, q) => p.d - q.d);
-    for (const { o } of others.slice(0, M.perVillage)) {
-      has.add(`${Math.min(o.id, v.id)}|${Math.max(o.id, v.id)}`);
-      out.push({ a: v.id, b: o.id, road: 'lane' });
-    }
-  }
-  return out;
-}

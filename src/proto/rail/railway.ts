@@ -34,6 +34,7 @@ export class Railway {
   private nextId = 1;
   private nextLine = 1;
   private road: Road | null = null;
+  private trackSig = NaN; // what the track, the stations and the roads about them were at the last rebuild
 
   constructor(readonly net: Network) {
     this.graph = new TrackGraph(net);
@@ -49,9 +50,54 @@ export class Railway {
 
   // ---------- the track changed ----------
   works(): StationWorks[] { return this.stations.map((s) => worksFor(this.net, s)).filter((w): w is StationWorks => !!w); }
-  rebuild() {
+  // What the track graph and the station shapes are made from, as one number: every railway
+  // segment (its ends, type, path, bridges), the stations, and the roads near enough a station to
+  // shape it (a viaduct's columns keep off them). A road edit that changes none of it leaves the
+  // railway, and every train on it, exactly as it was.
+  private signature(works: StationWorks[]) {
+    let h = 2166136261;
+    const mix = (v: number) => { h ^= (v * 1000 + (v < 0 ? 7 : 0)) | 0; h = Math.imul(h, 16777619); };
+    const str = (t: string) => { for (let i = 0; i < t.length; i++) mix(t.charCodeAt(i)); };
+    const boxes: [number, number, number, number][] = [];
+    for (const s of this.net.segs.values()) {
+      if (this.net.def(s).cls !== 'rail') continue;
+      mix(s.id); mix(s.a); mix(s.b); str(s.type); mix(s.oneway ? 1 : 0);
+      for (const q of this.net.path(s)) { mix(q.x); mix(q.z); mix(q.y ?? 0); }
+      if (s.bridges) str(JSON.stringify(s.bridges));
+      if (s.aux) str(JSON.stringify(s.aux));
+    }
+    str(JSON.stringify(this.stations));
+    for (const w of works) {
+      const seg = this.net.segs.get(w.seg);
+      if (!seg) continue;
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const q of this.net.path(seg)) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
+      boxes.push([x0 - 80, z0 - 80, x1 + 80, z1 + 80]);
+    }
+    if (boxes.length) for (const s of this.net.segs.values()) {
+      if (this.net.def(s).cls === 'rail') continue;
+      const p = this.net.path(s);
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const q of p) { x0 = Math.min(x0, q.x); z0 = Math.min(z0, q.z); x1 = Math.max(x1, q.x); z1 = Math.max(z1, q.z); }
+      if (!boxes.some((b) => x1 >= b[0] && x0 <= b[2] && z1 >= b[1] && z0 <= b[3])) continue;
+      mix(s.id); str(s.type);
+      for (const q of p) { mix(q.x); mix(q.z); mix(q.y ?? 0); }
+    }
+    return h >>> 0;
+  }
+  // Called after every change to the network. It does its work only when something the railway
+  // is made from changed (signature); a road built across the line on the level adds a crossing
+  // without touching the track, so that alone updates the crossings. `force` rebuilds regardless.
+  rebuild(force = false) {
     const works = this.works();
-    this.crossings = findCrossings(this.net);
+    const sig = this.signature(works), crossings = findCrossings(this.net);
+    if (!force && sig === this.trackSig) {
+      const k = (cs: CrossingSite[]) => cs.map((c) => `${c.rail}:${c.road}:${Math.round(c.railS)}`).join(',');
+      if (k(crossings) !== k(this.crossings)) { this.crossings = crossings; this.sim.setCrossings(crossings); this.version++; }
+      return;
+    }
+    this.trackSig = sig;
+    this.crossings = crossings;
     this.graph = new TrackGraph(this.net, works);
     this.sim.rebuild(this.graph, this.crossings);
     this.shapes.clear();
