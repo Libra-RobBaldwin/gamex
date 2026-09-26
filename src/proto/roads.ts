@@ -225,7 +225,13 @@ const hitsBand = (band: ReturnType<typeof bandOf>, poly: P[], c: P, r: number) =
 // until it has left it, say)
 export interface RoadOpts { height: HeightMode; grade: number; cross: CrossMode; spec: Spec; type: RoadType; oneway?: boolean; path?: P[]; limits?: Limit[] }
 export const DEFAULT_OPTS: RoadOpts = { height: 'auto', grade: 0.06, cross: 'junction', spec: GRADES.road, type: 'street' };
-export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; path: P[]; profile?: Profile; bridges: number; raised: number; tunnels: number; sunk: number; choices: BridgeChoice[] }
+// (stops: bus stops the road's junctions would land on. split() keeps them, on the half each lies
+// on, but they end up hard against the new junction: the road tool warns before building there.)
+export interface Check { ok: boolean; reason?: string; length: number; cost: number; clears: Lot[]; stops: Stop[]; path: P[]; profile?: Profile; bridges: number; raised: number; tunnels: number; sunk: number; choices: BridgeChoice[] }
+// A road split into two (a junction made part-way along it): the old road, where along it from its a
+// end, and the halves' ids. The traffic reads these to carry the vehicles on the road over onto the
+// right half (Traffic.carryOver); it clears the list as it goes.
+export interface Split { seg: number; s: number; a: number; b: number }
 
 // The network's segments, which keep an index of the segments at each node as they're set and
 // deleted (segsAt is asked about constantly; a scan of every segment each time was a big map's
@@ -276,6 +282,8 @@ export class Network {
   turningHeads = false; // a dead end just stops, as a standard UK dead end does; true draws a turning circle at each one (the old look)
   // lots whose plots the last build() cut into (their gardens get trimmed)
   touched: Lot[] = [];
+  // roads split since the traffic last looked (see Split)
+  splits: Split[] = [];
   // who owns the ground (see land.ts): roads claim theirs here, junctions theirs when designed
   land = new Land();
 
@@ -388,14 +396,47 @@ export class Network {
     this.segs.delete(segId);
     this.land.release(`road:${segId}`);
     const L = pathLength(path);
-    // stops go with whichever half they're on; one the split runs through is lost
-    const keepA = s.stops.filter((st) => stopSpan(st)[1] < c.s - 1), keepB = s.stops.filter((st) => stopSpan(st)[0] > c.s + 1).map((st) => ({ ...st, s: st.s - c.s }));
+    // Stops go with whichever half their stand is on, a pair (a stop and the one facing it, which
+    // share a name and a line's call) together on the half the pole further from the split is on.
+    // A stop the split runs through is kept: it ends up hard against the new junction (check()
+    // reports it, so the road tool can warn), never silently gone with the line that calls there.
+    const keepA: Stop[] = [], keepB: Stop[] = [], done = new Set<Stop>();
+    for (const st of s.stops) {
+      if (done.has(st)) continue;
+      const group = [st, ...s.stops.filter((o) => o !== st && !done.has(o) && o.side !== st.side && Math.abs(o.s - st.s) < 45)];
+      for (const o of group) done.add(o);
+      const far = group.reduce((m, o) => (Math.abs(o.s - c.s) > Math.abs(m.s - c.s) ? o : m), group[0]);
+      // (on its half, no closer than 2 m to either end, so it's still somewhere on the road)
+      const within = (v: number, len: number) => (len < 4 ? len / 2 : Math.max(2, Math.min(len - 2, v)));
+      if (far.s < c.s) for (const o of group) keepA.push({ ...o, s: within(o.s, c.s) });
+      else for (const o of group) keepB.push({ ...o, s: within(o.s - c.s, L - c.s) });
+    }
+    keepA.sort((x, y) => x.s - y.s); keepB.sort((x, y) => x.s - y.s);
     const sa = this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1), s.type, keepA, !!s.oneway);
     const sb = this.addSeg(n, s.b, subPath(path, c.s, L).slice(1, -1), s.type, keepB, !!s.oneway);
     // bridges (and the player's choice of type) go with whichever half they're on
     for (const [id, from, to] of [[sa, 0, c.s], [sb, c.s, L]]) { const x = this.segs.get(id); if (x && s.bridges) x.bridges = clipBridges(s.bridges, from, to); }
     for (const id of [sa, sb]) { const x = this.segs.get(id); if (x && s.aux) x.aux = s.aux; }
+    this.splits.push({ seg: segId, s: c.s, a: sa, b: sb });
+    if (this.splits.length > 20000) this.splits.splice(0, this.splits.length - 20000); // (a map generated with nobody on its roads yet)
     return n;
+  }
+  // The stops a road from a to b would land its junctions on: where it starts or ends part-way along
+  // a road, and where it crosses one on the level (a stop within a metre of the split). What
+  // split() keeps hard against the junction; the road tool warns about them.
+  landsOn(a: End, b: End, path: P[], cls: Cls): Stop[] {
+    const out: Stop[] = [];
+    const at = (seg: RSeg, q: P) => {
+      const s = closestOnPath(q, this.path(seg)).s;
+      for (const st of seg.stops) { const [s0, s1] = stopSpan(st); if (s0 < s + 1 && s1 > s - 1 && !out.includes(st)) out.push(st); }
+    };
+    for (const e of [a, b]) { const on = e.seg !== undefined ? this.segs.get(e.seg) : undefined; if (on) at(on, e); }
+    for (const c of this.crossings(path)) {
+      const seg = c.seg !== undefined ? this.segs.get(c.seg) : undefined;
+      if (!seg || this.def(seg).cls !== cls || Math.abs((pointAt(path, c.s).y ?? 0) - c.e) > 0.3) continue; // (grade separated: no junction)
+      at(seg, c);
+    }
+    return out;
   }
 
   // Directions a new road could leave an end in, following the road it starts on.
@@ -557,7 +598,7 @@ export class Network {
     let cost = Math.round(length * def.cost);
     const clears: Lot[] = [];
     let path = flat, profile: Profile | undefined, bridges = 0, raised = 0, tunnels = 0, sunk = 0, choices: BridgeChoice[] = [];
-    const res = (reason?: string): Check => ({ ok: !reason, reason, length, cost: reason ? cost : cost + clears.length * CLEAR_COST, clears, path, profile, bridges, raised, tunnels, sunk, choices });
+    const res = (reason?: string): Check => ({ ok: !reason, reason, length, cost: reason ? cost : cost + clears.length * CLEAR_COST, clears, stops: reason ? [] : this.landsOn(a, b, path, def.cls), path, profile, bridges, raised, tunnels, sunk, choices });
     if (length < MIN_LEN) return res('Too short');
     if (minRadius(flat) < Math.max(MIN_RADIUS, def.minR)) return res(def.minR > MIN_RADIUS ? `Curve too tight for a ${def.label.toLowerCase()} (${def.minR} m radius at least)` : 'Curve too tight');
     // motorways only meet other roads where they end (at a roundabout, or running on as another

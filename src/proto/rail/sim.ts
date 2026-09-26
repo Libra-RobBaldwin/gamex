@@ -66,6 +66,8 @@ export class RailSim {
     this.claim = new Int32Array(graph.blocks.length);
     this.attach(crossings);
   }
+  // the level crossings changed (a road built across the line) on track that didn't
+  setCrossings(sites: CrossingSite[]) { this.attach(sites); }
   private attach(sites: CrossingSite[]) {
     const old = new Map(this.crossings.map((c) => [`${c.site.rail}:${c.site.road}:${Math.round(c.site.railS)}`, c]));
     this.crossingSites = sites;
@@ -462,16 +464,49 @@ export class RailSim {
   }
 
   // ---------- the track changed ----------
-  // Put every train back on the rebuilt track where it stood; one that no longer fits goes back
-  // to its depot.
+  // Put every train back on the rebuilt track where it stood. A train whose track (the pieces its
+  // body, its way ahead and its held blocks are on, and how those pieces are blocked) is the same
+  // as before keeps its speed, its route and its reservations, only re-numbered: a road drawn across
+  // town, or a station built on another line, doesn't stop it dead. Anywhere else it's put back
+  // on the nearest track, stopped, and plans afresh; one that no longer fits goes back to its depot.
   rebuild(graph: TrackGraph, crossings: CrossingSite[]) {
-    const olds = this.trains.map((t) => ({ t, at: this.pose(t), tail: this.pose(t, Math.min(t.length, 20)) }));
+    const old = this.graph;
+    const olds = this.trains.map((t) => ({
+      t, at: this.pose(t), tail: this.pose(t, Math.min(t.length, 20)),
+      owned: new Set([...t.held].filter((b) => this.owner[b] === t.id)),
+    }));
+    // the same piece of track in both graphs, blocked the same way: keyed by what it's made of
+    const key = (p: Piece) => { const q = p.pts[p.pts.length - 1]; return `${p.seg}|${p.off.toFixed(2)}|${p.pts[0].x.toFixed(1)},${p.pts[0].z.toFixed(1)}|${q.x.toFixed(1)},${q.z.toFixed(1)}|${p.len.toFixed(1)}|${p.oneWay}|${p.mph}|${p.electric ? 1 : 0}${p.rack ? 'r' : ''}|${p.plat ? `${p.plat.station}:${p.plat.side}` : ''}|${p.station ?? ''}|${p.depot ?? ''}|${p.junction ?? ''}`; };
+    const newByKey = new Map(graph.pieces.map((p) => [key(p), p.id]));
+    const blockKey = (g: TrackGraph, b: number) => `${g.blocks[b].kind}|${g.blocks[b].safe ? 1 : 0}|${g.blocks[b].pieces.map((i) => key(g.pieces[i])).sort().join(';')}`;
+    const same = new Map<number, number>(); // old piece → new piece
+    for (const p of old.pieces) {
+      const n = newByKey.get(key(p));
+      if (n !== undefined && blockKey(old, p.block) === blockKey(graph, graph.pieces[n].block)) same.set(p.id, n);
+    }
     this.graph = graph;
     this.owner = new Int32Array(graph.blocks.length);
     this.claim = new Int32Array(graph.blocks.length);
     this.attach(crossings);
     this.trains = [];
-    for (const { t, at: p, tail } of olds) {
+    for (const { t, at: p, tail, owned } of olds) {
+      // its track as it was: carry on
+      const steps = [...t.body, ...t.route, ...t.later];
+      if (steps.length && steps.every((s) => same.has(s.piece))) {
+        const map = (s: Step): Step => ({ piece: same.get(s.piece)!, dir: s.dir });
+        const body = t.body.map(map), route = t.route.map(map), later = t.later.map(map);
+        const blk = (s: Step) => graph.pieces[s.piece].block;
+        // which of its blocks were held outright, which only claimed (over a level crossing not yet down)
+        const want = new Map<number, boolean>();
+        for (const s of [...body, ...route.slice(0, t.resv), ...later]) want.set(blk(s), true);
+        for (const s of [...t.route.slice(0, t.resv), ...t.later]) if (!owned.has(old.pieces[s.piece].block) && !t.body.some((b) => old.pieces[b.piece].block === old.pieces[s.piece].block)) want.set(blk(map(s)), false);
+        if ([...want.keys()].every((b) => !this.owner[b] && !this.claim[b])) {
+          t.body = body; t.route = route; t.later = later; t.held = new Set(want.keys());
+          for (const [b, outright] of want) { if (outright) this.owner[b] = t.id; else this.claim[b] = t.id; }
+          this.trains.push(t);
+          continue;
+        }
+      }
       const hit = graph.nearest(p.x, p.z, p.x - tail.x, p.z - tail.z, 6);
       t.held = new Set(); t.route = []; t.resv = 0; t.later = []; t.stop = null;
       const body = hit && graph.usable(graph.pieces[hit.step.piece], t.def) ? this.backFrom(hit.step, hit.u, t.length) : null;
