@@ -74,6 +74,7 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   }
   check(await page.evaluate(() => document.querySelector('.scr-about') === null), 'back steps from a screen to the home screen');
   const cards = await page.$$eval('.map', (els) => els.map((e) => ({ ready: e.classList.contains('ready'), text: e.textContent })));
+  check(!cards.some((c) => /Exeter|Ludlow/.test(c.text)), 'New game has no separate cards for the real places (they are in Region)');
   check(cards.length >= 4 && cards.some((c) => /Region/.test(c.text) && c.ready) && cards.some((c) => !c.ready && /Plans only/i.test(c.text)), 'New game lists the maps: the region ready, real towns as plans only');
   await page.goto(BASE + '/#about');
   await atMenu(page);
@@ -257,6 +258,7 @@ for (const id of ['town', 'sandbox']) {
   await page.waitForSelector('.scr-region');
   // simple steps, one question each: a tap on a card answers it and moves on
   check(await page.$$eval('.steps span', (d) => d.length) === 4 && await page.$('[data-place]') !== null, 'region setup: step 1 asks what kind of place');
+  check(await page.$$eval('[data-real]', (d) => d.length) >= 2, 'region setup: real places from OS maps are offered on the first step');
   await page.tap('[data-place="rolling"]');
   await page.waitForSelector('[data-climate]');
   await page.tap('[data-climate="arctic"]');

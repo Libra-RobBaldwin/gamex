@@ -93,7 +93,7 @@ const art = (m: Pick<MapInfo, 'id' | 'icon' | 'ready'>) => artFor(m.id)
 
 function newGame(notice?: string) {
   return `${notice ? `<p class="notice" role="status">${icon('info')}<span>${esc(notice)}</span></p>` : ''}
-    <ul class="maps">${MAPS.map((m) => `<li class="map${m.ready ? ' ready' : ''}">
+    <ul class="maps">${MAPS.filter((m) => !m.inRegion).map((m) => `<li class="map${m.ready ? ' ready' : ''}">
       ${art(m)}
       <div class="t"><b>${esc(m.name)}</b><small>${esc(m.blurb)}</small>
         ${m.ready ? '' : `<em class="chip">${esc(m.soon ?? 'Coming soon')}</em>`}</div>
@@ -203,7 +203,7 @@ export function render(root: HTMLElement, screen: Screen, h: MenuHost, notice?: 
       root.querySelector('.body')!.innerHTML = regionBody(next);
       wire(next);
       root.scrollTop = y;
-    }, (q) => h.play(region, false, q));
+    }, (q) => h.play(MAPS.find((m) => m.id === new URLSearchParams(q).get('map')) ?? region, false, q));
     wire(lastRegion());
   }
   // move focus to the new screen's heading, so a screen reader reads where it landed

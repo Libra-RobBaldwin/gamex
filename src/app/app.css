@@ -270,3 +270,6 @@
 #app .hero.loadart::after { background: radial-gradient(90% 60% at 50% 45%, rgba(10, 36, 22, 0.55), rgba(10, 36, 22, 0.92)); }
 @keyframes a-zoom { from { transform: scale(1.15); } to { transform: scale(1.3); } }
 @media (prefers-reduced-motion: reduce) { #app .hero.loadart img { animation: none; transform: scale(1.15); } }
+/* the real places (OS maps) under the region's first question */
+#app h4.or { margin: 26px 0 0; font: 700 18px/1.2 var(--a-display); color: var(--a-gold-text); }
+#app .pick.real > img { flex: none; width: 56px; height: 56px; border-radius: 14px; object-fit: cover; background: var(--a-panel); }
