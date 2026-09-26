@@ -92,7 +92,7 @@ const WORLD = MAP.world ?? null; // (a 50 km map's plan: MAP is its live play ar
 const VERN = new URLSearchParams(MAP_QUERY).get('vern') as Vern | null, vernForced = VERN && VERNS.includes(VERN) ? VERN : undefined;
 setParkedCars(false); // (parked cars are real ones: game/parking.ts)
 const vernReal = REAL ? REAL_VERN[(MAP as RealMap).real.region] : undefined; // (a real map: its region's tradition)
-if (MAP.generated || vernForced || vernReal) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.settlements }, vernForced ?? vernReal));
+if (MAP.generated || vernForced || vernReal) setPlaces(placeResolver({ seed: MAP.seed, style: MAP.style, relief: MAP.relief, settlements: MAP.world?.settlements ?? MAP.settlements }, vernForced ?? vernReal)); // (a 50 km map: every place on it, as its scenery is dressed too: game/dress.ts)
 // the loading screen, while the map is built (it goes once the first frame is drawn)
 const loading = new Loading(MAP.name, mapLine());
 function mapLine() {
@@ -2834,7 +2834,7 @@ function frame(now: number) {
     // (a 50 km map: the scenery round the live area for the view; and a place in the live area to bring to life)
     const next = worldGame.frame(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), !activating);
     if (next !== null) void activatePlace(next);
-    dresser?.update(view, loaded ? 5 : 0); // (real buildings for the scenery close under the view: game/dress.ts)
+    dresser?.update(view, loaded ? Math.min(30, Math.max(5, rawMs * 0.2)) : 0); // (real buildings for the scenery close under the view: game/dress.ts)
     worldIdle(loaded ? 5 : 0);
     worldGame.liveCanopy(gameGround.ground.uniforms, view.h);
   }

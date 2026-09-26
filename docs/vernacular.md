@@ -73,6 +73,29 @@ then fills the downhill side like a basement course. The ground drop under a bui
 3 m (a steeper plot digs into the hill instead). Four looks at the plot's corners skip the work on
 level ground, which is where places mostly stand, so loading costs the same.
 
+## Scenery up close (`game/dress.ts`)
+
+On the 50 km map only the live play area's places are the game's own. The others, and those in the
+live area that aren't live yet, are drawn by world50's tiles (`worldmap/tilegen.ts`) as plain boxes,
+which is right from afar but meant a town there stayed boxes however close you zoomed. Now, once the
+view is below 700 m, the near tiles close under it are **dressed**:
+- The same buildings, from the plan's own `settlementScene`, are built with buildgen: walls in the
+  place's tradition, windows, doors, roofs, chimneys, gardens with fences and trees.
+- Terraces along a street side become one row, and runs of shops a parade.
+- The work is metered at 5 ms a frame, or 20% of a slow frame up to 30 ms. A 1 km town tile takes
+  a few seconds on a phone.
+- Each tile is merged into one mesh per material, and only then are the tile's plain buildings
+  (their own `bld` mesh, near detail only) hidden, in the same frame.
+- Dressed tiles more than 2.5 km from the view are let go.
+
+The building style resolver sees every place on the map, so a far town takes its own stone.
+
+| A town 7 km out, before | after |
+|---|---|
+| ![](reports/dress/w50out-before.jpg) | ![](reports/dress/w50out-after.jpg) |
+| A city, before | after |
+| ![](reports/dress/city-before.jpg) | ![](reports/dress/city-after.jpg) |
+
 ## Seeing it
 
 - `/buildings-demo.html?vern=cotswold`: one tradition, a street per era plus the civic buildings;
