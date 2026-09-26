@@ -40,6 +40,9 @@ const MAP_ART: Record<string, string> = { town: mapTown, region: mapRegion, plac
 const artFor = (id: string) => MAP_ART[id];
 // a saved town's map: its query names it (the sandbox is saved on the town's map)
 const savedMap = (e: SaveEntry) => new URLSearchParams(e.map.query).get('map') ?? e.map.id;
+// a region saved before 50 km maps: it still opens as the old 6 km map (game/save.ts), so say so
+const oldMap = (e: SaveEntry) => savedMap(e) === 'region' && (new URLSearchParams(e.map.query).get('size') ?? '6') === '6';
+const oldNote = (e: SaveEntry) => (oldMap(e) ? ' · old 6 km map' : '');
 
 // the town behind the menu: a tall picture for a phone held upright, a wide one otherwise
 const hero = (cls: string, src?: string) => src
@@ -61,7 +64,7 @@ function home(h: MenuHost) {
     <nav class="dock" aria-label="Start">
       ${s ? `<button class="cont" data-continue>
           ${artFor(savedMap(s)) ? `<img class="thumb" src="${artFor(savedMap(s))}" alt="" decoding="async">` : ''}
-          <span class="t"><small>Continue</small><b>${esc(s.name)}</b><em>${esc(describe(s.summary))} · saved ${esc(when(s.savedAt))}</em></span>
+          <span class="t"><small>Continue</small><b>${esc(s.name)}</b><em>${esc(describe(s.summary))} · saved ${esc(when(s.savedAt))}${oldNote(s)}</em></span>
           <i class="playc">${icon('play')}</i></button>` : ''}
       <button class="newgame${s ? '' : ' primary'}" data-go="new">${icon(s ? 'plus' : 'play')}<span>New game</span></button>
       <div class="tiles">
@@ -80,7 +83,7 @@ function saves(h: MenuHost) {
   if (!h.saves.length) return `<p class="fine">No saved towns yet. A town saves itself as you play, every few game hours and when you leave it.</p>`;
   return `<ul class="maps saves">${h.saves.map((e, i) => `<li class="map ready">
       ${art({ id: savedMap(e), icon: 'clock', ready: true })}
-      <div class="t"><b>${esc(e.name)}</b><small>${esc(describe(e.summary))}</small><small>Saved ${esc(when(e.savedAt))}</small></div>
+      <div class="t"><b>${esc(e.name)}</b><small>${esc(describe(e.summary))}</small><small>Saved ${esc(when(e.savedAt))}${oldNote(e)}</small></div>
       <div class="go"><button class="act primary" data-open="${i}">${icon('play')}<span>Open</span></button><button class="act" data-del="${i}" aria-label="Delete ${esc(e.name)}, saved ${esc(when(e.savedAt))}">${icon('trash')}</button></div>
     </li>`).join('')}</ul>
     <p class="fine">Saved towns are kept in this browser on this device.</p>`;
