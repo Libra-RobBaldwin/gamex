@@ -132,6 +132,20 @@ two levels:
      passes over. Measured on seed 42: motorways are over 4% on about 3% of their length. Railways
      are over 2% on about 20%, against 28% for the land as a whole; those stretches are for
      cuttings and embankments.
+   - **The industries** (`industry.ts`): sites from the industries library's catalogue, on land
+     that suits each, and buildable in the game's year (2025 for now):
+     - quarries on high ground (the top fifth of the land's heights);
+     - forests on hillsides;
+     - farms and oil wells in the vales;
+     - docks on the coast by the town nearest the sea, with a refinery behind them;
+     - steelworks, a power station, factories, food plants, breweries, sawmills and
+       distribution centres at the edges of the towns and cities.
+
+     That comes to about 60 on a 50 km map. Each keeps clear of the places, the water, the roads
+     and the live play area, and gets a lane from the nearest road (`routes.ts` `spurs`: a `Route`
+     with `site` set). The scenery draws a site as sheds, chimneys and silos on a yard, which the
+     ground paints as worn ground. Industries in the live play area are left to the game
+     (`game/industry.ts`). A real source may give its own list.
    - **The hills.** A function of x, z (`terrain.ts`): broad downs up to about 120 m on a rolling map,
      and rolling hills of up to about 40 m on them.
 2. **Tiles** (`tilegen.ts`, pure, in workers: `tile.worker.ts`): everything fine, made a tile at a time as the
