@@ -49,6 +49,51 @@ export const PRIORS = {
   // steeper than 4% its grade over the ground's steepest slope (1: straight up the hill, 0: along
   // the contour); and how far it runs above the lowest ground within 1 km. The bigger the road,
   // the lower it runs: trunk roads and motorways keep to the valleys, lanes go over the hills.
+  // ---------------- the roads out of a place (tools/os/exits.mjs) ----------------
+  // Measured over 31 market towns and 330 villages: where a road (A, B or a lane; not streets, drives
+  // or tracks) runs out of a place's built-up area (its buildings, 4 or more within 150 m, joined to
+  // the centre) and on into open country. The pictures (node tools/os/exits.mjs --svg) show the rule:
+  // roads leave radially, through the main streets, straight out, and bend towards where they're
+  // going only once clear of the houses; where two roads want the same way out they share it and
+  // fork outside. Quantiles are the 10th, 25th, 50th, 75th and 90th.
+  exits: {
+    perPlace: { town: [7, 9, 11, 13, 15], village: [3, 3, 5, 6, 8] }, // ways out of a place
+    // the angle a road meets the edge at (0°: straight out, radial; 90°: along the edge)
+    edgeAngleDeg: { town: [4, 11, 25, 48, 79], village: [3, 10, 23, 45, 68] },
+    edgeAngleUnder30: { town: 0.58, village: 0.6 }, // the share leaving within 30° of straight out
+    // inside the place, over its last 400 m, how far the road's heading is off the line to the centre
+    insideOffCentreDeg: { town: [10, 17, 29, 59, 88], village: [11, 19, 36, 61, 91] },
+    reachesCentre: { town: 0.27, village: 0.58 }, // the share that, followed straight on, reach the middle
+    // how much a road turns in its first kilometre outside (net: the change of heading)
+    netTurnFirstKmDeg: { town: [5, 16, 40, 66, 109], village: [8, 19, 42, 83, 138] },
+    // the angles round the place between one way out and the next
+    gapDeg: { town: [4, 11, 24, 43, 67], village: [13, 28, 59, 101, 144] },
+    smallestGapDeg: { town: [1, 2, 4, 8, 11], village: [4, 10, 22, 48, 87] },
+    // what the ways out are: most of a village's are lanes
+    byClass: { town: { primary: 32, a: 42, b: 65, minor: 196 }, village: { primary: 109, a: 112, b: 206, minor: 1202 } },
+  },
+  // ---------------- how a place is put together (tools/os/towns.mjs) ----------------
+  // Over the same 31 towns and 330 villages: the ways out that, followed in, reach the middle are the
+  // radials (the roads the place grew along); the built-up edge reaches further along them than
+  // between them (ribbons); inside, streets branch off the radials as T-junctions, some of them
+  // closes (dead ends), at these rates and lengths. Quantiles are the 10th, 25th, 50th, 75th, 90th.
+  towns: {
+    radials: { town: [2, 4, 5, 7, 9], village: [1, 2, 3, 4, 5] }, // radials a place has
+    radialShare: { town: 0.45, village: 0.59 }, // the share of its ways out that are radials
+    radialGapDeg: { town: [11, 20, 43, 82, 142], village: [23, 48, 87, 138, 197] }, // between one radial and the next
+    areaHa: { town: [205, 291, 468, 720, 1034], village: [33, 47, 76, 126, 238] }, // built-up area (100 m cells)
+    // the built-up area's long axis over its short one (over 2: linear, strung along a road)
+    elongation: { town: [1.3, 1.36, 1.63, 1.92, 2.2], village: [1.2, 1.36, 1.65, 2.2, 2.66] },
+    linearShare: { town: 0.19, village: 0.29 },
+    // how far the edge reaches along a radial, against between radials (the ribbons)
+    edgeAlongOverBetween: { town: [0.87, 1.15, 1.71, 2.77, 3.22], village: [0.63, 0.96, 1.35, 1.95, 2.62] },
+    // streets off the radials, inside the place: how many a kilometre of radial, how many are closes,
+    // and how long they run before they end or meet another street
+    sideStreetsPerKm: { town: [10, 12, 15, 18, 24], village: [3, 5, 8, 11, 15] },
+    closeShare: { town: [0.09, 0.14, 0.18, 0.22, 0.26], village: [0, 0, 0.15, 0.33, 0.5] },
+    sideStreetLengthM: { town: [33, 55, 98, 191, 373], village: [31, 60, 133, 413, 1144] },
+    closeLengthM: { town: [49, 67, 103, 165, 270], village: [49, 66, 106, 177, 430] },
+  },
   follow: {
     motorway: { gradeMedian: 0.018, gradeP90: 0.064, over10: 0.043, gradeOverSlope: 0.45, aboveValleyM: 13 }, // (Exe only: the M5)
     primary: { gradeMedian: [0.032, 0.02], gradeP90: [0.092, 0.074], over10: [0.072, 0.044], gradeOverSlope: [0.49, 0.46], aboveValleyM: [30, 16] },

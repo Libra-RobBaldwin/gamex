@@ -37,7 +37,11 @@ defaults become:
   touch water or leave the map are dropped, and the rest come out in the order they're reached from the
   centre, so every settlement is one connected piece. The plan lays the far towns' streets this way for the
   scenery (`worldmap/towns.ts`), and the live area's for the game (`worldmap/spec.ts`, then `apply.ts`
-  `buildStreets`).
+  `buildStreets`). It also gives the settlement its **spokes**: both ends of the high street (the `gates`)
+  and of the main cross street, each facing out along its street. The plan's lanes leave by them
+  (`worldmap/routes.ts` `spokeFor`, `stem`): the spoke facing where the lane goes, straight along the
+  street for 150 m and more, then a sweep into its course; two lanes wanting one spoke share it and fork
+  outside. That's how real roads leave real places (`PRIORS.exits`, measured by `tools/os/exits.mjs`).
 - **`suggestLinks(settlements, water)`:** which places to join: A roads on the Gabriel graph of the cities
   and towns, B roads bringing each village in by its two shortest links, and whatever keeps everywhere
   reachable. `worldmap/routes.ts` turns them into the lanes of a seeded start.

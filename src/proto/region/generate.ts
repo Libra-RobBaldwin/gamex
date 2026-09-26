@@ -25,7 +25,13 @@ export interface Settlement {
   plan: Plan;
   seed: number;
   gates: XZ[]; // the ends of the high street: where roads from other places should come in
+  spokes?: Spoke[]; // every way out: the ends of the high street and the main cross street, with the way each faces
 }
+// A way out of a settlement: where one of its main streets reaches its edge, and the direction that
+// street faces there (a unit vector, outward). A road from elsewhere comes in along it, straight,
+// as real roads do (priors.ts PRIORS.exits: the roads out of a real place leave radially, through
+// its main streets, and bend towards where they're going only once they're clear of it).
+export interface Spoke extends XZ { ux: number; uz: number; along: 'high' | 'main' }
 export type Role = 'high' | 'main' | 'street' | 'industrial';
 // One street, as the game builds it: net.build(snap(a), snap(b), c, { type }).
 export interface StreetCall { settlement: number; a: XZ; b: XZ; c?: XZ; type: string; role: Role }
@@ -132,12 +138,21 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
       : e.role === 'main' ? K.main : e.role === 'industrial' ? (e.a.i === 0 && e.b.i === 0 ? INDUSTRIAL_ROAD : 'street') : streetType();
     return { settlement: s.id, a: fwd ? A : B, b: fwd ? B : A, c, type, role: e.role };
   });
-  // where the high street leaves town, each way
-  const hs = [...nodes.values()].filter((x) => x.j === 0 && order.some(({ e }) => e.a === x || e.b === x));
+  // where the high street leaves town, each way: the gates; and with the main cross street's two
+  // ends, the four ways out (spokes), each facing out along its street
+  const built = (x: LNode) => order.some(({ e }) => e.a === x || e.b === x);
+  const hs = [...nodes.values()].filter((x) => x.j === 0 && built(x)), ms = [...nodes.values()].filter((x) => x.i === 0 && built(x));
+  const spokes: Spoke[] = [];
+  const spoke = (x: LNode, du: number, dv: number, along: Spoke['along']) => { const p = world(x.u, x.v); spokes.push({ ...p, ux: du * ca - dv * sa, uz: du * sa + dv * ca, along }); return p; };
   if (hs.length) {
     const lo = hs.reduce((m, x) => (x.i < m.i ? x : m)), hi = hs.reduce((m, x) => (x.i > m.i ? x : m));
-    s.gates = [world(lo.u, lo.v), world(hi.u, hi.v)];
+    s.gates = [spoke(lo, -1, 0, 'high'), spoke(hi, 1, 0, 'high')];
   }
+  if (ms.length) {
+    const lo = ms.reduce((m, x) => (x.j < m.j ? x : m)), hi = ms.reduce((m, x) => (x.j > m.j ? x : m));
+    if (lo !== hi) { spoke(lo, 0, -1, 'main'); spoke(hi, 0, 1, 'main'); }
+  }
+  s.spokes = spokes;
   let zone: ZoneRule | null = null;
   if (K.industrial) {
     const W = K.industrial.width + S * 0.55, v0 = (j0 - 0.5) * S, v1 = (j0 + indRows - 1) * S + S * 0.75;
