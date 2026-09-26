@@ -58,14 +58,21 @@ The one field, wood and farm generator. The 50 km map's countryside comes from i
 `worldmap/country.ts` `countryFor(plan)`, which gives it the plan's roads and railways, rivers,
 lakes and sea, and terrain. It's the ground's field source everywhere (docs/ground.md):
 
-- **Farm blocks:** Voronoi cells of seeds about 650 m apart. Each block's fields run one way: along
-  the nearest road or river within 380 m, else along the contour where there's a slope, else as
-  the land's grain runs (a noise field over 2.6 km).
+- **Farm blocks:** Voronoi cells of seeds about 800 m apart (about 64 ha, an English farm). Each
+  block's fields run one way: along the nearest road or river within 380 m, else along the contour
+  where there's a slope, else as the land's grain runs (a noise field over 2.6 km).
 - **Fields:** each block is cut square across its longer side, again and again, until its fields
   are the size that land has: 4 to 11.5 ha where it's ploughed, less round the villages (down to
-  60%) and on slopes. So they're mostly four-sided with right angles, and meet the block's edge at
-  whatever angle it takes. A road through a field splits it (along its chord). One cut in ten on a
-  big block is a shelter belt, a strip of trees 16 to 24 m wide.
+  60%) and on slopes. The map's lanes wind (a B road turns 16° across a block, half the time), so
+  as the block is cut, a piece within 150 m of a lane turns to the lane once it has bent more than
+  11° from the grain the piece was cut in (`COUNTRYSIDE.follow`): the fields along a winding lane
+  fan round its bends, each square to the road beside it, with its rows along it; the rest of the
+  block keeps its one direction. So fields are mostly four-sided with right angles, and meet the
+  block's edge at whatever angle it takes. A road through a field splits it (along its chord). One
+  cut in ten on a big block is a shelter belt, a strip of trees 16 to 24 m wide. Measured on 6 km
+  squares of three seeds: nine fields in ten beside a lane run within 8.6° of it (was one in two,
+  once the roads wound), and about two corners in three are within 6.9° of square (a block's
+  boundary corners, half of all corners, are never square).
 - **What each is:** woods first (`woods.ts`: old woods in clumps a kilometre or so apart, hanging
   woods on the steepest slopes, wet woodland on small fields by the water, the odd copse, the
   belts, conifer plantations a farm block at a time on the high ground). Then rough grazing on the
