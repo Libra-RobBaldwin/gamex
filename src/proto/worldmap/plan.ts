@@ -18,6 +18,7 @@ import { KINDS, layStreets, reach, suggestLinks, type Kind, type Link, type Sett
 import { placeName } from '../region/names';
 import { mix, range, rng, type Rand } from '../region/random';
 import { regionOptions, type RegionOptions } from '../region/options';
+import { PRIORS, between } from '../region/priors';
 import type { LakeSpec, XZ } from '../region/water';
 import { WorldWater, type Sea, type WorldRiver, type WorldWaterSpec } from './water';
 import { planRoutes, spurs, type Rail, type Route } from './routes';
@@ -234,8 +235,11 @@ function makeWater(r: Rand, H: number, o: RegionOptions): WorldWaterSpec {
 // the water, and off the map's outer ring (where the edge and its portals are). Villages come in
 // looser and thicker patches, as they do in real country.
 function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: RegionOptions): WorldSettlement[] {
-  const nTowns = o.towns === -1 ? AUTO.towns[0] + Math.floor(r() * (AUTO.towns[1] - AUTO.towns[0] + 1)) : o.towns;
-  const nVillages = o.villages === -1 ? AUTO.villages[0] + Math.floor(r() * (AUTO.villages[1] - AUTO.villages[0] + 1)) : o.villages;
+  // (automatic counts: as many as real Britain has on this much land, region/priors.ts, somewhere
+  // between the Exe's coast and the Teme's inland valley; no fewer than the old figures' lower ends)
+  const t = r(), land = landKm2(w, H), S = PRIORS.settlements.perThousandKm2;
+  const nTowns = o.towns === -1 ? Math.max(AUTO.towns[0], Math.round((between(S.cityOrTown, t) * land) / 1000) - (o.city ? 2 : 0)) : o.towns;
+  const nVillages = o.villages === -1 ? Math.max(AUTO.villages[0], Math.round((between(S.village, t) * land) / 1000)) : o.villages;
   const kinds: Kind[] = [...(o.city ? ['city' as const, 'city' as const] : []), ...Array<Kind>(nTowns).fill('town'), ...Array<Kind>(nVillages).fill('village')];
   const out: WorldSettlement[] = [];
   const names = rng(mix(seed, 204)); // (a stream of their own: renaming never moves a place)
@@ -300,6 +304,13 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
   fillSquares(r, H, w, out, (kind, n, at) => place(kind, n, at, 400, false), kinds.length);
   return out;
 }
+// the map's land (km²): all of it bar the sea, on a 1 km lattice
+function landKm2(w: WorldWater, H: number) {
+  let n = 0;
+  for (let x = -H + 500; x < H; x += 1000) for (let z = -H + 500; z < H; z += 1000) if (w.seaDistance(x, z, 600) > 0) n++;
+  return n;
+}
+
 // The whole map is playable: every 10 km square gets places in proportion to its land (so none
 // is left empty but the open sea), and a coast gets villages along it. After the main placement,
 // from the same stream, so the places it made stay where they were.
