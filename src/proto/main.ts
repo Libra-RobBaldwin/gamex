@@ -761,7 +761,13 @@ async function bringToLife(id: number) {
   const st = WORLD.settlements[id], q = worldGame.towns.places.find((x) => x.id === id)!;
   const t0 = performance.now();
   q.live = true; // (so the roads to it are built now)
-  const made = buildStreets(net, MAP.streets.filter((x) => x.settlement === id), DEFAULT_OPTS, true).made;
+  // (its streets a few at a time, a frame between, so the view doesn't stall while a place is laid out)
+  const made: number[] = [], streets = MAP.streets.filter((x) => x.settlement === id), begun = new Set<number | undefined>();
+  let slice0 = performance.now();
+  for (let k = 0; k < streets.length; k += 4) {
+    made.push(...buildStreets(net, streets.slice(k, k + 4), DEFAULT_OPTS, true, begun).made);
+    if (performance.now() - slice0 > 8) { await nextFrame(); slice0 = performance.now(); }
+  }
   made.push(...layLiveRoutes(net, WORLD, DEFAULT_OPTS, 'road', (k) => !!worldGame.towns.places.find((x) => x.id === k)?.live, id).made);
   const t1 = performance.now();
   commitRoads(made);
