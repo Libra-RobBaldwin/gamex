@@ -197,7 +197,7 @@ const noErrors = (page, what) => check(page.errors.length === 0, `${what}: no co
   await page.screenshot({ path: `${shots}/5-guide-stop.png` });
   // place one (as the stop tool would), and the guide moves on to the line
   await page.evaluate(() => {
-    const P = window.proto, net = P.net, n = net.nearestSeg({ x: 120, z: 0 }, 120, (s) => net.def(s).cls === 'road');
+    const P = window.proto, net = P.net, n = net.nearestSeg({ x: -110, z: 30 }, 120, (s) => net.def(s).cls === 'road');
     if (n) for (const side of [1, -1]) for (const d of [0, 15, -15]) { const { plans } = net.planStop(n.seg.id, n.s + d, side); const pl = plans.find((x) => x.ok); if (pl) { net.addStop(n.seg.id, n.s + d, side, pl); P.rebuild(); return; } }
   });
   await page.waitForFunction(() => /Start a bus line/.test(document.querySelector('#guide')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => {});

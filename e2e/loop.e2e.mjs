@@ -45,7 +45,7 @@ if (t00.status === 'declining') fail('the town declines before the player has bu
 // four stops across the start town: housing, either side of the centre, housing (placed as the stop tool does)
 const made = await page.evaluate(() => {
   const P = window.proto, net = P.net, ids = [];
-  for (const q of [{ x: -110, z: -96 }, { x: -85, z: 0 }, { x: 120, z: 0 }, { x: 60, z: 110 }]) {
+  for (const q of [{ x: -110, z: -96 }, { x: -85, z: 0 }, { x: -110, z: 30 }, { x: 60, z: 110 }]) {
     const n = net.nearestSeg(q, 80, (s) => net.def(s).cls === 'road' && net.def(s).family !== 'Motorway' && net.def(s).family !== 'Rural');
     let first = null;
     if (n) for (const side of [1, -1]) for (const d of [0, 15, -15, 30, -30]) { const { plans } = net.planStop(n.seg.id, n.s + d, side); const pl = plans.find((x) => x.ok && x.kind === 'kerb') ?? plans.find((x) => x.ok); if (pl) { net.addStop(n.seg.id, n.s + d, side, pl); first ??= n.seg.stops[n.seg.stops.length - 1].id; break; } }
