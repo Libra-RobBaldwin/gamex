@@ -13,7 +13,7 @@ import { rng, range, pick, type Rand } from './random';
 import { MapWater, type XZ } from '../worldmap/water';
 import { GRID_PLAN, PRIORS } from './priors';
 
-export type Kind = 'city' | 'town' | 'village';
+export type Kind = 'city' | 'town' | 'village' | 'hamlet';
 export type Plan = 'grid' | 'organic';
 export interface Settlement {
   id: number;
@@ -45,6 +45,9 @@ export const KINDS: Record<Kind, KindSpec> = {
   city: { r: [440, 480], spacing: 90, high: ['boulevard-30-0-0', 'avenue'], main: 'arterial-1-30-0-0-2.2', street: ['street', 'street-30-2.4-2.2-0'], industrial: { width: 380, rows: 3 }, grid: GRID_PLAN.city },
   town: { r: [230, 270], spacing: 85, high: ['avenue', 'avenue'], main: 'street-30-2.4-2.2-0', street: ['street', 'street-20-2.4-0-0'], industrial: { width: 200, rows: 2 }, grid: GRID_PLAN.town },
   village: { r: [110, 160], spacing: 80, high: ['street-30-4-0-0', 'street-30-4-0-0'], main: 'street', street: ['street-20-2.4-0-0', 'street'], industrial: null, grid: GRID_PLAN.village },
+  // (a hamlet: a few houses along one lane, no shops, the OS bakes' smallest named places; the lane
+  // through is its whole street, with a close or two off it at most)
+  hamlet: { r: [35, 60], spacing: 55, high: ['street-20-2.4-0-0', 'street-20-2.4-0-0'], main: 'street-20-2.4-0-0', street: ['street-20-2.4-0-0', 'street'], industrial: null, grid: 0 },
 };
 const INDUSTRIAL_ROAD = 'arterial-1-40-0-0-0';
 // how far a settlement's land reaches from its centre: the built-up area and its industrial edge
@@ -68,13 +71,14 @@ const pickQ = (r: Rand, qsv: readonly number[]) => { // a draw between a prior's
 };
 export function layStreets(s: Settlement, mw: MapWater, bound: number): { streets: StreetCall[]; zone: ZoneRule | null } {
   const K = KINDS[s.kind], S = K.spacing, r = rng(s.seed), organic = s.plan === 'organic';
-  const T = s.kind === 'village' ? 'village' : 'town', P = PRIORS.towns;
+  const T = s.kind === 'village' || s.kind === 'hamlet' ? 'village' : 'town', P = PRIORS.towns;
   const nodes = new Map<string, LNode>(), edges: LEdge[] = [];
   const centre = NODE(nodes, s.x, s.z);
   const add = (a: LNode, b: LNode, role: Role, curve = 0, type?: string) => { if (a !== b) edges.push({ a, b, role, curve, type }); };
   // 1. the radials: the high street's two ways, then the rest spread round, none within `minGap` of another
-  const nRad = s.kind === 'village' ? 2 + Math.floor(r() * 3) : s.kind === 'town' ? 4 + Math.floor(r() * 3) : 6 + Math.floor(r() * 3);
-  const minGap = (s.kind === 'village' ? 40 : 28) * (Math.PI / 180), offHigh = 45 * (Math.PI / 180);
+  // (a hamlet is its lane through and nothing more: two ways out, and a close or two)
+  const nRad = s.kind === 'hamlet' ? 2 : s.kind === 'village' ? 2 + Math.floor(r() * 3) : s.kind === 'town' ? 4 + Math.floor(r() * 3) : 6 + Math.floor(r() * 3);
+  const minGap = (s.kind === 'town' || s.kind === 'city' ? 28 : 40) * (Math.PI / 180), offHigh = 45 * (Math.PI / 180);
   const angles = [s.axis, s.axis + Math.PI];
   const apart = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
   for (let tries = 0; angles.length < nRad && tries < 80; tries++) {
@@ -173,7 +177,7 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
   // 2. cross streets between neighbouring radials, part way out (each a T on both radials, offset so
   // the two never line up across a radial as a crossroads)
   const byAngle = [...radials].sort((p, q) => norm2(p.angle) - norm2(q.angle));
-  const rings = s.kind === 'village' ? [0.6] : s.kind === 'town' ? [0.45, 0.8] : [0.35, 0.6, 0.85];
+  const rings = s.kind === 'hamlet' ? [] : s.kind === 'village' ? [0.6] : s.kind === 'town' ? [0.45, 0.8] : [0.35, 0.6, 0.85];
   for (let i = 0; i < byAngle.length && byAngle.length > 2; i++) {
     const A = byAngle[i], B = byAngle[(i + 1) % byAngle.length];
     let gap = norm2(B.angle) - norm2(A.angle); if (gap <= 0) gap += 2 * Math.PI;
@@ -354,12 +358,13 @@ export function suggestLinks(ss: Settlement[], mw: MapWater): Link[] {
     }
     return out.sort((p, q) => d(...p) - d(...q));
   };
-  const major = gabriel(ss.filter((s) => s.kind !== 'village'));
-  const all = gabriel(ss).filter(([a, b]) => a.kind === 'village' || b.kind === 'village');
+  const minor = (s: Settlement) => s.kind === 'village' || s.kind === 'hamlet';
+  const major = gabriel(ss.filter((s) => !minor(s)));
+  const all = gabriel(ss).filter(([a, b]) => minor(a) || minor(b));
   const keep: [Settlement, Settlement][] = [...major];
   const count = new Map<number, number>();
   for (const e of all) {
-    const v = e.filter((x) => x.kind === 'village');
+    const v = e.filter(minor);
     if (v.some((x) => (count.get(x.id) ?? 0) < 2)) { keep.push(e); for (const x of v) count.set(x.id, (count.get(x.id) ?? 0) + 1); }
   }
   // (and whatever joins up pieces the trimming left apart: Kruskal over the rest, shortest first)
@@ -370,6 +375,6 @@ export function suggestLinks(ss: Settlement[], mw: MapWater): Link[] {
     let wet = false;
     const L = d(a, b);
     for (let t = 0; t <= L && !wet; t += 10) wet = mw.edgeDistance({ x: a.x + ((b.x - a.x) * t) / L, z: a.z + ((b.z - a.z) * t) / L }, 50) < 0;
-    return { a: a.id, b: b.id, length: Math.round(L), road: a.kind === 'village' || b.kind === 'village' ? 'B' : 'A', water: wet };
+    return { a: a.id, b: b.id, length: Math.round(L), road: minor(a) || minor(b) ? 'B' : 'A', water: wet };
   });
 }

@@ -21,9 +21,9 @@ const CSS = `
 .place-label.village { font: 600 13px/1 'Archivo', system-ui, sans-serif; }
 .place-label small { display: block; margin-top: 4px; font: 500 11px/1 'Archivo', system-ui, sans-serif; color: #e3c47e; text-transform: none; letter-spacing: 0; }
 `;
-const RANK = { city: 0, town: 1, village: 2 } as const;
+const RANK = { city: 0, town: 1, village: 2, hamlet: 3 } as const;
 // from how far out (the view's height in metres) each kind's name shows, and when villages give way
-export const SHOW = { city: 420, town: 480, village: 560, villagesUntil: 3800 };
+export const SHOW = { city: 420, town: 480, village: 560, hamlet: 700, villagesUntil: 3800 };
 
 export interface PlaceLabelOpts {
   toScreen: (p: { x: number; z: number }) => { x: number; y: number };
@@ -58,7 +58,7 @@ export class PlaceLabels {
   update(viewH: number, force = false) {
     const W = this.el.clientWidth, H = this.el.clientHeight, taken: [number, number, number, number][] = [];
     for (const it of this.items) {
-      const want = viewH >= SHOW[it.s.kind] && !(it.s.kind === 'village' && viewH > SHOW.villagesUntil);
+      const want = viewH >= SHOW[it.s.kind] && !((it.s.kind === 'village' || it.s.kind === 'hamlet') && viewH > SHOW.villagesUntil);
       if (!want) { this.hide(it); continue; }
       const p = this.o.toScreen(it.s);
       if (it.el.hidden) { it.el.hidden = false; this.refresh(it); }
@@ -92,7 +92,7 @@ export class PlaceLabels {
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
-const KIND_WORD = { city: 'City', town: 'Market town', village: 'Village' } as const;
+const KIND_WORD = { city: 'City', town: 'Market town', village: 'Village', hamlet: 'Hamlet' } as const;
 
 // The Places sheet: every settlement, the one you're looking at first, then by distance; tap one to go there.
 export function openPlaces(shell: Shell, places: SettlementInfo[], at: { x: number; z: number }, onPick: (s: SettlementInfo) => void, count?: (s: SettlementInfo) => number | undefined) {

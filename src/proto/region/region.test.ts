@@ -42,13 +42,13 @@ describe('a settlement’s streets', () => {
 
   test('each kind has its own layout: a high street, residential streets, an industrial edge for the city and towns', () => {
     for (const seed of SEEDS) {
-      const p = plan(seed), count: Record<string, number[]> = { city: [], town: [], village: [] };
+      const p = plan(seed), count: Record<string, number[]> = { city: [], town: [], village: [], hamlet: [] };
       let estates = 0, bigger = 0;
       for (const s of p.settlements) {
         const { streets, zone } = streetsOf(s, p);
         expect(streets.filter((t) => t.role === 'high').length).toBeGreaterThanOrEqual(2);
-        expect(streets.filter((t) => t.role === 'street').length).toBeGreaterThanOrEqual(s.kind === 'village' ? 1 : 10);
-        if (s.kind === 'village') expect(zone).toBeNull();
+        expect(streets.filter((t) => t.role === 'street').length).toBeGreaterThanOrEqual(s.kind === 'hamlet' ? 0 : s.kind === 'village' ? 1 : 10);
+        if (s.kind === 'village' || s.kind === 'hamlet') expect(zone).toBeNull();
         else {
           bigger++;
           // (an estate where there's dry room for one: three rows of wide blocks off a radial)
@@ -61,6 +61,7 @@ describe('a settlement’s streets', () => {
       const mean = (a: number[]) => a.reduce((t, v) => t + v, 0) / Math.max(1, a.length);
       if (count.city.length) expect(mean(count.city)).toBeGreaterThan(mean(count.town));
       expect(mean(count.town)).toBeGreaterThan(mean(count.village));
+      expect(mean(count.village)).toBeGreaterThan(mean(count.hamlet)); // (a hamlet: its lane through, a close at most)
     }
   });
 
@@ -161,10 +162,10 @@ describe('suggested links', () => {
       const parent = ss.map((_, i) => i), find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
       for (const l of links) parent[find(l.a)] = find(l.b);
       expect(new Set(ss.map((s) => find(s.id))).size).toBe(1);
-      const major = ss.filter((s) => s.kind !== 'village');
+      const major = ss.filter((s) => s.kind !== 'village' && s.kind !== 'hamlet');
       for (const l of links) {
         const a = ss[l.a], b = ss[l.b], m = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
-        expect(l.road).toBe(a.kind === 'village' || b.kind === 'village' ? 'B' : 'A');
+        expect(l.road).toBe(a.kind === 'village' || b.kind === 'village' || a.kind === 'hamlet' || b.kind === 'hamlet' ? 'B' : 'A');
         // Gabriel: nobody of its tier inside the circle on the link
         const tier = l.road === 'A' ? major : ss;
         for (const c of tier) if (c !== a && c !== b) expect(Math.hypot(c.x - m.x, c.z - m.z)).toBeGreaterThanOrEqual(l.length / 2 - 1);

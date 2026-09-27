@@ -123,7 +123,7 @@ export function placeResolver(m: PlaceMap, force?: Vern) {
     const s = m.settlements[si];
     const climate = climateVern[m.style];
     if (force) v = force;
-    else if (climate === 'desert') v = hash2(Math.round(s.x), Math.round(s.z), m.seed) < (s.kind === 'village' ? 0.7 : 0.35) ? 'desert' : 'med'; // (villages of earth, towns whitewashed)
+    else if (climate === 'desert') v = hash2(Math.round(s.x), Math.round(s.z), m.seed) < (s.kind === 'village' || s.kind === 'hamlet' ? 0.7 : 0.35) ? 'desert' : 'med'; // (villages of earth, towns whitewashed)
     else if (climate) v = climate;
     else v = vernOf(provided?.(s.x, s.z) ?? fallbackRock(prov, m.seed, s.x, s.z), prov);
     cache.set(si, v);
@@ -133,7 +133,7 @@ export function placeResolver(m: PlaceMap, force?: Vern) {
     let bi = 0, bd = Infinity;
     for (let i = 0; i < m.settlements.length; i++) { const s = m.settlements[i], d = Math.hypot(x - s.x, z - s.z); if (d < bd) { bd = d; bi = i; } }
     const s = m.settlements[bi];
-    const kind = (s?.kind === 'city' || s?.kind === 'village' ? s.kind : 'town') as Place['kind'];
+    const kind = (s?.kind === 'city' || s?.kind === 'village' ? s.kind : s?.kind === 'hamlet' ? 'village' : 'town') as Place['kind'];
     const jitter = hash2(Math.floor(x / 23), Math.floor(z / 23), m.seed + 7); // (patches of a street share an era)
     return { vern: s ? vernAt(bi) : force ?? 'clayvale', era: eraAt(bd, kind, jitter), kind };
   };
