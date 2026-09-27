@@ -15,6 +15,7 @@ import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setGround, setP
 import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
 import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops
 import { Dresser } from './game/dress'; // the 50 km map's scenery as real buildings up close
+import { farmGround, LiveFarms } from './game/country';
 import { placeResolver, REAL_VERN, setGeology, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
@@ -169,7 +170,7 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, 4, false, undefined, WORLD ? GROUND_SEED : undefined, WORLD ? countryFor(WORLD) : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => { const e = worldGame!.extra(), f = farmGround(WORLD); return { plots: [...e.plots, ...f.plots], blocked: [...e.blocked, ...f.blocked] }; } : undefined }, BOUND, 4, false, undefined, WORLD ? GROUND_SEED : undefined, WORLD ? countryFor(WORLD) : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 if (WORLD) gameGround.ground.uniforms.uSlope.value.set(...slopeLook()); // (the hills' rock and moor: worldmap/terrain.ts, as the far tiles have it)
 if (WORLD?.terrain.geologyAt) setGeology(WORLD.terrain.geologyAt); // (the buildings' stone from the rock under them: worldmap/landform.ts)
@@ -242,6 +243,8 @@ for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow 
 // a 50 km map: the rest of the map beyond the live area, streamed in tiles from workers (worldmap/)
 const worldGame = WORLD ? new WorldGame({ scene, plan: WORLD, field: RELIEF, drape, look: LOOK, trees: { crown: crownGeo, pine: pineGeo, trunk: trunkGeo, crownMat, pineMat, trunkMat }, live: SAVED?.world?.live ?? (REAL ? WORLD.settlements.filter((st) => Math.max(Math.abs(st.x), Math.abs(st.z)) < LIVE_HALF).map((st) => st.id) : [WORLD.start]) }) : null; // (a real region's live area is all there from the start: its pack)
 const dresser = worldGame ? new Dresser({ scene, plan: WORLD!, make: generate, view: worldGame.view, trees: { crown: crownGeo, trunk: trunkGeo, crownMat, trunkMat } }) : null;
+const liveFarms = WORLD ? new LiveFarms(WORLD, net, generate) : null; // (the live area's farmsteads: game/country.ts)
+if (liveFarms) scene.add(liveFarms.group);
 
 // Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
 // registry (a spatial hash, so this looks only at claims near the tree); plots through `lots`.
@@ -2859,6 +2862,7 @@ function frame(now: number) {
     const next = worldGame.frame(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), !activating);
     if (next !== null) void activatePlace(next);
     dresser?.update(view, loaded ? Math.min(30, Math.max(5, rawMs * 0.2)) : 0); // (real buildings for the scenery close under the view: game/dress.ts)
+    liveFarms?.update(loaded ? 4 : 0);
     worldIdle(loaded ? 5 : 0);
     worldGame.liveCanopy(gameGround.ground.uniforms, view.h);
   }
