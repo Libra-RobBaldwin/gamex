@@ -321,6 +321,100 @@ economy and its fetch are the real-region and economy owners' (round 1's item 7 
   all pass. CI runs them again on the PR.
 - `npx vitest run --no-file-parallelism` on the rebased tree: see the PR.
 
+## The park pond's game side (the coordinator, 02:33)
+
+PR #71 gave the world's water `addPond` (a small lake shape with a wandering shore at the ground's height,
+the ground laid level to it with a hollow) and left the game's side to this session. Done, one commit:
+
+- **Where.** `parkplan.ts` `parkPond`: a park of 2,000 m² or more gets a pond at its lowest spot where the
+  water lies a metre inside the park and its bank (4 m) is clear of the roads and the paths; a sixth of
+  the park's width across, within the water system's 8–30 m. The seed-42 start town's parks are too
+  ragged for even the smallest pond (the two over 2,000 m² are 35 m wide strips with roads both
+  sides), so it has none; seeds 2, 5, 7 and 13 have one to three.
+- **What.** `main.ts` `addInfill` asks the plan's water for the pond and `applyPonds` puts it in the game:
+  the relief grid round it taken again from the terrain (the drape draws from the same heights), the
+  ground mesh made again over it, the live water given the pond (`game/water.ts` `addPond`: its tile
+  built again with its surface and reeds, its land claimed so plots, paths and trees keep off), the
+  ground's paint and the trees round it redone. The park's lawn, trees, beds and bandstand keep off the
+  pond and its bank (`buildgen.ts` `makeRegion`). A park found again keeps its pond.
+- **Seen** at 412×915 on seed 2's 3,350 m² park: `pond-before.png` → `pond-after.png` (from 130 m) and
+  `pond2-close.png` (45 m) and `pond2-130m.png`: a level surface with an irregular outline, never a
+  circle, the paths and the hedge clear of it, reeds on its bank. (The black discs by the garden fences
+  in those views are the gardens' trampolines, not ponds.) One thing for the water owner: the bed under
+  a garden pond is a lake's, 4.2 m down (`worldmap/water.ts` `lakeGroundOf`); a pond wants a metre or so.
+- **Not done:** a pond is never taken away. A park bulldozed or cut by a road keeps the pond in the
+  field; the plan's water has no `removePond`, and the terrain would need laying back.
+
+## Round 3: the trunk after #73, with the money tuned (27 Sep 2026, 04:30)
+
+Played on the integration branch at 8abea60 (PRs #69, #70 and #73 in; `game/money.ts` tuned: a bus's
+running cost doubled, the start balance £250,000, the fare £2), plus the one-line fare import below, built
+and served with `vite preview`; the same stages as rounds 1 and 2, by touch at 412×915, DPR 2, SwiftShader.
+Screenshots in `docs/reports/play/round3/`. PR #71 (the park pond's water side) landed at 04:19, after
+the round; the pond's game side (above) is on this branch with it.
+
+### The loop
+
+- **Start:** £250,000 in the bank, the guide over the start town (`08-first-view-10s.png`). Two stops
+  (£600 each) on the high street and a radial, a line with two buses: £58,000, leaving £190,800.
+- **Save and reload** (the fix from #73): Save town, reload the tab, and the same town comes back (day 2,
+  £186,800, the line and both stops); Continue on the start menu opens it too (`21-reloaded.png`,
+  `22-menu-continue.png`).
+- **Rail by touch, the whole way this time:** a branch line square across a radial reads "New railway
+  460 m · £73,600" and builds with a level crossing (`62-rail-draft-square.png`, `63-rail-built.png`);
+  two stations from Build > Stops by tapping the track, Central and Parkway (£166,500 each as a passing
+  loop, £53,800 with one platform); New line from here, Create, two trains for £240,000, and a train is
+  standing at a platform 19 s later (`68-rail-line-created.png`, `69-train-at-platform.png`).
+- **The bridge, bulldoze, a pinch out, the city, a portal sign:** as round 2 (`23-bridge-draft.png`,
+  `26-pinched-out.png`, `30-portal-card.png`).
+
+### Money, with the tuning
+
+| day | status | people | balance | fares | running | riders a day |
+|---|---|---|---|---|---|---|
+| 1 | stable | 1,858 | £185,583 | £0 | £3,265 | 0 |
+| 2 | stable | 1,858 | £199,812 | £16,267 | £5,201 | 307 |
+| 3 | stable | 1,858 | £214,042 | £19,399 | £5,200 | 323 |
+| 4 | growing | 1,858 | £228,280 | £19,432 | £5,201 | 324 |
+| 6 | growing | 1,858 | £258,291 | £20,200 | £5,201 | 337 |
+| 8 | growing | 1,907 | £289,232 | £20,807 | £5,203 | 347 |
+| 12 | growing | 2,049 | £355,773 | £22,582 | £5,201 | 377 |
+| 16 | stable | 2,074 | £427,098 | £23,140 | £5,201 | 386 |
+| 20 | stable | 2,077 | £499,086 | £23,212 | £5,200 | 387 |
+| 24 | stable | 2,078 | £571,161 | £23,221 | £5,201 | 387 |
+
+(Day 1 is the line's first part-day: the fares land at the next review.) The two-bus line makes
+£19,000–23,000 a day against £5,200 running: 3.7 to 4.5 times, loop.md's four. It pays for itself in
+four days. **The pace to a railway:** the branch line above cost £73,600, two one-platform stations
+£107,600 and two trains £240,000, about £420,000; at £14,000–18,000 a day net the player who built the
+first line on day 1 has that on day 16 or so, a fortnight of game days. The town grows from 1,858 to
+2,078 by day 16 and then stops, "Steady": 100% of workers reach a job, but "shops within 20 min can serve
+only 29% of residents" (`16-town-panel.png`); the next thing a player is asked for is shops, which no tool
+gives them. That is the economy owner's (round 1's item 6, and the coordinator's).
+
+### Problems
+
+21. **Tapping a house, a shop or an office opened nothing** (confusing, fixed in this PR). On the start
+    town, a tap on the flats by the centre opened their card, but a 1930s semi, a shopping parade and a
+    1960s office opened nothing wherever they were tapped (`55-building-house.png`). Round 1's fix lifted
+    each chunk by the hill under the tap before casting the ray; the drape had already widened every
+    chunk's bounding sphere by the hills for culling, so lifted once more the sphere sat above the mesh
+    and the ray missed every chunk but the centre's. The pick now tests each geometry's own sphere. The
+    lines e2e taps a house, a shop and an office on their plots.
+22. **The bulldozer on a stop a line calls at** (fine): "Market Place · kerbside stop · Line 1 calls here ·
+    withdraw it first", Remove greyed (`57-bulldoze-stop-on-line.png`); a road with houses on it: "Buildings
+    face this road, and it's their only way in" (`58-bulldoze-road-preview.png`).
+23. **The bus card** (fine): "Bus UT 101 · Line 1 · Stalberg Glidare Mk III double-decker · next stop Market
+    Place · on board 0 · 5 mph" (`54-bus-card.png`).
+24. **The real Teme region** (unchanged, for its owners): Ludlow loads in 25 s, two stops and a line, and
+    six days on it is "Declining", 19,979 to 18,832, fares £57 a day, "Homes near a stop 0%", the JSON
+    fetch error still in the console (`85-real-town-panel.png`).
+
+### Fixed here
+
+- The line card's note reads the fare from `game/money.ts` instead of a literal "£2" (the coordinator's
+  ask).
+
 ## Test results (third PR, round 2, on the branch merged with integration at 28593b5)
 
 - `npx tsc --noEmit`: clean.

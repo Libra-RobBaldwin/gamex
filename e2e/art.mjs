@@ -11,7 +11,7 @@ mkdirSync(out, { recursive: true });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 // each picture: the screen it's for (CSS px, at DPR 2), where the camera looks (the start town is at 0, 0) and how high
 const SHOTS = [
-  { name: 'hero-tall', w: 540, h: 960, view: { x: 30, z: -140, h: 470, az: 0.55, el: 0.56 } },
+  { name: 'hero-tall', w: 540, h: 960, view: { x: -10, z: -30, h: 470, az: 0.55, el: 0.56 } },
   { name: 'hero-wide', w: 800, h: 450, view: { x: 40, z: -60, h: 560, az: 0.55, el: 0.6 } },
   { name: 'map-region', w: 400, h: 220, view: { x: 60, z: -40, h: 760, az: 0.55, el: 0.62 } },
 ];

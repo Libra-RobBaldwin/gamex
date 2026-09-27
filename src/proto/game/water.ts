@@ -76,7 +76,7 @@ export class GameWater {
   readonly shapes: MapWater; // the map's lakes and rivers (worldmap/water.ts)
   // (half the map's width, and the tiles it covers; the map's water, the town's lake by default)
   constructor(readonly half: number, spec: WaterSpec = TOWN_WATER) {
-    const W = (this.shapes = new MapWater(spec));
+    const W = (this.shapes = new MapWater({ ...spec, lakes: [...spec.lakes] })); // (its own list of lakes: a pond added later (addPond) joins this map's, not the spec it was given)
     // Only the map's own water: no rivers or basins are worked out from a flat map (a flat plain's
     // drainage is arbitrary, and the water system would start streams across it). Small regions,
     // as there's no catchment to follow: 2 km with 200 m of margin builds in a few ms, not 200.
@@ -92,20 +92,45 @@ export class GameWater {
       const t = this.water.tile(ti, tj);
       if (t.wet) this.tiles.push(t);
     }
-    for (const t of this.tiles) {
-      const w = waterSurface(t);
-      if (!w) continue;
-      level(w, t);
-      const m = new THREE.Mesh(waterGeometry(w), this.material);
-      m.position.set(w.offset[0], 0, w.offset[1]);
-      m.renderOrder = 2; // after the ground and the roads
-      m.name = 'water';
-      this.group.add(m);
-      const spots = reedSpots(t);
-      // (each tuft stands on the ground at its own spot, not the raster point it came from)
-      for (let i = 0; i < spots.length; i += 5) spots[i + 1] = W.ground(spots[i], spots[i + 2]);
-      if (spots.length) { const r = reedMesh(spots, reedGeometry(), this.reedMat); r.name = 'reeds'; this.group.add(r); }
+    for (const t of this.tiles) this.place(t);
+  }
+  // a tile's surface and reeds on the scene (kept by tile, so a tile built again replaces its own)
+  private meshes = new Map<string, THREE.Object3D[]>();
+  private place(t: WaterTile) {
+    const key = `${t.ti},${t.tj}`, W = this.shapes;
+    for (const o of this.meshes.get(key) ?? []) { this.group.remove(o); (o as THREE.Mesh).geometry?.dispose(); }
+    const made: THREE.Object3D[] = [];
+    this.meshes.set(key, made);
+    const w = waterSurface(t);
+    if (!w) return;
+    level(w, t);
+    const m = new THREE.Mesh(waterGeometry(w), this.material);
+    m.position.set(w.offset[0], 0, w.offset[1]);
+    m.renderOrder = 2; // after the ground and the roads
+    m.name = 'water';
+    this.group.add(m); made.push(m);
+    const spots = reedSpots(t);
+    // (each tuft stands on the ground at its own spot, not the raster point it came from)
+    for (let i = 0; i < spots.length; i += 5) spots[i + 1] = W.ground(spots[i], spots[i + 2]);
+    if (spots.length) { const r = reedMesh(spots, reedGeometry(), this.reedMat); r.name = 'reeds'; this.group.add(r); made.push(r); }
+  }
+  // A park's pond, added while the game runs (worldmap/water.ts addPond gives the spec; the terrain
+  // has laid the ground to it): the bowl joins the live water's shapes, the tiles it lies in are
+  // built again with their surface and reeds, and their land is claimed again so plots, paths and
+  // trees keep off it. The ground mesh and its paint are the caller's (main.ts), which has them.
+  addPond(L: LakeSpec, land: Land | null): WaterTile[] {
+    this.shapes.addLake(L);
+    this.edge = null;
+    const B = lakeBox(L), out: WaterTile[] = [];
+    for (let ti = Math.floor(B.x0 / TILE); ti <= Math.floor(B.x1 / TILE); ti++) for (let tj = Math.floor(B.z0 / TILE); tj <= Math.floor(B.z1 / TILE); tj++) {
+      this.water.forgetTile(ti, tj);
+      const t = this.water.tile(ti, tj), at = this.tiles.findIndex((q) => q.ti === ti && q.tj === tj);
+      if (at >= 0) this.tiles[at] = t; else this.tiles.push(t);
+      this.place(t);
+      if (land) claimWater(land, t, 'water', { buffer: CLAIM });
+      out.push(t);
     }
+    return out;
   }
 
   // The game's isWater: wet, or within ROAD_GAP of the waterline (so roads keep off the bank).

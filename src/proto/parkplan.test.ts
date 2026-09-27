@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { edgeRuns, inGate, parkEntrances, parkPaths, type EdgePiece } from './parkplan';
+import { edgeRuns, inGate, parkEntrances, parkPaths, parkPond, type EdgePiece } from './parkplan';
 
 // a square park 30 m across, its edge along two roads (north and east sides), in 1.5 m pieces
 function sides(): EdgePiece[] {
@@ -39,5 +39,37 @@ describe('a park’s entrances and paths', () => {
   });
   it('gives a short edge no gate', () => {
     expect(parkEntrances([[0, 0, 1.5, 0], [1.5, 0, 3, 0]], { x: 1, z: 5 })).toEqual([]);
+  });
+});
+
+describe('a park’s pond (parkPond)', () => {
+  const S = 5;
+  // a 100 m × 100 m park (400 cells), the ground falling to the east, a path across its middle
+  const cells: { x: number; z: number }[] = [];
+  for (let i = 0; i < 20; i++) for (let j = 0; j < 20; j++) cells.push({ x: i * S + S / 2, z: j * S + S / 2 });
+  const slope = (x: number) => 20 - x * 0.02;
+  const path = [{ x: 2, z: 50 }, { x: 98, z: 50 }];
+  const road: EdgePiece[] = [[100, 0, 100, 100]]; // (a road along the east side)
+  const pond = parkPond(cells, S, [path], road, slope, 1)!;
+  it('is inside the park, its bank clear of the road and the path', () => {
+    expect(pond).not.toBeNull();
+    expect(pond.r).toBeGreaterThanOrEqual(8);
+    expect(pond.r).toBeLessThanOrEqual(30);
+    expect(pond.x - pond.r - 1).toBeGreaterThanOrEqual(0);
+    expect(pond.z - pond.r - 1).toBeGreaterThanOrEqual(0);
+    expect(pond.z + pond.r + 1).toBeLessThanOrEqual(100);
+    expect(100 - pond.x).toBeGreaterThanOrEqual(pond.r + 4);
+    expect(Math.abs(pond.z - 50)).toBeGreaterThanOrEqual(pond.r + 4);
+  });
+  it('takes the lowest spot that fits', () => {
+    // the ground falls to the east: the pond sits as far east as the road's bank allows
+    expect(pond.x + pond.r + 4).toBeGreaterThan(95);
+  });
+  it('gives a small park none', () => {
+    expect(parkPond(cells.slice(0, 60), S, [], [], slope, 1)).toBeNull();
+  });
+  it('gives none when nothing fits: a park all path', () => {
+    const paths = Array.from({ length: 10 }, (_, k) => [{ x: 0, z: k * 10 + 5 }, { x: 100, z: k * 10 + 5 }]);
+    expect(parkPond(cells, S, paths, [], slope, 1)).toBeNull();
   });
 });
