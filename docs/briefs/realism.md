@@ -79,6 +79,13 @@ Moretonhampstead 8 from its centre; Ludlow's are its A roads and lanes continuin
    follows them, grid patches only as terrace or estate blocks; scenery towns from the same calls.
 4. Lanes' grades and density (`PRIORS.follow`, more links).
 5. Evidence: side-by-side shots, compare rows, the hero pictures retaken.
+6. Done through #75. What the yardsticks still show, for the coordinator to pick from (nothing assigned after
+   item 3): (a) lane km 1,313–1,655 against the real 2,523–3,368: the rest is farm lanes and tracks that no
+   place owns; a lane from each farmstead to its nearest lane, as `routes.ts` `spurs` does for industries,
+   once the plan exposes the countryside's farm sites (the farms are the countryside session's, `#70`);
+   (b) a town's radials wander 6–7° per 100 m against the real 11.3, the finer wiggle of a centreline that
+   85 m blocks can't carry; (c) villages 72 per 1,000 km² against 129–157 (`AUTO.villages`); (d) the hero
+   pictures (`src/app/art`) still show the town before its radials bent.
 
 ## Also mine, from the logic review (coordinator, 21:22 UTC; `docs/reports/review-2026-09-26.md` on `claude/review-2026-09-26`)
 Lower priority than step 4's PR and the stream above; in this PR or a small one of their own.
