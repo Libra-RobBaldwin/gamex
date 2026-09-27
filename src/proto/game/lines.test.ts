@@ -35,7 +35,7 @@ function run(stopsAt: { x: number; z: number }[], seconds: number, buses = 2) {
 
 describe('bus lines', () => {
   it('call only at their stops, in order, both ways along the line', () => {
-    const { calls, mine, placeOf, line } = run([{ x: -85, z: 0 }, { x: 120, z: 0 }, { x: 0, z: 150 }], 420);
+    const { calls, mine, placeOf, line } = run([{ x: -85, z: 0 }, { x: 120, z: 0 }, { x: 0, z: 150 }], 600);
     expect(mine.size).toBe(2);
     for (const id of mine) {
       const seq = (calls.get(id) ?? []).map(placeOf);
