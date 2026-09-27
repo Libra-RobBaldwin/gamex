@@ -167,7 +167,7 @@ export class Railway {
     if (o.depot !== false) line.depot = this.depotFor(stops[0]);
     for (const t of trains) {
       const why = this.sim.fits(t, t.cars * t.carLen + (t.cars - 1) * 0.9, line);
-      if (why) { if (!o.other) this.nextLine--; return why; }
+      if (why) { if (!o.other) this.nextLine--; return why.replace(/station (\d+)/g, (_, id: string) => this.station(+id)?.name ?? `station ${id}`); }
     }
     this.sim.lines.push(line);
     for (const t of trains.slice(0, this.sim.capacity(line))) this.sim.addTrain(t, line);

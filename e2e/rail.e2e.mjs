@@ -87,7 +87,7 @@ if (!line || line.stops.length !== 2) fail('the rail line was not created');
 
 // run: calls at both stations, doors open at a platform, the crossing shuts and holds the road
 await page.evaluate(() => window.proto.focusOn({ x: -440, z: 116 }, 160));
-let doorsSeen = false, closedSeen = false, carsHeld = 0, onTrack = 0;
+let doorsSeen = false, closedSeen = false, carsHeld = 0, onTrack = 0, doorsWrong = 0, doorsChecked = 0;
 for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a second)
   await wait(1000);
   const s = await page.evaluate((lid) => {
@@ -97,8 +97,17 @@ for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a
     const on = c ? P.traffic.onStretch(c.site.road, c.site.z0, c.site.z1) : false;
     const waitingCars = c ? (P.traffic.barriers.get(c.site.road)?.length ?? 0) : 0;
     const calls = sim.log.filter((e) => e.line === lid).map((e) => e.station);
-    return { doors, closed: c?.down ?? false, held, on, waitingCars, calls, red: sim.stats.redPassed };
+    // doors open on the platform side: every open door is at a platform edge of the station the train stands at
+    let wrong = 0, checked = 0;
+    for (const t of sim.trains) {
+      if (t.line !== l || t.state !== 'dwell' || t.doors !== 1 || t.station === undefined) continue;
+      const sh = R.shapes.get(t.station), pts = P.railDraw.doorsOf(t);
+      const near = (q) => (sh?.platforms ?? []).some((pl) => [pl.edge, ...(pl.twoFaced ? [pl.back] : [])].some((ln) => ln.some((e, i) => i && (() => { const A = ln[i - 1], B = e, dx = B.x - A.x, dz = B.z - A.z, L2 = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((q.x - A.x) * dx + (q.z - A.z) * dz) / L2)); return Math.hypot(A.x + dx * u - q.x, A.z + dz * u - q.z) < 1.2; })())));
+      for (const q of pts) { checked++; if (!near(q)) wrong++; }
+    }
+    return { doors, closed: c?.down ?? false, held, on, waitingCars, calls, red: sim.stats.redPassed, wrong, checked };
   }, line.id);
+  doorsWrong += s.wrong; doorsChecked += s.checked;
   if (s.doors && !doorsSeen) await page.screenshot({ path: `${out}/rail-3-doors.png` });
   doorsSeen ||= s.doors;
   closedSeen ||= s.closed;
@@ -110,6 +119,9 @@ for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a
   if (s.red) fail('a train passed a red signal');
 }
 if (onTrack) fail(`a car was on the level crossing while a train held its block (${onTrack} samples)`);
+console.log('doors checked against the platform edges', doorsChecked, 'wrong side', doorsWrong);
+if (!doorsChecked) fail('no open door was seen to check against a platform');
+if (doorsWrong) fail(`${doorsWrong} open doors were not at a platform edge`);
 await page.evaluate(() => window.proto.focusOn({ x: -440, z: 340 }, 120));
 await wait(2500);
 await page.screenshot({ path: `${out}/rail-5-station.png` });

@@ -4,6 +4,22 @@ Session https://claude.ai/code/session_01EKUWb6f3c3TYr6jHSTbTjp, branch `claude/
 PR #64 (the five review rows below) merged into `claude/cloud-session-history-rvqkm1` at 22:59 UTC.
 A second PR, #69, the coordinator's follow-ups (asked 23:18 UTC), is the section right below; opened 27 Sep 00:46 UTC, CI green locally (122 unit files, six phone e2es).
 
+# Round 3: an adversarial review of rail on the new town (asked 27 Sep 01:51 UTC)
+
+The coordinator: on the town grown along its radials (#67, #70), review rail as the review did for
+buses, failing tests first, then fixes; then the train card and the station card, small, as the bus's.
+
+| # | Ask | Status |
+|---|---|---|
+| S1 | Two stations and a line built by touch on a branch that crosses a radial on the level (the rail e2e). | Not started |
+| S2 | Trains through a level crossing with the new lanes' traffic. | Not started |
+| S3 | A train line that shares track with another. | Not started |
+| S4 | A station on a curve. | Not started |
+| S5 | Doors on the right side at every platform. | Not started |
+| S6 | Save and reload mid-journey. | Not started |
+| S7 | Speed 1× against 4×. | Not started |
+| S8 | The train card and the station card: a name, two or three numbers, one action, as the bus's has. | Not started |
+
 # Round 2: the coordinator's follow-ups (asked 23:18 UTC)
 
 | # | Ask | Status |
