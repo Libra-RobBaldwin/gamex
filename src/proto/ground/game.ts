@@ -5,6 +5,7 @@ import { circlePoly } from '../land';
 import type { Lot, Network } from '../roads';
 import { Ground, type GroundInput, type XZ } from './index';
 import { CROP_NAMES, PALETTE, type CropName } from './covers';
+import { applySeason, groundSeason, onGroundSeason } from './material';
 import type { FieldSource } from './plan';
 import { CanopyMeshes } from './canopymesh';
 import type { CanopyLook } from './canopy';
@@ -36,12 +37,19 @@ export class GameGround {
     const size = Math.ceil(((edge ? edge * 2 : bound * 2 + 160)) / 10) * 10;
     this.ground = new Ground({ region: { x0: -size / 2, z0: -size / 2, size }, seed, texel, hedges, fields });
     this.reach = Math.max(600, Math.ceil((bound * 1.15) / 40) * 40);
+    // the crops follow the page's season (material.ts setGroundSeason; the game sets it from its clock)
+    this.season(groundSeason());
+    onGroundSeason((t) => this.season(t));
   }
+  private style: { crops: Partial<Record<CropName, { a: string; b: string }>> } | null = null;
+  private season(t: number) { applySeason(this.ground.uniforms, t, this.style?.crops); }
   // A map's style: its palette and crops over the British ones (region/styles.ts). Nothing given, nothing changes.
   setStyle(s: { palette: Partial<Record<keyof typeof PALETTE, string>>; crops: Partial<Record<CropName, { a: string; b: string }>> }) {
     const u = this.ground.uniforms, keys = Object.keys(PALETTE) as (keyof typeof PALETTE)[];
     for (const [k, hex] of Object.entries(s.palette)) { const i = keys.indexOf(k as keyof typeof PALETTE); if (i >= 0 && hex) u.uPal.value[i].set(hex); }
     for (const [k, c] of Object.entries(s.crops)) { const i = CROP_NAMES.indexOf(k as CropName); if (i >= 0 && c) { u.uCropA.value[i].set(c.a); u.uCropB.value[i].set(c.b); } }
+    this.style = s;
+    this.season(groundSeason()); // (a crop the style colours keeps its colours; the rest follow the year)
   }
   // what only changes with the roads or the landscaping (kept between plots going up)
   private fixed: Pick<GroundInput, 'blocked' | 'lanes' | 'parks' | 'industrial' | 'water'> | null = null;

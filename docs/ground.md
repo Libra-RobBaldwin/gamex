@@ -144,6 +144,34 @@ tiles draw them), a few a frame after start-up into one mesh a material, claims 
 land registry as a site (no road through a farm), and gives the live ground the yards and tracks to
 paint (`farmGround`, through `GameWorld.extra`).
 
+### The farming year
+
+The fields change with the season without a repaint. `covers.ts` `CROP_YEAR` gives each crop
+keyframes through the year (a month each, wrapping), with the two field colours and the rows as
+`CROPS` has them; `cropLookAt(crop, t)` blends between them, so nothing ever jumps. The looks in
+`CROPS` are mid-July's, which the game starts on (`START_MONTH`). What the keys follow, for the
+lowland English year: winter wheat drilled in October, low and green over the winter, thick by
+May, turning in June, gold in July, cut in August, its stubble ploughed in September; spring
+barley ploughed over the winter, drilled in April, pale gold by July; oilseed rape low and green
+over the winter, in yellow flower April to May, pods to July, cut in August; a ley cut for silage
+in May and July; the stubble field is winter barley's, cut early in July and left over the
+winter, ploughed and drilled in the spring; pasture yellows in a dry August and dulls in the
+winter. A ploughed field stays bare, darker when wet in the winter.
+
+`material.ts` `applySeason(uniforms, t, fixed?)` sets a ground's crop colour and row uniforms
+for a point in the year; a crop the map's style colours (a desert's, snow's: `region/styles.ts`)
+keeps its colours all year. The page has one season, `setGroundSeason(t)`, which tells every
+ground that listens (`onGroundSeason`): the live ground (`GameGround`) and the 50 km map's tiles
+(`worldmap/view.ts`, whose far tiles tone the crops towards the grass as before), so the live
+area and the tiles agree at any date. The game sets it from its clock each frame
+(`seasonOf(clock)`: a game day is a month in the town's life, so a year passes in twelve game
+days, about 72 minutes of play). The ground demo's Month button steps through it. Screenshots
+at 700 m and 2 km through the year are in `docs/reports/country/season-*.jpg`.
+
+Not seasonal yet: the trees' leaves and the woods' canopy (their colours are baked into the tiles
+and the tree materials), snow, and the far rim beyond the map's edge (`game/edge.ts`, a fixed
+palette).
+
 ### Painting and repainting
 
 `paint` fills the whole map. `change(input, boxes)` repaints only round the boxes: each texel

@@ -125,7 +125,11 @@ lakes and sea, and terrain. It's the ground's field source everywhere (docs/grou
   belts, conifer plantations a farm block at a time on the high ground). Then rough grazing on the
   high ground, steep slopes and by the water, then arable where the block is ploughed (flat land
   away from the villages and the water), else pasture. Each farm grows two main crops, so
-  neighbouring fields are often the same. No woods or hedges on fields under the sea or a lake.
+  neighbouring fields are often the same; a block high among the map's land or steep grows less
+  wheat and rape and more barley and grass leys (`COUNTRYSIDE.upland`: on seed 7, arable fields in
+  the lowest third of the land grow wheat or rape 40% of the time, the highest quarter 14%). What
+  a crop looks like changes with the game's season (`docs/ground.md`, "The farming year"). No
+  woods or hedges on fields under the sea or a lake.
 - **The high ground** is ranked among the map's own land (`heightRank`, from a kilometre grid of
   its heights): the top 15% is rough grazing, the top tenth has more woods, the top fifth
   plantations. (Not a share of the highest point: a 50 km map is a plateau cut by valleys, and

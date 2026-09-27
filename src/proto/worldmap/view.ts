@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { workerLoader } from '../world/worker';
 import type { LoadRequest } from '../world/stream';
-import { groundUniforms, patchGround, setOrigin, coverTexture, forgetGround, type GroundUniforms } from '../ground/material';
+import { groundUniforms, patchGround, setOrigin, coverTexture, forgetGround, applySeason, groundSeason, onGroundSeason, type GroundUniforms } from '../ground/material';
 import { CROP_NAMES, PALETTE, type CropName } from '../ground/covers';
 import { Hedges } from '../ground/hedges';
 import type { HedgeTree, Piece } from '../ground/hedgerows';
@@ -76,6 +76,7 @@ export class WorldView {
     this.sharedFar = groundUniforms(this.shared.uCoverMap.value);
     for (const u of [this.shared, this.sharedFar]) u.uSlope.value.set(...slopeLook()); // (rock on the steep, moor on the tops: worldmap/terrain.ts)
     this.setStyle(host.look);
+    onGroundSeason(() => this.setStyle(this.look!)); // (the crops follow the game's season, as the live ground's do: ground/covers.ts CROP_YEAR)
     const n = Math.max(1, Math.min(3, host.workers ?? Math.min(2, Math.max(1, (navigator.hardwareConcurrency ?? 2) - 2))));
     for (let k = 0; k < n; k++) {
       const w = new Worker(new URL('./tile.worker.ts', import.meta.url), { type: 'module' });
@@ -87,12 +88,16 @@ export class WorldView {
     for (let j = -m; j < m; j++) for (let i = -m; i < m; i++) this.roots.push([2, i, j]);
   }
 
-  // The map's palette over the ground's (as GameGround.setStyle does for the live ground).
+  // The map's palette over the ground's (as GameGround.setStyle does for the live ground), and the
+  // crops as the season has them (a crop the style colours keeps its colours).
+  private look: StyleLook | null = null;
   setStyle(s: StyleLook) {
+    this.look = s;
     const keys = Object.keys(PALETTE) as (keyof typeof PALETTE)[];
     for (const u of [this.shared, this.sharedFar]) {
       for (const [k, hex] of Object.entries(s.palette)) { const i = keys.indexOf(k as keyof typeof PALETTE); if (i >= 0 && hex) u.uPal.value[i].set(hex); }
       for (const [k, c] of Object.entries(s.crops)) { const i = CROP_NAMES.indexOf(k as CropName); if (i >= 0 && c) { u.uCropA.value[i].set(c.a); u.uCropB.value[i].set(c.b); } }
+      applySeason(u, groundSeason(), s.crops);
     }
     // the canopy: the woods' own greens, the broadleaves' and the conifers' (the shader mixes the two)
     const P = this.sharedFar.uPal.value, crown = new THREE.Color(s.trees.crown), pine = new THREE.Color(s.trees.pine);

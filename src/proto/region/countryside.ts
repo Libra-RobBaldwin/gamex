@@ -17,6 +17,8 @@ export const COUNTRYSIDE = {
   // ---- what fields are ----
   crops: { wheat: 0.34, barley: 0.22, ley: 0.14, stubble: 0.11, plough: 0.12, rape: 0.07 }, // arable shares (sum 1)
   farmCrops: [0.45, 0.25], // share of a farm's arable in its first and second crops (the rest at random)
+  // the lie of the land: a block high among the map's land (its rank past `from`, × gain) or steep grows less wheat and rape, more barley and grass leys (the shares scaled by these, then made to sum to 1)
+  upland: { from: 0.5, gain: 2.5, slope: 8, wheat: 0.4, rape: 0.15, barley: 1.5, ley: 2.5 },
   ley: { silageFarm: 0.35, onSilage: 0.45, otherwise: 0.12 }, // grass fields cut for silage
   rough: { high: 0.85, highChance: 0.6, water: 25, waterChance: 0.35, steep: 0.12, steepChance: 0.45 },
   // ---- woods (woods.ts) ----

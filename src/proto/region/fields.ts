@@ -334,7 +334,15 @@ export class Countryside {
     const { seed } = this.inp, inp = this.inp;
     const woods = chooseWoods(sites, { seed, woods: inp.woods ?? 1, pines: inp.pines ?? 0.3 });
     const kr = rng(mix(seed, 63, block));
-    const cs = C.crops, cum = [cs.wheat, cs.wheat + cs.barley, cs.wheat + cs.barley + cs.ley, cs.wheat + cs.barley + cs.ley + cs.stubble, 1 - cs.rape];
+    // the crops' shares, by the lie of the block: high or steep land grows less wheat and rape,
+    // more barley and grass leys (the rotation of an upland farm), the low ground the reverse
+    let hi = 0, sl = 0;
+    for (const s of sites) { hi += s.high; sl += s.slope; }
+    hi /= sites.length || 1; sl /= sites.length || 1;
+    const U = C.upland, up = Math.min(1, Math.max(0, (hi - U.from) * U.gain + sl * U.slope)), lerp = (k: number) => 1 + (k - 1) * up;
+    const cs = C.crops, w = { wheat: cs.wheat * lerp(U.wheat), barley: cs.barley * lerp(U.barley), ley: cs.ley * lerp(U.ley), stubble: cs.stubble, plough: cs.plough, rape: cs.rape * lerp(U.rape) };
+    const tot = w.wheat + w.barley + w.ley + w.stubble + w.plough + w.rape;
+    const cum = [w.wheat / tot, (w.wheat + w.barley) / tot, (w.wheat + w.barley + w.ley) / tot, (w.wheat + w.barley + w.ley + w.stubble) / tot, 1 - w.rape / tot];
     const pickCrop = (c: number): Crop => (c < cum[0] ? 'wheat' : c < cum[1] ? 'barley' : c < cum[2] ? 'ley' : c < cum[3] ? 'stubble' : c < cum[4] ? 'plough' : 'rape');
     // a farm grows two or three crops at a time, so fields side by side are often the same
     const fr = rng(mix(seed, 64, block)), farm: [Crop, Crop, boolean] = [pickCrop(fr()), pickCrop(fr()), fr() < C.ley.silageFarm];

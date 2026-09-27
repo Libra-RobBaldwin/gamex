@@ -49,6 +49,18 @@ describe('the map lays out its farmland', () => {
     expect(once / n).toBeGreaterThan(0.995); // (a point exactly on a boundary may count twice)
   });
 
+  it('grows wheat and rape on the low ground, barley and leys on the high', () => {
+    // (the whole 50 km map's farmland, so the hills are in it: this box alone is a river valley)
+    const wide = { x0: -12000, z0: -12000, x1: 12000, z1: 12000 }, far = lay(make(world), wide).fields.filter((f) => inside(f, wide) && f.kind === 'arable');
+    const rank = (f: Field) => { const c = centroidOf(f.poly); return inp.heightRank!(inp.heightAt!(c.x, c.z)); };
+    const low = far.filter((f) => rank(f) < 0.35), high = far.filter((f) => rank(f) > 0.75);
+    const share = (l: Field[], k: string[]) => l.filter((f) => k.includes(f.crop)).length / l.length;
+    console.log(`arable fields low ${low.length} high ${high.length}; wheat+rape low ${(share(low, ['wheat', 'rape']) * 100).toFixed(0)}% high ${(share(high, ['wheat', 'rape']) * 100).toFixed(0)}%; barley+ley low ${(share(low, ['barley', 'ley']) * 100).toFixed(0)}% high ${(share(high, ['barley', 'ley']) * 100).toFixed(0)}%`);
+    expect(high.length).toBeGreaterThan(30);
+    expect(share(low, ['wheat', 'rape'])).toBeGreaterThan(share(high, ['wheat', 'rape']) + 0.1);
+    expect(share(high, ['barley', 'ley'])).toBeGreaterThan(share(low, ['barley', 'ley']) + 0.1);
+  });
+
   it('has fields of believable size: mostly 2 to 10 ha, bigger where they are ploughed', () => {
     const ha = farmland.map((f) => area(f.poly) / 1e4).sort((a, b) => a - b), q = (p: number) => ha[Math.floor(ha.length * p)];
     expect(q(0.5)).toBeGreaterThan(2);

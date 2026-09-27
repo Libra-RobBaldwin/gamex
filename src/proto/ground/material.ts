@@ -8,7 +8,7 @@
 // positions relative to it, plus the origin modulo the textures' common period (worked out here in
 // double precision), so nothing swims or bands however far away the world is.
 import * as THREE from 'three';
-import { CROPS, CROP_NAMES, DIRS, PALETTE, type GroundQuality } from './covers';
+import { CROPS, CROP_NAMES, DIRS, PALETTE, cropLookAt, type CropName, type GroundQuality } from './covers';
 import { MACRO_PERIOD, makeDetail, makeMacro } from './textures';
 
 export const DETAIL_REPEAT = MACRO_PERIOD / 160; // 12.8 m per repeat of the detail texture: a whole number of repeats in the period
@@ -215,6 +215,33 @@ export function patchGround(m: THREE.MeshLambertMaterial, u: GroundUniforms, ter
   return m;
 }
 export function forgetGround(m: THREE.MeshLambertMaterial) { materials.delete(m); }
+
+// ---- the season ----
+// The crops' colours and rows at a point in the year (covers.ts CROP_YEAR), set on a ground's
+// uniforms; a crop a map's style gives its own colours (a desert's, snow's) keeps them all year.
+// Nothing is repainted: the cover map only says which crop a field grows, and the shader draws it
+// from these, so the live ground and the map's far tiles change together.
+export function applySeason(u: GroundUniforms, t: number, fixed?: Partial<Record<CropName, unknown>>) {
+  CROP_NAMES.forEach((c, i) => {
+    const k = cropLookAt(c, t), r = u.uCropRow.value[i];
+    r.x = k.rows; r.y = k.row; r.z = k.tram;
+    if (fixed?.[c]) return;
+    u.uCropA.value[i].setRGB(k.a[0], k.a[1], k.a[2], THREE.SRGBColorSpace);
+    u.uCropB.value[i].setRGB(k.b[0], k.b[1], k.b[2], THREE.SRGBColorSpace);
+  });
+}
+// The page's one season (0 to 1 through the year), told to every ground that listens (the live
+// ground, the world's tiles) when it moves.
+let season = 6.5 / 12;
+const seasonListeners = new Set<(t: number) => void>();
+export const groundSeason = () => season;
+export function setGroundSeason(t: number) {
+  t = ((t % 1) + 1) % 1;
+  if (Math.abs(t - season) < 1 / 3000) return; // (under a quarter of a day: nothing would show)
+  season = t;
+  for (const f of seasonListeners) f(t);
+}
+export function onGroundSeason(f: (t: number) => void) { seasonListeners.add(f); return () => { seasonListeners.delete(f); }; }
 
 // The ground's fragment code as compiled at a quality level (its #if blocks resolved), for
 // counting texture reads.
