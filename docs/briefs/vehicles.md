@@ -6,9 +6,11 @@ A second PR, #69, the coordinator's follow-ups (asked 23:18 UTC), is the section
 
 # Round 5: the next items from this brief (asked 27 Sep 05:51 UTC, after #76 merged)
 
-The coordinator: merge integration and carry on with what the brief left. Taken in the order a
-player would notice them: first even gaps for trains (two trains bought together ran nose to tail
-all day, the second at a red signal behind the first at every station).
+The coordinator: merge integration and carry on with what the brief left; then (06:03 UTC) the
+user's ask on parked cars, which came before the rest. PR #81, opened 27 Sep 06:55 UTC; locally:
+typecheck clean, 133 unit files (1206 tests) green on the merged tree, five phone e2es and the
+menu green; the loop e2e fails on this branch and identically on the untouched integration head
+(the town keeps growing after its line is withdrawn: the economy's, said on the PR).
 
 | # | Item | Status |
 |---|---|---|
