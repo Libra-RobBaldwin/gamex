@@ -320,3 +320,14 @@ economy and its fetch are the real-region and economy owners' (round 1's item 7 
   (lines with the building tap, loop, rail, save with the bulldoze-refund step, stations, menu on the build):
   all pass. CI runs them again on the PR.
 - `npx vitest run --no-file-parallelism` on the rebased tree: see the PR.
+
+## Test results (third PR, round 2, on the branch merged with integration at 28593b5)
+
+- `npx tsc --noEmit`: clean.
+- `npx vitest run --no-file-parallelism`: 128 files, 1,128 passed, 1 expected fail (row 9's pinch-out
+  test), 8 skipped, none failed.
+- The phone e2es on a production build of the merged branch (`vite preview`, 412×915, DPR 2, touch,
+  SwiftShader): lines (with the framing check), rail (with the touch-drawn blueprint), save (with the
+  address and the reload), stations and loop pass; menu passed after the address fix's follow-up (a
+  save on the way out had rewritten the menu's entry), and save was run again on that build. CI runs
+  them all on the PR.
