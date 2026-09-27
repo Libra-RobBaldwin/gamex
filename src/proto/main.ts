@@ -33,7 +33,7 @@ import { TownCrowds } from './game/crowds';
 import { Lines, StopMarkers, routeMesh, callOrder, type Line } from './game/lines';
 import { STOP_WALK_M, TownEconomy, TOWN_NAME } from './game/econ';
 import { STOPS } from './econdefs';
-import { Purse, PRICE_SHARE } from './game/money';
+import { FARE, Purse, PRICE_SHARE } from './game/money';
 import { IX_BLURB, IX_FORMS, IX_NAME, IX_SIZES, IX_SIZE_BLURB, IX_SIZE_NAME, buildPair, motorwayCloverleaf, motorwayWithJunction, pairCrossed, pairToNode, scratch, type Interchange, type IxForm, type IxSize, type SlipStyle } from './interchange/build'; // motorway junctions (docs/motorways.md)
 import { buildSlip, planCloverleaf, planJunction, planSlip, roadCrossed, type IxPlan, type SlipPlan } from './interchange/plan';
 import { Railway } from './rail/railway'; // stations, signalling and rail lines (docs/rail.md)
@@ -1296,7 +1296,7 @@ function showLineInfo(l: Line) {
     stats: [['Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
     facts: [['Stops', l.stops.map((id) => lines.name(id)).join(' · ')]],
     // (the economy's own verdict on the line comes first when it can't run it: no route between its stops, say)
-    note: `${st && !st.ok && st.problem ? `This line isn't carrying anyone: ${st.problem}. ` : ''}Each rider pays £2${books.lastRunning ? `; the buses cost ${money(books.lastRunning)} a day to run` : ', and the buses cost a little each day to run'}.`,
+    note: `${st && !st.ok && st.problem ? `This line isn't carrying anyone: ${st.problem}. ` : ''}Each rider pays £${FARE}${books.lastRunning ? `; the buses cost ${money(books.lastRunning)} a day to run` : ', and the buses cost a little each day to run'}.`,
     actions: [
       { label: `Bus · ${money(busPrice(l.offer))}`, title: `Add a bus for ${money(busPrice(l.offer))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(busPrice(l.offer)), onClick: () => { buyBus(l); showLineInfo(l); } },
       { label: 'Sell', title: `Sell a bus for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`Bus sold for ${money(sell)}`, 'bus'); setTimeout(() => showLineInfo(l), 50); } },
