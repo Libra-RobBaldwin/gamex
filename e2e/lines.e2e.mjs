@@ -89,16 +89,22 @@ if (third === null) fail('a third bus could not be added'); else line.buses.push
 const gapsAt = () => page.evaluate((id) => { const sp = window.proto.traffic.spacing(id); return { min: sp.buses.length ? Math.min(...sp.buses.map((b) => b.ahead)) : 0, at: sp.buses.map((b) => +b.at.toFixed(2)), holds: window.proto.traffic.stats.holds }; }, line.id);
 const gap0 = await gapsAt();
 console.log('gaps round the loop at the start', JSON.stringify(gap0));
-// run the clock at 4x and log every call
+// log every call, then run the game six sim minutes at 16x: the frame loop takes at most 0.1 s of
+// real time a frame (main.ts) in steps of 1/30 s, so on SwiftShader at half a second a frame the
+// clock at 4x gives a slow runner too little sim time for three buses to call three times each,
+// and the run would measure the runner, not the buses; at 16x each frame is 1.6 s of sim whatever
+// the frame rate, and the traffic, the people and the railway all step together as they always do
 await page.evaluate(() => {
   const T = window.proto.traffic, orig = T.onBusStop;
   window.__calls = [];
+  window.__t0 = T.clock;
   T.onBusStop = (seg, st, bus) => { window.__calls.push([bus, st.id]); return orig(seg, st, bus); };
-  window.proto.setSpeed(4);
+  window.proto.setSpeed(16);
 });
 await page.tap('.close').catch(() => {});
-// until every bus on it has made three calls (SwiftShader runs a few frames a second), or 4 minutes
-await page.waitForFunction((ids) => ids.every((id) => window.__calls.filter(([b]) => b === id).length >= 3), line.buses, { timeout: 240000, polling: 2000 }).catch(() => {});
+const ran = await page.waitForFunction(() => window.proto.traffic.clock - window.__t0 >= 6 * 60 * 1000, null, { timeout: 360000, polling: 2000 }).then(() => true, () => false);
+console.log('sim minutes run', await page.evaluate(() => ((window.proto.traffic.clock - window.__t0) / 60000).toFixed(1)), ran ? '' : '(short: the wall-clock limit came first)');
+console.log('buses after', JSON.stringify(await page.evaluate((ids) => ids.map((id) => { const c = window.proto.traffic.cars.find((x) => x.id === id); return c ? { id, seg: c.seg.id, v: +c.v.toFixed(1), why: c.why, leg: c.leg, wait: +c.wait.toFixed(0) } : { id, depot: true }; }), line.buses)));
 // even gaps: the rule engaged (a bus held at a stop for the one ahead to get away), and the
 // smallest gap between buses is no worse than where the third bus started. (A few sim minutes
 // on SwiftShader is too little to measure headways settling; traffic.spacing.test.ts does that
@@ -122,8 +128,9 @@ for (const [bus, seq] of Object.entries(res)) {
   const st = order.indexOf(seq[0]);
   seq.forEach((k, i) => { if (k !== order[(st + i) % order.length]) fail(`bus ${bus} call ${i} out of order: ${seq}`); });
 }
-// (SwiftShader runs a few frames a second: at least one call each here; game/lines.test.ts checks many)
-if (calls < line.buses.length) fail(`only ${calls} calls`);
+// (six sim minutes in this town's traffic, where a bus can stand a minute in a queue: at least a
+// call each on average; game/lines.test.ts checks many more, in order)
+if (calls < line.buses.length) fail(`only ${calls} calls in six sim minutes`);
 
 // tap one of its buses
 await page.evaluate(() => window.proto.setSpeed(0));

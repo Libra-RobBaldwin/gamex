@@ -60,9 +60,12 @@ e2es green (the rail e2e checked 32 open doors against the platform edges, none 
   all started at the first call): over the second ten minutes the intervals between buses at each
   of the line's calls vary by 3–17% of their mean with the switch on (12 holds), and by up to 118%
   with it off (0 holds). Asserted at under 30% on, over 60% off. The switch survives a save.
-- **Lines e2e** (`e2e/lines.e2e.mjs`): a third bus is added (it starts 0.24 of the loop behind
-  another), and the run must show the rule engaging (at least one hold) and the smallest gap round
-  the loop no worse than at the start. A few sim minutes on SwiftShader is too little to measure
+- **Lines e2e** (`e2e/lines.e2e.mjs`): a third bus is added (it starts close behind another), and
+  the run must show the rule engaging (at least one hold) and the smallest gap round the loop no
+  worse than at the start. Since PR #72 the run is six sim minutes at 16× (the frame loop takes at
+  most 0.1 s of real time a frame, in steps of 1/30 s), not four wall-clock minutes at 4×: on
+  SwiftShader at half a second a frame that gave a slow runner three or four sim minutes and the
+  check measured the runner, not the buses (CI failed once that way). A few sim minutes on SwiftShader is too little to measure
   headways settling on the phone build; the e2e prints the gaps and the unit test carries the
   20-minute evidence.
 - Not done: no anti-bunching for trains; no "holding" shown on the map itself (the bus sheet says it).
