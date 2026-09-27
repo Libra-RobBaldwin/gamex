@@ -51,7 +51,7 @@ const changed = await A.evaluate(() => {
   const P = window.proto, net = P.net;
   // a branch line just west of the start town, north to south, two stations on it and a rail line between them
   P.purse.balance += 3_000_000;
-  P.buildRoad({ x: -440, z: -380 }, { x: -440, z: 580 }, 'rail-branch');
+  P.buildRoad({ x: -480, z: -380 }, { x: -480, z: 580 }, 'rail-branch');
   P.rebuild();
   // and a one-way carriageway west out of town, bridging the branch (the region starts with neither)
   P.buildRoad({ x: -300, z: 300 }, { x: -1300, z: 300 }, 'dual', { oneway: true });

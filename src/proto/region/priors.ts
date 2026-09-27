@@ -71,6 +71,9 @@ export const PRIORS = {
     smallestGapDeg: { town: [1, 2, 4, 8, 11], village: [4, 10, 22, 48, 87] },
     // what the ways out are: most of a village's are lanes
     byClass: { town: { primary: 32, a: 42, b: 65, minor: 196 }, village: { primary: 109, a: 112, b: 206, minor: 1202 } },
+    // the B roads and lanes out of a place, per place (byClass over the 31 towns and 330 villages):
+    // what a seeded map, which starts with lanes only, should give each
+    minorPerPlace: { town: 8, village: 4 },
   },
   // ---------------- how a place is put together (tools/os/towns.mjs) ----------------
   // Over the same 31 towns and 330 villages: the ways out that, followed in, reach the middle are the
@@ -93,6 +96,16 @@ export const PRIORS = {
     closeShare: { town: [0.09, 0.14, 0.18, 0.22, 0.26], village: [0, 0, 0.15, 0.33, 0.5] },
     sideStreetLengthM: { town: [33, 55, 98, 191, 373], village: [31, 60, 133, 413, 1144] },
     closeLengthM: { town: [49, 67, 103, 165, 270], village: [49, 66, 106, 177, 430] },
+    // a radial bends: from the edge in to the middle its heading turns this much net, per km of its
+    // run inside, and wanders this much from one 100 m to the next; over its first 600 m outside
+    // it turns this much net (the stems: routes.ts)
+    radialTurnInsideDegPerKm: { town: [5.4, 11.7, 24.2, 45.8, 66.8], village: [5.7, 15.1, 39.3, 72, 117] },
+    radialWanderInsideDegPer100m: { town: [6.1, 8.5, 11.3, 13.5, 17.4], village: [4.5, 7.7, 11.3, 15.6, 20.2] },
+    radialNetTurnOutsideDeg: { town: [3.5, 7.8, 16.5, 28.9, 44.4], village: [2.9, 7.9, 18.4, 34.4, 55.9] },
+    // the houses along a radial (buildings within 40 m of it, per 100 m), medians by quarter of its
+    // run from the middle to the edge: the ribbon thins over its last quarter to half the middle's;
+    // beyond the edge the median is none (a quarter of radials straggle on at 0.5–1.5 per 100 m)
+    housesPer100mByQuarter: { town: [4.67, 6.27, 5.6, 3.02], village: [3.27, 5.67, 5.33, 2.4] },
   },
   follow: {
     motorway: { gradeMedian: 0.018, gradeP90: 0.064, over10: 0.043, gradeOverSlope: 0.45, aboveValleyM: 13 }, // (Exe only: the M5)

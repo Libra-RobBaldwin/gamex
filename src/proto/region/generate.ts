@@ -9,7 +9,7 @@
 //
 // Pure: no three.js, no DOM, no Network. Plots, infill and buildings come from the game's own
 // Network and buildgen once the streets are built (docs/region.md).
-import { rng, range, pick, type Rand } from './random';
+import { rng, range, pick, type Rand, mix } from './random';
 import { MapWater, type XZ } from '../worldmap/water';
 import { GRID_PLAN, PRIORS } from './priors';
 
@@ -34,7 +34,7 @@ export interface Settlement {
 export interface Spoke extends XZ { ux: number; uz: number; along: 'high' | 'main' }
 export type Role = 'high' | 'main' | 'street' | 'industrial';
 // One street, as the game builds it: net.build(snap(a), snap(b), c, { type }).
-export interface StreetCall { settlement: number; a: XZ; b: XZ; c?: XZ; type: string; role: Role }
+export interface StreetCall { settlement: number; a: XZ; b: XZ; c?: XZ; type: string; role: Role; along?: [number, number] }
 // an industrial area: inside a polygon, or strictly inside a box (either may be given)
 export interface ZoneRule { kind: 'industrial'; poly?: XZ[]; box?: { x0: number; z0: number; x1: number; z1: number }; settlement?: number }
 export interface Link { a: number; b: number; length: number; road: 'A' | 'B'; water: boolean }
@@ -64,13 +64,13 @@ export const reach = (kind: Kind, r: number) => r + (KINDS[kind].industrial ? KI
 // dropped, then only what's joined to the centre is kept, and the calls come out in the order they're
 // reached from there, each starting on a street already built: so every place is one connected piece.
 interface LNode { x: number; z: number }
-interface LEdge { a: LNode; b: LNode; role: Role; curve: number; type?: string }
+interface LEdge { a: LNode; b: LNode; role: Role; curve: number; type?: string; along?: [number, number] }
 const NODE = (n: Map<string, LNode>, x: number, z: number) => { const k = `${Math.round(x)},${Math.round(z)}`; let v = n.get(k); if (!v) n.set(k, (v = { x, z })); return v; };
 const pickQ = (r: Rand, qsv: readonly number[]) => { // a draw between a prior's quartiles (the 25th to the 75th)
   return qsv[1] + (qsv[3] - qsv[1]) * r();
 };
 export function layStreets(s: Settlement, mw: MapWater, bound: number): { streets: StreetCall[]; zone: ZoneRule | null } {
-  const K = KINDS[s.kind], S = K.spacing, r = rng(s.seed), organic = s.plan === 'organic';
+  const K = KINDS[s.kind], S = K.spacing, r = rng(s.seed), rb = rng(mix(s.seed, 41)), organic = s.plan === 'organic'; // (rb: the radials' bends, a stream of their own)
   const T = s.kind === 'village' || s.kind === 'hamlet' ? 'village' : 'town', P = PRIORS.towns;
   const nodes = new Map<string, LNode>(), edges: LEdge[] = [];
   const centre = NODE(nodes, s.x, s.z);
@@ -127,13 +127,26 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
     // the line: vertices a block or so apart, wandering a little
     const verts: { x: number; z: number; d: number; h: number }[] = [{ x: start.x, z: start.z, d: 0, h: angle }];
     let x = start.x, z = start.z, h = angle, run = 0;
-    const bend = organic ? range(r, -0.05, 0.05) : 0;
+    // (it bends as real radials do, grid plan or not: a steady drift one way, PRIORS.towns
+    // radialTurnInsideDegPerKm, and sweeping bends, a curvature that carries over from one block to
+    // the next and wanders, so that its heading changes by radialWanderInsideDegPer100m from one
+    // 100 m to the next; the high street runs straight through the middle)
+    const drift = ((pickQ(rb, P.radialTurnInsideDegPerKm[T]) * Math.PI) / 180 / 1000) * (rb() < 0.5 ? -1 : 1);
+    const wander = (1.73 * pickQ(rb, P.radialWanderInsideDegPer100m[T]) * Math.PI) / 180 / 100; // (measured over 200 m windows as the real ones are, the bends come out near the measured wander)
+    let rate = 0;
     while (run < L - 20) {
       const step = Math.min(S * range(r, 0.8, 1.2), L - run);
-      if (organic && !(high && run < 1.7 * S)) h += bend + range(r, -0.06, 0.06); // (the high street runs straight through the middle)
+      rate = 0.6 * rate + range(rb, -wander, wander);
+      if (!(high && run < 1.7 * S)) h += Math.max(-0.35, Math.min(0.35, (drift + rate) * step));
       x += Math.cos(h) * step; z += Math.sin(h) * step; run += step;
       verts.push({ x, z, d: run, h });
     }
+    // (and never crosses a radial laid before it: cut short at the block before it would)
+    for (let k = 1; k < verts.length; k++) {
+      const a = verts[k - 1], b = verts[k];
+      if (edges.some((e) => e.role !== 'street' && e.a !== start && e.b !== start && meet(a as LNode, b as LNode, e.a, e.b) >= 0)) { verts.splice(Math.max(2, k)); break; }
+    }
+    run = verts[verts.length - 1].d;
     // where the side streets branch: every `every` metres from a block out, well short of the end
     const branches: number[] = [];
     // (a radial longer than a block always has one, even in the smallest village)
@@ -149,6 +162,7 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
       const q = posAt(m.d), n = m.node ?? NODE(nodes, q.x, q.z);
       if (n === pts[pts.length - 1]) continue;
       add(pts[pts.length - 1], n, high ? 'high' : 'main', 0);
+      edges[edges.length - 1].along = [dist[dist.length - 1] / run, m.d / run]; // (where the piece lies along its radial, 0 the middle, 1 the end)
       pts.push(n); dist.push(m.d); heads.push(q.h);
       if (m.branch) branchAt(n, q.h);
     }
@@ -261,17 +275,27 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
     if (e.role !== 'street') continue;
     let t0 = 1, hit: LEdge | undefined;
     for (const f of trunk) { if (f.a === e.a || f.b === e.a || f.a === e.b || f.b === e.b) continue; const t = meet(e.a, e.b, f.a, f.b); if (t >= 0 && t < t0) { t0 = t; hit = f; } }
+    // (one that would meet it too flat for a junction, or within 40 m, stops 25 m short instead, a
+    // close, if that leaves it 40 m; so does one that would cross a street already laid; and one
+    // that would pass within 25 m of another street's node stops 30 m short of it: with the radials
+    // bending, the streets square off them meet at every angle, as real side streets do)
     let b = e.b;
-    if (hit) {
-      const L0 = Math.hypot(e.b.x - e.a.x, e.b.z - e.a.z), Lf = Math.hypot(hit.b.x - hit.a.x, hit.b.z - hit.a.z);
-      const sin = Math.abs(((e.b.x - e.a.x) * (hit.b.z - hit.a.z) - (e.b.z - e.a.z) * (hit.b.x - hit.a.x)) / (L0 * Lf));
-      if (sin < 0.35 || L0 * t0 < 40) continue;
-      b = NODE(nodes, e.a.x + (e.b.x - e.a.x) * t0, e.a.z + (e.b.z - e.a.z) * t0);
-    }
-    const L = Math.hypot(b.x - e.a.x, b.z - e.a.z), ux = (b.x - e.a.x) / L, uz = (b.z - e.a.z) / L;
-    if (laid.some((f) => f.role === 'street' && f.a !== e.a && f.b !== e.a && f.a !== b && f.b !== b && meet(e.a, b, f.a, f.b) >= 0)) continue;
-    const tooNear = (q: LNode) => { if (q === e.a || q === b) return false; const t = (q.x - e.a.x) * ux + (q.z - e.a.z) * uz; return t > 15 && t < L + 15 && Math.abs(-(q.x - e.a.x) * uz + (q.z - e.a.z) * ux) < 25; };
-    if (laid.some((f) => tooNear(f.a) || tooNear(f.b))) continue;
+    const along = (t: number) => NODE(nodes, e.a.x + (b.x - e.a.x) * t, e.a.z + (b.z - e.a.z) * t);
+    const tee = (f: LEdge, t: number): boolean => {
+      const L0 = Math.hypot(b.x - e.a.x, b.z - e.a.z), Lf = Math.hypot(f.b.x - f.a.x, f.b.z - f.a.z);
+      const sin = Math.abs(((b.x - e.a.x) * (f.b.z - f.a.z) - (b.z - e.a.z) * (f.b.x - f.a.x)) / (L0 * Lf));
+      if (sin >= 0.35 && L0 * t >= 40) { b = along(t); return true; }
+      if (L0 * t - 25 >= 40) { b = along((L0 * t - 25) / L0); return true; }
+      return false;
+    };
+    if (hit && !tee(hit, t0)) continue;
+    let s0 = 1, cross: LEdge | undefined;
+    for (const f of laid) { if (f.role !== 'street' || f.a === e.a || f.b === e.a || f.a === b || f.b === b) continue; const t = meet(e.a, b, f.a, f.b); if (t >= 0 && t < s0) { s0 = t; cross = f; } }
+    if (cross && !tee(cross, s0)) continue;
+    let L = Math.hypot(b.x - e.a.x, b.z - e.a.z), ux = (b.x - e.a.x) / L, uz = (b.z - e.a.z) / L;
+    const nearAt = (q: LNode) => { if (q === e.a || q === b) return Infinity; const t = (q.x - e.a.x) * ux + (q.z - e.a.z) * uz; return t > 15 && t < L + 15 && Math.abs(-(q.x - e.a.x) * uz + (q.z - e.a.z) * ux) < 25 ? t : Infinity; };
+    let tn = Infinity; for (const f of laid) tn = Math.min(tn, nearAt(f.a), nearAt(f.b));
+    if (tn < Infinity) { if (tn - 30 < 40) continue; b = along((tn - 30) / L); L = tn - 30; }
     laid.push(b === e.b ? e : { ...e, b, curve: 0 });
   }
   edges.length = 0; edges.push(...laid);
@@ -286,7 +310,7 @@ export function layStreets(s: Settlement, mw: MapWater, bound: number): { street
     // the city's boulevard only through its centre, then an avenue; a radial is its main type near the
     // middle and a street further out
     const type = e.type ?? (e.role === 'high' ? (s.kind === 'city' && far > 2.5 * S ? 'avenue' : high) : e.role === 'main' ? (far > s.r * 0.9 ? K.street[0] : K.main) : e.role === 'industrial' ? 'street' : streetType());
-    return { settlement: s.id, a: fwd ? A : B, b: fwd ? B : A, c, type, role: e.role };
+    return { settlement: s.id, a: fwd ? A : B, b: fwd ? B : A, c, type, role: e.role, along: e.along && (fwd ? e.along : [e.along[1], e.along[0]]) };
   });
   // the ways out: each radial's end, facing out along it; the gates are the high street's two
   const reached = new Set<LNode>(); for (const { e } of order) { reached.add(e.a); reached.add(e.b); }
@@ -362,10 +386,32 @@ export function suggestLinks(ss: Settlement[], mw: MapWater): Link[] {
   const major = gabriel(ss.filter((s) => !minor(s)));
   const all = gabriel(ss).filter(([a, b]) => minor(a) || minor(b));
   const keep: [Settlement, Settlement][] = [...major];
+  // (a real town has about eight B roads and lanes out of it, a village four, a hamlet its lane
+  // through: PRIORS.exits.minorPerPlace; so a town or city takes every neighbour's lane, a village
+  // up to its share, a hamlet two)
   const count = new Map<number, number>();
+  const share = (s: Settlement) => (s.kind === 'hamlet' ? 2 : s.kind === 'village' ? PRIORS.exits.minorPerPlace.village : Infinity);
   for (const e of all) {
-    const v = e.filter(minor);
-    if (v.some((x) => (count.get(x.id) ?? 0) < 2)) { keep.push(e); for (const x of v) count.set(x.id, (count.get(x.id) ?? 0) + 1); }
+    if (e.every((x) => (count.get(x.id) ?? 0) < share(x))) { keep.push(e); for (const x of e) count.set(x.id, (count.get(x.id) ?? 0) + 1); }
+  }
+  // (a town or village short of its share takes lanes to its nearest neighbours besides, nearest
+  // first, none to a place that already has its share plus one, and none whose line runs through
+  // a third place)
+  const has = (a: Settlement, b: Settlement) => keep.some(([p, q]) => (p === a && q === b) || (p === b && q === a));
+  const through = (a: Settlement, b: Settlement) => ss.some((c) => { if (c === a || c === b) return false; const L = d(a, b), t = ((c.x - a.x) * (b.x - a.x) + (c.z - a.z) * (b.z - a.z)) / (L * L); if (t <= 0 || t >= 1) return false; return Math.hypot(a.x + (b.x - a.x) * t - c.x, a.z + (b.z - a.z) * t - c.z) < c.r + 150; });
+  const want = (s: Settlement) => (s.kind === 'hamlet' ? 2 : s.kind === 'village' ? PRIORS.exits.minorPerPlace.village : PRIORS.exits.minorPerPlace.town);
+  for (const a of ss) {
+    if (a.kind === 'hamlet') continue;
+    const near = ss.filter((b) => b !== a).sort((p, q) => d(a, p) - d(a, q)).slice(0, 24);
+    for (const b of near) {
+      if ((count.get(a.id) ?? 0) >= want(a)) break;
+      if (has(a, b) || (count.get(b.id) ?? 0) > want(b) || d(a, b) > 6000 || through(a, b)) continue;
+      // (and not within 12° of a lane it already has: that one would fork off it outside, a fan)
+      const bearing = (p: Settlement, q: Settlement) => Math.atan2(q.z - p.z, q.x - p.x);
+      const close = (p: number, q: number) => Math.abs(Math.atan2(Math.sin(p - q), Math.cos(p - q))) < (12 * Math.PI) / 180;
+      if (keep.some(([p, q]) => (p === a && close(bearing(a, q), bearing(a, b))) || (q === a && close(bearing(a, p), bearing(a, b))))) continue;
+      keep.push([a, b]); count.set(a.id, (count.get(a.id) ?? 0) + 1); count.set(b.id, (count.get(b.id) ?? 0) + 1);
+    }
   }
   // (and whatever joins up pieces the trimming left apart: Kruskal over the rest, shortest first)
   const parent = ss.map((_, i) => i), find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));

@@ -9,6 +9,7 @@
 // A place is worked out whole, once (a city takes a few tens of milliseconds), and kept; a tile takes
 // the streets whose middles and the buildings whose centres fall in it, so every one is drawn once
 // and they meet seamlessly across tile borders. Pure: no three.js.
+import { PRIORS } from '../region/priors';
 import { ROADS, halfOf, kerbOf } from '../catalog';
 import { KINDS, layStreets, type Kind, type StreetCall } from '../region/generate';
 import { mix, rng, type Rand } from '../region/random';
@@ -17,7 +18,7 @@ import { ROUTE_HALF, type Route, type Rail } from './routes';
 import type { WorldPlan, WorldSettlement } from './plan';
 import { REAL_VERN, paletteOf, placeResolver, type Vern } from '../vernacular';
 
-export interface SceneStreet { path: XZ[]; kerb: number; half: number; role: StreetCall['role']; settlement: number }
+export interface SceneStreet { path: XZ[]; kerb: number; half: number; role: StreetCall['role']; settlement: number; along?: [number, number] }
 // A building: its footprint (centre, width along the street, depth, turn), eaves height, roof
 // (0 flat, else the ridge's height above the eaves, gable along the width), and its colours.
 export interface SceneBuilding { x: number; z: number; w: number; d: number; rot: number; h: number; ridge: number; wall: number; roof: number; kind: BKind; settlement: number; wc?: string; rc?: string } // (wc, rc: the place's own wall and roof colours, from vernacular.ts, over the indices)
@@ -120,7 +121,7 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
   const { streets: calls, zone } = layStreets({ ...s, gates: [] }, plan.water, plan.half);
   const r = rng(mix(s.seed, 77));
   const occ = new Occ();
-  const streets: SceneStreet[] = calls.map((c) => { const d = ROADS[c.type] ?? ROADS.street; return { path: streetPath(c), kerb: kerbOf(d), half: halfOf(d), role: c.role, settlement: s.id }; });
+  const streets: SceneStreet[] = calls.map((c) => { const d = ROADS[c.type] ?? ROADS.street; return { path: streetPath(c), kerb: kerbOf(d), half: halfOf(d), role: c.role, settlement: s.id, along: c.along }; });
   for (const st of streets) occ.band(st.path, st.half + 0.5);
   for (const c of corridors(plan, s)) occ.band(c.path, c.half);
   // junctions: where two or more streets meet (their ends), a patch of carriageway over the crossing
@@ -153,6 +154,10 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
   };
   if (s.kind !== 'city' && s.kind !== 'hamlet') addChurch();
   // frontage: both sides of every street, in the order the streets were laid out (the centre first)
+  const prof = PRIORS.towns.housesPer100mByQuarter[s.kind === 'village' || s.kind === 'hamlet' ? 'village' : 'town'], mid = (prof[1] + prof[2]) / 2;
+  // the share of the middle's houses a radial keeps at `f` of its length: all to half way, then down
+  // through the measured third and last quarters, to 0.6 of the last quarter's at its end
+  const ribbon = (f: number) => { const k = [[0.5, 1], [0.625, Math.min(1, prof[2] / mid)], [0.875, prof[3] / mid], [1, (0.6 * prof[3]) / mid]]; if (f <= 0.5) return 1; for (let i = 1; i < k.length; i++) if (f <= k[i][0]) { const t = (f - k[i - 1][0]) / (k[i][0] - k[i - 1][0]); return k[i - 1][1] + (k[i][1] - k[i - 1][1]) * t; } return k[k.length - 1][1]; };
   for (const st of streets) {
     const P = st.path, L = P.reduce((t, p, i) => (i ? t + Math.hypot(p.x - P[i - 1].x, p.z - P[i - 1].z) : 0), 0);
     if (L < 25) continue;
@@ -165,6 +170,9 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
         const industrial = st.role === 'industrial' || inZone(p);
         // (a village thins out into the country: gaps between the houses further out)
         if ((s.kind === 'village' || s.kind === 'hamlet') && c > 170 && r() < (s.kind === 'hamlet' ? 0.25 : 0.35)) { at += 14; row = null; continue; }
+        // (and a ribbon thins out along its radial, to half the middle's houses over the last
+        // quarter and fewer at its end: PRIORS.towns.housesPer100mByQuarter)
+        if (st.along && r() > ribbon(st.along[0] + (st.along[1] - st.along[0]) * (at / L))) { at += 14; row = null; continue; }
         let sp: Spec;
         if (row && rowLeft > 0) sp = row;
         else {
