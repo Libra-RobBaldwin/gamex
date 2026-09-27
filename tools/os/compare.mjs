@@ -13,6 +13,7 @@ import { setRegionReader } from '../../src/proto/real/world.ts';
 import { readRegion } from '../../src/proto/real/node.ts';
 import { PRIORS } from '../../src/proto/region/priors.ts';
 import { layStreets } from '../../src/proto/region/generate.ts';
+import { settlementScene } from '../../src/proto/worldmap/towns.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 setRegionReader(async (id) => readRegion(id, { half: 40000 }));
@@ -109,12 +110,38 @@ ${rows.map((r) => `| ${r} | ${cols.map((c) => c.m[r]).join(' | ')} |`).join('\n'
 // (the real figures are PRIORS.towns and PRIORS.roads, measured by tools/os/towns.mjs and measure.mjs over
 // the bakes' own streets; the seeded ones are layStreets over each seeded plan's places)
 function places(p) {
-  const out = { town: { radials: [], deadEnd: 0, tee: 0, cross: 0, pieces: [], bins: new Float64Array(36) }, village: { radials: [], deadEnd: 0, tee: 0, cross: 0, pieces: [], bins: new Float64Array(36) } };
+  const fresh = () => ({ radials: [], ways: [], deadEnd: 0, tee: 0, cross: 0, pieces: [], bins: new Float64Array(36), wander: [], quarters: [[0, 0], [0, 0], [0, 0], [0, 0]] });
+  const out = { town: fresh(), village: fresh() };
+  const waysOut = new Map();
+  for (const r of p.roads) for (const e of [r.a, r.b]) if (e !== null) waysOut.set(e, (waysOut.get(e) ?? 0) + 1);
   for (const s of p.settlements) {
     if (s.kind === 'hamlet') continue; // (a hamlet is its lane through and a close at most: not a place with radials)
     const T = s.kind === 'village' ? 'village' : 'town', o = out[T];
     const { streets } = layStreets({ ...s, gates: [] }, p.water, p.half);
     o.radials.push(s.spokes?.length ?? 0);
+    o.ways.push(waysOut.get(s.id) ?? 0);
+    // the radials' bends, measured as towns.mjs measures the real ones: each radial's line every 25 m,
+    // its heading over 200 m windows, the change from one 100 m to the next
+    const rad = streets.filter((st) => st.along), len = (st) => Math.hypot(st.b.x - st.a.x, st.b.z - st.a.z);
+    const same = (p, q) => Math.hypot(p.x - q.x, p.z - q.z) < 1;
+    for (const first of rad.filter((st) => st.along[0] === 0)) {
+      const line = [first.a, first.b]; let cur = first;
+      for (let hops = 0; hops < 60; hops++) { const nxt = rad.find((st) => st !== cur && same(st.a, cur.b) && st.along[0] >= cur.along[1] - 1e-9); if (!nxt) break; line.push(nxt.b); cur = nxt; }
+      const pts = [line[0]]; for (let i = 1; i < line.length; i++) { const a = pts[pts.length - 1], b = line[i], d = Math.hypot(b.x - a.x, b.z - a.z); for (let t = 25; t <= d; t += 25) pts.push({ x: a.x + ((b.x - a.x) * t) / d, z: a.z + ((b.z - a.z) * t) / d }); }
+      const heading = (i) => { const a = pts[Math.max(0, i - 4)], b = pts[Math.min(pts.length - 1, i + 4)]; return Math.atan2(b.z - a.z, b.x - a.x); };
+      if (pts.length < 6) continue;
+      let wander = 0, n = 0; for (let k = 4; k < pts.length - 4; k += 4) { const d = heading(k) - heading(k - 4); wander += Math.abs(Math.atan2(Math.sin(d), Math.cos(d))); n++; }
+      if (n) o.wander.push(((wander / n) * 180) / Math.PI);
+    }
+    // the houses along the radials (the scenery's buildings within 40 m of a radial's pieces, per
+    // 100 m) by quarter of the radial from the middle to its end
+    const B = settlementScene(p, s).buildings;
+    for (const st of rad) {
+      const L = len(st); if (L < 5) continue;
+      const q = Math.min(3, Math.floor(((st.along[0] + st.along[1]) / 2) * 4)), ux = (st.b.x - st.a.x) / L, uz = (st.b.z - st.a.z) / L;
+      let n = 0; for (const b of B) { const t = (b.x - st.a.x) * ux + (b.z - st.a.z) * uz; if (t < 0 || t > L) continue; if (Math.abs(-(b.x - st.a.x) * uz + (b.z - st.a.z) * ux) < 40) n++; }
+      o.quarters[q][0] += n; o.quarters[q][1] += L;
+    }
     const deg = new Map(), key = (q) => `${Math.round(q.x)},${Math.round(q.z)}`;
     for (const st of streets) { for (const q of [st.a, st.b]) deg.set(key(q), (deg.get(key(q)) ?? 0) + 1); const L = Math.hypot(st.b.x - st.a.x, st.b.z - st.a.z); o.pieces.push(L); const b = ((Math.atan2(st.b.z - st.a.z, st.b.x - st.a.x) * 180) / Math.PI + 360) % 180; o.bins[Math.floor(b / 10) % 18] += L; o.bins[(Math.floor(b / 10) % 18) + 18] += L; }
     // (a radial's end is where a lane leaves, not a dead end: the plan's lanes carry on from the spokes)
@@ -122,22 +149,39 @@ function places(p) {
     for (const [k, d] of deg) { if (d === 1) { if (!spokeKeys.has(k)) o.deadEnd++; } else if (d === 3) o.tee++; else if (d >= 4) o.cross++; }
   }
   const order = (bins) => { const tot = bins.reduce((t, v) => t + v, 0); let Hh = 0; for (const v of bins) if (v > 0) Hh -= (v / tot) * Math.log(v / tot); const Hmax = Math.log(36), Hg = Math.log(4); return +(1 - ((Hh - Hg) / (Hmax - Hg)) ** 2).toFixed(2); };
-  const row = (o) => { const n = o.deadEnd + o.tee + o.cross || 1; return { radials: median(o.radials), junctions: `${(o.deadEnd / n).toFixed(2)} / ${(o.tee / n).toFixed(2)} / ${(o.cross / n).toFixed(2)}`, piece: Math.round(median(o.pieces)), order: order(o.bins) }; };
+  const row = (o) => {
+    const n = o.deadEnd + o.tee + o.cross || 1, per100 = o.quarters.map(([c, L]) => (L ? (c / L) * 100 : 0)), mid = (per100[1] + per100[2]) / 2 || 1;
+    return { radials: median(o.radials), ways: median(o.ways), junctions: `${(o.deadEnd / n).toFixed(2)} / ${(o.tee / n).toFixed(2)} / ${(o.cross / n).toFixed(2)}`, piece: Math.round(median(o.pieces)), order: order(o.bins), wander: median(o.wander).toFixed(1), ribbon: per100.map((v) => (v / mid).toFixed(2)).join(' / ') };
+  };
   return { town: row(out.town), village: row(out.village) };
 }
 const PT = PRIORS.towns, PR = PRIORS.roads;
-const realPlaces = { town: { radials: PT.radials.town[2], junctions: `${PR.junctions.deadEnd} / ${PR.junctions.tee} / ${PR.junctions.cross}`, piece: `${PR.streetPieceM[0][1]}–${PR.streetPieceM[1][1]}`, order: `${PR.orientationOrder.core[0]}–${PR.orientationOrder.core[1]} (core), ${PR.orientationOrder.suburb[0]}–${PR.orientationOrder.suburb[1]} (suburb)` }, village: { radials: PT.radials.village[2], junctions: '(as towns)', piece: '(as towns)', order: '(as towns)' } };
+const ribbonReal = (k) => { const q = PT.housesPer100mByQuarter[k], mid = (q[1] + q[2]) / 2; return q.map((v) => (v / mid).toFixed(2)).join(' / '); };
+const realPlaces = { town: { ways: PRIORS.exits.perPlace.town[2], wander: PT.radialWanderInsideDegPer100m.town[2], ribbon: ribbonReal('town'), radials: PT.radials.town[2], junctions: `${PR.junctions.deadEnd} / ${PR.junctions.tee} / ${PR.junctions.cross}`, piece: `${PR.streetPieceM[0][1]}–${PR.streetPieceM[1][1]}`, order: `${PR.orientationOrder.core[0]}–${PR.orientationOrder.core[1]} (core), ${PR.orientationOrder.suburb[0]}–${PR.orientationOrder.suburb[1]} (suburb)` }, village: { ways: PRIORS.exits.perPlace.village[2], wander: PT.radialWanderInsideDegPer100m.village[2], ribbon: ribbonReal('village'), radials: PT.radials.village[2], junctions: '(as towns)', piece: '(as towns)', order: '(as towns)' } };
 const seededPlaces = SEEDS.map((sd) => ({ seed: sd, m: places(planWorld({ seed: sd, size: 50 })) }));
 md += `
 ## The places: the seeded street layouts on the real towns' yardsticks
 
 The real column is what \`tools/os/towns.mjs\` and \`measure.mjs\` measured over the bakes' own streets
 (\`PRIORS.towns\`, \`PRIORS.roads\`); the seeded columns are \`layStreets\` over every place on those plans.
+The ways out count the plan's roads at a place (the real count has its A roads too; a seeded map starts
+with lanes). A radial's wander is measured the same way on both: its line every 25 m, headings over
+200 m windows, the change from one 100 m to the next; the generator's blocks are 85 m, so the finer
+wiggle of a real centreline isn't there, and a village's radial is two blocks, too short for the
+measure to catch much. The houses along a radial are buildings within 40 m of it per 100 m, each
+quarter over the mean of the middle two: the real first quarter reads low because OS maps a terrace or
+a parade of shops as one footprint, where the scenery builds each house and shop.
 
 | | real (measured) | ${SEEDS.map((sd) => `seeded: ${sd}`).join(' | ')} |
 |---|---|${SEEDS.map(() => '---').join('|')}|
 | radials per town (median) | ${realPlaces.town.radials} | ${seededPlaces.map((c) => c.m.town.radials).join(' | ')} |
 | radials per village (median) | ${realPlaces.village.radials} | ${seededPlaces.map((c) => c.m.village.radials).join(' | ')} |
+| ways out of a town (median; the real count has its A roads, the seeded one its lanes) | ${realPlaces.town.ways} | ${seededPlaces.map((c) => c.m.town.ways).join(' | ')} |
+| ways out of a village (median) | ${realPlaces.village.ways} | ${seededPlaces.map((c) => c.m.village.ways).join(' | ')} |
+| a radial's wander inside a town, from one 100 m to the next (°, median) | ${realPlaces.town.wander} | ${seededPlaces.map((c) => c.m.town.wander).join(' | ')} |
+| a radial's wander inside a village (°, median) | ${realPlaces.village.wander} | ${seededPlaces.map((c) => c.m.village.wander).join(' | ')} |
+| houses along a town's radials by quarter, over the middle quarters' (the ribbon thinning) | ${realPlaces.town.ribbon} | ${seededPlaces.map((c) => c.m.town.ribbon).join(' | ')} |
+| houses along a village's radials by quarter | ${realPlaces.village.ribbon} | ${seededPlaces.map((c) => c.m.village.ribbon).join(' | ')} |
 | junctions in towns: dead ends / T / crossroads | ${realPlaces.town.junctions} | ${seededPlaces.map((c) => c.m.town.junctions).join(' | ')} |
 | junctions in villages: dead ends / T / crossroads | ${realPlaces.village.junctions} | ${seededPlaces.map((c) => c.m.village.junctions).join(' | ')} |
 | street piece between junctions, towns (m, median) | ${realPlaces.town.piece} | ${seededPlaces.map((c) => c.m.town.piece).join(' | ')} |

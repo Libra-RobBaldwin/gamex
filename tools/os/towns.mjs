@@ -31,7 +31,7 @@ function measure(id) {
   for (let j = 0; j < M.n; j++) for (let i = 0; i < M.n; i++) tiles.push(decodeTile(new Uint8Array(readFileSync(join(dir, tileFile(i, j))))));
   const all = (k) => tiles.flatMap((t) => t.layers[k] ?? []);
   const cells = new Map(), blds = [];
-  for (const f of all('buildings')) { const a = f.parts[0]; let x = 0, z = 0, n = 0; for (let k = 0; k < a.length; k += 2) { x += a[k]; z += a[k + 1]; n++; } x /= n; z /= n; blds.push([x, z]); const key = `${Math.floor(x / C)},${Math.floor(z / C)}`; (cells.get(key) ?? cells.set(key, []).get(key)).push([x, z]); }
+  for (const f of all('buildings')) { const a = f.parts[0]; let x = 0, z = 0, n = 0; for (let k = 0; k < a.length; k += 2) { x += a[k]; z += a[k + 1]; n++; } x /= n; z /= n; blds.push([x, z]); const key = `${Math.floor(x / C)},${Math.floor(z / C)}`; (cells.get(key) ?? cells.set(key, []).get(key)).push([x, z, blds.length - 1]); }
   const builtUp = (x, z, r = 150, need = 4) => { let n = 0; const i0 = Math.floor((x - r) / C), i1 = Math.floor((x + r) / C), j0 = Math.floor((z - r) / C), j1 = Math.floor((z + r) / C); for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) for (const [bx, bz] of cells.get(`${i},${j}`) ?? []) if (Math.hypot(bx - x, bz - z) < r && ++n >= need) return true; return false; };
   // every road, including the streets (local); the graph by shared end points
   const roads = all('roads').map((f) => ({ cls: ROAD_CLASSES[f.c & 15], a: f.parts[0] })).filter((r) => r.cls !== 'restricted' && r.cls !== 'access' && r.cls !== 'shared' && r.a.length >= 4);
@@ -46,6 +46,11 @@ function measure(id) {
   function walk(road, end, far) { let r = road, e = end, run = 0; const out = [pts(r, e === 1)[0]], passed = []; for (let hops = 0; hops < 120 && run < far; hops++) { const b = onward(r, e); if (!b) break; r = b.road; e = b.end === 1 ? 0 : 1; const P = pts(r, b.end === 1); for (let i = 1; i < P.length && run < far; i++) { run += Math.hypot(P[i].x - P[i - 1].x, P[i].z - P[i - 1].z); out.push(P[i]); } passed.push(r); } return { pts: out, run, passed }; }
   // a side street from a node: how long until it ends (a close) or meets another street
   function sideStreet(r, fromEnd) { let road = r, e = fromEnd, L = 0; const seen = new Set(); for (let hops = 0; hops < 40; hops++) { if (seen.has(road.id)) break; seen.add(road.id); L += road.L; const p = pts(road, e === 0)[0] /* the far end */; const d = degreeAt(p); if (d === 1) return { L, close: true }; if (d > 2) return { L, close: false }; const nxt = (at.get(key(p.x, p.z)) ?? []).find((n) => n.road !== road); if (!nxt) return { L, close: true }; road = nxt.road; e = nxt.end; } return { L, close: false }; }
+
+  // a polyline every 25 m; the buildings (by index) within `w` of a run of points; the heading of a run
+  const every25 = (P) => { const out = [P[0]]; for (let i = 1; i < P.length; i++) { const a = out[out.length - 1], b = P[i], d = Math.hypot(b.x - a.x, b.z - a.z); for (let t = 25; t <= d; t += 25) out.push({ x: a.x + ((b.x - a.x) * t) / d, z: a.z + ((b.z - a.z) * t) / d }); } return out; };
+  const near = (pts, w) => { const seen = new Set(); for (const p of pts) { const i0 = Math.floor((p.x - w) / C), i1 = Math.floor((p.x + w) / C), j0 = Math.floor((p.z - w) / C), j1 = Math.floor((p.z + w) / C); for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) for (const [bx, bz, bi] of cells.get(`${i},${j}`) ?? []) if (Math.hypot(bx - p.x, bz - p.z) < w) seen.add(bi); } return seen.size; };
+  const heading = (pts, i, span = 4) => { const a = pts[Math.max(0, i - span)], b = pts[Math.min(pts.length - 1, i + span)]; return Math.atan2(b.z - a.z, b.x - a.x); };
 
   const places = M.places.filter((p) => ['city', 'town', 'village'].includes(p.kind) && p.people >= 150);
   const out = [];
@@ -94,7 +99,16 @@ function measure(id) {
         const sides = [];
         for (const rr of roadsIn) for (const end of [0, 1]) { const e = pts(rr, end === 1)[0]; if (!inBlob(e.x, e.z)) continue; for (const n of at.get(key(e.x, e.z)) ?? []) { if (roadsIn.includes(n.road)) continue; const s = sideStreet(n.road, n.end); sides.push({ L: Math.round(s.L), close: s.close, cls: n.road.cls }); } }
         let inRun = 0; for (let k = 1; k < inPts.length; k++) if (inBlob(inPts[k].x, inPts[k].z)) inRun += Math.hypot(inPts[k].x - inPts[k - 1].x, inPts[k].z - inPts[k - 1].z);
-        exits.push({ theta: deg(Math.atan2(c.z - p.z, c.x - p.x)), at: c, dist: Math.hypot(c.x - p.x, c.z - p.z), cls: r.cls, nearest, radial: nearest < Math.max(120, 0.3 * Req), inRun, sides });
+        // the bend of the road inside the place (from the edge in to where it gets nearest the middle) and
+        // over its first 400 m outside: the net turn, and how much its heading wanders per 100 m
+        const inside = every25(inPts).filter((q) => inBlob(q.x, q.z)).slice(0, Math.max(2, Math.round(inRun / 25))), outside = every25(outPts).slice(0, 25);
+        const bendOf = (pts) => { if (pts.length < 6) return null; let wander = 0, n = 0; for (let k = 4; k < pts.length - 4; k += 4) { wander += Math.abs(norm(heading(pts, k) - heading(pts, k - 4))); n++; } const net = Math.abs(norm(heading(pts, pts.length - 3) - heading(pts, 2))), L = (pts.length - 1) * 25; return { netDeg: deg(net), perKmDeg: (deg(net) * 1000) / L, wanderDegPer100m: n ? deg(wander / n) : 0 }; };
+        // the houses along it: buildings within 40 m of the road per 100 m, by quarter of its run inside
+        // (from the middle out) and by 200 m outside the edge (the ribbon straggling on)
+        const inFromMiddle = [...inside].reverse();
+        const q4 = [0, 1, 2, 3].map((k) => { const a = Math.floor((inFromMiddle.length * k) / 4), b = Math.floor((inFromMiddle.length * (k + 1)) / 4); const run = inFromMiddle.slice(a, Math.max(a + 2, b)); return run.length >= 2 ? (near(run, 40) * 100) / ((run.length - 1) * 25) : null; });
+        const out3 = [0, 1, 2].map((k) => { const run = outside.slice(k * 8, k * 8 + 9); return run.length >= 2 ? (near(run, 40) * 100) / ((run.length - 1) * 25) : null; });
+        exits.push({ theta: deg(Math.atan2(c.z - p.z, c.x - p.x)), at: c, dist: Math.hypot(c.x - p.x, c.z - p.z), cls: r.cls, nearest, radial: nearest < Math.max(120, 0.3 * Req), inRun, sides, bendIn: bendOf(inside), bendOut: bendOf(outside), housesPer100m: { inQuarters: q4, outBy200m: out3 } });
       }
     }
     exits.sort((a, b) => a.theta - b.theta);
@@ -111,6 +125,7 @@ function measure(id) {
       edgeAlongRadialM: Math.round(mean(along)), edgeBetweenM: Math.round(q(between, 0.5)), edgeRatio: between.length && along.length ? Math.round((mean(along) / Math.max(1, q(between, 0.5))) * 100) / 100 : null,
       sideStreetsPerKm: inKm > 0 ? Math.round(sidesAll.length / inKm) : null, closeShare: sidesAll.length ? Math.round((100 * sidesAll.filter((s) => s.close).length) / sidesAll.length) / 100 : null,
       sideLengthM: sidesAll.map((s) => s.L), closeLengthM: sidesAll.filter((s) => s.close).map((s) => s.L),
+      radialBendIn: radials.map((e) => e.bendIn).filter(Boolean), radialBendOut: radials.map((e) => e.bendOut).filter(Boolean), radialHouses: radials.map((e) => e.housesPer100m),
     });
   }
   return { id, places: out };
@@ -130,6 +145,12 @@ for (const kind of ['town', 'village']) {
     edgeRatioAlongRadials: qs(ps.filter((p) => p.edgeRatio !== null).map((p) => p.edgeRatio)),
     sideStreetsPerKm: qs(withR.filter((p) => p.sideStreetsPerKm !== null).map((p) => p.sideStreetsPerKm)), closeShare: qs(withR.filter((p) => p.closeShare !== null).map((p) => p.closeShare)),
     sideStreetLengthM: qs(ps.flatMap((p) => p.sideLengthM)), closeLengthM: qs(ps.flatMap((p) => p.closeLengthM)),
+    // a radial's bend inside the place and over its first 400 m outside (net turn in degrees, per km, and the wander per 100 m)
+    radialNetTurnInsideDeg: qs(ps.flatMap((p) => p.radialBendIn.map((b) => b.netDeg))), radialTurnInsideDegPerKm: qs(ps.flatMap((p) => p.radialBendIn.map((b) => b.perKmDeg))), radialWanderInsideDegPer100m: qs(ps.flatMap((p) => p.radialBendIn.map((b) => b.wanderDegPer100m))),
+    radialNetTurnOutsideDeg: qs(ps.flatMap((p) => p.radialBendOut.map((b) => b.netDeg))), radialWanderOutsideDegPer100m: qs(ps.flatMap((p) => p.radialBendOut.map((b) => b.wanderDegPer100m))),
+    // the houses along a radial, per 100 m within 40 m of it: by quarter of its run from the middle to the edge, then by 200 m on outside
+    housesPer100mByQuarter: [0, 1, 2, 3].map((k) => qs(ps.flatMap((p) => p.radialHouses.map((h) => h.inQuarters[k]).filter((v) => v !== null)))),
+    housesPer100mOutsideBy200m: [0, 1, 2].map((k) => qs(ps.flatMap((p) => p.radialHouses.map((h) => h.outBy200m[k]).filter((v) => v !== null)))),
   };
 }
 console.log(JSON.stringify(summary, null, 1));
