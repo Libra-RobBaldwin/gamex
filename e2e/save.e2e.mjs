@@ -107,13 +107,21 @@ const sa = await state(A);
 const id = await A.evaluate(() => window.proto.saveId);
 
 // ---- Menu > Load town lists it (the menu stays open after saving) ----
-await (await A.$('[data-menu]:has-text("Load town")')).tap();
+await A.tap('[data-menu]:has-text("Load town")'); // (a locator: the menu can re-render as the save lands)
 await A.waitForSelector('.saverow', { timeout: 5000 });
 await A.waitForTimeout(300);
 await shot(A, 'save-2-load');
 const rows = await A.$$eval('.saverow b', (b) => b.map((x) => x.textContent));
 ok(rows.length === 1 && /this town/.test(rows[0]), `Load town lists this town (${rows.join(' | ')})`);
 await A.tap('#sheet .close').catch(() => {});
+
+// ---- the address names the saved town, so a reload of the page opens it again, not a new town ----
+ok(new URL(A.url()).searchParams.get('save') === id, 'after the first save, the page’s address names the saved town');
+await A.reload();
+await A.waitForFunction(() => window.proto?.town, null, { timeout: 120000 });
+await A.waitForTimeout(1500);
+await A.evaluate(() => window.proto.setSpeed(0));
+ok(await A.evaluate(() => window.proto.saveId) === id, 'reloading the page opens the saved town, not a new one on the same map');
 
 // ---- the save, opened in a second tab ----
 const B = await open(withSave(id));

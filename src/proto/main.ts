@@ -2550,6 +2550,7 @@ function snapshot(): GameSave {
   };
 }
 // Save now (the town is copied as it's written, so play carries straight on). False if it couldn't.
+let addressed = !!PARAMS.get('save'); // (whether the page's address names this town)
 function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
   if (!canSave) return Promise.resolve(false);
   // (one at a time: a second asks for the same. But hiding the page saves now, even mid-save: storage
@@ -2561,6 +2562,8 @@ function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
   const put = putSave(s), ms = performance.now() - t0; // (storage copies the town as it's put: that's in the time too)
   const mine: Promise<boolean> = put.then(() => {
     lastSaved = s.savedAt;
+    // (the address names the town once it's saved, so a reload of the page opens it again, not a new town on the same map)
+    if (!addressed) { addressed = true; try { history.replaceState(history.state, '', `${location.pathname}${saveSearch(s)}`); } catch { /* a page that can't change its address */ } menuLink?.onSaved?.(); }
     (window as unknown as { __saved: unknown }).__saved = { why, at: s.savedAt, ms, clock: s.clock }; // (for e2e/save.e2e.mjs)
     if (why === 'manual') hint(`Town saved · ${describeSave(s.summary)}`, 'floppy');
     return true;
@@ -2918,7 +2921,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 // ---- the start menu (src/app/main.ts) loads this module, then links it: the quality set on the
 // menu, the Menu sheet's way back to it, and quality picked here remembered for next time ----
-export interface MenuLink { quality: number | 'auto'; onQuality: (q: number | 'auto') => void; onMenu: () => void }
+export interface MenuLink { quality: number | 'auto'; onQuality: (q: number | 'auto') => void; onMenu: () => void; onSaved?: () => void }
 let menuLink: MenuLink | null = null;
 export function linkMenu(link: MenuLink) {
   menuLink = link;
