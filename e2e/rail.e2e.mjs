@@ -56,6 +56,9 @@ const laid = await page.evaluate(() => {
 console.log('laid', JSON.stringify(laid));
 if (laid.crossings < 1) fail('no level crossing where the branch meets the lane west');
 
+// (the camera glides to each spot: on a slow runner a fixed wait ends mid-glide and the tap lands
+// on the wrong stretch of track, so wait for the glide to end, then a frame or two)
+const settled = async () => { for (let i = 0; i < 60 && (await page.evaluate(() => !!window.proto.nav.anim)); i++) await wait(250); await wait(800); };
 // Build > Stops > Railway station, then tap the track (twice, once for each station)
 async function buildStation(z) {
   await page.tap('[data-bar="build"]'); await wait(400);
@@ -66,7 +69,7 @@ async function buildStation(z) {
   if (!hit) { fail('no Railway station card'); return; }
   await wait(500);
   await page.evaluate((z) => window.proto.focusOn({ x: -480, z }, 380), z);
-  await wait(1800);
+  await settled();
   const s = await page.evaluate((z) => window.proto.toScreen({ x: -477, z }), z);
   await page.touchscreen.tap(s.x, s.y);
   await wait(1500);
@@ -92,7 +95,7 @@ for (const b of newLine) if ((await b.textContent())?.includes('New line from he
 if (!started) fail('no New line from here on the station sheet');
 await wait(600);
 await page.evaluate(() => window.proto.focusOn({ x: -480, z: 100 }, 900));
-await wait(2200);
+await settled(); await wait(1000);
 const first = built.find((s) => s.z < 0);
 const fp = await page.evaluate((id) => { const P = window.proto, sh = P.railway.shapes.get(id); return P.toScreen(sh.mid); }, first.id);
 await page.touchscreen.tap(fp.x, fp.y);

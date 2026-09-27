@@ -66,3 +66,45 @@ export function parkPaths(entrances: Entrance[], centre: XZ): XZ[][] {
 
 // is this point in one of the gates' gaps (for leaving the wall open there)
 export const inGate = (p: XZ, entrances: Entrance[], half = GATE_W / 2) => entrances.some((e) => Math.hypot(p.x - e.at.x, p.z - e.at.z) < half);
+
+// ---------- the pond ----------
+// A real park (a few thousand square metres inside a town) can hold a pond: a level surface in a
+// hollow with an irregular outline, through the water system (worldmap/water.ts addPond; the user's
+// rule, docs/briefs/play.md 12). This picks where: the lowest spot in the park whose water, with a
+// bank round it, lies wholly inside the park and clear of the paths and the edge, so the paths and
+// the fence keep off it. `heightAt` is the ground's before the pond. Null when the park is too
+// small or no spot fits.
+export interface PondSpot { x: number; z: number; r: number }
+export const POND_MIN_CELLS = 80; // cells (5 m) a park needs before it gets a pond: 2,000 m²
+const POND_BANK = 4; // m of bank between the water and anything else
+export function parkPond(cells: XZ[], size: number, paths: XZ[][], edges: EdgePiece[], heightAt: (x: number, z: number) => number, seed: number): PondSpot | null {
+  if (cells.length < POND_MIN_CELLS) return null;
+  // (the cells' own lattice: any point maps to the cell it's in)
+  const ox = cells[0].x, oz = cells[0].z, key = (x: number, z: number) => `${Math.round((x - ox) / size)},${Math.round((z - oz) / size)}`;
+  const has = new Set(cells.map((c) => key(c.x, c.z)));
+  const inR = (x: number, z: number) => has.has(key(x, z));
+  // (a sixth of the park's width, within a pond's range)
+  const r = Math.max(8, Math.min(30, Math.sqrt(cells.length * size * size) / 6)), reach = r + POND_BANK;
+  // the water inside the park (a metre in from its edge), its bank clear of the roads and the paths
+  // (the bank may run onto the lawn beyond the park's own cells, where nothing stands)
+  const fits = (c: XZ) => {
+    for (let k = 0; k < 16; k++) { const a = (k / 16) * Math.PI * 2; if (!inR(c.x + Math.cos(a) * (r + 1), c.z + Math.sin(a) * (r + 1))) return false; }
+    for (const [x0, z0, x1, z1] of edges) if (segDist(c, { x: x0, z: z0 }, { x: x1, z: z1 }) < reach) return false;
+    for (const path of paths) for (let i = 0; i + 1 < path.length; i++) if (segDist(c, path[i], path[i + 1]) < reach) return false;
+    return true;
+  };
+  let best: XZ | null = null, low = Infinity;
+  // (ties broken by the seed, so two seeds don't put the pond in the same corner of a flat park)
+  const tie = (c: XZ) => ((Math.sin(c.x * 12.9898 + c.z * 78.233 + seed) * 43758.5453) % 1) * 1e-3;
+  for (const c of cells) {
+    if (!fits(c)) continue;
+    const h = heightAt(c.x, c.z) + tie(c);
+    if (h < low) { low = h; best = c; }
+  }
+  return best ? { x: best.x, z: best.z, r } : null;
+}
+function segDist(p: XZ, a: XZ, b: XZ) {
+  const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz;
+  const t = L2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.z - a.z) * dz) / L2)) : 0;
+  return Math.hypot(p.x - (a.x + dx * t), p.z - (a.z + dz * t));
+}
