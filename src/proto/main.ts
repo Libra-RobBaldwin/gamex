@@ -753,7 +753,10 @@ async function bringToLife(id: number) {
   if (!WORLD || !worldGame) return;
   const st = WORLD.settlements[id], q = worldGame.towns.places.find((x) => x.id === id)!;
   const t0 = performance.now();
-  q.live = true; // (so the roads to it are built now)
+  // (busy, not live, until it stands: a save taken part way through, say when the phone locks, must
+  // not list it as finished, or the load leaves it half built for ever. The roads to it are built
+  // now all the same, below.)
+  q.busy = true;
   // (its streets a few at a time, a frame between, so the view doesn't stall while a place is laid out)
   const made: number[] = [], streets = MAP.streets.filter((x) => x.settlement === id), begun = new Set<number | undefined>();
   let slice0 = performance.now();
@@ -761,7 +764,7 @@ async function bringToLife(id: number) {
     made.push(...buildStreets(net, streets.slice(k, k + 4), DEFAULT_OPTS, true, begun).made);
     if (performance.now() - slice0 > 8) { await nextFrame(); slice0 = performance.now(); }
   }
-  made.push(...layLiveRoutes(net, WORLD, DEFAULT_OPTS, 'road', (k) => !!worldGame.towns.places.find((x) => x.id === k)?.live, id).made);
+  made.push(...layLiveRoutes(net, WORLD, DEFAULT_OPTS, 'road', (k) => { const x = worldGame.towns.places.find((y) => y.id === k); return !!x && (x.live || x.id === id); }, id).made);
   const t1 = performance.now();
   commitRoads(made);
   const t2 = performance.now();
@@ -884,7 +887,7 @@ function hint(text?: string, ic?: Icon) {
   if (t === undefined) {
     if (!tool) return shell.hint(null);
     if (mode === 'stop') t = stopPreview ? '' : 'Tap a road, on the side you want the stop'; // (with a blueprint down, the card says it all)
-    else if (mode === 'bulldoze') t = doomed ? '' : 'Tap a road or a bus stop to take it away';
+    else if (mode === 'bulldoze') t = doomed ? '' : 'Tap a road, a railway or a bus stop to take it away';
     else if (mode === 'line') t = lineDraft.length === 0 ? 'Tap the stop the line starts from' : ''; // (then the card says what next)
     else if (draft && slipPlan) t = 'A slip road: drag ahead and out to leave the motorway, back and out to join it · then Build';
     else if (draft) t = ''; // (the blueprint's card says what to do)
@@ -938,8 +941,8 @@ function startBulldozeTool() {
 }
 function bulldozeTap(p: P) {
   const hit = stopAt(p);
-  const q = hit ? null : net.nearestSeg(p, 14, (x) => net.def(x).cls === 'road');
-  if (!hit && !q) { doomed = null; drawGhost(); tool?.setPanel(null); tool?.setPrimary(null); hint('Tap a road or a bus stop', 'alert'); return; }
+  const q = hit ? null : net.nearestSeg(p, 14, (x) => net.def(x).cls === 'road' || net.def(x).cls === 'rail');
+  if (!hit && !q) { doomed = null; drawGhost(); tool?.setPanel(null); tool?.setPrimary(null); hint('Tap a road, a railway or a bus stop', 'alert'); return; }
   const seg = hit ? hit.seg : q!.seg, calls = (id: number) => lines.list.filter((l) => l.stops.some((x) => lines.same(x, id)));
   doomed = { seg, stop: hit?.stop };
   drawGhost();
@@ -951,9 +954,12 @@ function bulldozeTap(p: P) {
   } else {
     const d = net.def(seg), len = pathLength(net.path(seg));
     what = `${d.label.split(' · ')[0]} · ${Math.round(len)} m`;
-    refund = Math.round(price(d.cost * len) / 2);
+    refund = paid.has(seg.id) ? Math.round(price(d.cost * len) / 2) : 0; // (a road the map gave cost nothing, so refunds nothing: the review's bug 4)
     const lined = seg.stops.flatMap((st) => calls(st.id));
-    if (buildings.some((b) => !b.dying && b.lot.seg === seg.id)) why = 'Buildings face this road, and it’s their only way in';
+    // (a railway: not under a station, which comes away from its own sheet; a mis-drawn line is otherwise the player's to take back)
+    const underStation = d.cls === 'rail' && railway.stations.find((st) => net.nearestSeg({ x: st.x, z: st.z }, st.len / 2 + 12, (x) => x.id === seg.id));
+    if (underStation) why = `${underStation.name} station stands on it · demolish the station first`;
+    else if (buildings.some((b) => !b.dying && b.lot.seg === seg.id)) why = 'Buildings face this road, and it’s their only way in';
     else if (lined.length) why = `Line ${[...new Set(lined.map((l) => l.num))].join(' and ')} calls at a stop on it · withdraw the line first`;
     else if (interchanges.some((ix) => ix.segs.includes(seg.id))) why = 'Part of a motorway junction, which comes away as a whole (not yet)';
   }
@@ -1151,7 +1157,7 @@ shell.addBuildCategory({ id: 'stops', label: 'Stops', icon: 'busStop' }); // (bu
 shell.addBuildItem('stops', { id: 'bus-stop', label: 'Bus stop', spec: 'On any road; a lay-by where there is room', short: 'On any road', icon: 'busStop', tone: 'stop', onPick: () => startStopTool() });
 shell.addBuildItem('stops', { id: 'rail-station', label: 'Railway station', spec: 'Platforms on a straight, level run of track', short: 'On straight track', icon: 'train', tone: 'rail', onPick: () => { endTool(); railGame.startStationTool(); } });
 shell.addBuildCategory({ id: 'bulldoze', label: 'Bulldoze', icon: 'bulldozer' });
-shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Take away a road or a bus stop; half a road’s price comes back', short: 'Roads and stops', icon: 'bulldozer', tone: 'bulldoze', onPick: () => startBulldozeTool() });
+shell.addBuildItem('bulldoze', { id: 'bulldoze', label: 'Bulldoze', spec: 'Take away a road, a railway or a bus stop; half of what you paid for a road comes back', short: 'Roads, rail and stops', icon: 'bulldozer', tone: 'bulldoze', onPick: () => startBulldozeTool() });
 
 // ---- the Layers pop-over: overlays (none are in the game yet) and the view ----
 shell.addLayer({ id: 'catchment', label: 'Stop coverage', icon: 'busStop', on: false, onToggle: (on) => { coverOn = on; coverSig = '-'; if (on) hint('Stop coverage: blue is within a three-minute walk of a bus stop (a longer one to a station) · build stops where it isn’t', 'busStop'); } });
@@ -1280,9 +1286,10 @@ function showLineInfo(l: Line) {
     // (the three numbers that matter as tiles, the stops in a line, and the actions in a row;
     // a game day is the town's month, so "a day" is what the player sees)
     key: `line:${l.id}`, title: `Line ${l.num}`, sub: `${lines.title(l)} · ${l.loop ? 'circular' : 'there and back'}`, icon: 'transport', tone: 'stop',
-    stats: [['Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth * 30).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
+    stats: [['Buses', `${n}`], ['Riders a day', st ? Math.round(st.carriedLastMonth).toLocaleString('en-GB') : '—'], ['Profit a day', money(profit)]],
     facts: [['Stops', l.stops.map((id) => lines.name(id)).join(' · ')]],
-    note: `Each rider pays £2${books.lastRunning ? `; the buses cost ${money(books.lastRunning)} a day to run` : ', and the buses cost a little each day to run'}.`,
+    // (the economy's own verdict on the line comes first when it can't run it: no route between its stops, say)
+    note: `${st && !st.ok && st.problem ? `This line isn't carrying anyone: ${st.problem}. ` : ''}Each rider pays £2${books.lastRunning ? `; the buses cost ${money(books.lastRunning)} a day to run` : ', and the buses cost a little each day to run'}.`,
     actions: [
       { label: `Bus · ${money(busPrice(l.offer))}`, title: `Add a bus for ${money(busPrice(l.offer))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(busPrice(l.offer)), onClick: () => { buyBus(l); showLineInfo(l); } },
       { label: 'Sell', title: `Sell a bus for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`Bus sold for ${money(sell)}`, 'bus'); setTimeout(() => showLineInfo(l), 50); } },
@@ -1506,6 +1513,17 @@ function arrowTap(sx: number, sy: number) {
 }
 
 // what a road would knock down, in words
+// The stops a blueprint takes away (Network.check reports the ones the new road lands on; a stop the
+// road merely joins beside is kept across the split since PR #64). Its line loses the call, and a
+// two-stop line goes with its buses: said on the card before Build (the review's bug 2).
+function stopsLostNote(lost: Stop[]) {
+  if (!lost.length) return '';
+  const names = [...new Set(lost.map((x) => lines.name(x.id)))];
+  const on = lines.list.filter((l) => lost.some((x) => l.stops.some((id) => lines.same(id, x.id))));
+  const gone = on.filter((l) => l.stops.filter((id) => !lost.some((x) => lines.same(id, x.id))).length < 2);
+  const lineText = on.length ? ` Line ${on.map((l) => l.num).join(' and ')} ${on.length > 1 ? 'call' : 'calls'} there${gone.length ? `: ${gone.length > 1 ? 'they go' : `line ${gone[0].num} goes`}, and ${gone.length > 1 ? 'their' : 'its'} buses are sold back` : ' and would skip it'}.` : '';
+  return `<div class="demo">${icon('alert')}<div><b>This road joins where the ${esc(names.join(' and '))} stop${names.length > 1 ? 's stand' : ' stands'}</b>: the stop goes.${esc(lineText)}</div></div>`;
+}
 function demolitionSummary(lots: Lot[]) {
   const counts = new Map<string, number>();
   let residents = 0, jobs = 0;
@@ -1559,18 +1577,20 @@ function renderBar() {
     tool.setPrimary({ label: 'Build', title: 'Build the motorway and its junction', icon: nd ? 'bulldozer' : 'check', kind: nd ? 'danger' : 'primary', disabled: !(p.ok && !dragging && purse.can(price(p.cost))), onClick: buildDraft });
     return;
   }
-  const cost = price(c.cost), afford = purse.can(cost);
+  const cost = price(c.cost), afford = purse.can(cost), lost = c.stops;
   tool.setPanel(`<div class="what">${icon('ruler')}<span>${kind} <b>${Math.round(c.length)} m</b> · <b class="cost">${money(cost)}</b></span></div>
     ${ix}
     ${afford ? '' : `<div class="bad">${icon('alert')}<span>${short(cost)}</span></div>`}
     ${demo ? `<div class="demo">${icon('alert')}<div><b>This road demolishes ${n} building${n > 1 ? 's' : ''}</b> (flashing red): ${demo.list}.<br>${demo.people} · ${money(price(n * 6000))} compensation included</div></div>` : ''}
+    ${stopsLostNote(lost)}
     ${lift}
     ${c.ok ? bridgeLines(c) : ''}
     ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}
     <p class="why">Drag the white handles to adjust${c.ok ? ', then Build' : ''}</p>`, bindIx);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
   tool.avoid(handles().map((h) => toScreen(h.p)));
-  tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : 'Build', icon: n ? 'bulldozer' : 'check', kind: n ? 'danger' : 'primary', disabled: !(c.ok && !dragging && afford), onClick: buildDraft });
+  const nd = n + lost.length;
+  tool.setPrimary({ label: 'Build', title: n ? `Demolish ${n} building${n > 1 ? 's' : ''} and build` : lost.length ? 'Take the stop away and build' : 'Build', icon: nd ? 'bulldozer' : 'check', kind: nd ? 'danger' : 'primary', disabled: !(c.ok && !dragging && afford), onClick: buildDraft });
 }
 // the bridges in a blueprint: the type the chooser picked, its price and what's worth knowing
 function bridgeLines(c: Check) {
@@ -1663,8 +1683,19 @@ function buildJunctionDraft(d: Draft, pick: { form: IxForm; style: SlipStyle; si
   hint(`Built for ${money(cost)}: the motorway and a ${IX_NAME[pick.form].toLowerCase()}. Tap the junction to see how it's working.`, 'check');
 }
 
+// The roads the player paid for, by segment id: the bulldozer refunds half of these and nothing for
+// a road the map gave. A paid road split by a later one passes it on to its halves (their ids are new).
+const paid = new Set<number>(SAVED?.paid ?? []);
 function buildRoad(a: End, b: End, ctrl: P | undefined, o: RoadOpts) {
+  const before = new Set(net.segs.keys()), paidPaths = [...paid].map((id) => net.segs.get(id)).filter((x): x is RSeg => !!x).map((x) => net.path(x));
   const made = net.build(a, b, ctrl, o);
+  for (const id of made) paid.add(id);
+  for (const [id, sg] of net.segs) {
+    if (before.has(id) || paid.has(id)) continue;
+    const p = net.path(sg), m = p[Math.floor(p.length / 2)];
+    if (paidPaths.some((q) => closestOnPath(m, q).d < 1)) paid.add(id);
+  }
+  for (const id of [...paid]) if (!net.segs.has(id)) paid.delete(id);
   // demolished buildings sink away rather than vanishing
   for (const x of buildings) if (x.lot.id >= 0 && !net.lots.includes(x.lot) && !x.dying) demolish(x);
   for (const l of net.touched) { const x = buildings.find((y) => y.lot === l); if (x && !x.dying) regenerate(x); }
@@ -2285,7 +2316,14 @@ traffic.parking = parking;
 traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);
-onRoadsChanged = () => { traffic.invalidate(); placesDirty = true; lines.prune(); townRef?.networkChanged(); portalFlows?.refresh(); };
+onRoadsChanged = () => {
+  traffic.invalidate(); placesDirty = true;
+  // (a line left with one stop goes, and its buses are sold back at the price Sell gives, with a word)
+  const doomed = lines.list.filter((l) => l.stops.filter((id) => traffic.place(id)).length < 2).map((l) => ({ l, k: lines.buses(l).length, sell: Math.round(busPrice(l.offer) / 2) }));
+  lines.prune();
+  for (const { l, k, sell } of doomed) { if (k) purse.refund(sell * k); hint(`Line ${l.num} lost its stops and is withdrawn · ${k} bus${k === 1 ? '' : 'es'} sold for ${money(sell * k)}`, 'transport'); }
+  townRef?.networkChanged(); portalFlows?.refresh();
+};
 // traffic in and out through the ways off the map, near the camera; and what drives out through the face is cut off at it
 // (only those on the game's own roads: a 50 km map's, once the live area reaches the rim)
 const portalFlows = portals.some((p) => p.segs.length) ? new PortalTraffic(net, traffic, portals) : null;
@@ -2415,7 +2453,7 @@ shell.addStatsTab({
     if (!lines.list.length) { el.innerHTML = '<p class="note">No lines yet. Build two stops and draw a line through them, and its numbers show here.</p>'; return; }
     const rows = lines.list.map((l) => {
       const b = purse.line(l.id), st = townRef?.line(l.id), p = b.lastFares - b.lastRunning, n = lines.buses(l).length;
-      return { l, p, html: `<button class="lrow tone-stop" data-sl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${st ? `${Math.round((st.carriedLastMonth || st.carried) * 30).toLocaleString('en-GB')} riders a day · ` : ''}${n} ${n === 1 ? 'bus' : 'buses'} · <b class="${p >= 0 ? 'good' : 'badv'}">${p >= 0 ? '+' : '−'}${money(Math.abs(p))}/day</b></span></button>` };
+      return { l, p, html: `<button class="lrow tone-stop" data-sl="${l.id}"><span class="num">${l.num}</span><b>${esc(lines.title(l))}</b><span>${st ? `${Math.round(st.carriedLastMonth || st.carried).toLocaleString('en-GB')} riders a day · ` : ''}${n} ${n === 1 ? 'bus' : 'buses'} · <b class="${p >= 0 ? 'good' : 'badv'}">${p >= 0 ? '+' : '−'}${money(Math.abs(p))}/day</b></span></button>` };
     }).sort((a, b) => a.p - b.p);
     el.innerHTML = `<p class="note">Worst first: a line losing money wants more stops where people are, or fewer buses.</p>${rows.map((r) => r.html).join('')}`;
     el.querySelectorAll<HTMLButtonElement>('[data-sl]').forEach((b) => b.addEventListener('click', () => { const l = lines.list.find((x) => x.id === +b.dataset.sl!); if (l) showLineInfo(l); }));
@@ -2456,14 +2494,16 @@ people.numbers = town.numbers();
 // The game starts with nothing of the player's, so a card under the status strip says what to
 // do next, and tapping it gets on with it: stops, then a line through them, then the town panel
 // to watch it grow. It goes once the first line has run a couple of days (or the panel's opened).
-let goalDone = false, firstLineAt: number | null = null;
+let goalDone = SAVED?.goal?.done ?? false, firstLineAt: number | null = SAVED?.goal?.firstLineAt ?? null;
 function updateGoal() {
   if (goalDone) return;
   const nLines = lines.list.length + railway.lines.filter((l) => !l.other).length;
   if (!nLines) {
     firstLineAt = null;
-    let stops = 0;
-    for (const sg of net.segs.values()) stops += sg.stops.length;
+    // (places a line could join: a stop and the one facing it across the road are one place)
+    const places = new Set<number>();
+    for (const sg of net.segs.values()) for (const st of sg.stops) { const p = traffic.place(st.id); places.add(p ? Math.min(...p.stops.map((x) => x.id)) : st.id); }
+    const stops = places.size;
     shell.goal(stops < 2
       ? { step: `Step 1 of 3 · ${stops} of 2 stops`, text: 'Build bus stops where people live and work', icon: 'busStop', onClick: () => startStopTool() }
       : { step: 'Step 2 of 3', text: 'Draw a bus line through your stops', icon: 'transport', onClick: () => startLineTool() });
@@ -2482,7 +2522,7 @@ let syncAt = 2;
 // A loaded town goes on saving over the save it came from. (The junction pages are demos: no saves.)
 const SAVE_ID = SAVED?.id ?? (globalThis.crypto?.randomUUID?.() ?? `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
 // (named as the start menu lists it)
-const SAVE_NAME = SAVED?.name ?? menuMap(new URLSearchParams(MAP_QUERY).get('map'))?.name ?? MAP.name;
+const SAVE_NAME = SAVED?.name ?? (REAL ? MAP.name : menuMap(new URLSearchParams(MAP_QUERY).get('map'))?.name ?? MAP.name); // (a real region's town is named after its place, not "Region")
 const AUTOSAVE_EVERY = 4 * 60; // game minutes
 const canSave = !demo;
 let autoAt = clock + AUTOSAVE_EVERY, lastSaved = SAVED?.savedAt ?? 0, saving: Promise<boolean> | null = null;
@@ -2494,7 +2534,7 @@ function snapshot(): GameSave {
     clock, speed, rate, rand: rand.state,
     net: saveNetwork(net), queue,
     junctions: [...junctions.values()].filter((j) => !j.auto), interchanges,
-    industries: industries.save(), railway: railway.save(), lines: lines.save(), town: t, purse: purse.save(),
+    industries: industries.save(), railway: railway.save(), lines: lines.save(), town: t, purse: purse.save(), paid: [...paid], goal: { done: goalDone, firstLineAt },
     ...(worldGame ? { world: { live: worldGame.towns.liveIds } } : {}), // (a 50 km map: which places had come to life)
   };
 }
@@ -2611,7 +2651,9 @@ function drawFlow(now: number) {
 // ---------------- milestones (the gold ring by the bell, once the guide is done) ----------------
 // Goals that grow with the network, each paying a grant when it's reached (money, like CS2's
 // milestones): riders a day across all the player's lines, and a few firsts.
-const ridersADay = () => lines.list.reduce((a, l) => { const st = townRef?.line(l.id); return a + (st ? (st.carriedLastMonth || st.carried) * 30 : 0); }, 0);
+// (a game day is the town's month, so a line's carried count is already a town-day's riders: the
+// purse pays a month of fares for it; showing or judging it times 30 was the review's bug 3)
+const ridersADay = () => lines.list.reduce((a, l) => { const st = townRef?.line(l.id); return a + (st ? (st.carriedLastMonth || st.carried) : 0); }, 0);
 const MILESTONES: { title: string; sub: string; grant: number; at: () => number }[] = [
   { title: '500 riders a day', sub: 'Across all your lines', grant: 50_000, at: () => ridersADay() / 500 },
   { title: 'A second line', sub: 'Link another part of town', grant: 60_000, at: () => lines.list.length / 2 },

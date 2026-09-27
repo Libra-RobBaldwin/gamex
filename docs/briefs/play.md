@@ -1,7 +1,8 @@
 # Play brief: the 50 km region played as a player (26 Sep 2026)
 
-Session: https://claude.ai/code/session_01DGEkjY29QMXCGUF7EoXkuj. Branch `claude/work-play`, PR into
-`claude/cloud-session-history-rvqkm1`. Screenshots in `docs/reports/play/`, all 412×915, DPR 2, touch,
+Session: https://claude.ai/code/session_01DGEkjY29QMXCGUF7EoXkuj. Branch `claude/work-play`. PR #63 (the
+play-through, six loop fixes and the review's tests) is merged into `claude/cloud-session-history-rvqkm1`;
+the parks, the walls and the review's play rows follow on a second PR from the same branch. Screenshots in `docs/reports/play/`, all 412×915, DPR 2, touch,
 Chromium with SwiftShader, on the production build (`npm run build`, `vite preview`).
 
 What was played, in order: Start menu > New game > Region (Lowland vale, Temperate, Villages, seed 42) with
@@ -142,6 +143,49 @@ See 6. If the month stays, "Riders a month" is the honest label.
 - The home screen's picture is the old starter town, which no longer exists (`01-home.png`). Owner:
   world50, ONE MAP step 4.
 
+### 12. Ponds and diagonal paths in every green a road encloses (the user, 21:50; fixed in this PR)
+
+`113-fields-road-before.png`, `114-fields-road-before-close.png`: four streets round a field beside the start
+town made 219 cells of park, a playground, allotments and three round ponds with sand rims and diagonal gravel
+paths. Cause: `infill.ts` counted the plots a new road plans along itself as town, so the land between them
+was a gap to fill; `crowdsites.ts` and `makeRegion` gave every park a fixed disc pond on the first free 4×4
+block and a path along a grid row, which reads as a diagonal on a rotated town. Fixed: only land within a few
+metres of buildings that stand is town (`113-fields-road-after.png`: the field stays grass; the countryside's
+own field pattern inside the square is the ground painter's, countryside's); no park has a pond; paths run
+from the gates (`parkplan.ts`). Tests in `infill.test.ts` and `parkplan.test.ts`.
+
+**Ponds and the water rules** (the user, 21:58): a park pond must be a level surface in a hollow with an
+irregular outline, never a circle. The water system (`src/proto/water`, `docs/water.md`) derives its lakes from
+the ground and has no way to take a small hollow the park makes, and the region's terrain is the terrain
+owner's, so ponds are off until it can: none is drawn or placed. Owner for the hollow: terrain and water.
+
+### 13. Parks need walls and gates (the user, 21:58; fixed in this PR)
+
+`115-town-park-before.png` → `115-town-park-after.png`: a park's edge along its roads is now a wall in the
+town's tradition (the garden walls' materials from `vernacular.ts`: dry stone, flint, brick, white-washed,
+Cornish hedge) with railings on it, or a hedge, open at each gate with a pier either side; a playground gets
+a green fence and a gate, allotments posts and wire. Paths run gate to gate. All in the park's one merged
+shape, so no extra draw calls. Shared file: `buildgen.ts` (`makeRegion` only). The wall reads as a thin dark
+line at the phone's usual zoom; if the user wants it bolder, the wall's height and the railings' weight are
+one line each in `makeRegion`.
+
+## The logic review's play rows (`docs/reports/review-2026-09-26.md`, 21:20)
+
+Its tests are in the branch: `game/review.play.test.ts` and `review.play.flow.test.ts`. A row's test is a real
+test once its fix is in; the rest are `it.fails` (expected to fail), so CI stays green in between.
+
+| Row | What | Done |
+|---|---|---|
+| 3 | "Riders a day" ×30 on the line sheet and Lines tab; the milestone ladder judged the same number and paid about £900k of grants at once | Fixed: the count is a town-day's riders, shown plain and judged plain. The 500-rider first milestone still comes with the first line (a two-stop line carries about 700 a day in a town of 2,200); 2,000, 5,000 and 12,000 now take a network. |
+| 4 | Bulldozing a lane the map gave refunded half its price, about £100k | Fixed: the game keeps and saves the ids of the roads the player paid for; only those refund. The save e2e checks both. |
+| 2 (play half) | A road joined where a stop stands took the stop, the line and its buses with no warning or refund | Fixed here: the blueprint card names the stop and the line the join takes, Build turns red, and a line left with one stop is withdrawn with its buses sold back at Sell's price. Keeping the stop across the split is the vehicles session's half: the review's two tests stay expected-to-fail until it lands. |
+| village | A place half built at a hide-save reloaded as finished | Fixed: busy, not live, until it stands; tests that a busy place isn't saved live and that its streets aren't laid twice on the reload. |
+| 8 | The goal card asked for a line between two stops that are one place | Fixed: it counts places. |
+| 7 | The economy put each stop at the wrong point on its road | Fixed: `pointAt` by arc length, as the overlay. |
+| 9 | The guide's road step ticked when a village came to life | The road step is gone (fix 3 above), so nothing of the guide's ticks on activation. The review's test measures the world's activation radius (3.3 km at a 2 km view, `worldmap/game.ts`), which is world50's call: it stays expected-to-fail with a note. |
+| 10 | Continue offered an old real-region save the game refuses | Fixed in `menu.ts`, with the same rule as `isOldRealSave`. |
+| rest | "No route" line problem never shown; goalDone/firstLineAt not saved; real-region saves named "Region"; track and stations can't be bulldozed | Fixed: the line sheet leads with the economy's problem; the goal card's progress is saved; a real region's town is named after its place; the bulldozer takes track that no station stands on (a station comes away from its own sheet, as before). |
+
 ### 11. Bulldoze refuses a road with a reason (fine)
 
 `58-bulldoze-road-preview.png`: "Buildings face this road, and it's their only way in", Remove disabled.
@@ -149,12 +193,20 @@ See 6. If the month stays, "Riders a month" is the honest label.
 
 ## Done and not done
 
-- Done in this PR, each its own commit: 1 (building tap, with a lines e2e step), 2 (line framing), 2b (stop
-  badges), 3 (one guide, with menu e2e checks), 5 (rail Join), 9 (loading counts). Each is checked on a
-  screenshot named above; "live" once the PR is merged and the integration branch is deployed.
+- Done and merged (PR #63), each its own commit: 1 (building tap, with a lines e2e step), 2 (line framing),
+  2b (stop badges), 3 (one guide, with menu e2e checks), 5 (rail Join), 9 (loading counts). Each is checked
+  on a screenshot named above; live once the integration branch is deployed.
+- On the second PR: 12 (fields stay fields, no ponds, paths from the gates), 13 (park walls and gates).
 - Reported for their owners, not done: 4 (a short bridge is refused), 6 (money), 7 (real regions decline),
-  8 (riders label), 10 (buildings and scenery), the `/assets/regions` fetch.
+  8 (riders label), 10 (buildings and scenery), the `/assets/regions` fetch, a pond in a real hollow (12).
+- From the logic review, on the second PR: rows 3, 4, 2 (play half), the half-built village, 8, 7, 10 and the
+  rest of the play list, each its own commit (table above). Row 9's test stays expected-to-fail (world50's
+  activation radius); row 2's two tests pass since the vehicles session's PR #64 keeps stops across a split.
 
-## Test results
+## Test results (second PR, on the rebased branch)
 
-Filled in at each push.
+- `npx tsc --noEmit`: clean.
+- The six phone e2es on a production build of the branch before the rebase onto the merged #63, #64 and #65
+  (lines with the building tap, loop, rail, save with the bulldoze-refund step, stations, menu on the build):
+  all pass. CI runs them again on the PR.
+- `npx vitest run --no-file-parallelism` on the rebased tree: see the PR.

@@ -121,6 +121,18 @@ describe('painting', () => {
     expect(fields).toBeGreaterThan(a.length / 4 / 10); // there's countryside, and it's farmed
     g.dispose();
   });
+  it('keeps its scratch layers after a game-sized paint, and drops them after a live-area-sized one', () => {
+    // (the pools are sized to the biggest window painted and were kept for good: about 205 MB after
+    // the 50 km map's first whole-live-area paint, on a phone)
+    const pools = (g: Ground) => { const c = g.cover as unknown as { fpool: unknown[]; bpool: unknown[]; ipool: Int32Array }; return c.fpool.length + c.bpool.length + c.ipool.length; };
+    const small = new Ground({ region: REGION });
+    small.paint(town());
+    expect(pools(small)).toBeGreaterThan(0);
+    const big = new Ground({ region: { x0: -1400, z0: -1400, size: 2800 } }); // (over a million texels with the margin)
+    big.paint(town());
+    expect(pools(big)).toBe(0);
+    small.dispose(); big.dispose();
+  });
   it('is deterministic', () => {
     const g1 = new Ground({ region: REGION }), g2 = new Ground({ region: REGION });
     g1.paint(town()); g2.paint(town());

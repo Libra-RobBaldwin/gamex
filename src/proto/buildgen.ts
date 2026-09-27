@@ -4,6 +4,7 @@
 // Everything a building uses is batched into one mesh per material to keep draw calls down.
 import * as THREE from 'three';
 import { rng, type Lot } from './roads';
+import { GATE_W, inGate, parkEntrances, parkPaths } from './parkplan';
 import type { Era, Place, Vern } from './vernacular';
 
 type Sw = [string, string]; // colour, name
@@ -1689,7 +1690,29 @@ export function makeRegion(reg: RegionShape): BuiltShape {
   const centre = cells.reduce((b, c) => (Math.hypot(c.x - cx, c.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? c : b), cells[0]);
   const block = (n: number) => cells.find((c) => { for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (!inR(c.x + i * S, c.z + j * S)) return false; return true; });
   const notes: string[] = [`${Math.round(cells.length * S * S)} m²`];
-  const railings = () => { for (const [x0, z0, x1, z1] of reg.roadEdges) k.at((x0 + x1) / 2, (z0 + z1) / 2, -Math.atan2(z1 - z0, x1 - x0), () => k.box(0, 0, 0, Math.hypot(x1 - x0, z1 - z0) + 0.05, 1.1, 0.06, plain('#23262a'))); };
+  // The edge along the roads, so a park reads as one: a wall in the town's tradition (the garden
+  // walls' materials) with railings on it, a hedge where the tradition is hedges, a green fence
+  // round a playground, posts and wire round allotments; open at the gates (parkplan.ts), which get
+  // a pier each side. The edge comes in 1.5 m pieces, each drawn in its own frame.
+  const gates = parkEntrances(reg.roadEdges, centre);
+  const V = P ? VD[P.vern] : null;
+  const edge = (style: 'park' | 'play' | 'wire') => {
+    const wallM = V ? boundaryMat(V) : plain('#8f8a80'), dark = plain('#23262a'), post = plain('#6b5a48');
+    for (const [x0, z0, x1, z1] of reg.roadEdges) {
+      const mid = { x: (x0 + x1) / 2, z: (z0 + z1) / 2 };
+      if (inGate(mid, gates)) continue;
+      const w = Math.hypot(x1 - x0, z1 - z0) + 0.05;
+      k.at(mid.x, mid.z, -Math.atan2(z1 - z0, x1 - x0), () => {
+        if (style === 'play') k.box(0, 0, 0, w, 1.0, 0.05, plain('#2e7d5b'));
+        else if (style === 'wire') { k.box(-w / 2 + 0.05, 0, 0, 0.08, 1.2, 0.08, post); for (const y of [0.5, 1.1]) k.box(0, y, 0, w, 0.03, 0.03, dark); }
+        else if (!V || V.bound === 'hedge' || V.bound === 'picket') k.box(0, 0, 0, w, 0.95, 0.7, hedgeM());
+        else if (V.bound === 'cornish') { k.box(0, 0, 0, w, 1.0, 0.9, wallM); k.box(0, 1.0, 0, w, 0.35, 0.7, hedgeM()); }
+        else { const wh = V.bound === 'whitewall' ? 1.2 : 0.6; k.box(0, 0, 0, w, wh, 0.3, wallM); k.box(0, wh, 0, w, 0.08, 0.36, plain(V.bound === 'brickwall' ? '#7e3b2e' : shade(V.stone, 0.85))); if (wh < 1) { k.box(0, wh + 0.08, 0, w, 0.7, 0.05, dark); for (let x = -w / 2 + 0.75; x < w / 2; x += 1.5) k.box(x, wh + 0.08, 0, 0.06, 0.8, 0.06, dark); } }
+      });
+    }
+    for (const g of gates) for (const s of [-1, 1]) k.box(g.at.x + g.dir.x * s * (GATE_W / 2 + 0.25), 0, g.at.z + g.dir.z * s * (GATE_W / 2 + 0.25), 0.45, style === 'park' ? 1.4 : 1.1, 0.45, style === 'wire' ? post : style === 'play' ? plain('#2e7d5b') : wallM);
+  };
+  const railings = () => edge('park');
   const keep: { x: number; z: number; r: number }[] = [];
   const clear = (x: number, z: number) => keep.every((o) => Math.hypot(x - o.x, z - o.z) > o.r);
   const L = reg.leafy ?? 1;
@@ -1699,19 +1722,29 @@ export function makeRegion(reg: RegionShape): BuiltShape {
     trees(0.3, 0.8);
     notes.push('shrubs and trees');
   } else if (reg.kind === 'pocket' || reg.kind === 'park') {
-    const pond = reg.kind === 'park' ? block(4) : undefined;
-    if (pond) { keep.push({ x: pond.x + 1.5 * S, z: pond.z + 1.5 * S, r: S * 1.6 + 2 }); k.prismN(pond.x + 1.5 * S, pond.z + 1.5 * S, S * 1.6, 18, 0, 0.1, plain('#cfc7a8')); k.prismN(pond.x + 1.5 * S, pond.z + 1.5 * S, S * 1.4, 18, 0, 0.14, plain('#4f93c4')); notes.push('pond'); }
-    // a path across the longer way, benches along it
-    const xs = cells.map((c) => c.x), zs = cells.map((c) => c.z);
-    const alongX = Math.max(...xs) - Math.min(...xs) >= Math.max(...zs) - Math.min(...zs);
-    const path = cells.filter((c) => (alongX ? Math.abs(c.z - centre.z) < 0.1 : Math.abs(c.x - centre.x) < 0.1) && clear(c.x, c.z));
-    for (const c of path) alongX ? flat(k, c.x - h, c.z - 1.2, c.x + h, c.z + 1.2, 0.075, gravelM()) : flat(k, c.x - 1.2, c.z - h, c.x + 1.2, c.z + h, 0.075, gravelM());
-    path.forEach((c, i) => { if (i % 2 === 1) bench(k, alongX ? c.x : c.x + 2, alongX ? c.z + 2 : c.z, alongX); });
+    // (no pond: the water system has no hollow to hold one yet, and a flat disc broke its rules)
+    // gravel paths from the gates on the road edges (gate to gate, or each to the middle), a bench
+    // beside the middle of each, the trees kept off them
+    const paths = gates.length ? parkPaths(gates, centre) : [];
+    if (!paths.length) {
+      const xs = cells.map((c) => c.x), zs = cells.map((c) => c.z);
+      const alongX = Math.max(...xs) - Math.min(...xs) >= Math.max(...zs) - Math.min(...zs);
+      const row = cells.filter((c) => (alongX ? Math.abs(c.z - centre.z) < 0.1 : Math.abs(c.x - centre.x) < 0.1)).sort((p, q) => (alongX ? p.x - q.x : p.z - q.z));
+      if (row.length > 1) { const a = row[0], z = row[row.length - 1]; paths.push(alongX ? [{ x: a.x - h + 0.5, z: a.z }, { x: z.x + h - 0.5, z: z.z }] : [{ x: a.x, z: a.z - h + 0.5 }, { x: z.x, z: z.z + h - 0.5 }]); }
+    }
+    for (const path of paths) {
+      const a = path[0], b = path[path.length - 1], L = Math.hypot(b.x - a.x, b.z - a.z);
+      if (L < 1) continue;
+      const rot = -Math.atan2(b.z - a.z, b.x - a.x), nx = -(b.z - a.z) / L, nz = (b.x - a.x) / L;
+      k.at((a.x + b.x) / 2, (a.z + b.z) / 2, rot, () => { k.box(0, 0, 0, L, 0.075, 2.4, gravelM()); if (L > 8) bench(k, 0, 2.2, true); });
+      for (let t = 0; t <= L; t += 3) keep.push({ x: a.x + ((b.x - a.x) * t) / L, z: a.z + ((b.z - a.z) * t) / L, r: 2.6 });
+      if (L > 8) keep.push({ x: (a.x + b.x) / 2 + nx * 2.2, z: (a.z + b.z) / 2 + nz * 2.2, r: 2 });
+    }
     const tn = trees(reg.kind === 'park' ? 0.3 : 0.4);
     for (const c of cells) if (r() < 0.12 * L && clear(c.x, c.z)) flat(k, c.x - 1.5, c.z - 1, c.x + 1.5, c.z + 1, 0.07, bedM());
     if (reg.kind === 'park' && cells.length > 80 && clear(centre.x, centre.z + S)) { k.prismN(centre.x, centre.z + S, 3.2, 8, 0, 0.6, plain('#c9c2b4')); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; k.box(centre.x + Math.cos(a) * 2.8, 0.6, centre.z + S + Math.sin(a) * 2.8, 0.15, 2.6, 0.15, plain('#2e5a45')); } k.prismN(centre.x, centre.z + S, 3.6, 8, 3.2, 0.2, plain('#2e5a45'), 1.4, plain('#2e5a45')); notes.push('bandstand'); }
     railings();
-    notes.push(`${tn} trees`, 'benches', 'railings');
+    notes.push(`${tn} trees`, 'benches', V && V.bound !== 'hedge' && V.bound !== 'picket' ? `${BOUND_NAME[V.bound]} and railings` : 'a hedge', `${gates.length} gate${gates.length === 1 ? '' : 's'}`);
   } else if (reg.kind === 'playground') {
     const b = block(2) ?? centre;
     const x0 = b.x - h, z0 = b.z - h, x1 = x0 + 2 * S, z1 = z0 + 2 * S;
@@ -1727,8 +1760,8 @@ export function makeRegion(reg: RegionShape): BuiltShape {
     for (const [a, c, d, e] of [[x0, z0, x1, z0], [x0, z1, x1, z1], [x0, z0, x0, z1], [x1, z0, x1, z1]]) k.box((a + d) / 2, 0, (c + e) / 2, Math.max(0.05, d - a), 1, Math.max(0.05, e - c), plain('#2e7d5b'));
     bench(k, x0 - 1.5, z0 + S, false);
     trees(0.25);
-    railings();
-    notes.push('swings, slide and climbing frame');
+    edge('play');
+    notes.push('swings, slide and climbing frame', 'a fence with a gate');
   } else if (reg.kind === 'allotments') {
     let sheds = 0;
     for (const c of cells) {
@@ -1737,7 +1770,8 @@ export function makeRegion(reg: RegionShape): BuiltShape {
       else if (r() < 0.15) k.prismN(c.x - h + 1, c.z - h + 1, 0.4, 8, 0, 0.9, plain('#2f5d3a'));
       if (r() < 0.2) { for (let i = 0; i < 3; i++) k.box(c.x - 1 + i, 0, c.z, 0.05, 1.6, 0.05, plain('#8a6446')); }
     }
-    notes.push(`${cells.length} plots`, `${sheds} sheds`);
+    edge('wire');
+    notes.push(`${cells.length} plots`, `${sheds} sheds`, 'posts and wire, a gate');
   } else if (reg.kind === 'carpark') {
     let spaces = 0;
     for (const c of cells) { for (let i = 0; i < 2; i++) { flat(k, c.x - h + i * 2.5, c.z - h + 0.2, c.x - h + i * 2.5 + 0.1, c.z + h - 0.2, 0.1, plain('#f2f2ee')); if (r() < 0.6) car(k, c.x - h + 1.3 + i * 2.5, c.z, true, pick(r, CAR_COLS)); spaces++; } }

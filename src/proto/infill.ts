@@ -1,7 +1,9 @@
 // Leftover land. Plots are rectangles along roads, so corners, the insides of curves and the odd
 // gaps between blocks are left over. Real towns fill those: a church or a pub on the corner, a
 // petrol station on the way out, allotments behind houses, a playground, a pocket park, a car
-// park, a planted verge. This finds the gaps on a 5 m grid and decides what each becomes.
+// park, a planted verge. This finds the gaps on a 5 m grid and decides what each becomes. Only
+// land within a few metres of buildings that stand is town: a road across open country leaves
+// fields either side, however it encloses them.
 import { CIVIC } from './buildgen';
 import type { RegionKind } from './buildgen';
 import { closestOnPath, closestOnSeg, pathLength, rng, type Lot, type Network, type P, type RSeg } from './roads';
@@ -52,13 +54,16 @@ export function findRegions(net: Network, pending: Lot[], within?: Box) {
     const c = net.parcelCentre(l), co = Math.cos(l.rot), si = Math.sin(l.rot), dx = x - c.x, dz = z - c.z;
     return Math.abs(dx * co + dz * si) < l.pw / 2 + pad && Math.abs(-dx * si + dz * co) < (l.d + l.front + l.back) / 2 + pad;
   };
+  // (a plot still waiting to be built is taken, but it isn't town yet: a new road across the fields
+  // plans plots along it at once, and the land between them stays fields until houses stand there)
+  const standing = new Set(net.lots);
   for (const l of all) {
     const c = net.parcelCentre(l), r = net.parcelR(l) + 20;
     const [i0, i1] = range(c.x - r, c.x + r, x0, nx), [j0, j1] = range(c.z - r, c.z + r, z0, nz);
     for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
       const x = cx(i), z = cz(j);
       if (inPlot(l, x, z, 0.5)) occ[i + j * nx] = LOT;
-      if (inPlot(l, x, z, 18)) nearLot[i + j * nx] = 1;
+      if (standing.has(l) && inPlot(l, x, z, 18)) nearLot[i + j * nx] = 1;
     }
   }
   // roads, and whether land is close enough to one to be part of town
@@ -162,6 +167,8 @@ export function findRegions(net: Network, pending: Lot[], within?: Box) {
         // piece by piece, and the ones far off skipped)
         const near = p.map((q, k) => k > 0 && Math.max(q.x, p[k - 1].x) >= lo.x && Math.min(q.x, p[k - 1].x) <= hi.x && Math.max(q.z, p[k - 1].z) >= lo.z && Math.min(q.z, p[k - 1].z) <= hi.z);
         if (!near.some(Boolean)) continue;
+        // (the edge stops short of the road's ends, where a junction's corner takes over)
+        const corner = Math.max(6, net.half(s) * 2 + 4);
         for (const side of [1, -1]) {
           let prev: P | null = null;
           const walk = walker(p);
@@ -170,7 +177,8 @@ export function findRegions(net: Network, pending: Lot[], within?: Box) {
             if (!near[w.i]) { prev = null; continue; }
             const q = w.q, nxv = q.uz * side, nzv = -q.ux * side;
             const at = { x: q.x + nxv * back, z: q.z + nzv * back };
-            const ok = Math.abs(q.y) < 1 && inside(q.x + nxv * (back + 2.5), q.z + nzv * (back + 2.5)) && !net.land.at({ x: q.x + nxv * (back + 0.3), z: q.z + nzv * (back + 0.3) });
+            // (the gap's first cell may start a cell or two behind the pavement: the corridor's margin)
+            const ok = Math.abs(q.y) < 1 && t > corner && t < L - corner && [2.5, 5, 7.5].some((d) => inside(q.x + nxv * (back + d), q.z + nzv * (back + d)));
             if (ok && prev) out.push([prev.x, prev.z, at.x, at.z]);
             prev = ok ? at : null;
           }
