@@ -102,19 +102,6 @@ await page.evaluate(() => {
   window.proto.setSpeed(16);
 });
 await page.tap('.close').catch(() => {});
-// log every call, then run the game six sim minutes at 16x: the frame loop takes at most 0.1 s of
-// real time a frame (main.ts) in steps of 1/30 s, so on SwiftShader at half a second a frame the
-// clock at 4x gives a slow runner too little sim time for three buses to call three times each,
-// and the run would measure the runner, not the buses; at 16x each frame is 1.6 s of sim whatever
-// the frame rate, and the traffic, the people and the railway all step together as they always do
-await page.evaluate(() => {
-  const T = window.proto.traffic, orig = T.onBusStop;
-  window.__calls = [];
-  window.__t0 = T.clock;
-  T.onBusStop = (seg, st, bus) => { window.__calls.push([bus, st.id]); return orig(seg, st, bus); };
-  window.proto.setSpeed(16);
-});
-await page.tap('.close').catch(() => {});
 const ran = await page.waitForFunction(() => window.proto.traffic.clock - window.__t0 >= 6 * 60 * 1000, null, { timeout: 360000, polling: 2000 }).then(() => true, () => false);
 console.log('sim minutes run', await page.evaluate(() => ((window.proto.traffic.clock - window.__t0) / 60000).toFixed(1)), ran ? '' : '(short: the wall-clock limit came first)');
 console.log('buses after', JSON.stringify(await page.evaluate((ids) => ids.map((id) => { const c = window.proto.traffic.cars.find((x) => x.id === id); return c ? { id, seg: c.seg.id, v: +c.v.toFixed(1), why: c.why, leg: c.leg, wait: +c.wait.toFixed(0) } : { id, depot: true }; }), line.buses)));
