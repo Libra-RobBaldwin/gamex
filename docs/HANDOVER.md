@@ -1,6 +1,35 @@
 # Handover: where everything stands
 
-## Latest: the morning of 27 Sep 2026 (06:25 UTC)
+## Latest: the morning of 27 Sep 2026 (08:05 UTC)
+
+Since 06:25: **#78** (play round 3: money measured at 3.7–4.5 times with the tuning, the park pond's game side,
+building taps fixed), **#74** (countryside: the dresser's barns, fields up to the town's ragged edge, the repaint
+budget fixed by the fresh session), **#79** (realism step 5: villages at the real density, 152 per 1,000 km²
+against 72, placed after everything else so the start town and its lanes keep every road), **#81** (vehicles:
+**kerbside parked cars are real cars that trips pull into and out of**, the user's ask; **the fleet drew no
+vehicle at all on the region map**, its culling testing the unlifted height against the camera 245 m up the
+hills, which is why the user saw boxes and no cars; even gaps for trains).
+
+**The economy, twice (coordinator):** round 3 found the town stopping on day 16 with "shops within 20 min can
+serve only 29%". The first fix (41e2456) made every supply the town finds for itself unlimited, including
+visitors, so the offices never fell back when the line went and the loop e2e turned red on the trunk (play
+caught it). The correction (8f1c7cd): only goods are found without limit (`selfSupplied` in the tune); visitors
+and works stay a share of the start; shops follow their customers from where the town started (`custBase`), so a
+thin high street keeps its share as the town grows and never falls further behind; the panel's shops line warns
+only when shops fall behind the start (`shopReach0`). Verified on the region town with the loop e2e locally and on
+CI. `game/econ.shops.test.ts` holds it. The seeded town's thin high street (4 shops for 1,775 people) is a
+realism item, queued.
+
+**Open PRs:** #80 (countryside: the fields follow the farming year, twelve game days to a year, crops by the
+lie of the land; CI running), #82 (play: a stop tapped too close to a junction moves to the nearest clear spot;
+CI running). Both were red only on the trunk's loop bug.
+
+**Sessions now:** play runs round 4 once #82 is in (parked cars, vehicles on the hills, villages, the money
+table, the shops line); realism takes the farm lanes with country-3's farm-site export, then the radials' finer
+wiggle and the towns' shops; vehicles carries on with its brief; country-3 (session_012DhwfJ2AbfvDW6ViDNqx4d,
+the old countryside session archived after its handover) finishes #80 and then the farm-site export.
+
+## Earlier that morning (06:25 UTC)
 
 Since 04:55: **#75** (realism step 4: radials bend with a steady drift and a wandering curvature drawn from the
 OS priors, side streets end as closes or T junctions instead of being dropped, ribbons thin along their radials,
