@@ -61,7 +61,8 @@ export interface RailHooks { stops(): StopIn[]; lines(): LineIn[]; time(a: numbe
 //  - it's taken to be in balance as it starts even though it has more jobs than workers (so it's
 //    propped up further than the library's default allows), and plenty of jobs in reach keeps
 //    counting towards where people want to live, so homes follow the jobs your service brings;
-//  - the town finds its own goods and materials until freight is in the game;
+//  - the town finds its own goods and materials until freight is in the game, and all the goods
+//    its shops ever need (so its shops keep up with its people: play round 3, 27 Sep);
 //  - it stands on its own as the map made it: you start with no transport at all, and the
 //    visitors your buses bring its offices are what make it grow (and withdrawing the service
 //    lets it fall back);
@@ -80,6 +81,11 @@ const GAME_TUNE = {
   monthDays: 1, calibrateMax: 3, reachCap: 4, visitsPerOfficeJobDay: 0.1, ptBiasMin: 0, transferWalkM: 60,
   growAt: 1.02, growAfter: 1, declineAt: 0.95, declineAfter: 2, recoverAt: 0.98,
   local: { homes: 0.5, goods: 1, materials: 1, visitors: 1 },
+  // (goods are freight, not in the game: the town finds all its shops ever need, so they follow
+  // their customers; visitors are what the lines bring, so the offices beyond the start stand on
+  // those alone and fall back when the service goes; works stay as the map made them, since with
+  // materials to spare they would grow on the town's own workers, service or none)
+  selfSupplied: { goods: true },
 };
 const zoneKey = (x: number, z: number) => (Math.floor(x / CELL) + 500) * 1000 + (Math.floor(z / CELL) + 500);
 const kindOf = (k: LotKind): BuildingKind => k;
