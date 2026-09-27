@@ -2333,6 +2333,7 @@ parking = new Parking(traffic.fleet, rng(11), (lot, heavy) => {
   return null;
 }); // (no ground height: the drape puts parked cars on the hills, as it does every car)
 traffic.parking = parking;
+if (RELIEF) traffic.fleet.lift = RELIEF.heightAt; // (the fleet culls where the drape draws its vehicles: on the hills)
 traffic.speedCap = (seg, s, dir, ahead) => bridgeLayer.capAt(seg, s, dir, ahead); // speed limits on bridges (game/bridges.ts)
 traffic.junctions = junctions;
 seenAt = (node) => traffic.seen.get(node);

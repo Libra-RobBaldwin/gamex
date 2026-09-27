@@ -557,8 +557,10 @@ the simulation, the spawning and each vehicle's size.
   - Before there are express sets, a train is a locomotive and coaches.
 - **HUD:** Transport → Buy vehicles lists `purchaseList(gameYear())`. Buses and trains from it run
   now.
-- **Culling:** only vehicles in view are drawn (`Fleet.frame` each frame). While the game is paused,
-  `traffic.redraw()` keeps panning honest.
+- **Culling:** only vehicles in view are drawn (`Fleet.frame` each frame). On a map with relief the
+  test point is lifted onto the hills (`Fleet.lift`, set from the relief by the game), where the
+  drape draws the vehicle: without it a town 245 m up drew no vehicle at all. While the game is
+  paused, `traffic.redraw()` keeps panning honest.
 - **Tests:** `src/proto/game/*.review.test.ts` (artics and bendy buses, goods trips, period
   trains) and `fleet.doors.test.ts`.
 

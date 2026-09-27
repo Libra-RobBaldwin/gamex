@@ -340,8 +340,12 @@ export class Fleet {
     // buckets with nothing in them this frame are left out of the scene's lists altogether
     for (const o of this.vr.group.children) o.visible = (o as THREE.InstancedMesh).count > 0;
   }
+  // The hills under a point (drape.ts lifts every vehicle onto them in its shader): the game
+  // sets it on a map with relief, so culling looks where the vehicle is drawn. Without it, on a
+  // town 245 m up, every car, bus, train and parked car failed the test and none was drawn.
+  lift: (x: number, z: number) => number = () => 0;
   private seen(x: number, y: number, z: number, r: number) {
-    return !this.frustum || this.frustum.intersectsSphere(this.sphere.set(this.p.set(x, y, z), r + 6));
+    return !this.frustum || this.frustum.intersectsSphere(this.sphere.set(this.p.set(x, y + this.lift(x, z), z), r + 6));
   }
   private put(m: Model, x: number, y: number, z: number, heading: number, pitch: number, k: number, cols: THREE.Color[], flags: number, odo: number, dl = 0, dr = 0) {
     if (!this.seen(x, y, z, m.dims.length / 2)) return;
