@@ -319,13 +319,14 @@ export class RailGame {
     const sh = railway.shapes.get(st.id);
     const use = (sh?.platforms ?? []).map((_, i) => this.c.people.platformUse(`plat:${st.id}:${i}`)).reduce((a, u) => ({ waiting: a.waiting + u.waiting, boarded: a.boarded + u.boarded, alighted: a.alighted + u.alighted }), { waiting: 0, boarded: 0, alighted: 0 });
     const n = st.tracks ?? (st.loop ? 2 : 1), lay = `${n} track${n === 1 ? '' : 's'}${st.loop ? ' (a passing loop)' : ''} · ${st.layout === 'side' ? 'side platforms' : st.layout === 'island' ? 'island' : 'platforms both sides'} · ${st.style === 'modern' ? 'glass hall' : st.style === 'halt' ? 'halt' : 'brick hall'}${st.structure === 'viaduct' ? ' · stairs and lifts to the street' : st.structure === 'underground' ? ` · ${Math.round(-(sh?.mid.y ?? 0))} m down, lifts and escalators` : (sh?.platforms.length ?? 0) > 1 || n > 1 ? ` · ${st.access === 'subway' ? 'subway' : 'footbridge'}` : ''}`;
+    // a small card, as a bus stop's or a bus's: the name, three numbers, one thing to do (and the
+    // way to take the station away, which the bulldozer doesn't offer; its lines are in Transport > Railway)
     shell.openInfo({
-      key: `station:${st.id}`, title: st.name, sub: st.structure === 'viaduct' ? 'Railway station, on a viaduct' : st.structure === 'underground' ? 'Railway station, underground' : 'Railway station', icon: 'train', tone: 'rail',
-      facts: [['Layout', lay], ['Platforms', `${sh?.platforms.length ?? 0} × ${st.len} m`], ['Lines', lines.map((l) => `${l.num}`).join(', ') || 'None yet'], ['Waiting', `${use.waiting}`], ['Boarded today', `${use.boarded}`], ['Got off today', `${use.alighted}`]],
-      note: sh ? undefined : 'The track here has changed: the station is closed until it’s straight and clear again',
+      key: `station:${st.id}`, title: st.name, sub: `${st.structure === 'viaduct' ? 'Railway station, on a viaduct' : st.structure === 'underground' ? 'Railway station, underground' : 'Railway station'} · ${sh?.platforms.length ?? 0} platform${(sh?.platforms.length ?? 0) === 1 ? '' : 's'} × ${st.len} m`, icon: 'train', tone: 'rail',
+      stats: [['Waiting', `${use.waiting}`], ['Boarded today', `${use.boarded}`], ['Lines', `${lines.length}`]],
+      note: sh ? lay : 'The track here has changed: the station is closed until it’s straight and clear again',
       actions: [
         { label: 'New line from here', icon: 'transport', kind: 'primary', onClick: () => { shell.closeSheet(); this.startLineTool(st.id); } },
-        ...lines.slice(0, 2).map((l) => ({ label: `Line ${l.num}`, icon: 'train' as const, onClick: () => this.showLine(l) })),
         { label: 'Demolish', icon: 'trash', kind: 'danger', onClick: () => { railway.remove(st.id); this.c.rebuildRoads(); shell.closeSheet(); this.c.hint(`${st.name} demolished`, 'trash'); } },
       ],
     });
@@ -353,9 +354,12 @@ export class RailGame {
     const { railway, shell } = this.c, l = t.line;
     const at = t.state === 'dwell' && t.station !== undefined ? railway.station(t.station)?.name : undefined, next = t.stop ? railway.station(t.stop.station)?.name : undefined;
     const waiting = t.state !== 'dwell' && t.v < 0.1 && t.waited > 3;
+    const model = (t.dress as { chain?: { name?: string }[] } | undefined)?.chain?.[0]?.name ?? (t.def as { label?: string }).label ?? 'Train';
+    const doing = t.state === 'dwell' ? (t.doors ? 'doors open' : 'about to leave') : waiting ? 'waiting at a red signal' : 'running';
+    // a small card, as a bus's: the name, three numbers, one thing to do
     shell.openInfo({
-      key: `train:${t.id}`, title: (t.def as { label?: string }).label ?? 'Train', sub: l ? `Line ${l.num}` : 'Train', icon: 'train', tone: 'rail',
-      facts: [['Line', l ? `${l.num}` : 'None'], [at ? 'At' : 'Next station', at ?? next ?? '—'], ['Doing', t.state === 'dwell' ? (t.doors ? 'Doors open' : 'About to leave') : waiting ? 'Waiting at a red signal' : 'Running'], ['Speed', `${Math.round(t.v * 2.237)} mph`], ['On board', `${this.c.people.aboardTrain(t.id)}`], ['Cars', `${t.def.cars} · ${Math.round(t.length)} m`]],
+      key: `train:${t.id}`, title: `Train ${t.id}`, sub: `${model} · ${t.def.cars} car${t.def.cars === 1 ? '' : 's'}${l ? ` · Line ${l.num}` : ''} · ${doing}`, icon: 'train', tone: 'rail',
+      stats: [['Speed', `${Math.round(t.v * 2.237)} mph`], ['On board', `${this.c.people.aboardTrain(t.id)}`], [at ? 'At' : 'Next', at ?? next ?? '—']],
       actions: l ? [{ label: `Line ${l.num}`, icon: 'train', onClick: () => this.showLine(l) }] : [],
     });
   }

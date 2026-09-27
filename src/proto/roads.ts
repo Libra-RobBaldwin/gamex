@@ -633,6 +633,20 @@ export class Network {
       if (def.family !== 'Motorway' && ((on && isMotorway(on)) || (e.node !== undefined && midway(e.node))))
         return res('Roads can’t join a motorway part-way along — cross it with Over or Under, or join it where it ends');
     }
+    // A railway joining another makes points, and points can't turn a train through more than
+    // 60° (rail/track.ts exits): a branch has to leave its main line at a gentle angle, either way
+    // along it. A junction sharper than that would take a line the trains could never run.
+    if (def.cls === 'rail') for (const [e, k] of [[a, 0], [b, flat.length - 1]] as const) {
+      const legs = e.node !== undefined ? this.segsAt(e.node).filter((x) => this.def(x).cls === 'rail') : e.seg !== undefined && this.segs.has(e.seg) ? [this.segs.get(e.seg)!] : [];
+      if (!legs.length) continue;
+      const q = flat[k === 0 ? 1 : k - 1], L = dist(e, q) || 1, h = { x: (q.x - e.x) / L, z: (q.z - e.z) / L }; // (into the new railway, away from the join)
+      const dirs: P[] = [];
+      for (const s of legs) {
+        if (e.node !== undefined) { const p = this.pathFrom(s, e.node), l = dist(p[0], p[1]) || 1; dirs.push({ x: (p[0].x - p[1].x) / l, z: (p[0].z - p[1].z) / l }); } // (along the existing track towards the join)
+        else { const c = closestOnPath(e, this.path(s)); dirs.push({ x: c.ux, z: c.uz }, { x: -c.ux, z: -c.uz }); }
+      }
+      if (!dirs.some((d) => d.x * h.x + d.z * h.z > 0.5)) return res('Too sharp a junction: a railway has to leave the other at 60° or less, as points do');
+    }
     // railways need gentler gradients and more headroom (for the wires) than roads
     const spec = def.cls === 'rail' ? GRADES.rail : opts.spec, G = Math.min(opts.grade, def.maxGrade);
     const floor = opts.cross === 'tunnel' ? FLOOR : 0;

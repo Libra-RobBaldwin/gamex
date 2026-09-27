@@ -71,7 +71,7 @@ class Occ {
 }
 
 // How "central" a spot is, in the town's metres (region/mapspec.ts centrality): what gets built there.
-const central: Record<Kind, (d: number) => number> = { town: (d) => d, city: (d) => d / 2, village: (d) => 70 + 1.2 * d };
+const central: Record<Kind, (d: number) => number> = { town: (d) => d, city: (d) => d / 2, village: (d) => 70 + 1.2 * d, hamlet: (d) => 180 + d };
 interface Spec { kind: BKind; w: [number, number]; d: [number, number]; h: [number, number]; setback: number; ridge: number; walls: number[]; roofs: number[]; back: number; gap: number }
 function specFor(c: number, kind: Kind, industrial: boolean, r: Rand): Spec {
   if (industrial) return { kind: 'shed', w: [26, 48], d: [22, 40], h: [7, 11], setback: 9, ridge: 0, walls: pickOf(r, [0, 1]) ? W.concrete : [10, 13], roofs: R.sheet, back: 8, gap: 8 };
@@ -79,7 +79,7 @@ function specFor(c: number, kind: Kind, industrial: boolean, r: Rand): Spec {
   if (c < 70) return { kind: 'shop', w: [6.5, 9], d: [12, 16], h: [7, 10], setback: 0.5, ridge: r() < 0.5 ? 3.5 : 0, walls: [...W.brick, ...W.render, ...W.buff], roofs: [...R.slate, ...R.tile], back: 6, gap: 0 };
   if (c < 115) return r() < (kind === 'city' ? 0.55 : 0.25) ? { kind: 'flats', w: [18, 28], d: [12, 16], h: [10, 16], setback: 3, ridge: 0, walls: [...W.brick, ...W.concrete, ...W.buff], roofs: R.flat, back: 10, gap: 5 } : { kind: 'terrace', w: [5, 6.2], d: [8, 10], h: [5.6, 6.4], setback: 2, ridge: 3, walls: [...W.brick, ...W.brick, ...W.render], roofs: R.slate, back: 11, gap: 0 };
   if (c < 170) return r() < 0.5 ? { kind: 'terrace', w: [5.2, 6.4], d: [8, 10], h: [5.4, 6.2], setback: 3, ridge: 3, walls: [...W.brick, ...W.render, ...W.buff], roofs: [...R.slate, ...R.tile], back: 14, gap: 0 } : { kind: 'house', w: [8, 10], d: [8, 10], h: [5.2, 5.8], setback: 5, ridge: 3.2, walls: [...W.brick, ...W.render], roofs: [...R.tile, ...R.slate], back: 16, gap: 2.5 };
-  return { kind: 'house', w: [9, 13], d: [8, 11], h: [5, 6], setback: 7, ridge: 3.4, walls: kind === 'village' ? [...W.brick, ...W.stone, ...W.render, ...W.buff] : [...W.brick, ...W.render, ...W.buff], roofs: [...R.tile, ...R.slate], back: 18, gap: 4 };
+  return { kind: 'house', w: [9, 13], d: [8, 11], h: [5, 6], setback: 7, ridge: 3.4, walls: kind === 'village' || kind === 'hamlet' ? [...W.brick, ...W.stone, ...W.render, ...W.buff] : [...W.brick, ...W.render, ...W.buff], roofs: [...R.tile, ...R.slate], back: 18, gap: 4 };
 }
 
 // the trunk routes and railways near a place, for keeping clear of
@@ -151,20 +151,20 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
       return;
     }
   };
-  if (s.kind !== 'city') addChurch();
+  if (s.kind !== 'city' && s.kind !== 'hamlet') addChurch();
   // frontage: both sides of every street, in the order the streets were laid out (the centre first)
   for (const st of streets) {
     const P = st.path, L = P.reduce((t, p, i) => (i ? t + Math.hypot(p.x - P[i - 1].x, p.z - P[i - 1].z) : 0), 0);
     if (L < 25) continue;
     for (const side of [1, -1]) {
-      let at = 12; // (clear of the junction at the start)
+      let at = s.kind === 'hamlet' ? 6 : 12; // (clear of the junction at the start; a hamlet's lane is short, its houses come right up to its bends)
       let row: Spec | null = null, rowLeft = 0, rowH = 0, rowWall = 0, rowRoof = 0;
-      while (at < L - 12) {
+      while (at < L - (s.kind === 'hamlet' ? 6 : 12)) {
         const p = pointAt(P, at);
         const c = central[s.kind](Math.hypot(p.x - s.x, p.z - s.z));
         const industrial = st.role === 'industrial' || inZone(p);
         // (a village thins out into the country: gaps between the houses further out)
-        if (s.kind === 'village' && c > 170 && r() < 0.35) { at += 14; row = null; continue; }
+        if ((s.kind === 'village' || s.kind === 'hamlet') && c > 170 && r() < (s.kind === 'hamlet' ? 0.25 : 0.35)) { at += 14; row = null; continue; }
         let sp: Spec;
         if (row && rowLeft > 0) sp = row;
         else {
@@ -173,7 +173,7 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
           else row = null;
         }
         const w = sp.w[0] + r() * (sp.w[1] - sp.w[0]), d = sp.d[0] + r() * (sp.d[1] - sp.d[0]);
-        if (at + w > L - 12) break;
+        if (at + w > L - (s.kind === 'hamlet' ? 6 : 12)) break;
         const q = pointAt(P, at + w / 2), off = st.half + sp.setback + d / 2;
         const x = q.x + (-q.uz * side) * off, z = q.z + (q.ux * side) * off, rot = Math.atan2(q.uz, q.ux);
         const ok = occ.rect(x, z, w, d, rot, false, sp.gap > 0 ? 0.6 : 0.05) && !wet({ x, z });

@@ -87,9 +87,9 @@ const key = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
 
 // how many of each at 50 km when the seed decides (−1): about as many as a real 50 km square of
 // lowland England, a place every few kilometres
-const AUTO = { towns: [11, 15], villages: [130, 170], lakes: [4, 7] } as const;
+const AUTO = { towns: [11, 15], villages: [130, 170], hamlets: [60, 220], lakes: [4, 7] } as const;
 // people at the start, by kind and size (the coarse economy grows them from here)
-const popOf = (kind: Kind, r: number) => Math.round(kind === 'city' ? 60 * r : kind === 'town' ? 30 * r : 5 * r);
+const popOf = (kind: Kind, r: number) => Math.round(kind === 'city' ? 60 * r : kind === 'town' ? 30 * r : kind === 'hamlet' ? 2 * r : 5 * r);
 // the start town: a market town, the size the game's own town is
 const START_R = 250;
 // The live play area: the square round the start town where the game's Network, traffic and
@@ -167,7 +167,10 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
   const t = r(), land = landKm2(w, H) * (RUGGED[o.relief] ?? 1), S = PRIORS.settlements.perThousandKm2;
   const nTowns = o.towns === -1 ? Math.max(AUTO.towns[0], Math.round((between(S.cityOrTown, t) * land) / 1000) - (o.city ? 2 : 0)) : o.towns;
   const nVillages = o.villages === -1 ? Math.max(AUTO.villages[0], Math.round((between(S.village, t) * land) / 1000)) : o.villages;
-  const kinds: Kind[] = [...(o.city ? ['city' as const, 'city' as const] : []), ...Array<Kind>(nTowns).fill('town'), ...Array<Kind>(nVillages).fill('village')];
+  // (and the hamlets on top, as the bakes have them: a few houses on a lane, 65–170 per 1,000 km²,
+  // capped so a plan is still made in a few seconds)
+  const nHamlets = o.villages === -1 ? Math.max(AUTO.hamlets[0], Math.min(AUTO.hamlets[1], Math.round((between(S.hamlet, t) * land) / 1000))) : Math.round(o.villages * 1.2);
+  const kinds: Kind[] = [...(o.city ? ['city' as const, 'city' as const] : []), ...Array<Kind>(nTowns).fill('town'), ...Array<Kind>(nVillages).fill('village'), ...Array<Kind>(nHamlets).fill('hamlet')];
   const out: WorldSettlement[] = [];
   const names = rng(mix(seed, 204)); // (a stream of their own: renaming never moves a place)
   const everyName = new Set<string>();
@@ -188,16 +191,16 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
     return found;
   };
   const add = (s: WorldSettlement) => { out.push(s); const k = key(Math.floor(s.x / cell), Math.floor(s.z / cell)); const l = index.get(k); if (l) l.push(s); else index.set(k, [s]); };
-  const gapFor = (a: Kind, b: Kind) => (a === 'village' || b === 'village' ? (a === b ? 1100 : 1500) : a === 'city' && b === 'city' ? 9000 : a === 'city' || b === 'city' ? 4200 : 3400);
+  const gapFor = (a: Kind, b: Kind) => (a === 'hamlet' || b === 'hamlet' ? (a === b ? 600 : 700) : a === 'village' || b === 'village' ? (a === b ? 1100 : 1500) : a === 'city' && b === 'city' ? 9000 : a === 'city' || b === 'city' ? 4200 : 3400);
   const make = (kind: Kind, x: number, z: number, radius: number, n: number): WorldSettlement => {
     const K = KINDS[kind], axis = range(r, 0, Math.PI), plan = r() < K.grid ? 'grid' : 'organic';
-    return { id: out.length, name: nameFor(x, z, kind === 'village'), kind, x: Math.round(x), z: Math.round(z), r: radius, axis, plan, seed: mix(seed, 1000 + n), gates: [], pop: popOf(kind, radius), reach: reach(kind, radius) };
+    return { id: out.length, name: nameFor(x, z, kind === 'village' || kind === 'hamlet'), kind, x: Math.round(x), z: Math.round(z), r: radius, axis, plan, seed: mix(seed, 1000 + n), gates: [], pop: popOf(kind, radius), reach: reach(kind, radius) };
   };
   // the start town, right in the middle
   add(make('town', 0, 0, START_R, 0));
   const edge = Math.min(1600, H * 0.12);
   // one place of a kind, somewhere `at` picks (null: nowhere left), clear of the others
-  const place = (kind: Kind, n: number, at: (R: number) => XZ | null, maxTries = 2500, patchy = kind === 'village') => {
+  const place = (kind: Kind, n: number, at: (R: number) => XZ | null, maxTries = 2500, patchy = kind === 'village' || kind === 'hamlet') => {
     const K = KINDS[kind];
     const radius = Math.round(kind === 'city' && n === 1 ? range(r, 380, 420) : range(r, K.r[0], K.r[1]));
     const R = reach(kind, radius);
@@ -210,6 +213,8 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
       if (!p) return false;
       const { x, z } = p;
       if (Math.abs(x) > lim || Math.abs(z) > lim) continue;
+      // (no hamlet within the start town's first view: a pinch-out over it must not bring a place to life)
+      if (kind === 'hamlet' && Math.hypot(x, z) < 3600) continue;
       // (villages thin out and thicken in patches a few kilometres across)
       if (patchy && r() > 0.35 + 0.65 * patch(x, z, seed)) continue;
       if (w.edgeDistance({ x, z }, R + 200) < R + 90) continue;

@@ -28,7 +28,7 @@ defaults become:
 
 ## Settlements' streets and links (`generate.ts`)
 
-- **`KINDS`:** how big a city, a market town and a village is, its block spacing, and the road types of
+- **`KINDS`:** how big a city, a market town, a village and a hamlet is, its block spacing, and the road types of
   its high street, main cross street, side streets and industrial edge.
 - **`layStreets(s, water, bound)`:** one settlement's streets as `net.build` calls, grown along its
   radials as real places are (`PRIORS.towns`, measured by `tools/os/towns.mjs`): the high street's two
