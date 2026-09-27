@@ -30,18 +30,28 @@ defaults become:
 
 - **`KINDS`:** how big a city, a market town and a village is, its block spacing, and the road types of
   its high street, main cross street, side streets and industrial edge.
-- **`layStreets(s, water, bound)`:** one settlement's streets as `net.build` calls: a lattice in the
-  settlement's frame inside a wobbly circle, row 0 the high street, column 0 the main cross street, an
-  industrial edge of double-length blocks (with a zone rule) for cities and towns. An organic plan jitters
-  the lattice, bends the streets and leaves about a third out, keeping a spanning tree. Streets that would
-  touch water or leave the map are dropped, and the rest come out in the order they're reached from the
-  centre, so every settlement is one connected piece. The plan lays the far towns' streets this way for the
-  scenery (`worldmap/towns.ts`), and the live area's for the game (`worldmap/spec.ts`, then `apply.ts`
-  `buildStreets`). It also gives the settlement its **spokes**: both ends of the high street (the `gates`)
-  and of the main cross street, each facing out along its street. The plan's lanes leave by them
-  (`worldmap/routes.ts` `spokeFor`, `stem`): the spoke facing where the lane goes, straight along the
-  street for 150 m and more, then a sweep into its course; two lanes wanting one spoke share it and fork
-  outside. That's how real roads leave real places (`PRIORS.exits`, measured by `tools/os/exits.mjs`).
+- **`layStreets(s, water, bound)`:** one settlement's streets as `net.build` calls, grown along its
+  radials as real places are (`PRIORS.towns`, measured by `tools/os/towns.mjs`): the high street's two
+  ways through the middle and 2–4 more radials for a village, 4–6 for a town, 6–8 for a city, none within
+  30–40° of another and each starting on a high-street node a block or two off the middle (a T, not one
+  great crossroads); the houses run further out along the radials than between them; cross streets join
+  neighbouring radials part way out; side streets and closes branch off every radial at the measured rate
+  and lengths, through side streets on one side joined end to end by a back street; an organic plan
+  wanders and bends, a grid plan runs square. No street crosses another: one that would meet a radial
+  ends on it as a T, one that would cross another street or run within 25 m of its node is left out. The
+  city's and the towns' industrial estate is a small grid of wide blocks beside one radial's outer end,
+  its way in a T off the radial (with a zone rule). Streets that would touch water or leave the map are
+  dropped, and the rest come out in the order they're reached from the centre along the streets, so every
+  settlement is one connected piece and the careful builder (`apply.ts` `buildStreets`) refuses none. The
+  plan lays the far towns' streets this way for the scenery (`worldmap/towns.ts`), and the live area's
+  for the game (`worldmap/spec.ts`, then `apply.ts`). It also gives the settlement its **spokes**: each
+  radial's outer end, facing out along it (the high street's two are the `gates`). The plan's lanes leave
+  by them (`worldmap/routes.ts` `laneBetween`, `spokeFor`, `stem`): of the two spokes at each end that best
+  face the other place, the pair whose way doesn't double back and has no standing water at the stem;
+  straight along the street for 240 m, then a smooth blend into the course found between; two lanes
+  wanting one spoke share it and fork outside. That's how real roads leave real places (`PRIORS.exits`,
+  measured by `tools/os/exits.mjs`). `docs/reports/os/seeded-vs-real.md` puts the seeded places on the
+  real towns' yardsticks.
 - **`suggestLinks(settlements, water)`:** which places to join: A roads on the Gabriel graph of the cities
   and towns, B roads bringing each village in by its two shortest links, and whatever keeps everywhere
   reachable. `worldmap/routes.ts` turns them into the lanes of a seeded start.

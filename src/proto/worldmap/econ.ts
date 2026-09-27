@@ -11,6 +11,8 @@
 import { mix } from '../region/random';
 import type { WorldPlan } from './plan';
 
+const GROWTH_CAP = 0.5; // how much a place can grow, as a share of its planned size
+
 export class CoarseEconomy {
   private rate: Float64Array; // growth a day
   constructor(readonly plan: WorldPlan) {
@@ -24,9 +26,11 @@ export class CoarseEconomy {
       this.rate[s.id] = (0.00012 + 0.00006 * Math.min(4, links[s.id]) + 0.00018 * rail[s.id]) * (0.6 + 0.8 * j);
     }
   }
+  // (bounded: a place grows at its rate at first and eases off towards half again its size, so a
+  // far place's people never run away from what its streets could hold when it comes to life)
   pop(id: number, day: number) {
-    const s = this.plan.settlements[id];
-    return Math.round(s.pop * (1 + this.rate[id] * Math.max(0, day)));
+    const s = this.plan.settlements[id], t = (this.rate[id] * Math.max(0, day)) / GROWTH_CAP;
+    return Math.round(s.pop * (1 + GROWTH_CAP * (1 - Math.exp(-t))));
   }
   jobs(id: number, day: number) { const s = this.plan.settlements[id]; return Math.round(this.pop(id, day) * (s.kind === 'city' ? 0.62 : s.kind === 'town' ? 0.48 : 0.2)); }
   // trips a day between two places (a gravity model)

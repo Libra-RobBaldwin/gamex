@@ -42,12 +42,12 @@ export const ROUTE_HALF: Record<RouteKind | 'rail', number> = { motorway: 17, A:
 // how long its bends are (the smoothing, in 25 m steps). Steeper than its grade, it has to cut or
 // tunnel, at `dig` times the cost a metre, so it goes round a hill unless going through pays. And
 // turning costs it (`turn`: a railway or a motorway can't take a tight bend), so it keeps a line.
-export interface Profile { grade: number; wander: number; bridge: number; keep: number; smooth: number; dig: number; live: boolean; turn: number }
+export interface Profile { grade: number; wander: number; bridge: number; keep: number; smooth: number; dig: number; live: boolean; turn: number; climb: number }
 export const PROFILES: Record<RouteKind | 'rail', Profile> = {
-  B: { grade: 0.05, wander: 1, bridge: 900, keep: 60, smooth: 7, dig: 0, live: false, turn: 0 },
-  A: { grade: 0.06, wander: 0.7, bridge: 1600, keep: 150, smooth: 12, dig: 14, live: false, turn: 0.5 },
-  motorway: { grade: 0.04, wander: 0.25, bridge: 2500, keep: 350, smooth: 22, dig: 10, live: true, turn: 2 },
-  rail: { grade: 0.02, wander: 0.15, bridge: 2500, keep: 120, smooth: 14, dig: 30, live: false, turn: 3 },
+  B: { grade: 0.05, wander: 1, bridge: 900, keep: 60, smooth: 7, dig: 0, live: false, turn: 0, climb: 0.9 },
+  A: { grade: 0.06, wander: 0.7, bridge: 1600, keep: 150, smooth: 12, dig: 14, live: false, turn: 0.5, climb: 2 },
+  motorway: { grade: 0.04, wander: 0.25, bridge: 2500, keep: 350, smooth: 22, dig: 10, live: true, turn: 2, climb: 2 },
+  rail: { grade: 0.02, wander: 0.15, bridge: 2500, keep: 120, smooth: 14, dig: 30, live: false, turn: 3, climb: 2 },
 };
 
 interface Ctx { seed: number; half: number; settlements: WorldSettlement[]; links: Link[]; water: WorldWater; grid: SettlementGrid; heightAt: (x: number, z: number) => number }
@@ -64,8 +64,7 @@ export function planRoutes(c: Ctx, full = false): { roads: Route[]; rails: Rail[
   if (full) for (const line of motorwayLines(c, r)) add('motorway', L.through(line, [], 'motorway'), null, null);
   for (const l of [...c.links].sort((p, q) => p.length - q.length)) {
     const A = c.settlements[l.a], B = c.settlements[l.b], kind = full ? l.road : 'B';
-    const sa = stem(c, A, B), sb = stem(c, B, A);
-    add(kind, joinStems(sa, L.find(sa.end, sb.end, [A.id, B.id], kind, true), sb, kind, () => L.find(sa.end, sb.end, [A.id, B.id], kind)), A.id, B.id);
+    add(kind, laneBetween(c, L, A, B, kind), A.id, B.id);
   }
   for (const e of edgeExits(c, r)) {
     // (found to just inside the edge, then straight on off it)
@@ -227,8 +226,8 @@ class LaneFinder {
         }
         const wf = 1 + (this.wander(ni, nj) - 1) * P.wander;
         // (a lane just climbs, dearer the steeper; a bigger road steeper than its grade cuts or tunnels)
-        let w = !P.dig ? len * (1 + 2 * (slope / 0.05) ** 2) * wf
-          : len * (1 + 2 * (Math.min(slope, P.grade) / 0.05) ** 2) * wf + (slope > P.grade ? len * P.dig * (1 + (slope - P.grade) / P.grade) : 0);
+        let w = !P.dig ? len * (1 + P.climb * (slope / 0.05) ** 2) * wf
+          : len * (1 + P.climb * (Math.min(slope, P.grade) / 0.05) ** 2) * wf + (slope > P.grade ? len * P.dig * (1 + (slope - P.grade) / P.grade) : 0);
         if (this.water(ni, nj) === 2 && this.water(i, j) !== 2) w += P.bridge; // (a bridge: only where it must)
         if (P.turn && from[k] >= 0) {
           // (against the way it came into this cell: straight on is free, a right angle dear)
@@ -280,13 +279,43 @@ export function spokeFor(A: WorldSettlement, toward: XZ): Spoke | null {
   const score = (s: Spoke) => { const dx = toward.x - s.x, dz = toward.z - s.z, d = Math.hypot(dx, dz) || 1; return (s.ux * dx + s.uz * dz) / d; };
   return A.spokes.reduce((b, s) => (score(s) > score(b) ? s : b));
 }
+// A lane between two places: out of each by the spoke facing the other, straight, then the way found
+// between. Where the way found from the best-facing spoke turns straight back (water or another
+// place beyond it), the next spoke is tried, so a lane never doubles back through the place it leaves.
+function laneBetween(c: Ctx, L: LaneFinder, A: WorldSettlement, B: WorldSettlement, kind: RouteKind): XZ[] | null {
+  const spokesOf = (P: WorldSettlement, toward: XZ) => {
+    if (!P.spokes?.length) return [null];
+    // (a spoke facing water within its stem's length is a poor way out: it counts against it)
+    const wet = (s: Spoke) => { for (let d = 30; d <= STEM; d += 30) if (standing(c.water, { x: s.x + s.ux * d, z: s.z + s.uz * d }) < 60) return true; return false; };
+    const score = (s: Spoke) => { const dx = toward.x - s.x, dz = toward.z - s.z, d = Math.hypot(dx, dz) || 1; return (s.ux * dx + s.uz * dz) / d - (wet(s) ? 1 : 0); };
+    return [...P.spokes].sort((p, q) => score(q) - score(p)).slice(0, 2);
+  };
+  // (does the way found leave the stem's end going on, not back past the place?)
+  const goesOn = (st: Stem, s: Spoke | null, path: XZ[] | null) => {
+    if (!path || !s || st.pts.length < 2) return true;
+    let run = 0, i = 1;
+    for (; i < path.length && run < 150; i++) run += dist(path[i], path[i - 1]);
+    const q = path[Math.min(i, path.length - 1)], dx = q.x - st.end.x, dz = q.z - st.end.z, d = Math.hypot(dx, dz) || 1;
+    return (dx * s.ux + dz * s.uz) / d > -0.5;
+  };
+  let best: XZ[] | null = null;
+  for (const sa of spokesOf(A, B)) for (const sb of spokesOf(B, A)) {
+    const a = stem(c, A, B, sa), b = stem(c, B, A, sb);
+    const raw = L.find(a.end, b.end, [A.id, B.id], kind, true);
+    const path = joinStems(a, raw, b, kind, () => L.find(a.end, b.end, [A.id, B.id], kind));
+    if (!path) continue;
+    if (!best) best = path;
+    if (goesOn(a, sa, raw) && goesOn(b, sb, raw ? [...raw].reverse() : null)) return path;
+  }
+  return best;
+}
 // A road's first stretch out of a place: straight on along its spoke's street, `STEM` metres (real
 // roads run straight out of a place and only then bend: PRIORS.exits.netTurnFirstKmDeg), stopping
 // short of water or the map's edge. `end` is where the road is found from; `pts` the stretch.
 interface Stem { pts: XZ[]; end: XZ }
 export const STEM = 240;
-function stem(c: Ctx, A: WorldSettlement, toward: XZ): Stem {
-  const s = spokeFor(A, toward);
+function stem(c: Ctx, A: WorldSettlement, toward: XZ, chosen?: Spoke | null): Stem {
+  const s = chosen === undefined ? spokeFor(A, toward) : chosen;
   if (!s) { const e = endOf(A, toward); return { pts: [e], end: e }; }
   let L = STEM;
   const at = (d: number) => ({ x: s.x + s.ux * d, z: s.z + s.uz * d });
@@ -311,6 +340,24 @@ function joinStems(a: Stem, cells: XZ[] | null, b: Stem | null, kind: RouteKind 
   const r = resample(all, STEP), sm = smooth(r, P.smooth, 2);
   const holdA = a.pts.length > 1 ? Math.min(HOLD, a.pts.length) : 0, holdB = b && b.pts.length > 1 ? Math.min(HOLD, b.pts.length) : 0;
   const out = r.map((p, i) => (i < holdA || i >= r.length - holdB ? p : sm[i]));
+  // (from the end of each held stretch, a curve that leaves it on its line and meets the smoothed
+  // course further on with its heading: no corner where the stem ends, however sharp the turn)
+  const BLEND = 8;
+  const blend = (i0: number, dir: 1 | -1) => {
+    const i3 = i0 + dir * BLEND;
+    if (i0 < 1 || i0 >= out.length - 1 || i3 < 1 || i3 >= out.length - 1) return;
+    const p0 = out[i0], p3 = out[i3], prev = out[i0 - dir], next = out[i3 + dir];
+    const L = dist(p0, p3) / 3;
+    const t0 = { x: p0.x - prev.x, z: p0.z - prev.z }, t3 = { x: next.x - p3.x, z: next.z - p3.z };
+    const n0 = Math.hypot(t0.x, t0.z) || 1, n3 = Math.hypot(t3.x, t3.z) || 1;
+    const c1 = { x: p0.x + (t0.x / n0) * L, z: p0.z + (t0.z / n0) * L }, c2 = { x: p3.x - (t3.x / n3) * L, z: p3.z - (t3.z / n3) * L };
+    for (let k = 1; k < BLEND; k++) {
+      const t = k / BLEND, u = 1 - t;
+      out[i0 + dir * k] = { x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p3.x, z: u * u * u * p0.z + 3 * u * u * t * c1.z + 3 * u * t * t * c2.z + t * t * t * p3.z };
+    }
+  };
+  if (holdA) blend(holdA - 1, 1);
+  if (holdB) blend(out.length - holdB, -1);
   return resample(chaikin(chaikin(out)), STEP);
 }
 

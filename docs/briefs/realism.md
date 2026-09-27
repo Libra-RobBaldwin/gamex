@@ -1,7 +1,7 @@
 # Brief: realism (seeded places and roads as real UK ones, from OS data)
 
 Session: https://claude.ai/code/session_01N2xhRAKzQWsSt6RZQH8jdG (the onemap-4 session), branch
-`claude/work-realism` (step 4 is merged, #61; the integration branch is merged in, so this branch carries only its own changes).
+`claude/work-realism` (step 4 is merged, #61; the stream's first PR, spokes and stems, is merged, #65; the integration branch is merged in after each landing, so a PR carries only what is new).
 Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU. Its brief came at 20:52 UTC, 26 Sep 2026.
 
 **Rule:** nothing is "done" until it is live (merged into the integration branch) and checked on a 412×915
@@ -94,12 +94,15 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 ## State
 | Item | State |
 |---|---|
-| Exits measured, priors written | done locally |
-| Spokes and stems | done locally; checked on 1600×900 and 412×915 shots of seed 42 (the lanes continue the town's streets and fork outside it); tsc clean, full vitest green, all six phone suites green (rail and save with their positions moved, listed in the PR); not live |
-| PR open | #65, open, subscribed |
-| Radials, edge, T-junctions, closes, village shapes measured | not started |
-| Generator: town grown along its radials | not started |
-| Lane grades and density | not started |
-| Side-by-side evidence, compare yardsticks, hero pictures retaken | not started |
-| Review bug 11 (failed tiles asked for for ever) | not started |
-| Review: bounded coarse growth, no jump on activation | not started |
+| Exits measured, priors written | live (#65) |
+| Spokes and stems | live (#65), checked at 412×915 |
+| PR open | #67 (the radial town), open, subscribed; #65 merged (integration head 2338450, 26 Sep) |
+| Radials, edge, T-junctions, closes, village shapes measured | committed: `tools/os/towns.mjs`, `PRIORS.towns`, a section in the report; on this branch, not live |
+| Generator: town grown along its radials | on PR #67 (`layStreets` rewritten, then made crossing-free); the careful builder refuses nothing on five seeds; tsc clean; the full unit suite green (126 files, 1120 tests); all six phone suites green locally on their moved positions (listed in the PR); the start town checked at 412×915 from 900 m and 400 m (report); waiting on CI and the coordinator's merge; not live |
+| Lanes: the best-facing spoke, water at the stem, a blend into the course | committed with the above; `region.test.ts` checks every lane on three plans |
+| Compare yardsticks: radials, junction shares, street pieces, orientation order | committed (`compare.mjs`, the places table in `seeded-vs-real.md`), within the real ranges |
+| Lane grades and density | measured: the seeded land is two to three times gentler than the bakes' (slope median 2.7–3.5% against 6.7–8.1%), so lane grades read low because of the ground, not the router; the fair yardstick, a lane's grade over the slope of its ground, was 0.44–0.46 against the real 0.52–0.6; the lanes' slope penalty (`PROFILES.B.climb`, 2 → 0.9) takes it to 0.49–0.54 (higher climbs match better still but tip `routes.test.ts`'s marginal motorway row, which re-plans its motorway over ground the lanes have eased: 0.057 against a 0.06 limit). Density: the plan makes 74 villages per 1,000 km² and no hamlets; the real bakes have 65–170 hamlets per 1,000 km² on top, each with lanes, which is most of the 800 vs 2,500–3,400 km gap. A hamlet kind touches `Kind` everywhere (econ, names, vernacular, live): a shared decision for the coordinator, proposed with the next PR. Rows for both are in `seeded-vs-real.md`; committed locally, not pushed while #67 waits on CI |
+| Side-by-side evidence at 6 km / 1 km, hero pictures retaken | done on PR #67: hero pictures retaken from the radial town (`src/app/art`); Moretonhampstead (Exe bake, 2,180 people) against the seeded start town at 412×915 from 6 km and 1 km, in `docs/reports/os/exits.md` (`side-*.jpg`): the same compact blob at a meeting of roads with ribbons along the radials; the real town has more lanes round it, bends with its roads and thins out along them |
+| Review bug 11 (failed tiles asked for for ever) | committed (`view.ts`: three tries, each wait twice the last, then left alone; `view.fail.test.ts`, the review's test); on PR #67, not live |
+| Park pond (coordinator, 26 Sep 23:46 UTC, on PR #67: after it lands, a park pond as a level surface in a hollow with an irregular outline, through the water system, or a clear note here on why not yet) | not started; taken up after #67 lands |
+| Review: bounded coarse growth, no jump on activation | growth bounded, committed (`econ.ts` eases off towards half again the planned size; `econ.test.ts`); the jump on activation is `main.ts`, the play session's, noted in the PR; not live |
