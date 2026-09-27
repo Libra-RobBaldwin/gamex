@@ -8,6 +8,8 @@ A second PR, #69, the coordinator's follow-ups (asked 23:18 UTC), is the section
 
 The coordinator: on the town grown along its radials (#67, #70), review rail as the review did for
 buses, failing tests first, then fixes; then the train card and the station card, small, as the bus's.
+PR #72, opened 27 Sep 02:36 UTC; locally: typecheck clean, 129 unit files (1183 tests) and the six phone
+e2es green (the rail e2e checked 32 open doors against the platform edges, none wrong).
 
 | # | Ask | Status |
 |---|---|---|
