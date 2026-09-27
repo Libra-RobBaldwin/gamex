@@ -14,6 +14,10 @@ export const PRIORS = {
   settlements: {
     // places per 1,000 km² of land
     perThousandKm2: { cityOrTown: [11.8, 5.2], village: [74, 71.2], hamlet: [65.1, 170] },
+    // the villages a baked region presents (tools/os/compare.mjs over public/regions): Open Names'
+    // villages and its hamlets of 150 people or more, which the bake folds in as villages; the
+    // smaller hamlets it does not load. A seeded map should show as many village-sized places.
+    villagesLoadedPerThousandKm2: [129, 156.6],
     // distance to the nearest place of the same size or bigger (m): quartiles
     nearestM: { town: [[4411, 5493, 6419], [10574, 11104, 11504]], village: [[1097, 1775, 2535], [1298, 1855, 2747]], hamlet: [[776, 1240, 1472], [797, 1097, 1386]] },
     // rank–size (people ∝ rank^−exponent, places of 300 people or more): a coast of resort towns is

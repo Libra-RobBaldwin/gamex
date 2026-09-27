@@ -22,6 +22,7 @@ export interface Settlement {
   x: number; z: number; // the centre: where the high street and the main cross street meet
   r: number; // radius of the built-up area (the industrial edge lies beyond it)
   axis: number; // the high street's direction (radians from +x)
+  later?: boolean; // (one of the villages placed after everything else, whose lanes are added on top of the rest's: suggestLinks)
   plan: Plan;
   seed: number;
   gates: XZ[]; // the ends of the high street: where roads from other places should come in
@@ -372,13 +373,27 @@ function reachOrder(edges: LEdge[], root: LNode) {
 //   - B roads bring each village in: the Gabriel graph of every centre, the links with a village at
 //     one end, trimmed to each village's two shortest, plus whatever keeps everywhere reachable.
 // `water` says the straight line crosses water (a bridge is needed, or a way round).
-export function suggestLinks(ss: Settlement[], mw: MapWater): Link[] {
+export function suggestLinks(all0: Settlement[], mw: MapWater): Link[] {
   const d = (a: Settlement, b: Settlement) => Math.hypot(a.x - b.x, a.z - b.z);
+  // (the villages placed after everything else, plan.ts: their lanes are chosen last, added on top of
+  // the others', so every lane a place had before them is what it was)
+  const ss = all0.filter((s) => !s.later), laterOnes = all0.filter((s) => s.later);
+  // (the Gabriel graph: a pair is joined when no third place lies in the circle on their line; the
+  // places in a 2 km grid, so a pair looks only at the cells its circle covers, and pairs further
+  // apart than 14 km are not tried, a circle that wide always holding someone on a 50 km map)
   const gabriel = (set: Settlement[]) => {
-    const out: [Settlement, Settlement][] = [];
+    const out: [Settlement, Settlement][] = [], cell = 2000, grid = new Map<string, Settlement[]>();
+    const key = (x: number, z: number) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+    for (const s of set) { const k = key(s.x, s.z); const l = grid.get(k); if (l) l.push(s); else grid.set(k, [s]); }
+    const inCircle = (a: Settlement, b: Settlement, m: XZ, R: number) => {
+      for (let i = Math.floor((m.x - R) / cell); i <= Math.floor((m.x + R) / cell); i++) for (let j = Math.floor((m.z - R) / cell); j <= Math.floor((m.z + R) / cell); j++) for (const c of grid.get(`${i},${j}`) ?? []) if (c !== a && c !== b && Math.hypot(c.x - m.x, c.z - m.z) < R) return true;
+      return false;
+    };
+    const far = set.length > 40 ? 14000 : Infinity;
     for (let i = 0; i < set.length; i++) for (let j = i + 1; j < set.length; j++) {
-      const a = set[i], b = set[j], m = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }, R = d(a, b) / 2;
-      if (!set.some((c) => c !== a && c !== b && Math.hypot(c.x - m.x, c.z - m.z) < R)) out.push([a, b]);
+      const a = set[i], b = set[j], L = d(a, b);
+      if (L > far) continue;
+      if (!inCircle(a, b, { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }, L / 2)) out.push([a, b]);
     }
     return out.sort((p, q) => d(...p) - d(...q));
   };
@@ -398,25 +413,44 @@ export function suggestLinks(ss: Settlement[], mw: MapWater): Link[] {
   // first, none to a place that already has its share plus one, and none whose line runs through
   // a third place)
   const has = (a: Settlement, b: Settlement) => keep.some(([p, q]) => (p === a && q === b) || (p === b && q === a));
-  const through = (a: Settlement, b: Settlement) => ss.some((c) => { if (c === a || c === b) return false; const L = d(a, b), t = ((c.x - a.x) * (b.x - a.x) + (c.z - a.z) * (b.z - a.z)) / (L * L); if (t <= 0 || t >= 1) return false; return Math.hypot(a.x + (b.x - a.x) * t - c.x, a.z + (b.z - a.z) * t - c.z) < c.r + 150; });
-  const want = (s: Settlement) => (s.kind === 'hamlet' ? 2 : s.kind === 'village' ? PRIORS.exits.minorPerPlace.village : PRIORS.exits.minorPerPlace.town);
-  for (const a of ss) {
-    if (a.kind === 'hamlet') continue;
-    const near = ss.filter((b) => b !== a).sort((p, q) => d(a, p) - d(a, q)).slice(0, 24);
-    for (const b of near) {
-      if ((count.get(a.id) ?? 0) >= want(a)) break;
-      if (has(a, b) || (count.get(b.id) ?? 0) > want(b) || d(a, b) > 6000 || through(a, b)) continue;
-      // (and not within 12° of a lane it already has: that one would fork off it outside, a fan)
-      const bearing = (p: Settlement, q: Settlement) => Math.atan2(q.z - p.z, q.x - p.x);
-      const close = (p: number, q: number) => Math.abs(Math.atan2(Math.sin(p - q), Math.cos(p - q))) < (12 * Math.PI) / 180;
-      if (keep.some(([p, q]) => (p === a && close(bearing(a, q), bearing(a, b))) || (q === a && close(bearing(a, p), bearing(a, b))))) continue;
-      keep.push([a, b]); count.set(a.id, (count.get(a.id) ?? 0) + 1); count.set(b.id, (count.get(b.id) ?? 0) + 1);
+  // (a third place on the line: among the places there were when the lane was chosen, so the later
+  // villages change no lane chosen before them)
+  const through = (a: Settlement, b: Settlement, among: Settlement[] = ss) => among.some((c) => { if (c === a || c === b) return false; const L = d(a, b), t = ((c.x - a.x) * (b.x - a.x) + (c.z - a.z) * (b.z - a.z)) / (L * L); if (t <= 0 || t >= 1) return false; return Math.hypot(a.x + (b.x - a.x) * t - c.x, a.z + (b.z - a.z) * t - c.z) < c.r + 150; });
+  // (a later village takes three: a real village's 25th percentile, and the plan's time)
+  const want = (s: Settlement) => (s.kind === 'hamlet' ? 2 : s.later ? 3 : s.kind === 'village' ? PRIORS.exits.minorPerPlace.village : PRIORS.exits.minorPerPlace.town);
+  const bearing = (p: Settlement, q: Settlement) => Math.atan2(q.z - p.z, q.x - p.x);
+  const close = (p: number, q: number) => Math.abs(Math.atan2(Math.sin(p - q), Math.cos(p - q))) < (12 * Math.PI) / 180;
+  // (`from` the places to top up, `among` their possible neighbours, `over` how many lanes over its
+  // own share a neighbour may take)
+  const topUp = (from: Settlement[], among: Settlement[], over: number) => {
+    for (const a of from) {
+      if (a.kind === 'hamlet') continue;
+      const near = among.filter((b) => b !== a && Math.abs(b.x - a.x) < 6000 && Math.abs(b.z - a.z) < 6000).sort((p, q) => d(a, p) - d(a, q)).slice(0, 24);
+      for (const b of near) {
+        if ((count.get(a.id) ?? 0) >= want(a)) break;
+        if (has(a, b) || (count.get(b.id) ?? 0) > want(b) + over || d(a, b) > 6000 || through(a, b, among)) continue;
+        // (and not within 12° of a lane it already has: that one would fork off it outside, a fan)
+        if (keep.some(([p, q]) => (p === a && close(bearing(a, q), bearing(a, b))) || (q === a && close(bearing(a, p), bearing(a, b))))) continue;
+        keep.push([a, b]); count.set(a.id, (count.get(a.id) ?? 0) + 1); count.set(b.id, (count.get(b.id) ?? 0) + 1);
+      }
     }
+  };
+  topUp(ss, ss, 0);
+  // the later villages: their Gabriel neighbours among everyone, nearest first, up to their share,
+  // then their nearest neighbours as above; a neighbour takes one lane over its own share, so a
+  // town or village next to a later village gets a fifth or a ninth lane, never more
+  const everyone = laterOnes.length ? gabriel(all0) : [];
+  if (laterOnes.length) {
+    for (const e of everyone) {
+      if (!e.some((x) => x.later)) continue;
+      if (e.every((x) => (count.get(x.id) ?? 0) < want(x) + (x.later ? 0 : 1))) { keep.push(e); for (const x of e) count.set(x.id, (count.get(x.id) ?? 0) + 1); }
+    }
+    topUp(laterOnes, all0, 0);
   }
   // (and whatever joins up pieces the trimming left apart: Kruskal over the rest, shortest first)
-  const parent = ss.map((_, i) => i), find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const parent = all0.map((_, i) => i), find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   for (const [a, b] of keep) parent[find(a.id)] = find(b.id);
-  for (const e of gabriel(ss)) { const x = find(e[0].id), y = find(e[1].id); if (x !== y && !keep.includes(e)) { parent[x] = y; keep.push(e); } }
+  for (const e of laterOnes.length ? everyone : gabriel(ss)) { const x = find(e[0].id), y = find(e[1].id); if (x !== y && !keep.includes(e)) { parent[x] = y; keep.push(e); } }
   return keep.map(([a, b]) => {
     let wet = false;
     const L = d(a, b);

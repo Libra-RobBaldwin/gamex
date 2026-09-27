@@ -155,6 +155,23 @@ class LaneFinder {
     if (Number.isNaN(v)) v = this.h[k] = this.c.heightAt(this.x0 + i * LaneFinder.C, this.x0 + j * LaneFinder.C);
     return v;
   }
+  // (which place keeps a cell for a road of this kind: worked out once per cell for every road, not
+  // once per road; 0 nobody, id + 1 one place, -1 more than one, so a road looks it up and only
+  // checks the places when more than one claims the cell)
+  private owners = new Map<string, Int32Array>();
+  private owner(i: number, j: number, kind: RouteKind | 'rail') {
+    let O = this.owners.get(kind);
+    if (!O) { O = new Int32Array(this.n * this.n).fill(-2); this.owners.set(kind, O); }
+    const k = j * this.n + i;
+    if (O[k] === -2) {
+      const x = this.x0 + i * LaneFinder.C, z = this.x0 + j * LaneFinder.C, P = PROFILES[kind];
+      let found = 0;
+      // (a hamlet is a few houses: a trunk road keeps off it only as a lane would, not by its own margin)
+      for (const s of this.c.grid.near(x, z)) if (Math.hypot(x - s.x, z - s.z) < s.reach + (s.kind === 'hamlet' ? PROFILES.B.keep : P.keep)) { found = found === 0 ? s.id + 1 : -1; if (found < 0) break; }
+      O[k] = found;
+    }
+    return O[k];
+  }
   // A route through waypoints (off the map at its ends: it's found to just inside the edge, then
   // runs straight on off it), one piece at a time, then smoothed as one.
   through(pts: XZ[], serves: number[], kind: RouteKind | 'rail'): XZ[] | null {
@@ -187,8 +204,11 @@ class LaneFinder {
       if (bad[k]) return bad[k] < 0;
       const x = x0 + i * C, z = x0 + j * C;
       let no = Math.abs(x) > c.half - 20 && !(i === ti && j === tj) || this.water(i, j) < 0;
-      // (a hamlet is a few houses: a trunk road keeps off it only as a lane would, not by its own margin)
-      if (!no) for (const s of c.grid.near(x, z)) if (!serves.includes(s.id) && Math.hypot(x - s.x, z - s.z) < s.reach + (s.kind === 'hamlet' ? PROFILES.B.keep : P.keep)) { no = true; break; }
+      if (!no) {
+        const o = this.owner(i, j, kind);
+        if (o > 0) no = !serves.includes(o - 1);
+        else if (o < 0) for (const s of c.grid.near(x, z)) if (!serves.includes(s.id) && Math.hypot(x - s.x, z - s.z) < s.reach + (s.kind === 'hamlet' ? PROFILES.B.keep : P.keep)) { no = true; break; }
+      }
       // (motorways keep out of the live play area round the start town: its roads are the player's to join them to)
       if (!no && P.live && Math.max(Math.abs(x), Math.abs(z)) < LIVE_HALF + 500) no = true;
       if (!no && Math.abs(z) > c.half - 20 && !(i === ti && j === tj)) no = true;

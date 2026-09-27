@@ -165,6 +165,28 @@ the rest of a place's layout is what it was), and the twelve towns' scenery has 
 
 ![the start town from 1 km, before](side-seeded-1km-before.jpg) ![after](side-seeded-1km.jpg)
 
+## Villages at the density a real region shows (seed 42, 412×915)
+
+A baked region presents 129–157 villages per 1,000 km² (`seeded-vs-real.md`: it folds its hamlets of 150
+people or more into its villages and does not load the rest), and the plan made 72, from Open Names'
+own village count (`PRIORS.settlements.perThousandKm2.village`, 71–74). From every phone view of the
+region that showed as long empty stretches between places. The plan now makes as many village-sized
+places as a baked region shows (`villagesLoadedPerThousandKm2`, 129–157): the villages it had, then the
+hamlets, then the rest of the villages, so every place placed before them keeps its spot, the start
+town's first view and its own lanes are what they were (none of the later villages within 6.5 km of
+it), and the plan is still made in about three seconds (3.2 s idle for seed 42, as before this step:
+the Gabriel test for the lanes now looks only at the places near a pair, and the lane finder works out
+once per cell which place keeps it, not once per lane).
+
+Seeds 42 / 7 / 1234: villages 152 / 156 / 148 per 1,000 km² (real 129–157), a village's nearest place
+1.4 km at the median (real 1.4), lane km 2,045 / 1,963 / 1,438 (was 1,655 / 1,583 / 1,313; real
+2,523–3,368); the towns' and villages' ways out and the places' layouts unchanged.
+
+The same 6 km view 8.7 km east of the start town, before and after: the stretch between the town at the
+top and the fields below had two hamlets; it now has villages along its lanes as well.
+
+![before](country-before-6km.jpg) ![after](country-after-6km.jpg)
+
 ## Hamlets (seed 42, 412×915)
 
 The bakes' smallest named places, 65–170 per 1,000 km² on top of the villages (`PRIORS.settlements`),
