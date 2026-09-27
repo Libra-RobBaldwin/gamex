@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { planWorld } from './plan';
-import { PROFILES, planRoutes } from './routes';
+import { PROFILES, ROUTE_HALF, planRoutes } from './routes';
 import type { XZ } from './water';
 
 // The trunk network (off at the start of a game: the player builds it, but the planner is the same)
@@ -9,6 +9,9 @@ import type { XZ } from './water';
 describe('trunk routes follow the land (docs/streaming.md)', () => {
   const p = planWorld({ seed: 42 });
   const { roads, rails } = planRoutes({ seed: 42, half: p.half, settlements: p.settlements, links: p.links, water: p.water, grid: p.grid, heightAt: p.terrain.heightAt }, true);
+  // (the ground eased along them as it is along every route the game builds, plan.ts: a road is
+  // measured over its own cuttings and embankments, not the lanes' that happen to cross its line)
+  p.terrain.ease?.([...roads.map((r) => ({ path: r.path, grade: PROFILES[r.kind].grade, half: ROUTE_HALF[r.kind] })), ...rails.map((r) => ({ path: r.path, grade: PROFILES.rail.grade, half: ROUTE_HALF.rail }))]);
   const h = p.terrain.heightAt;
   const steep = (path: XZ[], grade: number) => {
     let over = 0, L = 0;

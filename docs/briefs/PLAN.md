@@ -48,6 +48,13 @@ removed and ignored. Typecheck clean; the full unit suite passes except the econ
    seeded-against-real screenshots as the evidence. Second priority: lanes too gentle and too few
    (`docs/reports/os/seeded-vs-real.md`).
 
+7. **Money is tuned to the loop's four times (27 Sep, 04:00 UTC).** Play round 2 measured a two-decker line at
+   £22,900 of fares a game day against £2,600 running, eight times, and a balance rising so fast that money never
+   constrained the player (rail affordable in the second week). The fare stays £2 a rider (the anchor on the
+   card). A bus's running cost is doubled (`RUNNING` in `game/money.ts`) for the ratio, and the start balance is
+   £250,000 so a railway is saved up for. Play round 3 judges it; the rail lines' running (`rail/game.ts`, the
+   vehicles session's) is left as it is until a playthrough measures a train's line the same way.
+
 ## Honesty rule (unchanged)
 
 Every session keeps `docs/briefs/<name>.md` current: what's left, done or not done, and nothing reported as done

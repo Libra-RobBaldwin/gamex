@@ -116,3 +116,21 @@ along; the seeded town's are straighter and end more squarely, and its centre is
 choice for a town centre, not this stream's).
 
 ![Moretonhampstead from 1 km](side-real-1km.jpg) ![the seeded start town from 1 km](side-seeded-1km.jpg)
+
+## Hamlets (seed 42, 412×915)
+
+The bakes' smallest named places, 65–170 per 1,000 km² on top of the villages (`PRIORS.settlements`),
+were missing from the plan, and with them most of the lanes a real 50 km square has. The plan now
+makes them from that prior (capped at 220 so a plan is still made in under three seconds): a hamlet
+is a few houses along one lane, no shops, with two ways out and a close or two at most; its lanes
+join it to its nearest neighbours as a village's do. On seed 42 the hamlets stand 1.26 km from their
+nearest neighbour at the median (real 1.1–1.24 km), have 2 lanes each and about 95 people, and the
+lane km rise from about 800 to 1,100–1,140 (real 2,500–3,400: the rest is the farm lanes and tracks
+no place owns).
+
+![a hamlet from 400 m](hamlet-400.jpg) ![two hamlets and their lanes from 2.5 km](hamlet-2500.jpg)
+
+Judged as a player: from 2.5 km, two hamlets a lane apart with their names, the lane wandering
+between them, as the bakes show; from 400 m, a dozen houses in a line along the lane with their
+gardens, a close off it either side. Still to do: the closes end in the fields rather than a turning
+head, and the far ends of the lane run straight where a real lane would bend at the last house.
