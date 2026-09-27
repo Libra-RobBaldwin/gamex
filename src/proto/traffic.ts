@@ -886,7 +886,14 @@ export class Traffic {
     });
     for (const b of pos) {
       let fwd = 1, back = 1;
-      for (const o of pos) if (o !== b) { const g = (o.at - b.at + 1) % 1; if (g > 1e-9 && g < fwd) fwd = g; const h = (b.at - o.at + 1) % 1; if (h > 1e-9 && h < back) back = h; }
+      for (const o of pos) {
+        if (o === b) continue;
+        let g = (o.at - b.at + 1) % 1, h = (b.at - o.at + 1) % 1;
+        // (two buses at the very same place, as when both start at one call: the lower id counts as the one ahead)
+        if (g < 1e-9 || h < 1e-9) { if (o.id < b.id) { g = 0; h = 1; } else { g = 1; h = 0; } }
+        if (g < fwd) fwd = g;
+        if (h < back) back = h;
+      }
       if (on.length > 1) { b.ahead = fwd; b.behind = back; }
     }
     return { loop: total, buses: pos };
