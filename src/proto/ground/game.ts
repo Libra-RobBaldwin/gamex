@@ -45,19 +45,33 @@ export class GameGround {
   }
   // what only changes with the roads or the landscaping (kept between plots going up)
   private fixed: Pick<GroundInput, 'blocked' | 'lanes' | 'parks' | 'industrial' | 'water'> | null = null;
+  // A lot's plot and a site's town point, the same objects from one input to the next while the
+  // lot's parcel stays where it was: the ground marks only what changed between two inputs, and
+  // tells a plot by identity (layout.ts `setInput`).
+  private plotOf = new Map<Lot, { poly: XZ[]; kind: 'garden' | 'site' | 'yard' }>();
+  private pointOf = new Map<Lot, XZ>();
+  private plot(l: Lot, kind: 'garden' | 'site' | 'yard') {
+    const poly = this.w.net.parcelRect(l), was = this.plotOf.get(l);
+    if (was && was.kind === kind && was.poly.every((p, i) => p.x === poly[i].x && p.z === poly[i].z)) return was;
+    const p = { poly, kind };
+    this.plotOf.set(l, p);
+    return p;
+  }
   input(): GroundInput {
     const { net } = this.w, q = this.w.queue();
     const fixed = (this.fixed ??= this.fixedInput());
     const plots: GroundInput['plots'] = [];
-    for (const l of net.lots) plots.push({ poly: net.parcelRect(l), kind: l.kind === 'industry' ? 'yard' : 'garden' });
+    for (const l of net.lots) plots.push(this.plot(l, l.kind === 'industry' ? 'yard' : 'garden'));
     // (the first few free plots in the queue: looking no further than that)
     this.sites = new Set();
     for (const l of q) { if (this.sites.size >= SITES) break; if (net.lotFree(l)) this.sites.add(l); }
-    for (const l of this.sites) plots.push({ poly: net.parcelRect(l), kind: 'site' });
+    for (const l of this.sites) plots.push(this.plot(l, 'site'));
     if (this.w.extra) plots.push(...this.w.extra().plots);
     // (the town's ground is its plots' and its parks': a plot still in the queue takes its field
     // when it's built, not before, so the fields run up to the town's edge, as they do at a real one)
-    return { seed: this.seed, ...fixed, plots, trees: this.w.trees(), town: [...this.sites].map((l) => ({ x: l.x, z: l.z })) };
+    const town: XZ[] = [];
+    for (const l of this.sites) { let p = this.pointOf.get(l); if (!p || p.x !== l.x || p.z !== l.z) this.pointOf.set(l, (p = { x: l.x, z: l.z })); town.push(p); }
+    return { seed: this.seed, ...fixed, plots, trees: this.w.trees(), town };
   }
   private fixedInput() {
     const { net } = this.w;

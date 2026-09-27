@@ -11,7 +11,7 @@
 // slopes) and needs no painting: `new Ground().material` is a drop-in for a flat green material.
 // See docs/ground.md.
 import * as THREE from 'three';
-import { CoverMap, type Region } from './paint';
+import { CoverMap, type Region, type Spot } from './paint';
 import { Layout, type GroundInput, type XZ } from './layout';
 import type { FieldSource } from './plan';
 import { Occupancy, planHedges, type HedgeGroup } from './hedgerows';
@@ -130,7 +130,10 @@ export class Ground {
           this.groups.set(g.key, g);
           if (was && same(was.pieces, g.pieces) && same(was.trees, g.trees) && same(was.gates, g.gates)) continue;
           moved = true;
-          for (const s of [...(was?.gates ?? []), ...g.gates]) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
+          // (a gateway that came or went is repainted; one that stayed where it was isn't)
+          const gate = (s: Spot, l: Spot[]) => l.some((o) => o.x === s.x && o.z === s.z && o.r === s.r && o.v === s.v);
+          for (const s of was?.gates ?? []) if (!gate(s, g.gates)) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
+          for (const s of g.gates) if (!was || !gate(s, was.gates)) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
         }
       }
       dirty.push(...gateBoxes);

@@ -19,6 +19,9 @@ export type ParcelKind = 'arable' | 'grass' | 'wood' | 'rough' | 'town';
 export const TOWN_BAND = 20;
 // how far a repaint after a plot reaches round it: the band, and a little more for the texel
 export const TOWN_REACH = TOWN_BAND + 1;
+// a grid cell's key, for the spots' 32 m cells and the coarse grid's 320 m blocks: a small integer
+// (a Map keyed by doubles is many times slower); good for 4096 cells either side of the origin
+const cell = (a: number, b: number) => ((a + 4096) << 13) | (b + 4096);
 
 // What the painter needs to know about the world. Every polygon is in world metres.
 export interface GroundInput {
@@ -56,7 +59,7 @@ export class Coarse {
   mark(flag: number, x: number, z: number, r: number) {
     const C = Coarse.C;
     for (let i = Math.floor((x - r) / C); i <= Math.floor((x + r) / C); i++) for (let j = Math.floor((z - r) / C); j <= Math.floor((z + r) / C); j++) {
-      const k = ((i >> 4) + 32768) * 65536 + ((j >> 4) + 32768);
+      const k = cell(i >> 4, j >> 4);
       let b = this.blocks.get(k);
       if (!b) this.blocks.set(k, (b = new Uint8Array(256)));
       b[(i & 15) * 16 + (j & 15)] |= flag;
@@ -64,7 +67,7 @@ export class Coarse {
   }
   at(x: number, z: number): number {
     const i = Math.floor(x / Coarse.C), j = Math.floor(z / Coarse.C);
-    const b = this.blocks.get(((i >> 4) + 32768) * 65536 + ((j >> 4) + 32768));
+    const b = this.blocks.get(cell(i >> 4, j >> 4));
     return (b ? b[(i & 15) * 16 + (j & 15)] : 0) | (this.under ? this.under.at(x, z) : 0);
   }
 }
@@ -106,7 +109,7 @@ type Box = { x0: number; z0: number; x1: number; z1: number };
 // a plot's middle (or a town point, or a park's middle) and how far the town's ground reaches from it
 interface TownSpot { x: number; z: number; r: number }
 function putSpot(spots: Map<number, TownSpot[]>, x: number, z: number, r: number): TownSpot {
-  const k = (Math.floor(x / 32) + 32768) * 65536 + (Math.floor(z / 32) + 32768), s = { x, z, r }, l = spots.get(k);
+  const k = cell(Math.floor(x / 32), Math.floor(z / 32)), s = { x, z, r }, l = spots.get(k);
   if (l) l.push(s); else spots.set(k, [s]);
   return s;
 }
@@ -120,7 +123,7 @@ export class Layout {
   private fixed: { parks: GroundInput['parks']; industrial: GroundInput['industrial']; water: GroundInput['water']; coarse: Coarse; spots: Map<number, TownSpot[]> } | null = null;
   // the plots and town points whose marks are on the coarse grid and in `spots` (a change that only
   // adds to them marks the additions, rather than every plot in the town again)
-  private marked: { plots: Set<object>; town: Set<XZ> } | null = null;
+  private marked: { plots: Set<NonNullable<GroundInput['plots']>[number]>; town: Set<XZ> } | null = null;
   private info = new Map<number, ParcelInfo>();
   constructor(public input: GroundInput, source?: FieldSource) {
     this.seed = input.seed ?? 1;
@@ -148,9 +151,9 @@ export class Layout {
   // A new input. With `near` (world boxes round what changed), fields away from it keep what they
   // were, and what came back says what else to repaint: `changed`, the boxes of the fields near it
   // that became something else; `band`, where the town's band round the plots changed (a disc of
-  // TOWN_BAND round each plot or point added, where a field the town has reached lies; or, when a
-  // plot or point may have gone and the marks were made afresh, TOWN_REACH round each box); and
-  // `added`, that the marks only grew (then a hedge in the band can only have gone, not come).
+  // TOWN_BAND round each plot or point added, where a field the town has reached lies, and round
+  // each that went; or, with no marks to compare with, TOWN_REACH round each box); and `added`,
+  // that the marks only grew (then a hedge in the band can only have gone, not come).
   setInput(input: GroundInput, near?: Box[]): { changed: Box[]; band: Box[]; added: boolean } {
     this.input = input;
     if (!near) this.info = new Map();
@@ -165,15 +168,18 @@ export class Layout {
       fixedChanged = true;
     }
     // Only added to since the last time (every plot and point marked then is still here)? Then the
-    // additions are marked and nothing else is touched. Otherwise the marks are made afresh.
-    const prev = this.marked;
+    // additions are marked and nothing else is touched. Otherwise the marks are made afresh, and the
+    // few plots and points that went (a plot bulldozed; in the game a building site becoming a
+    // garden, and its town point going with it) say where the band may have shrunk.
+    const prev = this.marked, gone: TownSpot[] = [];
     let added = !!near && !fixedChanged && !!prev;
     if (added) {
-      let kept = 0;
-      for (const p of input.plots ?? []) if (prev!.plots.has(p)) kept++;
-      if (kept !== prev!.plots.size) added = false;
-      else { kept = 0; for (const p of input.town ?? []) if (prev!.town.has(p)) kept++; if (kept !== prev!.town.size) added = false; }
+      const plots = new Set(input.plots ?? []), town = new Set(input.town ?? []);
+      for (const p of prev!.plots) if (!plots.has(p)) { if (p.kind !== 'yard') { const q = centroid(p.poly); gone.push({ x: q.x, z: q.z, r: TOWN_BAND }); } added = false; }
+      for (const p of prev!.town) if (!town.has(p)) { gone.push({ x: p.x, z: p.z, r: TOWN_BAND }); added = false; }
     }
+    // (many gone at once, or no marks to compare with: every box is repainted to the band's full reach)
+    const wide = !near || !prev || fixedChanged || gone.length > 8;
     if (!added) {
       this.coarse = new Coarse(this.fixed.coarse);
       this.spots = new Map();
@@ -197,7 +203,7 @@ export class Layout {
     const ids = new Set<number>();
     const look = (b: Box) => { const B = { x0: b.x0 - 52, z0: b.z0 - 52, x1: b.x1 + 52, z1: b.z1 + 52 }; this.ensure(B, 0); for (const n of this.plan.fieldsNear(B)) ids.add(n); };
     for (const b of near) look(b);
-    if (added) for (const s of fresh) look({ x0: s.x, z0: s.z, x1: s.x, z1: s.z });
+    if (!wide) for (const s of [...fresh, ...gone]) look({ x0: s.x, z0: s.z, x1: s.x, z1: s.z });
     for (const id of ids) {
       const was = this.info.get(id);
       this.info.delete(id);
@@ -205,16 +211,19 @@ export class Layout {
       if (was && was.kind === now.kind && was.crop === now.crop) continue;
       changed.push(this.boxOf(id));
     }
-    if (added) {
-      for (const s of fresh) {
-        const D = { x0: s.x - s.r - 1, z0: s.z - s.r - 1, x1: s.x + s.r + 1, z1: s.z + s.r + 1 };
-        if (this.fieldsIn(D).some((id) => this.about(id).mixed)) band.push(D);
-      }
-    } else {
+    if (wide) {
       for (const b of near) {
         const B = { x0: b.x0 - TOWN_REACH, z0: b.z0 - TOWN_REACH, x1: b.x1 + TOWN_REACH, z1: b.z1 + TOWN_REACH };
         if (this.fieldsIn(B).some((id) => this.about(id).kind !== 'town')) band.push(B);
       }
+    } else {
+      // the disc round each spot added, where a field the town has reached lies (elsewhere the band
+      // paints nothing), and round each that went (its ground may have gone back to the field)
+      for (const s of fresh) {
+        const D = { x0: s.x - s.r - 1, z0: s.z - s.r - 1, x1: s.x + s.r + 1, z1: s.z + s.r + 1 };
+        if (this.fieldsIn(D).some((id) => this.about(id).mixed)) band.push(D);
+      }
+      for (const s of gone) band.push({ x0: s.x - s.r - 1, z0: s.z - s.r - 1, x1: s.x + s.r + 1, z1: s.z + s.r + 1 });
     }
     return { changed, band, added };
   }
@@ -230,10 +239,21 @@ export class Layout {
   townAt(x: number, z: number) {
     const i = Math.floor(x / 32), j = Math.floor(z / 32);
     for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) {
-      const l = this.spots.get((a + 32768) * 65536 + (b + 32768));
+      const l = this.spots.get(cell(a, b));
       if (l) for (const s of l) if ((s.x - x) ** 2 + (s.z - z) ** 2 <= s.r * s.r) return true;
     }
     return false;
+  }
+  // the spots (each a circle of the town's band) reaching into a box: a paint rasterises them
+  // once over its window rather than asking `townAt` texel by texel
+  spotsIn(box: Box): TownSpot[] {
+    const out: TownSpot[] = [];
+    const i0 = Math.floor((box.x0 - TOWN_BAND) / 32), i1 = Math.floor((box.x1 + TOWN_BAND) / 32), j0 = Math.floor((box.z0 - TOWN_BAND) / 32), j1 = Math.floor((box.z1 + TOWN_BAND) / 32);
+    for (let a = i0; a <= i1; a++) for (let b = j0; b <= j1; b++) {
+      const l = this.spots.get(cell(a, b));
+      if (l) for (const s of l) if (s.x + s.r > box.x0 && s.x - s.r < box.x1 && s.z + s.r > box.z0 && s.z - s.r < box.z1) out.push(s);
+    }
+    return out;
   }
   // What a field is: what its source says, unless the town has grown over it (half of it within
   // 30 m of plots) or industry has, or it's a field at the water's edge (then it's grass). A field

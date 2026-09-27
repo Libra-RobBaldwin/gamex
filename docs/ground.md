@@ -92,10 +92,10 @@ What a field becomes is its source's (arable, grass, wood, rough), unless:
 - the town has grown over it (more than half of it within 30 m of plots), which makes it town. A
   field the town has only reached stays a field, and the ground within 20 m of a plot's middle
   (`TOWN_BAND`: the back fence and a few metres behind it) is painted as town, texel by texel
-  (`Layout.townAt`), with no hedge through it: the crops run up to the back gardens, as they do
-  at a real town's ragged edge. A repaint after a plot at the fields' edge also repaints the
-  band's disc round the plot's middle (`TOWN_REACH`, 21 m), so it stays exact; in the town itself
-  it reaches only the plot;
+  (`Layout.townAt`; a paint rasterises the band once over its window, `Layout.spotsIn`), with no
+  hedge through it: the crops run up to the back gardens, as they do at a real town's ragged edge.
+  A repaint after a plot at the fields' edge reaches the band round that plot (`TOWN_REACH`, 21 m
+  from its middle), so it stays exact; in the town itself it reaches only the plot;
 - industry has (more than 12%), which makes it rough;
 - it's arable at the water's edge, which makes it grass.
 
@@ -155,13 +155,16 @@ repainted and its hedges replanned. Replaced hedge instances reuse their buffers
 A repaint after one building is kept cheap by touching only what that building can change. The
 layout's town marks (the coarse grid and the band's spots) and the hedges' occupancy grid are
 kept between changes: an input whose plots and town points only grew since the last one (the
-same objects, plus new ones) has just the additions marked; one where any went, or whose roads,
-parks or water changed, has them made afresh. The parks' marks live with the other fixed marks.
-The band round a new plot is repainted as a disc of `TOWN_BAND` round its middle, not the
-plot's whole box padded, and only where a field the town has reached lies; its hedges are
-replanned only if a hedge piece or gateway stands within it (a spot added can only take hedges
-away). The plot's box and its band are planned as one box, so a hedge line they both touch is
-walked once.
+same objects, plus new ones) has just the additions marked; one where a few went (a building
+site becoming a garden, its town point going with it), or whose roads, parks or water changed,
+has them made afresh. The parks' marks live with the other fixed marks, and the grids' keys are
+small integers. The band round a new plot is repainted as a disc of `TOWN_BAND` round its
+middle, not the plot's whole box padded, and only where a field the town has reached lies; the
+disc round a plot or point that went is repainted too; its hedges are replanned only if a hedge
+piece or gateway stands within it (a spot added can only take hedges away). The plot's box and
+its band are planned as one box, so a hedge line they both touch is walked once. `GameGround`
+keeps a lot's plot object from one input to the next while its parcel stays where it was, so the
+game's repaint after a building takes this path.
 
 ## In the game (main.ts)
 

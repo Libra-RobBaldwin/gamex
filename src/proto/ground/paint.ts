@@ -169,7 +169,7 @@ export class CoverMap {
     const ei0 = rect.i0 - M, ej0 = rect.j0 - M, W = rect.i1 - rect.i0 + 2 * M, H = rect.j1 - rect.j0 + 2 * M, N = W * H;
     const x0 = R.x0 + ei0 * t, z0 = R.z0 + ej0 * t, x1 = x0 + W * t, z1 = z0 + H * t;
     const [lawn, field, wood, bare, rough, wet, dir, d, tmp, edge] = this.floats(N, 10);
-    const [crop, town, blocked, water] = this.bytes(N, 4);
+    const [crop, town, blocked, water, townBand] = this.bytes(N, 5);
     const pid = this.ints(N);
     const win0 = { x0, z0, x1, z1 };
     const inWin = (b: { x0: number; z0: number; x1: number; z1: number }, pad = 0) => b.x1 + pad > x0 && b.x0 - pad < x1 && b.z1 + pad > z0 && b.z0 - pad < z1;
@@ -202,7 +202,18 @@ export class CoverMap {
     layout.ensure(win0);
     const PL = layout.plan, hedge = d;
     hedge.fill(1e9);
-    for (const n of PL.fieldsNear(win0)) fill(PL.fields[n].poly, x0, z0, t, W, H, (a, b) => pid.fill(n, a, b + 1));
+    let mixed = false;
+    for (const n of PL.fieldsNear(win0)) { fill(PL.fields[n].poly, x0, z0, t, W, H, (a, b) => pid.fill(n, a, b + 1)); if (layout.about(n).mixed) mixed = true; }
+    // (a field the town has reached: the town's band, TOWN_BAND round each plot, rasterised once
+    // over the window; its ground is the town's)
+    if (mixed) for (const s of layout.spotsIn(win0)) {
+      const ia = Math.max(0, Math.floor((s.x - s.r - x0) / t)), ib = Math.min(W - 1, Math.floor((s.x + s.r - x0) / t));
+      const ja = Math.max(0, Math.floor((s.z - s.r - z0) / t)), jb = Math.min(H - 1, Math.floor((s.z + s.r - z0) / t));
+      for (let j = ja; j <= jb; j++) {
+        const dz = z0 + (j + 0.5) * t - s.z;
+        for (let i = ia; i <= ib; i++) { const dx = x0 + (i + 0.5) * t - s.x; if (dx * dx + dz * dz <= s.r * s.r) townBand[j * W + i] = 1; }
+      }
+    }
     for (const n of PL.linesNear(win0)) {
       const [p, q] = layout.sides(n);
       if ((p === 'wood' && q === 'wood') || (p === 'town' && q === 'town')) continue;
@@ -221,7 +232,7 @@ export class CoverMap {
       if (id !== lastId) { lastId = id; inf = layout.about(id); }
       const ed = edge[k];
       // (a field the town has reached: within 30 m of its plots the ground is the town's)
-      if (inf.mixed && layout.townAt(x0 + ((k % W) + 0.5) * t, z0 + (Math.floor(k / W) + 0.5) * t)) { lawn[k] = 0.5; town[k] = 1; continue; }
+      if (inf.mixed && townBand[k]) { lawn[k] = 0.5; town[k] = 1; continue; }
       switch (inf.kind) {
         case 'arable': case 'grass': {
           field[k] = ed >= 4.5 * sc ? 1 : smooth(1.5 * sc, 4.5 * sc, ed);
