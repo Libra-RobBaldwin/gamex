@@ -52,9 +52,17 @@ const drafted = () => page.evaluate(() => document.querySelector('#tpanel')?.tex
 
 // New line: frame the town, tap three stop badges
 await page.tap('[data-newline]');
-await page.evaluate(() => window.proto.focusOn({ x: 0, z: -60 }, 900));
 await page.waitForTimeout(1000);
 await settle();
+// (the tool frames every stop itself: each badge inside the part of the screen the chrome leaves clear, above the hint)
+{
+  const out = await page.evaluate(() => {
+    const P = window.proto, c = P.shell.clearRect(), h = document.querySelector('#hint'), hb = h && !h.hidden ? h.getBoundingClientRect().top : c.bottom;
+    return P.markers.places().map((m) => ({ id: m.id, ...P.toScreen(m.p) })).filter((s) => s.x < c.left + 20 || s.x > c.right - 20 || s.y < c.top + 20 || s.y > hb - 20).map((s) => `${s.id} at ${Math.round(s.x)},${Math.round(s.y)}`);
+  });
+  if (out.length) fail(`New line should frame every stop clear of the chrome and the hint: ${out.join('; ')}`);
+  else console.log('New line frames every stop clear of the chrome and the hint');
+}
 const targets = [{ x: -80, z: -50 }, { x: -110, z: 30 }, { x: 60, z: 100 }];
 const pickOf = (q) => page.evaluate((q) => {
   const P = window.proto, places = P.markers.places();
