@@ -113,6 +113,12 @@ export interface TownCtx {
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+// What a town finds for itself of a supply: the tune's share of what it started with. A share of
+// one means it finds all its businesses need (the game runs its town so until freight exists), and
+// then nothing the town finds caps how far those businesses grow: only their workers and custom do.
+// (A town that started with none of a use finds nothing for it, as before: the use isn't started
+// from nothing by supplies it can't have.)
+const found = (share: number, base: number) => (share >= 1 && base > 0 ? Infinity : share * base);
 export const allowed = (z: ZState, kind: BuildingKind) =>
   z.allow ? z.allow.has(kind) : kind !== 'industry' || z.buildings.some((b) => b.kind === 'industry');
 
@@ -155,9 +161,9 @@ export function reviewTown(t: TState, c: TownCtx) {
     t.offmap = { ...t.supply };
     t.primed = true;
   }
-  supplyB.shop = T.local.goods * t.base.shop + t.supply.goods / T.goodsPerShopJobHour;
-  supplyB.office = T.local.visitors * t.base.office + t.supply.visitors / (T.visitsPerOfficeJobDay / 24);
-  supplyB.works = T.local.materials * t.base.works + t.supply.materials / T.materialsPerWorksJobHour;
+  supplyB.shop = found(T.local.goods, t.base.shop) + t.supply.goods / T.goodsPerShopJobHour;
+  supplyB.office = found(T.local.visitors, t.base.office) + t.supply.visitors / (T.visitsPerOfficeJobDay / 24);
+  supplyB.works = found(T.local.materials, t.base.works) + t.supply.materials / T.materialsPerWorksJobHour;
   // the same from last month's deliveries alone, without the town's memory of earlier months
   const gotB = fedJobs(t, T);
   // A building the town has asked for and is waiting on counts as part of the town its people
@@ -202,12 +208,14 @@ export function reviewTown(t: TState, c: TownCtx) {
       const staffed = t.bias[u] * struct[u], ahead = staffed * (1 + T.labourSlack);
       // What's to spare is judged on what actually came last month: firms don't take on staff on
       // the memory of deliveries that have stopped (the smoothed view still caps what they keep).
-      const spare = ahead > 0 ? clamp(Math.min(supplyB[u], gotB[u]) / ahead - 1, 0, 1) : 0;
+      // (a supply the town finds all of for itself is not to spare: it finds what its businesses
+      // need, no more, so it draws no growth of its own)
+      const spare = ahead > 0 && Number.isFinite(supplyB[u]) ? clamp(Math.min(supplyB[u], gotB[u]) / ahead - 1, 0, 1) : 0;
       us.raw = Math.min(ahead + staffed * T.supplySlack * spare, supplyB[u]);
       // Supply beyond twice `ahead` changes nothing above, so that (less what the town finds for
       // itself) is all it takes delivered: never less than what the businesses standing use, nor
       // than one new building's worth.
-      const most = (local: number, per: number) => per * Math.max(0, Math.max(2 * ahead, C[u], BUILDINGS[ENTRY[u]].cap) - local * t.base[u]);
+      const most = (local: number, per: number) => (local >= 1 ? 0 : per * Math.max(0, Math.max(2 * ahead, C[u], BUILDINGS[ENTRY[u]].cap) - local * t.base[u]));
       if (u === 'shop') t.accept.goods = most(T.local.goods, T.goodsPerShopJobHour);
       else if (u === 'works') t.accept.materials = most(T.local.materials, T.materialsPerWorksJobHour);
     }
@@ -278,9 +286,9 @@ export function reviewTown(t: TState, c: TownCtx) {
 // smoothed view still says.
 export function fedJobs(t: TState, T: Tune, got = t.got): PerUse {
   const b = perUse(Infinity);
-  b.shop = T.local.goods * t.base.shop + got.goods / T.goodsPerShopJobHour;
-  b.office = T.local.visitors * t.base.office + got.visitors / (T.visitsPerOfficeJobDay / 24);
-  b.works = T.local.materials * t.base.works + got.materials / T.materialsPerWorksJobHour;
+  b.shop = found(T.local.goods, t.base.shop) + got.goods / T.goodsPerShopJobHour;
+  b.office = found(T.local.visitors, t.base.office) + got.visitors / (T.visitsPerOfficeJobDay / 24);
+  b.works = found(T.local.materials, t.base.works) + got.materials / T.materialsPerWorksJobHour;
   return b;
 }
 
@@ -476,7 +484,7 @@ function facts(t: TState, c: TownCtx, abandoned: number, built: number, lost: nu
   }
   const d = Math.max(1, R), cap = (u: Use) => t.zones.reduce((a, z) => a + z.cap[u], 0);
   const need = (have: number, per: number) => (have > 0 ? have * per : 0);
-  const share = (local: number, sup: number, n: number) => (n > 0 ? (local + sup) / n : NaN);
+  const share = (local: number, sup: number, n: number) => (n > 0 && Number.isFinite(local) ? (local + sup) / n : NaN); // (NaN: nothing to say: no such businesses, or the town finds all they need)
   const gN = need(cap('shop'), T.goodsPerShopJobHour), mN = need(cap('works'), T.materialsPerWorksJobHour), vN = need(cap('office'), T.visitsPerOfficeJobDay / 24);
   const ratio = perUse();
   for (const u of GROWN) { const cu = cap(u) + c.pendingCap(t, u); ratio[u] = cu > 0 ? t.use[u].demand / cu : 0; }
@@ -484,9 +492,9 @@ function facts(t: TState, c: TownCtx, abandoned: number, built: number, lost: nu
   return {
     residents: R, homes, vacancy: homes > 0 ? 1 - R / homes : 0, jobs, workers: R * T.workerShare,
     reachWork: w / d, workCar: wc / d, workNoCar: wn / d, workTransit: wp / d, reachShop: s / d, reachLeisure: l / d,
-    goods: share(T.local.goods * t.base.shop * T.goodsPerShopJobHour, t.supply.goods, gN),
-    materials: share(T.local.materials * t.base.works * T.materialsPerWorksJobHour, t.supply.materials, mN),
-    visitors: share(T.local.visitors * t.base.office * (T.visitsPerOfficeJobDay / 24), t.supply.visitors, vN),
+    goods: share(found(T.local.goods, t.base.shop) * T.goodsPerShopJobHour, t.supply.goods, gN),
+    materials: share(found(T.local.materials, t.base.works) * T.materialsPerWorksJobHour, t.supply.materials, mN),
+    visitors: share(found(T.local.visitors, t.base.office) * (T.visitsPerOfficeJobDay / 24), t.supply.visitors, vN),
     stops: svc.stops, lines: svc.lines, homesNearStop: homes > 0 ? near / homes : 0, plots, abandoned, ratio, built, lost, crowding: c.crowding(t),
   };
 }
