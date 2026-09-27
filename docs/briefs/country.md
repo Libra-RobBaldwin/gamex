@@ -1,9 +1,28 @@
-# Brief: country (the countryside session, second run)
+# Brief: country (the countryside session, second and third runs)
 
-Session https://claude.ai/code/session_016uD19qC4yiFZR8AhPrtiib, branch `claude/work-country-2`, PR #62 (merged) into
+Sessions https://claude.ai/code/session_016uD19qC4yiFZR8AhPrtiib (ran out of context 27 Sep, about 05:00 UTC) and, from
+27 Sep 06:00, https://claude.ai/code/session_012DhwfJ2AbfvDW6ViDNqx4d. Branch `claude/work-country-2`, PR #62 (merged) into
 `claude/cloud-session-history-rvqkm1`, then `claude/work-country-pools` (#68, merged), `claude/work-country-farms` (#70,
-merged) and `claude/work-country-edge`. Written 26 Sep 2026, 21:00 UTC, updated 27 Sep 02:50. Coordinator:
+merged) and `claude/work-country-edge` (PR #74, open). Written 26 Sep 2026, 21:00 UTC, updated 27 Sep 06:40. Coordinator:
 https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, decision 1).
+
+## Now: PR #74's repaint budget
+
+#74 failed CI's unit job twice on `ground.test.ts` "a repaint after one building under 2 ms": 4.1 then 4.2 ms on the runner
+against 2.78 (machine factor 1.39), where the trunk's repaint takes 0.67 ms there. The coordinator's timings on #74 (27 Sep
+05:16): `layout.setInput` 0.62 ms, hedge replanning 0.62 ms, `cover.paint` 0.91 ms, ten times the trunk's painted area. Fixed
+in the third run (commit on the branch, 27 Sep):
+- the layout's town marks (coarse grid and band spots) are kept across changes and only the plots and points added are
+  marked, when the input only grew (same objects, plus new); the parks' spots live with the fixed marks (`layout.ts`);
+- the band round a new plot is repainted as a 42 m disc round its middle, not the plot's box padded 21 m on every side, and
+  only where a field the town has reached lies (`setInput` returns it as `band`);
+- its hedges are replanned only if a hedge piece or gateway stands within it, the plot's box and band are planned as one
+  merged box, and the hedges' occupancy grid is kept across additive changes too (`index.ts`, `hedgerows.ts`).
+Measured on this box (slow and noisy: factor 1.8–3.3 between runs), the budget test's workload alone, three runs each,
+median of the fifteen repaints: trunk 1.05 / 1.07 / 1.01 ms; #74 as pushed (77232ef) 2.08 / 2.06 / 2.07 ms; fixed
+0.95 / 0.97 / 1.30 ms (the 1.30 with another vitest running alongside). Stages after the fix, per change: `setInput` 0.11 ms,
+hedge planning 0.25 ms, planting 0.06 ms, paint 0.73 ms. The full paint is unchanged. The ground and game test folders
+pass (29 files, 192 tests); the exactness test (incremental equals full) holds.
 
 ## The state, honestly
 
@@ -77,10 +96,10 @@ https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, de
     ground within 20 m of a plot's middle (`TOWN_BAND`, the back fence and a few metres behind it) is painted
     as town texel by texel (`Layout.townAt`) with no hedge through it, so the crops run up to the back
     gardens; and only the next four plots in the queue (the building sites) mark the town, not the whole
-    queue. A repaint after a plot at the fields' edge reaches 21 m round it (`TOWN_REACH`) so it stays exact;
-    CI's first run of this failed its 2 ms repaint budget at 52 m (4.1 ms), so the band is exact per texel
-    rather than on 20 m cells and the reach 21 m: cold 2.5 ms here against the old 0.6 ms, warm 1.1 ms
-    against 0.3 ms, about 1.1 ms on CI's machine. Screenshots at 700 m, 350 m and 2 km, before and after:
+    queue. A repaint after a plot at the fields' edge also repaints the band's disc round the plot's middle
+    (`TOWN_REACH`, 21 m) so it stays exact; CI's first run of this failed its 2 ms repaint budget at 52 m
+    (4.1 ms), so the band is exact per texel rather than on 20 m cells; the second run still failed (4.2 ms),
+    fixed as "Now" above says. Screenshots at 700 m, 350 m and 2 km, before and after:
     `docs/reports/country/before-edge-700-w.jpg`, `after-edge-700-w.jpg`, `before-edge-350-e.jpg`,
     `after-edge-350-e.jpg`, `before-edge-2km.jpg`, `after-edge-2km.jpg`. What's left round the town is its
     parks (the leftover land the game landscapes, 5 ha) and the 30 m band. A test in `ground.test.ts`.

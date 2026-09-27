@@ -59,6 +59,8 @@ export class Occupancy {
       }
     }
   }
+  // more plots (an input that only added some since this was built: the rest is as it was)
+  extend(plots: XZ[][]) { this.add(plots); }
   // clear by at least r metres?
   free(x: number, z: number, r = CLEAR): boolean {
     if (this.under && !this.under.free(x, z, r)) return false;

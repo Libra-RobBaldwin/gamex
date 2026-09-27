@@ -93,8 +93,9 @@ What a field becomes is its source's (arable, grass, wood, rough), unless:
   field the town has only reached stays a field, and the ground within 20 m of a plot's middle
   (`TOWN_BAND`: the back fence and a few metres behind it) is painted as town, texel by texel
   (`Layout.townAt`), with no hedge through it: the crops run up to the back gardens, as they do
-  at a real town's ragged edge. A repaint after a plot at the fields' edge reaches `TOWN_REACH`
-  (21 m) round it, so it stays exact; in the town itself it reaches only the plot;
+  at a real town's ragged edge. A repaint after a plot at the fields' edge also repaints the
+  band's disc round the plot's middle (`TOWN_REACH`, 21 m), so it stays exact; in the town itself
+  it reaches only the plot;
 - industry has (more than 12%), which makes it rough;
 - it's arable at the water's edge, which makes it grass.
 
@@ -150,6 +151,17 @@ depends only on the world within a fixed margin, so an incremental repaint is ex
 full paint would give (tested). When a plot turns a field into town, that whole parcel is
 repainted and its hedges replanned. Replaced hedge instances reuse their buffers, and
 `dispose()` frees everything.
+
+A repaint after one building is kept cheap by touching only what that building can change. The
+layout's town marks (the coarse grid and the band's spots) and the hedges' occupancy grid are
+kept between changes: an input whose plots and town points only grew since the last one (the
+same objects, plus new ones) has just the additions marked; one where any went, or whose roads,
+parks or water changed, has them made afresh. The parks' marks live with the other fixed marks.
+The band round a new plot is repainted as a disc of `TOWN_BAND` round its middle, not the
+plot's whole box padded, and only where a field the town has reached lies; its hedges are
+replanned only if a hedge piece or gateway stands within it (a spot added can only take hedges
+away). The plot's box and its band are planned as one box, so a hedge line they both touch is
+walked once.
 
 ## In the game (main.ts)
 
