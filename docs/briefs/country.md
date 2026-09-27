@@ -51,10 +51,10 @@ Done and checked on 412×915 screenshots (DPR 2, SwiftShader), `docs/reports/cou
     as for #74 (the budget test's workload alone, three runs): full paint 34.6 / 34.4 / 42.4 ms, repaint after one
     building 0.78 / 0.77 / 0.84 ms, the same as #74's head (nothing here touches the painter). Phone e2es on
     this head (412×915, DPR 2): lines, rail, save, stations, the menu e2e and firstview (two starts, 0% blank on
-    every shot) pass; **the loop e2e fails on the trunk itself** since
-    41e2456 (the economy's supply cap: the town keeps growing after its line is withdrawn, 1898 → 2054 people),
-    the trunk's run 233 and this branch giving the same numbers; it passed here before that merge. The
-    economy is the coordinator's; noted on #80, merged in when fixed.
+    every shot) pass; the loop e2e failed on the trunk itself from 41e2456 (the
+    economy's supply cap: the town kept growing after its line was withdrawn, 1898 → 2054 people; the trunk's
+    run 233 and this branch gave the same numbers) until the coordinator's 8f1c7cd fixed it at 07:20; with that
+    merged in, the loop e2e passes here again (declining eight days after the buses go).
 13. **Crop variety by the lie of the land** (`region/fields.ts`, `COUNTRYSIDE.upland`): a farm block high among
     the map's land or steep grows less wheat and rape, more barley and grass leys. Same rng draws, so every other
     field is unchanged. Over the middle 24 km of seed 7's map: arable fields in the lowest third of the land grow
