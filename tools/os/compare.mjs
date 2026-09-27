@@ -42,6 +42,18 @@ function measure(p) {
   };
   const gr = (g) => (g.length ? `${(median(g) * 100).toFixed(1)} / ${(pct(g, 0.9) * 100).toFixed(1)}` : 'n/a');
   const grades = gradesOf('A'), bGrades = gradesOf('B');
+  // the land's own slope (rise over run over 100 m, every 400 m of land), and how directly the lanes
+  // climb it: a lane's grade over the slope of the ground under it (real roads: about half, PRIORS.follow)
+  const h = p.terrain.heightAt, slopeAt = (x, z) => Math.hypot((h(x + 50, z) - h(x - 50, z)) / 100, (h(x, z + 50) - h(x, z - 50)) / 100);
+  const landSlopes = [];
+  for (let x = -H + 500; x < H; x += 400) for (let z = -H + 500; z < H; z += 400) if (water.seaDistance(x, z, 1000) > 0) landSlopes.push(slopeAt(x, z));
+  const overSlope = [];
+  for (const r of p.roads.filter((q) => q.kind === 'B')) for (let i = 4; i < r.path.length; i += 4) {
+    const a = r.path[i - 4], b = r.path[i], d = Math.hypot(b.x - a.x, b.z - a.z);
+    if (d < 50) continue;
+    const s = slopeAt((a.x + b.x) / 2, (a.z + b.z) / 2);
+    if (s > 0.01) overSlope.push(Math.abs(h(b.x, b.z) - h(a.x, a.z)) / d / s);
+  }
   const heights = [];
   for (let x = -H + 500; x < H; x += 1000) for (let z = -H + 500; z < H; z += 1000) if (water.seaDistance(x, z, 1000) > 0) heights.push(p.terrain.heightAt(x, z));
   return {
@@ -55,6 +67,8 @@ function measure(p) {
     'B and minor road km': Math.round(km('B')),
     'A road grade, median / 90th (%)': gr(grades),
     'B road and lane grade, median / 90th (%)': gr(bGrades),
+    'land slope, median / 90th (%)': gr(landSlopes),
+    'lane grade over the slope of its ground (median)': overSlope.length ? +median(overSlope).toFixed(2) : 'n/a',
     'land height, median / 90th (m)': `${Math.round(median(heights))} / ${Math.round(pct(heights, 0.9))}`,
     'railway km': Math.round(p.rails.reduce((t, r) => { let L = 0; for (let i = 1; i < r.path.length; i++) L += Math.hypot(r.path[i].x - r.path[i - 1].x, r.path[i].z - r.path[i - 1].z); return t + L; }, 0) / 1000),
   };
@@ -73,7 +87,12 @@ Seeded maps start with lanes only (PLAN.md decision 3), so their A road rows are
 planner's A roads are the priors' concern. \`PRIORS.follow\` measured every 50 m of the real roads
 over Terrain 50: A roads ${F.a.gradeMedian.map((v) => (v * 100).toFixed(1)).join('–')}% median and ${F.a.gradeP90.map((v) => (v * 100).toFixed(1)).join('–')}% at the 90th;
 minor roads ${F.minor.gradeMedian.map((v) => (v * 100).toFixed(1)).join('–')}% and ${F.minor.gradeP90.map((v) => (v * 100).toFixed(1)).join('–')}%. (The rows here sample every 100 m of the plan's
-routes over the plan's heights, so they read a little lower.)
+routes over the plan's heights, so they read a little lower.) A lane's grade is mostly its land's: the
+real bakes' ground is two to three times steeper than a seeded lowland map's (the land slope row), so
+the fair yardstick for the router is a lane's grade over the slope of the ground under it, which real
+lanes take at about ${F.b.gradeOverSlope.join('–')} (B roads) to ${F.minor.gradeOverSlope.join('–')} (minor roads). The seeded lane km fall short of the
+real minor road km because the plan has no hamlets: the real "villages" row counts every named place,
+and a real 50 km square has ${PRIORS.settlements.perThousandKm2.hamlet.join('–')} hamlets per 1,000 km² on top of its ${PRIORS.settlements.perThousandKm2.village.join('–')} villages, each with its lanes.
 
 | | ${cols.map((c) => c.name).join(' | ')} |
 |---|${cols.map(() => '---').join('|')}|

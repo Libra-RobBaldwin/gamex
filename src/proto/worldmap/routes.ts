@@ -42,12 +42,12 @@ export const ROUTE_HALF: Record<RouteKind | 'rail', number> = { motorway: 17, A:
 // how long its bends are (the smoothing, in 25 m steps). Steeper than its grade, it has to cut or
 // tunnel, at `dig` times the cost a metre, so it goes round a hill unless going through pays. And
 // turning costs it (`turn`: a railway or a motorway can't take a tight bend), so it keeps a line.
-export interface Profile { grade: number; wander: number; bridge: number; keep: number; smooth: number; dig: number; live: boolean; turn: number }
+export interface Profile { grade: number; wander: number; bridge: number; keep: number; smooth: number; dig: number; live: boolean; turn: number; climb: number }
 export const PROFILES: Record<RouteKind | 'rail', Profile> = {
-  B: { grade: 0.05, wander: 1, bridge: 900, keep: 60, smooth: 7, dig: 0, live: false, turn: 0 },
-  A: { grade: 0.06, wander: 0.7, bridge: 1600, keep: 150, smooth: 12, dig: 14, live: false, turn: 0.5 },
-  motorway: { grade: 0.04, wander: 0.25, bridge: 2500, keep: 350, smooth: 22, dig: 10, live: true, turn: 2 },
-  rail: { grade: 0.02, wander: 0.15, bridge: 2500, keep: 120, smooth: 14, dig: 30, live: false, turn: 3 },
+  B: { grade: 0.05, wander: 1, bridge: 900, keep: 60, smooth: 7, dig: 0, live: false, turn: 0, climb: 0.9 },
+  A: { grade: 0.06, wander: 0.7, bridge: 1600, keep: 150, smooth: 12, dig: 14, live: false, turn: 0.5, climb: 2 },
+  motorway: { grade: 0.04, wander: 0.25, bridge: 2500, keep: 350, smooth: 22, dig: 10, live: true, turn: 2, climb: 2 },
+  rail: { grade: 0.02, wander: 0.15, bridge: 2500, keep: 120, smooth: 14, dig: 30, live: false, turn: 3, climb: 2 },
 };
 
 interface Ctx { seed: number; half: number; settlements: WorldSettlement[]; links: Link[]; water: WorldWater; grid: SettlementGrid; heightAt: (x: number, z: number) => number }
@@ -226,8 +226,8 @@ class LaneFinder {
         }
         const wf = 1 + (this.wander(ni, nj) - 1) * P.wander;
         // (a lane just climbs, dearer the steeper; a bigger road steeper than its grade cuts or tunnels)
-        let w = !P.dig ? len * (1 + 2 * (slope / 0.05) ** 2) * wf
-          : len * (1 + 2 * (Math.min(slope, P.grade) / 0.05) ** 2) * wf + (slope > P.grade ? len * P.dig * (1 + (slope - P.grade) / P.grade) : 0);
+        let w = !P.dig ? len * (1 + P.climb * (slope / 0.05) ** 2) * wf
+          : len * (1 + P.climb * (Math.min(slope, P.grade) / 0.05) ** 2) * wf + (slope > P.grade ? len * P.dig * (1 + (slope - P.grade) / P.grade) : 0);
         if (this.water(ni, nj) === 2 && this.water(i, j) !== 2) w += P.bridge; // (a bridge: only where it must)
         if (P.turn && from[k] >= 0) {
           // (against the way it came into this cell: straight on is free, a right angle dear)
