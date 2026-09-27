@@ -50,7 +50,8 @@ Done and checked on 412×915 screenshots (DPR 2, SwiftShader), `docs/reports/cou
     their summer green (not mine: baked colours). The ground demo has a Month button. The paint budgets, measured
     as for #74 (the budget test's workload alone, three runs): full paint 34.6 / 34.4 / 42.4 ms, repaint after one
     building 0.78 / 0.77 / 0.84 ms, the same as #74's head (nothing here touches the painter). Phone e2es on
-    this head: lines, rail, save, stations and the menu pass; **the loop e2e fails on the trunk itself** since
+    this head (412×915, DPR 2): lines, rail, save, stations, the menu e2e and firstview (two starts, 0% blank on
+    every shot) pass; **the loop e2e fails on the trunk itself** since
     41e2456 (the economy's supply cap: the town keeps growing after its line is withdrawn, 1898 → 2054 people),
     the trunk's run 233 and this branch giving the same numbers; it passed here before that merge. The
     economy is the coordinator's; noted on #80, merged in when fixed.
