@@ -107,14 +107,18 @@ await page.evaluate(() => {
 await page.tap('.close').catch(() => {});
 // until every bus on it has made three calls (SwiftShader runs a few frames a second), or 4 minutes
 await page.waitForFunction((ids) => ids.every((id) => window.__calls.filter(([b]) => b === id).length >= 3), line.buses, { timeout: 240000, polling: 2000 }).catch(() => {});
-// even gaps: the rule engaged (a bus held at a stop for the one ahead to get away), and the
-// smallest gap between buses is no worse than where the third bus started. (A few sim minutes
-// on SwiftShader is too little to measure headways settling; traffic.spacing.test.ts does that
-// over twenty minutes: bunched buses end up calling at intervals within 30% of even.)
+// even gaps: the rule engaged (a bus held at a stop for the one ahead to get away), and the three
+// buses haven't ended up in one bunch: the widest gap round the loop is under nine tenths of it.
+// (A few sim minutes on SwiftShader is too little to measure headways settling, and the smallest
+// gap is noise here: a bus holding for its leader lets its follower close up, so the smallest
+// gap read at one instant fell from 0.17 to 0.04 on one CI run and 0.18 to 0.10 on the next with
+// the rule working, and rose on others. traffic.spacing.test.ts measures headways over twenty
+// minutes: bunched buses end up calling at intervals within 30% of even.)
 const gap1 = await gapsAt();
-console.log('gaps round the loop at the end', JSON.stringify(gap1));
+console.log('gaps round the loop at the end', JSON.stringify(gap1), `(smallest gap ${gap0.min.toFixed(2)} -> ${gap1.min.toFixed(2)})`);
 if (gap1.holds === 0) fail('no bus held at a stop to even the gaps');
-if (gap1.min < gap0.min - 0.05) fail(`the smallest gap round the loop closed up: ${gap0.min.toFixed(2)} -> ${gap1.min.toFixed(2)}`);
+const widest = (g) => { const at = [...g.at].sort((a, b) => a - b); return at.length ? Math.max(...at.map((v, i) => (i + 1 < at.length ? at[i + 1] - v : 1 - v + at[0]))) : 1; };
+if (widest(gap1) > 0.9) fail(`the buses ended up in one bunch: the widest gap round the loop is ${widest(gap1).toFixed(2)} of it (${JSON.stringify(gap1.at)})`);
 const res = await page.evaluate((line) => {
   const P = window.proto, placeOf = (id) => line.stops.findIndex((k) => P.traffic.place(k)?.stops.some((s) => s.id === id));
   const by = {};
