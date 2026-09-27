@@ -1,6 +1,42 @@
 # Handover: where everything stands
 
-## Latest: the morning of 27 Sep 2026 (08:05 UTC)
+## Latest: the coordinator stops here, 27 Sep 2026 (08:30 UTC): how to carry on from another account
+
+The user's account ran out of credit. Everything is merged and pushed: **no open PRs**, the integration branch
+`claude/cloud-session-history-rvqkm1` holds #71 to #82 and the economy's two fixes, its CI was green on the last
+push before #80 and #82 merged (their own CI was green on heads that included the trunk), and Vercel production
+follows it. The four sessions were told to push what they had and stop; anything unpushed in their containers is
+lost with the containers, so a new coordinator starts from the briefs.
+
+**To resume from a new account:**
+1. Read `docs/briefs/PLAN.md` (top section, decisions 1–8 and the ownership map), this file's sections below, and
+   the four briefs: `docs/briefs/play.md`, `realism.md`, `vehicles.md`, `country.md`. Each brief ends with what its
+   session was on and what comes next.
+2. Start one cloud session per stream from `claude/cloud-session-history-rvqkm1` with the same ownership (play:
+   game/* ui/* app/* e2e/* infill parkplan; realism: region/generate.ts priors worldmap/* tools/os; vehicles:
+   traffic lines rail roads roaddraw parking fleet; countryside: ground/* region/fields woods lanes countryside
+   worldmap/country game/country) and its brief as the first message. Branch names in use were `claude/work-play`,
+   `claude/work-realism`, `claude/work-vehicles-fixes`, `claude/work-country-seasons`; the sessions merged
+   integration into them before every push, so a new session can start from the branch or from the trunk.
+3. The coordinator owns `economy*.ts`, `econ*.ts`, `game/econ.shops.test.ts`, `bridges/perf.review.test.ts`,
+   PLAN.md, `docs/loop.md` and this file, merges PRs into integration on green CI after reading the description
+   and screenshots, and never weakens a test to go green.
+
+**What each stream was on when we stopped:**
+- Play: round 4 as a player on the phone against this trunk (parked cars at kerbs and pulling out, vehicles on
+  the hills, the villages, the seasons, the money table over 24 days, the town panel's lines).
+- Realism: farm lanes (spurs from the countryside's farmstead sites to the nearest lane, needing a farm-site
+  export from the countryside's files), the radials' finer wiggle, and the seeded towns' thin high streets (4 shops
+  for 1,775 people on seed 42; a real market town has about one shop per 100–150 people).
+- Vehicles: the rest of its brief after #81.
+- Countryside: the farm-site export for realism, then its brief's list.
+
+**Still open overall:** the guide's road step on a pinch-out (`it.fails`); the real Teme region declining from
+day one with fares £0 and a JSON fetch error (the real-map loader); the far cities' box buildings and the
+towers-on-a-lawn look; the GitHub default branch is still `claude/runescape-transport-puzzle-game-q1uhy8` (only
+the user can change it) and 52 fully merged branches can be deleted.
+
+## Earlier: the morning of 27 Sep 2026 (08:05 UTC)
 
 Since 06:25: **#78** (play round 3: money measured at 3.7–4.5 times with the tuning, the park pond's game side,
 building taps fixed), **#74** (countryside: the dresser's barns, fields up to the town's ragged edge, the repaint
