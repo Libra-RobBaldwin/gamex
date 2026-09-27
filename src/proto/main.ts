@@ -2572,7 +2572,8 @@ function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
   const mine: Promise<boolean> = put.then(() => {
     lastSaved = s.savedAt;
     // (the address names the town once it's saved, so a reload of the page opens it again, not a new town on the same map)
-    if (!addressed) { addressed = true; try { history.replaceState(history.state, '', `${location.pathname}${saveSearch(s)}`); } catch { /* a page that can't change its address */ } menuLink?.onSaved?.(); }
+    // (only while the address is the game's: the app saves on the way out too, with the menu's entry already current)
+    if (!addressed && new URLSearchParams(location.search).has('map')) { addressed = true; try { history.replaceState(history.state, '', `${location.pathname}${saveSearch(s)}`); } catch { /* a page that can't change its address */ } menuLink?.onSaved?.(s); }
     (window as unknown as { __saved: unknown }).__saved = { why, at: s.savedAt, ms, clock: s.clock }; // (for e2e/save.e2e.mjs)
     if (why === 'manual') hint(`Town saved · ${describeSave(s.summary)}`, 'floppy');
     return true;
@@ -2931,7 +2932,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 // ---- the start menu (src/app/main.ts) loads this module, then links it: the quality set on the
 // menu, the Menu sheet's way back to it, and quality picked here remembered for next time ----
-export interface MenuLink { quality: number | 'auto'; onQuality: (q: number | 'auto') => void; onMenu: () => void; onSaved?: () => void }
+export interface MenuLink { quality: number | 'auto'; onQuality: (q: number | 'auto') => void; onMenu: () => void; onSaved?: (s: Pick<GameSave, 'id' | 'map'>) => void }
 let menuLink: MenuLink | null = null;
 export function linkMenu(link: MenuLink) {
   menuLink = link;
