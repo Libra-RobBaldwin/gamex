@@ -27,6 +27,25 @@ await page.evaluate(() => window.proto.focusOn({ x: -440, z: 116 }, 220));
 await wait(2500);
 await page.screenshot({ path: `${out}/rail-0-starter.png` });
 
+// the rail tool by touch: Build > Rail > Branch line, a finger dragged across the fields north of town; the blueprint calls it a railway
+{
+  await page.tap('[data-bar="build"]'); await wait(400);
+  await page.tap('[data-tab="rail"]'); await wait(400);
+  let hit = false;
+  for (const c of await page.$$('[data-item]')) if ((await c.getAttribute('aria-label'))?.startsWith('Branch line')) { await c.tap(); hit = true; break; }
+  if (!hit) fail('no Branch line card under Build > Rail');
+  await page.evaluate(() => window.proto.focusOn({ x: 0, z: 760 }, 900)); await wait(2000);
+  const cdp = await page.context().newCDPSession(page);
+  const [a, b] = await page.evaluate(() => [window.proto.toScreen({ x: -200, z: 760 }), window.proto.toScreen({ x: 200, z: 760 })]);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: a.x, y: a.y, id: 1 }] }); await wait(150);
+  for (let i = 1; i <= 12; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: a.x + ((b.x - a.x) * i) / 12, y: a.y + ((b.y - a.y) * i) / 12, id: 1 }] }); await wait(40); }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await wait(1500);
+  const panel = (await page.textContent('#tpanel').catch(() => '')) ?? '';
+  if (!/New railway|Curved railway/.test(panel)) fail(`the rail blueprint should say it's a railway, not a road: "${panel.slice(0, 60)}"`);
+  else console.log('rail blueprint:', panel.slice(0, 40));
+  await page.tap('#t-cancel'); await wait(500);
+}
+
 // a branch line just west of the start town, north to south: it crosses the lane west on the level
 const laid = await page.evaluate(() => {
   const P = window.proto;

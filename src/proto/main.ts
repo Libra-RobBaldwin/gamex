@@ -937,7 +937,7 @@ function switchType(t: RoadType) {
 // comes back. ----
 let doomed: { seg: RSeg; stop?: Stop } | null = null;
 function startBulldozeTool() {
-  tool = shell.startTool({ name: 'Bulldoze', spec: 'Tap a road or a bus stop', icon: 'bulldozer', tone: 'bulldoze', onDone: endTool, onCancel: endTool });
+  tool = shell.startTool({ name: 'Bulldoze', spec: 'Tap a road, a railway or a bus stop', icon: 'bulldozer', tone: 'bulldoze', onDone: endTool, onCancel: endTool });
   setMode('bulldoze');
   doomed = null;
   hint();
@@ -1010,10 +1010,14 @@ function startLineTool() {
   const pts = markers.places().map((m) => m.p);
   if (pts.length) {
     const c = shell.clearRect(), M = 44; // px round the badges
+    // (the hint sits on the clear part's bottom edge: the lowest badge must clear it too)
+    const hintEl = document.querySelector<HTMLElement>('#hint'), hh = hintEl && !hintEl.hidden ? hintEl.offsetHeight + 8 : 0;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const q of pts) { const s = toScreen(q); x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y); }
-    const k = Math.max(1, (x1 - x0 + 2 * M) / (c.right - c.left), (y1 - y0 + 2 * M) / (c.bottom - c.top)); // (an orthographic view: distances on screen scale with 1/h)
-    const mid = nav.screenToGround((x0 + x1) / 2, (y0 + y1) / 2);
+    // (distances on screen scale with about 1/h, with a tenth to spare for the lens's foreshortening)
+    const k = Math.max(1, 1.1 * (x1 - x0 + 2 * M) / (c.right - c.left), 1.1 * (y1 - y0 + 2 * M + hh) / (c.bottom - c.top));
+    // (the point that lands in the middle of the clear part: half the hint's band below the badges' middle, so they sit that much higher)
+    const mid = nav.screenToGround((x0 + x1) / 2, (y0 + y1) / 2 + (k * hh) / 2);
     focusOn(mid ? { x: mid.x, z: mid.z } : pts[0], Math.min(1400, view.h * k));
   }
 }
@@ -1552,7 +1556,7 @@ function renderBar() {
   if (slipPlan) { renderSlipBar(slipPlan); return; }
   const c = draftCheck;
   const n = c.clears.length;
-  const kind = ctrlOf(draft) ? 'Curved road' : 'New road';
+  const kind = mode === 'rail' ? (ctrlOf(draft) ? 'Curved railway' : 'New railway') : ctrlOf(draft) ? 'Curved road' : 'New road';
   const demo = n ? demolitionSummary(c.clears) : null;
   const pr = c.profile;
   const lift = pr && pr.maxY > 0.05
@@ -1588,7 +1592,7 @@ function renderBar() {
     ${stopsLostNote(lost)}
     ${lift}
     ${c.ok ? bridgeLines(c) : ''}
-    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}
+    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}${mode === 'rail' && opts.cross === 'junction' && /clear the road/.test(c.reason ?? '') ? ' · Or cross the road square-on, clear of its junctions, and the track gets a level crossing instead' : ''}</span></div>`}
     <p class="why">Drag the white handles to adjust${c.ok ? ', then Build' : ''}</p>`, bindIx);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
   tool.avoid(handles().map((h) => toScreen(h.p)));
@@ -2137,7 +2141,20 @@ function peopleIn(st: SettlementInfo) {
 const goTo = (st: SettlementInfo) => { closeSheet(); focusOn(st, Math.max(260, st.r * 2.6)); };
 // (a 50 km map: every place on it, those not live yet with the coarse economy's figures: worldmap/econ.ts)
 const PLACES = worldGame ? worldGame.infos : MAP.settlements;
-const countIn = (st: SettlementInfo) => (worldGame && !worldGame.towns.places.some((q) => q.id === st.id && q.live) ? worldGame.people(st.id, clock / 1440) : peopleIn(st));
+// A place not yet live shows the coarse economy's figure scaled by what the live places show: the
+// people in their built homes against their plan population (the plan says 7,500 for a town whose
+// homes hold about 2,200), so a place's count doesn't jump the moment it comes to life (the review).
+let liveRatioAt = -1, liveRatio = 1;
+function coarseScale() {
+  if (!worldGame || !WORLD) return 1;
+  if (performance.now() - liveRatioAt < 4000) return liveRatio;
+  liveRatioAt = performance.now();
+  let built = 0, plan = 0;
+  for (const q of worldGame.towns.places) { if (!q.live) continue; const st = MAP.settlements.find((x) => x.id === q.id); if (!st) continue; built += peopleIn(st); plan += worldGame.people(q.id, clock / 1440); }
+  liveRatio = built > 0 && plan > 0 ? Math.min(1, built / plan) : 1;
+  return liveRatio;
+}
+const countIn = (st: SettlementInfo) => (worldGame && !worldGame.towns.places.some((q) => q.id === st.id && q.live) ? Math.round(worldGame.people(st.id, clock / 1440) * coarseScale()) : peopleIn(st));
 // a sign at each way off the map; tapped, what flows through it (game/portals.ts)
 let portalSigns: PortalSigns | null = null, showPortalRef: ((p: Portal) => void) | null = null;
 const placeLabels = PLACES.length > 1 ? new PlaceLabels($('#ui'), PLACES, { toScreen, onPick: goTo, count: countIn }) : null;
@@ -2542,6 +2559,7 @@ function snapshot(): GameSave {
   };
 }
 // Save now (the town is copied as it's written, so play carries straight on). False if it couldn't.
+let addressed = !!PARAMS.get('save'); // (whether the page's address names this town)
 function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
   if (!canSave) return Promise.resolve(false);
   // (one at a time: a second asks for the same. But hiding the page saves now, even mid-save: storage
@@ -2553,6 +2571,9 @@ function saveGame(why: 'manual' | 'auto' | 'hide'): Promise<boolean> {
   const put = putSave(s), ms = performance.now() - t0; // (storage copies the town as it's put: that's in the time too)
   const mine: Promise<boolean> = put.then(() => {
     lastSaved = s.savedAt;
+    // (the address names the town once it's saved, so a reload of the page opens it again, not a new town on the same map)
+    // (only while the address is the game's: the app saves on the way out too, with the menu's entry already current)
+    if (!addressed && new URLSearchParams(location.search).has('map')) { addressed = true; try { history.replaceState(history.state, '', `${location.pathname}${saveSearch(s)}`); } catch { /* a page that can't change its address */ } menuLink?.onSaved?.(s); }
     (window as unknown as { __saved: unknown }).__saved = { why, at: s.savedAt, ms, clock: s.clock }; // (for e2e/save.e2e.mjs)
     if (why === 'manual') hint(`Town saved · ${describeSave(s.summary)}`, 'floppy');
     return true;
@@ -2911,7 +2932,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 // ---- the start menu (src/app/main.ts) loads this module, then links it: the quality set on the
 // menu, the Menu sheet's way back to it, and quality picked here remembered for next time ----
-export interface MenuLink { quality: number | 'auto'; onQuality: (q: number | 'auto') => void; onMenu: () => void }
+export interface MenuLink { quality: number | 'auto'; onQuality: (q: number | 'auto') => void; onMenu: () => void; onSaved?: (s: Pick<GameSave, 'id' | 'map'>) => void }
 let menuLink: MenuLink | null = null;
 export function linkMenu(link: MenuLink) {
   menuLink = link;

@@ -90,7 +90,8 @@ async function startGame(map: MapInfo, guide: boolean) {
     // (the guide's small module comes down alongside the game's, so it's ready when the game is)
     const wantGuide = guide && !!map.guide;
     const [game, g] = await Promise.all([import('../proto/main'), wantGuide ? import('./guide') : null]);
-    game.linkMenu({ quality: quality(), onQuality: setQuality, onMenu: askLeave });
+    // (the first save puts the town's id in the address: keep the game's entry at it, so back and forward find the same town)
+    game.linkMenu({ quality: quality(), onQuality: setQuality, onMenu: askLeave, onSaved: (e) => { gameUrl = `${menuUrl()}${saveSearch(e)}`; } });
     // hold the loading screen until the game has drawn its first frames (the first can be slow
     // while shaders compile), so the town appears rather than a moment of empty sky
     for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(r));
