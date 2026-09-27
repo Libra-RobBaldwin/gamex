@@ -485,7 +485,11 @@ body.tooling #credit { opacity: 0.6; }
 .chips span { color: var(--muted); font-size: 11px; letter-spacing: 0.02em; }
 .chips b { font-weight: 600; font-size: 13.5px; line-height: 1.25; overflow-wrap: anywhere; }
 .sheet.peek .note { font-size: 11.5px; }
-.sheet.peek .sb .acts { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+/* (a card's actions wrap onto a second row rather than scroll sideways with nothing to say so: a
+   line's Bus, Sell, Even gaps and Withdraw showed as three and a cut-off word) */
+.sheet.peek .sb .acts { flex-wrap: wrap; }
+.sheet.peek .sb .acts .act { flex: 1 1 auto; min-width: 0; }
+.sheet.peek .sb .acts .act span { overflow: hidden; text-overflow: ellipsis; }
 .sheet.peek .sb .acts .act { flex: 1 0 auto; min-height: 40px; }
 
 /* the milestone ring: fills clockwise towards the next milestone; its number in the middle */
