@@ -55,6 +55,14 @@ removed and ignored. Typecheck clean; the full unit suite passes except the econ
    £250,000 so a railway is saved up for. Play round 3 judges it; the rail lines' running (`rail/game.ts`, the
    vehicles session's) is left as it is until a playthrough measures a train's line the same way.
 
+8. **Kerbside parked cars are real vehicles and get used (the user, 27 Sep, 05:55 UTC).** "Parked cars still
+   look like horrible boxes, not actual vehicles; vehicles should actually use parking spaces, not just block
+   them up." The drives and car parks already hold real fleet cars that drive in and out (`game/parking.ts`);
+   the boxes are the kerbside bays on streets with parking, drawn as plain solids in `roaddraw.ts` and never
+   used by the traffic. The vehicles session makes them Bays handed to the parking, drawn through the fleet's
+   instanced models, taken by trips that end on the street and left by trips that start there. Screenshots
+   before and after at 100–200 m are the evidence.
+
 ## Honesty rule (unchanged)
 
 Every session keeps `docs/briefs/<name>.md` current: what's left, done or not done, and nothing reported as done

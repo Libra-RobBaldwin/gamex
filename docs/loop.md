@@ -114,7 +114,15 @@ the screenshots, and frame time no worse than before the milestone at the same q
     (`RUNNING` in `game/money.ts`: a decker £2,600 a game day) and the start balance is
     £250,000, not £400,000, so a railway (£520,000 for two stations and a train) is saved up
     for over two or three weeks of game days rather than affordable in the second. The fare
-    stays £2 a rider. The next playthrough judges it.
+    stays £2 a rider. The rail side was measured the same way (#76, `e2e/railmoney.e2e.mjs`):
+    within the 1 km town a station's catchment makes walking as quick, so a railway earns only
+    between places; the start town to a village of 590 people, 2.1 km, one intercity unit,
+    carried 108 riders a town-day for £13,080 a game day (a rail rider pays twice the bus fare),
+    so a train's running cost (`RUN` in `rail/game.ts`) is set at 0.37 of what it was, an
+    intercity £3,300 a game day: four times on that line, and an empty line loses £3,300 a day.
+    A train's day is cheaper than a decker's (£2,600) because its riders pay £4 and a village
+    line carries a third of a busy bus line's; the railway's cost is in building it (£520,000).
+    The next playthrough judges both.
 
 ## Estimates
 
