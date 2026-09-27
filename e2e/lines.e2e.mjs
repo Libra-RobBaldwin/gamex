@@ -171,6 +171,23 @@ else {
   if (!opened) fail(`tapping a building did not open its sheet (${await page.evaluate(() => document.querySelector('#sheet h2')?.textContent ?? '')})`);
   await page.tap('.close').catch(() => {});
 }
+// and a house, a shop and an office, each tapped on its own plot (the pick tests each chunk's geometry as
+// it is: the drape's culling sphere, lifted once more for the pick, put every chunk but the centre's out of reach)
+for (const kind of ['house', 'shop', 'office']) {
+  const home = await page.evaluate((kind) => {
+    const P = window.proto, b = P.buildings.filter((x) => !x.dying && x.lot.kind === kind).sort((p, q) => Math.hypot(p.lot.x, p.lot.z) - Math.hypot(q.lot.x, q.lot.z))[0];
+    if (!b) return null;
+    const c = P.net.parcelCentre(b.lot); P.focusOn(c, 90); return { name: b.name, c };
+  }, kind);
+  if (!home) { console.log(`(no ${kind} in the town)`); continue; }
+  await page.waitForTimeout(800); await settle();
+  const at = await page.evaluate(({ c, name }) => { const P = window.proto, q = P.toScreen(c); for (let r = 0; r <= 60; r += 6) for (let a = 0; a < 6.283; a += 0.5) { const x = q.x + Math.cos(a) * r, y = q.y + Math.sin(a) * r; if (P.pickBuilding(x, y)?.name === name) return { x: Math.round(x), y: Math.round(y) }; } return null; }, home);
+  if (!at) { fail(`a ${kind} (${home.name}) cannot be picked on its own plot`); continue; }
+  await page.touchscreen.tap(at.x, at.y);
+  const opened = await page.waitForFunction((n) => (document.querySelector('#sheet h2')?.textContent ?? '') === n, home.name, { timeout: 10000 }).then(() => true, () => false);
+  if (!opened) fail(`tapping a ${kind} did not open its sheet`); else console.log(`a ${kind} under the finger: ${home.name}`);
+  await page.tap('.close').catch(() => {});
+}
 await page.evaluate(() => window.proto.setSpeed(1));
 console.log('median frame ms (after)', (await frameMs()).toFixed(1));
 console.log('errors', JSON.stringify(errs));

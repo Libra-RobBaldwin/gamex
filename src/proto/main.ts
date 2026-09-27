@@ -1845,6 +1845,7 @@ function ndc(sx: number, sy: number) {
 // test (the ground's height under the finger, which is a building's within a metre or two), so the
 // ray meets its bounds and, brought down by the same amount, its triangles.
 const cityLift = new THREE.Matrix4();
+const ownSphere = new WeakMap<THREE.BufferGeometry, THREE.Sphere>(); // (a geometry's sphere as it is, beside the drape's widened one)
 function cityHit(sx: number, sy: number) {
   ray.setFromCamera(ndc(sx, sy), cam);
   if (!RELIEF) return ray.intersectObjects(cityGroup.children, true)[0] ?? null;
@@ -1853,10 +1854,18 @@ function cityHit(sx: number, sy: number) {
   const hits: THREE.Intersection[] = [];
   cityGroup.traverse((o) => {
     if (!(o as THREE.Mesh).isMesh) return;
+    // (the drape widened the geometry's bounding sphere by the hills under it, for culling the mesh
+    // where it's drawn; lifted here as well, that sphere sits above the mesh and the ray misses it
+    // (houses, shops and offices opened nothing): the pick tests the geometry's own sphere)
+    const g = (o as THREE.Mesh).geometry, culling = g.boundingSphere;
+    let own = ownSphere.get(g);
+    if (!own) { g.boundingSphere = null; g.computeBoundingSphere(); own = g.boundingSphere!; ownSphere.set(g, own); }
+    g.boundingSphere = own;
     const was = o.matrixWorld.clone();
     o.matrixWorld.multiplyMatrices(cityLift, was); // (drawn there, until the next frame puts it back)
     o.raycast(ray, hits);
     o.matrixWorld.copy(was);
+    g.boundingSphere = culling;
   });
   hits.sort((a, b) => a.distance - b.distance);
   return hits[0] ?? null;
