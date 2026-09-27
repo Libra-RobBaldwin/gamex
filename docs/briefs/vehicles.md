@@ -11,6 +11,9 @@ against a train line's fares (riders × 30 × £2 × 2). On the phone build, see
 line with one train, run ten game days, report fares against running per day; then set RUN so a
 well-used line makes about four times its running and an empty one loses.
 
+PR #76, opened 27 Sep 05:08 UTC; locally: typecheck clean, 130 unit files (1187 tests) and the six phone
+e2es green.
+
 ## Measured (27 Sep 04:30–05:10 UTC, `e2e/railmoney.e2e.mjs`, not part of CI)
 
 Three lines, each two stations built by the station tool, the line from a station's sheet, then ten
