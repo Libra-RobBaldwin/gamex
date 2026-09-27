@@ -11,14 +11,26 @@ buses, failing tests first, then fixes; then the train card and the station card
 
 | # | Ask | Status |
 |---|---|---|
-| S1 | Two stations and a line built by touch on a branch that crosses a radial on the level (the rail e2e). | Not started |
-| S2 | Trains through a level crossing with the new lanes' traffic. | Not started |
-| S3 | A train line that shares track with another. | Not started |
-| S4 | A station on a curve. | Not started |
-| S5 | Doors on the right side at every platform. | Not started |
-| S6 | Save and reload mid-journey. | Not started |
-| S7 | Speed 1× against 4×. | Not started |
-| S8 | The train card and the station card: a name, two or three numbers, one action, as the bus's has. | Not started |
+| S1 | Two stations and a line built by touch on a branch that crosses a radial on the level (the rail e2e). | **Covered** by `e2e/rail.e2e.mjs` on the new town (the branch at x −440 crosses the lane west on the level; two stations from Build > Stops, a line by tapping); it now also checks S5 on the phone build. |
+| S2 | Trains through a level crossing with the new lanes' traffic. | **Covered**: the rail e2e checks the barriers hold the lane's cars and no car is on the crossing while a train holds its block; `rail/rail.test.ts` and `rail/review.test.ts` cover the crossing rules. Nothing new found. |
+| S3 | A train line that shares track with another. | **Done, one bug found and fixed** (below): two lines over one double line run clean; a branch off a main line at a workable angle runs clean; a branch joined at a right angle made a line whose trains never moved. |
+| S4 | A station on a curve. | **Done, nothing wrong**: trains call at a station on a 1,250 m curve with their doors meeting the set-back platforms (`review2.test.ts`; `stations.test.ts` already covered placing and refusing). |
+| S5 | Doors on the right side at every platform. | **Done, nothing wrong**: every layout a single or double line offers (side, island, both; 1–4 tracks; tapped on either side), 55 cases, each dwell's doors are at a platform edge and, for side platforms, not on the other side. The rail e2e checks every open door against the platform edges on the phone build. |
+| S6 | Save and reload mid-journey. | **Done, nothing wrong at the sim level**: stations, lines and the train count come back; every train is out of the depot within a day and calling. By design a saved train restarts from its depot (its position, calls and who's aboard aren't saved), as a saved bus restarts along its line; its look comes back the same (dressed from its def). |
+| S7 | Speed 1× against 4×. | **Done, nothing wrong**: two days at 0.25 s steps (a slow phone at 1×) against 1/30 s (4×): same calls within two, no red passed, no shared block, no train run past its stopping point. |
+| S8 | The train card and the station card: a name, two or three numbers, one action, as the bus's has. | **Done** (`rail/game.ts`): the train card is "Train N", the model, cars, line and what it's doing on one line, three numbers (speed, on board, at/next), one action (its line). The station card is the name, "Railway station · 2 platforms × 130 m", three numbers (waiting, boarded today, lines), the layout as a note, New line from here; it keeps Demolish, which nothing else offers (the bulldozer refuses stations: the play session's row). Its lines are listed under Transport > Railway. |
+
+### What the review found
+
+- **A railway joined to another at a right angle** (a branch dropped square onto a main line) makes
+  points no train can take: `track.ts exits` lets a train through a junction only within 60° of
+  straight. The track tool built it all the same, the station tool put a station on the branch,
+  and the line tool ran a line over it: its trains stood at the platform for ever, the money gone.
+  Fixed twice: `Network.check` refuses the join ("Too sharp a junction: a railway has to leave the
+  other at 60° or less, as points do"), and `RailSim.reachable` makes `fits()` refuse a line with
+  no way by rail between two of its calls, by station name, before any train is paid for.
+- Congestion, not a bug: four trains sharing a two-platform terminus make two or three calls a day
+  each on a 2 km line (they queue to reverse). The test allows for it.
 
 # Round 2: the coordinator's follow-ups (asked 23:18 UTC)
 
