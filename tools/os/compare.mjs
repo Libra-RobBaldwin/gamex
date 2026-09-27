@@ -28,7 +28,7 @@ function measure(p) {
   for (let x = -H + 250; x < H; x += 500) for (let z = -H + 250; z < H; z += 500) { n++; if (water.seaDistance(x, z, 1000) > 0) land++; }
   const landKm2 = (land / n) * (2 * H / 1000) ** 2;
   const by = (k) => S.filter((s) => s.kind === k);
-  const towns = [...by('city'), ...by('town')], villages = by('village');
+  const towns = [...by('city'), ...by('town')], villages = by('village'), hamlets = by('hamlet');
   const nn = (a, b) => a.map((s) => Math.min(...b.filter((t) => t !== s).map((t) => Math.hypot(t.x - s.x, t.z - s.z)))).filter(Number.isFinite);
   const km = (k) => p.roads.filter((r) => r.kind === k).reduce((t, r) => { let L = 0; for (let i = 1; i < r.path.length; i++) L += Math.hypot(r.path[i].x - r.path[i - 1].x, r.path[i].z - r.path[i - 1].z); return t + L; }, 0) / 1000;
   // a kind of road's grade, every 100 m (the heights the game draws)
@@ -60,6 +60,8 @@ function measure(p) {
     'land (km²)': Math.round(landKm2),
     'towns and cities per 1,000 km²': +(towns.length / landKm2 * 1000).toFixed(1),
     'villages per 1,000 km²': +(villages.length / landKm2 * 1000).toFixed(1),
+    'hamlets per 1,000 km² (the bakes: those of 150 people or more count as villages above, the rest are not loaded)': hamlets.length ? +(hamlets.length / landKm2 * 1000).toFixed(1) : 'n/a',
+    'villages and hamlets per 1,000 km²': +((villages.length + hamlets.length) / landKm2 * 1000).toFixed(1),
     'town to nearest town (km, median)': +(median(nn(towns, towns)) / 1000).toFixed(1),
     'village to nearest place (km, median)': +(median(nn(villages, S)) / 1000).toFixed(1),
     'largest places (people)': S.map((s) => s.pop).sort((a, b) => b - a).slice(0, 3).map((v) => Math.round(v / 100) * 100).join(', '),
@@ -79,6 +81,8 @@ for (const id of ['exe', 'teme']) { const t0 = performance.now(); const p = awai
 for (const s of SEEDS) { const t0 = performance.now(); const p = planWorld({ seed: s, size: 50 }); cols.push({ name: `seeded: ${s}`, m: measure(p), ms: performance.now() - t0 }); }
 const rows = Object.keys(cols[0].m);
 const F = PRIORS.follow;
+// a pair of measured values (the Exe's and the Teme's) as a range, low to high, or the one value
+const span = (a) => { const lo = Math.min(...a), hi = Math.max(...a); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
 let md = `# Seeded against real: the 50 km plans on the same yardsticks
 
 Made by \`tools/os/compare.mjs\` (${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC). The real columns are the
@@ -90,9 +94,10 @@ minor roads ${F.minor.gradeMedian.map((v) => (v * 100).toFixed(1)).join('–')}%
 routes over the plan's heights, so they read a little lower.) A lane's grade is mostly its land's: the
 real bakes' ground is two to three times steeper than a seeded lowland map's (the land slope row), so
 the fair yardstick for the router is a lane's grade over the slope of the ground under it, which real
-lanes take at about ${F.b.gradeOverSlope.join('–')} (B roads) to ${F.minor.gradeOverSlope.join('–')} (minor roads). The seeded lane km fall short of the
-real minor road km because the plan has no hamlets: the real "villages" row counts every named place,
-and a real 50 km square has ${PRIORS.settlements.perThousandKm2.hamlet.join('–')} hamlets per 1,000 km² on top of its ${PRIORS.settlements.perThousandKm2.village.join('–')} villages, each with its lanes.
+lanes take at about ${span(F.b.gradeOverSlope)} (B roads) to ${span(F.minor.gradeOverSlope)} (minor roads). The seeded lane km fall short of the
+real minor road km where the plan has fewer of the smallest places: a real 50 km square has
+${span(PRIORS.settlements.perThousandKm2.hamlet)} hamlets per 1,000 km² on top of its ${span(PRIORS.settlements.perThousandKm2.village)} villages, each with its lanes (the plan now makes
+hamlets from that prior, capped so a plan is still made in a few seconds; the hamlets row).
 
 | | ${cols.map((c) => c.name).join(' | ')} |
 |---|${cols.map(() => '---').join('|')}|
@@ -106,6 +111,7 @@ ${rows.map((r) => `| ${r} | ${cols.map((c) => c.m[r]).join(' | ')} |`).join('\n'
 function places(p) {
   const out = { town: { radials: [], deadEnd: 0, tee: 0, cross: 0, pieces: [], bins: new Float64Array(36) }, village: { radials: [], deadEnd: 0, tee: 0, cross: 0, pieces: [], bins: new Float64Array(36) } };
   for (const s of p.settlements) {
+    if (s.kind === 'hamlet') continue; // (a hamlet is its lane through and a close at most: not a place with radials)
     const T = s.kind === 'village' ? 'village' : 'town', o = out[T];
     const { streets } = layStreets({ ...s, gates: [] }, p.water, p.half);
     o.radials.push(s.spokes?.length ?? 0);

@@ -66,7 +66,7 @@ export const centreDistance = (m: MapSpec, p: XZ) => { const s = settlementAt(m,
 // houses by distance from the centre it's given (under 60, 110, 170 m), sized for a market town.
 // A city is twice the size, so its bands are twice as wide; a village has a few shops and terraces
 // on its high street and houses beyond, never towers.
-const scaleOf: Record<Kind, (d: number) => number> = { town: (d) => d, city: (d) => d / 2, village: (d) => 70 + 1.2 * d };
+const scaleOf: Record<Kind, (d: number) => number> = { town: (d) => d, city: (d) => d / 2, village: (d) => 70 + 1.2 * d, hamlet: (d) => 180 + d };
 export const centrality = (m: MapSpec, p: XZ) => { const s = settlementAt(m, p); return scaleOf[s.kind](Math.hypot(p.x - s.x, p.z - s.z)); };
 
 // The centre to give Network.plotsFor for a street from `a` to `b`, so its plots come out as

@@ -146,6 +146,12 @@ export class MapWater {
       return { x0: Math.min(...r.path.map((p) => p.x)) - m, z0: Math.min(...r.path.map((p) => p.z)) - m, x1: Math.max(...r.path.map((p) => p.x)) + m, z1: Math.max(...r.path.map((p) => p.z)) + m };
     })];
   }
+  // Another lake (a park's pond, worldmap/water.ts addPond) after the map is made: its bowl, box and
+  // edge join the rest. (The game then rebuilds what it drew from these: game/water.ts.)
+  addLake(L: LakeSpec) {
+    this.boxes.splice(this.spec.lakes.length, 0, lakeBox(L));
+    this.spec.lakes.push(L);
+  }
   // the ground with only the lakes' bowls in it (rivers' channels are drawn as strips of their own)
   // (each bowl and channel skipped outright when the spot is outside its box: the same answer, quicker)
   lakesGround = (x: number, z: number) => {
@@ -237,6 +243,9 @@ export class WorldWater extends MapWater {
   // the lakes on the land's grid: the signed distance to their shores (m, negative in them), and
   // which lake is nearest each point
   private lakeSd: Float32Array | null = null; private lakeOf: Int32Array | null = null;
+  // Park ponds (addPond): small bowls with a level of their own, added while the game runs. They are
+  // too small for the land's grid, so they are kept as shapes (lakeGroundOf) and asked one by one.
+  readonly ponds: LakeSpec[] = [];
   constructor(w: WorldWaterSpec, readonly land: CoarseLand | null = null) {
     super({ lakes: w.lakes, rivers: w.rivers.map(riverSpec) });
     this.world = w;
@@ -317,22 +326,55 @@ export class WorldWater extends MapWater {
     return r ? r.half * 2 : 0;
   }
 
+  // ---- ponds ----
+  // A park's pond: a level surface in a hollow with an irregular outline (the user's rule,
+  // docs/briefs/play.md 12). It's a small lake shape (8–30 m across its radius, its shore wandering
+  // with `waves` from the seed, never a circle) at the ground's height where it's put: the terrain
+  // lays the ground level to it and cuts its hollow (terrain.ts heightAt and bed), and the game's
+  // water fills it and draws it like any lake (game/water.ts, given the spec this returns through
+  // its MapWater's addLake). `heightAt` is the terrain's, asked before the pond is in it.
+  addPond(p: { x: number; z: number; r: number; seed: number }, heightAt: (x: number, z: number) => number): LakeSpec {
+    const r = rng(mix(p.seed, 77)), R = Math.max(8, Math.min(30, p.r));
+    const L: LakeSpec = { x: p.x, z: p.z, r: R, waves: [range(r, 0, 6.28), range(r, 0, 6.28), range(r, 0, 6.28)], level: Math.round(heightAt(p.x, p.z) * 100) / 100 };
+    this.ponds.push(L);
+    return L;
+  }
+  // the ponds' bowls (≤ 0), and the nearest pond's shore: how far (negative in it) and its level
+  private pondGround(x: number, z: number) {
+    let h = 0;
+    for (const L of this.ponds) { const g = lakeGroundOf(L, x, z); if (g < h) h = g; }
+    return h;
+  }
+  pondAt(x: number, z: number, cap = 260): { d: number; level: number; pond: LakeSpec } | null {
+    let best: { d: number; level: number; pond: LakeSpec } | null = null;
+    for (const L of this.ponds) {
+      const dx = x - L.x, dz = z - L.z;
+      if (dx > cap + L.r || dx < -cap - L.r || dz > cap + L.r || dz < -cap - L.r) continue;
+      const d = Math.hypot(dx, dz) - lakeRadiusOf(L, Math.atan2(dz, dx));
+      if (d <= cap && (!best || d < best.d)) best = { d, level: L.level ?? 0, pond: L };
+    }
+    return best;
+  }
+
   // ---- lakes ----
   // A lake's shape is the coarse land's (its cells), its shore smoothed between them; `spec.lakes`
   // are bowls covering each, for anything that only needs to know roughly where the lakes are.
   // The ground's dip for the lakes (≤ 0: from the beach down the shelving bed), as the region's
   // bowls have it (above), from the shore's distance.
   override lakesGround = (x: number, z: number) => {
-    if (!this.lakeSd) return 0;
+    const pond = this.ponds.length ? this.pondGround(x, z) : 0;
+    if (!this.lakeSd) return pond;
     const L = this.land!;
-    if (sampleGrid(L, this.lakeSd, x, z) > RIM + 2 * L.cell) return 0;
+    if (sampleGrid(L, this.lakeSd, x, z) > RIM + 2 * L.cell) return pond;
     const d = this.lakeShore(x, z);
-    return d >= RIM ? 0 : d >= 0 ? LEVEL * smooth01(1 - d / RIM) : LEVEL - Math.min(LAKE_DEEP, 0.3 - d * 0.06);
+    return Math.min(pond, d >= RIM ? 0 : d >= 0 ? LEVEL * smooth01(1 - d / RIM) : LEVEL - Math.min(LAKE_DEEP, 0.3 - d * 0.06));
   };
   // (the shore's distance, smoothly, with a little wobble the grid is too coarse for)
   private lakeShore(x: number, z: number) { return sampleSmooth(this.land!, this.lakeSd!, x, z) + 0.3 * this.coastNoise(x * 1.7, z * 1.7); }
   // How far a spot is from the nearest lake's shore (negative in it), and that lake's level, within
   // `cap` metres (else null).
+  // (the land's lakes only: a pond is asked for by pondAt, and the terrain lays the ground to it
+  // within a few times its size, not the 250 m a lake's shore gets)
   lakeAt(x: number, z: number, cap = 260): { d: number; level: number } | null {
     if (!this.lakeSd) return null;
     const L = this.land!;
@@ -368,9 +410,10 @@ export class WorldWater extends MapWater {
   private coarseDistance(x: number, z: number) { return this.wd && this.land ? sampleGrid(this.land, this.wd, x, z) : -Infinity; }
   // The region's "how far to the water's edge" (negative in the water), with the sea too.
   override edgeDistance(p: XZ, cap = 1e5) {
+    const pond = this.ponds.length ? this.pondAt(p.x, p.z, cap) : null;
     const c = this.coarseDistance(p.x, p.z);
-    if (c - 2 * (this.land?.cell ?? 0) > cap) return cap; // (nowhere near: the usual answer, quickly)
-    let best = Math.min(cap, this.seaDistance(p.x, p.z, cap));
+    if (c - 2 * (this.land?.cell ?? 0) > cap) return pond ? Math.min(cap, pond.d) : cap; // (nowhere near: the usual answer, quickly)
+    let best = Math.min(cap, this.seaDistance(p.x, p.z, cap), pond ? pond.d : cap);
     if (cap <= 250) {
       const r = this.riverAt(p.x, p.z, cap);
       if (r) best = Math.min(best, r.d - r.half);
@@ -389,6 +432,7 @@ export class WorldWater extends MapWater {
     return best;
   }
   override mayBeNear(p: XZ, m: number) {
+    if (this.ponds.length && this.pondAt(p.x, p.z, m)) return true;
     if (this.wd) return this.coarseDistance(p.x, p.z) - 2 * this.land!.cell < m;
     return super.mayBeNear(p, m) || (this.world.sea !== null && this.seaDistance(p.x, p.z, m + 1) < m);
   }
