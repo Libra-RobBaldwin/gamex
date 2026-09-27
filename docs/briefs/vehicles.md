@@ -4,6 +4,38 @@ Session https://claude.ai/code/session_01EKUWb6f3c3TYr6jHSTbTjp, branch `claude/
 PR #64 (the five review rows below) merged into `claude/cloud-session-history-rvqkm1` at 22:59 UTC.
 A second PR, #69, the coordinator's follow-ups (asked 23:18 UTC), is the section right below; opened 27 Sep 00:46 UTC, CI green locally (122 unit files, six phone e2es).
 
+# Round 4: rail money (asked 27 Sep 04:24 UTC)
+
+The coordinator: RUN in `rail/game.ts` (a train's running cost a game day) had never been measured
+against a train line's fares (riders × 30 × £2 × 2). On the phone build, seed 42, build a two-station
+line with one train, run ten game days, report fares against running per day; then set RUN so a
+well-used line makes about four times its running and an empty one loses.
+
+## Measured (27 Sep 04:30–05:10 UTC, `e2e/railmoney.e2e.mjs`, not part of CI)
+
+Three lines, each two stations built by the station tool, the line from a station's sheet, then ten
+game days skipped on the page's clock hook, the line's fares and running read from the purse each
+day. RUN as it was: dmu £4,000, intercity £9,000 a game day.
+
+| Line | Trains | Riders a town-day (days 6–10) | Fares a game day | Running a game day | Ratio |
+|---|---|---|---|---|---|
+| The rail e2e's: a 590 m branch at the town's west edge, both stations covering the same homes | 2 dmus | 19.3 | £2,321 | £8,000 | 0.29 |
+| Town to village: the start town's west edge to Fellwick (590 people, 2.1 km of single track, no loop, so one train runs; the tool's first is the intercity) | 1 intercity | 108.5 (147 on day 1, falling about 4% a day) | £13,080 (£15,759 on day 1, £12,027 on day 10) | £9,000 | 1.45 |
+| Out in the fields, 2.2 km west of the town | 2 dmus | 0 | £0 | £8,000 | 0.00 |
+
+What the numbers say: on this map a railway earns only between places: a line within the start town
+(1 km across, a station's catchment 800 m) carries almost nobody because walking is as quick. The
+town-to-village line is the natural first railway and the well-used case; its ridership was still
+falling at day ten (the village's people settling), so the mean of days six to ten is the reference.
+
+## Set
+
+`RUN` = dmu £1,500, intercity £3,300, hs £4,400, tram £1,100, rack £1,300 a game day (the kinds keep
+their old proportions, 0.37 of what they were). The town-to-village line then makes £13,080 against
+£3,300, four times; the empty line loses £3,300 a day. One consequence to weigh (the fare side is the
+economy's, not mine): a train's day now costs less than a decker bus's (£2,600), because a rail rider
+pays twice a bus fare and a village line carries a third of a busy bus line's riders.
+
 # Round 3: an adversarial review of rail on the new town (asked 27 Sep 01:51 UTC)
 
 The coordinator: on the town grown along its radials (#67, #70), review rail as the review did for
