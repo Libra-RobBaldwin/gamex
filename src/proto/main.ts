@@ -2068,7 +2068,14 @@ function stopTap(p: P) {
   const q = net.nearestSeg(p, 30, (x) => net.def(x).cls === 'road');
   if (!q) { hint('Tap on a road', 'alert'); return; }
   const side = net.sideOf(q.seg, p);
-  const res = net.planStop(q.seg.id, q.s, side);
+  let res = net.planStop(q.seg.id, q.s, side), t = q.s, moved = 0;
+  // (a tap a little too close to a junction or the road's end: the nearest spot along the road
+  // that is clear, up to 40 m off, rather than a refusal a first-time player has to guess at)
+  if (res.reason && /junction|end of the road/.test(res.reason)) {
+    const L = net.length(q.seg);
+    for (let d = 2.5; d <= 40 && res.reason; d += 2.5) for (const s of [q.s + d, q.s - d]) { if (s < 0 || s > L || !res.reason) continue; const r = net.planStop(q.seg.id, s, side); if (!r.reason) { res = r; t = s; moved = s - q.s; } }
+  }
+  const at = moved ? pointAt(net.path(q.seg), t) : q;
   if (res.reason) {
     stopPreview = null; drawGhost();
     tool?.setPanel(`<div class="bad">${icon('alert')}<span>${esc(res.reason)}</span></div>`);
@@ -2077,15 +2084,16 @@ function stopTap(p: P) {
   }
   const afford = (pl: StopPlan) => pl.ok && purse.can(price(pl.cost));
   let pick = Math.max(0, res.plans.findIndex(afford));
-  const feeds = industries.servedFrom(industries.kerbPoint(q.seg, q.s, side)).map((x) => x.model.variant.name); // (game/industry.ts)
+  const feeds = industries.servedFrom(industries.kerbPoint(q.seg, t, side)).map((x) => x.model.variant.name); // (game/industry.ts)
   const WHAT = { kerb: ['Kerbside', 'Buses stop in the lane'], layby: ['Lay-by', 'Buses pull in, clear of the traffic'] } as const;
   // (centred in the clear map above the card, closer in if far out, so the blueprint can be seen)
-  focusOn({ x: q.x, z: q.z }, Math.min(view.h, 140));
+  focusOn({ x: at.x, z: at.z }, Math.min(view.h, 140));
   const show = () => {
     const pl = res.plans[pick], cost = price(pl.cost);
-    stopPreview = { seg: q.seg, t: q.s, side, kind: pl.kind };
+    stopPreview = { seg: q.seg, t, side, kind: pl.kind };
     drawGhost();
-    const why = !pl.ok ? pl.blocked ?? 'Can’t be built here' : !purse.can(cost) ? short(cost) : `${WHAT[pl.kind][1]}${feeds.length ? ` · serves the ${feeds.join(' and the ')} too` : ''} · tap elsewhere to move it`;
+    const nudge = moved ? `Moved ${Math.round(Math.abs(moved))} m along the road, clear of the junction · ` : '';
+    const why = !pl.ok ? pl.blocked ?? 'Can’t be built here' : !purse.can(cost) ? short(cost) : `${nudge}${WHAT[pl.kind][1]}${feeds.length ? ` · serves the ${feeds.join(' and the ')} too` : ''} · tap elsewhere to move it`;
     tool?.setPanel(`<div class="choice">${res.plans.map((x, i) => `<button data-pick="${i}" class="${i === pick ? 'on' : ''}" ${x.ok ? '' : 'disabled'}><b>${WHAT[x.kind][0]}</b><span>${money(price(x.cost))}</span></button>`).join('')}</div>
       <p class="why">${esc(why)}</p>`, (el) => el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((b) => b.addEventListener('click', () => { pick = +b.dataset.pick!; show(); })));
     tool?.setPrimary({ label: `Build · ${money(cost)}`, icon: 'check', kind: 'primary', disabled: !afford(pl), onClick: build });
@@ -2094,7 +2102,7 @@ function stopTap(p: P) {
   const build = () => {
     const pl = res.plans[pick], cost = price(pl.cost);
     if (!afford(pl) || !purse.spend(cost, 'building')) { hint(short(cost), 'alert'); return; }
-    net.addStop(q.seg.id, q.s, side, pl);
+    net.addStop(q.seg.id, t, side, pl);
     for (const l of net.touched) { const bb = buildings.find((x) => x.lot === l); if (bb && !bb.dying) regenerate(bb); }
     stopPreview = null;
     drawGhost();

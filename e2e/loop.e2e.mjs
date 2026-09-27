@@ -32,6 +32,29 @@ console.log('start', JSON.stringify(t0));
 if (t0.status === 'declining') fail('the town declines from the start');
 await page.tap('#sheet .close'); await page.waitForTimeout(300);
 
+// the stop tool, tapped a little too close to a junction: the blueprint moves along the road to the
+// nearest clear spot and says so, instead of refusing (a first-time player's first tap, rounds 2 and 3)
+{
+  const nudged = await page.evaluate(() => {
+    const P = window.proto, net = P.net;
+    const seg = [...net.segs.values()].find((s) => net.def(s).cls === 'road' && !s.stops.length && net.length(s) > 120);
+    if (!seg) return { error: 'no long street' };
+    const t = net.nodeHalf(seg.a) + 6 + 15; // (20 m short of the clearance a stop needs)
+    const pt = P.net.pointAt ? P.net.pointAt(net.path(seg), t) : null;
+    P.startStopTool();
+    const q = (() => { const path = net.path(seg); let d = 0; for (let i = 0; i + 1 < path.length; i++) { const a = path[i], b = path[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z); if (d + L >= t) { const u = (t - d) / L; return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u }; } d += L; } return path[path.length - 1]; })();
+    P.focusOn(q, 140);
+    const sc = P.toScreen(q); P.tapMap(sc.x, sc.y);
+    const panel = document.querySelector('#tpanel')?.textContent ?? '', build = document.querySelector('#t-prim button');
+    const out = { panel: panel.replace(/\s+/g, ' ').slice(0, 120), buildable: !!build && !build.disabled && /Build/.test(build.textContent ?? ''), pt: !!pt };
+    P.endTool();
+    return out;
+  });
+  console.log('stop tapped 15 m from a junction:', JSON.stringify(nudged));
+  if (nudged.error) fail(nudged.error);
+  else if (!/Moved \d+ m along the road/.test(nudged.panel) || !nudged.buildable) fail(`the stop tool did not move the blueprint clear of the junction (${nudged.panel})`);
+}
+
 // nothing of the player's at the start: no stops, lines, stations or trains
 const none = await page.evaluate(() => { const P = window.proto; return { stops: [...P.net.segs.values()].reduce((a, s) => a + s.stops.length, 0), lines: P.lines.list.length, buses: P.traffic.buses, rail: P.railway?.lines?.length ?? 0 }; });
 console.log('at the start', JSON.stringify(none));

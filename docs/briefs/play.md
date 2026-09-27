@@ -232,7 +232,8 @@ Screenshots in `docs/reports/play/round2/`, 412×915, DPR 2, touch, SwiftShader.
   anywhere from 30 m to 120 m along it, a lay-by or kerbside, and a radial 300 m out (186 m, 28 buildings)
   from 30 m to 155 m: the 30 m at each end are the junction's (`11-stop1-preview.png`,
   `12-stop2-built.png`). The first tap of round 1's script, at a street's very middle, was "Too close to
-  a junction" on a short high-street piece; a player nudges along and it takes. Nothing to fix.
+  a junction" on a short high-street piece; a player nudges along and it takes. Fixed after round 3
+  (below, 25): the tool nudges for them.
 - **The line earns and the town grows.** Two stops 300 m apart, two buses: 307 riders on day one, 381 on
   day twelve; Stoatbury "Growing" from day three, 1,858 to 2,061 people, 96% of homes near a stop
   (`15-town-after-12-days.png`, `16-town-panel.png`). The goal strip moves as in round 1.
@@ -414,6 +415,32 @@ gives them. That is the economy owner's (round 1's item 6, and the coordinator's
 
 - The line card's note reads the fare from `game/money.ts` instead of a literal "£2" (the coordinator's
   ask).
+
+### After round 3: what was still confusing in the play session's files (the coordinator, 06:44)
+
+25. **A stop tapped a little too close to a junction was refused** (confusing, fixed). "Too close to a
+    junction or the end of the road — stops need about 35 m clear" was the first thing rounds 2 and 3's
+    first tap met on a short high-street piece, and a player has to guess which way and how far to move.
+    The stop tool now walks along the road, 2.5 m at a time up to 40 m either way, to the nearest spot
+    that is clear, puts the blueprint there and says "Moved 14 m along the road, clear of the junction";
+    a tap that has no clear spot within reach is refused as before. The loop e2e taps 15 m from a
+    junction and expects the moved blueprint with Build enabled.
+26. **The town grows with no service at all since the shops fix** (breaks the loop's premise, the
+    economy owner's; found 07:00). On the trunk at 28ded90 (the coordinator's 41e2456, shops follow their
+    customers) the start town, with a line for six days and then none, keeps growing: 1,775 on day 6 with
+    the line, then 1,794, 1,824, 1,858, 1,878, 1,891, 1,898, 1,902, 1,924 over eight days without one,
+    "growing" throughout, the panel saying "no bus or rail service" against "100% of workers can get to a
+    job within 30 min". `docs/loop.md`'s loop is build, watch it grow, withdraw, watch it shrink; the loop
+    e2e checks that and now fails on the trunk's own CI (run 233, "The loop": the town did not decline
+    when its line went). The e2e is left as it is: it says what the loop promises. The coordinator
+    corrected the economy on the trunk at 07:35 (visitors had become an unlimited supply too, so the
+    offices never fell back): a town with a line grows, and declines within days of losing it.
+- **The review's row 9** (a pinch-out over the start town brings a village to life) is world50's
+  activation reach, not this session's; its test stays expected-to-fail.
+- Everything else still open from rounds 1 to 3 is another owner's: a short bridge refused on a grade
+  (4), the real Teme region declining (7), the town's look (10), a slanted rail crossing (17), the pond's
+  bed depth and removal, and the economy's growth ceiling, which the coordinator has since fixed on the
+  trunk (shops follow their customers).
 
 ## Test results (third PR, round 2, on the branch merged with integration at 28593b5)
 
