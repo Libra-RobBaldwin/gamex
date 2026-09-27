@@ -41,7 +41,10 @@ const coarser = (d: Detail, n = 1): Detail => ORDER[Math.min(3, ORDER.indexOf(d)
 const finer = (a: Detail, b: Detail) => ORDER.indexOf(a) < ORDER.indexOf(b);
 
 interface Built { group: THREE.Group; bytes: number; tris: number; dispose(): void }
-interface Node { key: string; level: number; i: number; j: number; box: Box; built: Partial<Record<Detail, Built>>; pending: Set<Detail>; used: number }
+const TILE_TRIES = 3, TILE_RETRY = 120; // (a failed tile: three tries, the first 120 frames apart)
+// (`failed`: a detail whose request failed, how many times and the tick it may be asked for again:
+// a tile is tried three times, each wait twice the last, then left alone, not asked for every frame)
+interface Node { key: string; level: number; i: number; j: number; box: Box; built: Partial<Record<Detail, Built>>; pending: Set<Detail>; failed: Partial<Record<Detail, { n: number; until: number }>>; used: number }
 
 const distToBox = (x: number, z: number, b: Box) => Math.hypot(Math.max(b.x0 - x, 0, x - b.x1), Math.max(b.z0 - z, 0, z - b.z1));
 const kids = (n: { level: number; i: number; j: number }) => { const out: [number, number, number][] = []; for (let b = 0; b < 4; b++) for (let a = 0; a < 4; a++) out.push([n.level - 1, n.i * 4 + a, n.j * 4 + b]); return out; };
@@ -112,7 +115,7 @@ export class WorldView {
   private node(level: number, i: number, j: number): Node {
     const k = tileKey(level, i, j);
     let n = this.nodes.get(k);
-    if (!n) { n = { key: k, level, i, j, box: tileBox(level, i, j), built: {}, pending: new Set(), used: 0 }; this.nodes.set(k, n); }
+    if (!n) { n = { key: k, level, i, j, box: tileBox(level, i, j), built: {}, pending: new Set(), failed: {}, used: 0 }; this.nodes.set(k, n); }
     return n;
   }
   private onMap(b: Box) { const H = this.host.half; return b.x1 > -H && b.x0 < H && b.z1 > -H && b.z0 < H; }
@@ -144,7 +147,7 @@ export class WorldView {
     // pick what to show
     const next = new Map<string, { node: Node; detail: Detail }>();
     const need: { node: Node; detail: Detail; score: number }[] = [];
-    const ask = (n: Node, d: Detail, score: number) => { n.used = this.tick; if (!n.built[d] && !n.pending.has(d)) need.push({ node: n, detail: d, score }); };
+    const ask = (n: Node, d: Detail, score: number) => { n.used = this.tick; const f = n.failed[d]; if (!n.built[d] && !n.pending.has(d) && !(f && (f.n >= TILE_TRIES || this.tick < f.until))) need.push({ node: n, detail: d, score }); };
     // can a node show something (itself, or all of its children)?
     const canShow = (n: Node, depth = 0): boolean => {
       if (inLive(n.box) || !this.onMap(n.box)) return true;
@@ -200,7 +203,7 @@ export class WorldView {
       this.stats.requested++;
       L.load({ level: q.node.level, i: q.node.i, j: q.node.j, detail: q.detail, options: this.host.options }, new AbortController().signal)
         .then((d) => { this.stats.arrived++; this.arrived.push({ node: q.node, detail: q.detail, data: d as TileData }); })
-        .catch((e) => { console.warn('world tile', q.node.key, q.detail, e); q.node.pending.delete(q.detail); })
+        .catch((e) => { const f = q.node.failed[q.detail] ?? { n: 0, until: 0 }; f.n++; f.until = this.tick + TILE_RETRY * 2 ** (f.n - 1); q.node.failed[q.detail] = f; console.warn('world tile', q.node.key, q.detail, f.n >= TILE_TRIES ? 'given up' : `try ${f.n}`, e); q.node.pending.delete(q.detail); })
         .finally(() => { L.busy--; this.pump(); });
     }
   }
