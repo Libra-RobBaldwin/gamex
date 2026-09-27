@@ -1,6 +1,48 @@
 # Handover: where everything stands
 
-## Latest: a new coordinator, 26 Sep 2026 (20:10 UTC)
+## Latest: the night of 26–27 Sep 2026 (02:30 UTC)
+
+Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU. The decisions are in
+`docs/briefs/PLAN.md` (top section); the logic review is `docs/reports/review-2026-09-26.md`; the V2 ideas
+are at the end of `docs/ROADMAP.md`. Integration branch `claude/cloud-session-history-rvqkm1`; Vercel
+production follows it. CI is green on its head (check and phone).
+
+**Merged tonight, in order:** #58, #59, #57, #55 (the previous sessions' waiting PRs); #60 (the economy
+growth test fixed at its root: reach weighs a journey by its length, so a served town keeps its jobs; the
+bridge timing test best-of-five); #61 (one map step 4: the 6 km code, Leaflet and the docs about deleted
+maps gone; region pictures on the start menu); #62 (#52 back: one field and woods generator, fields fan
+round winding lanes, first view proved not blank); #63 (play, first playthrough: building tap, rail Join,
+line tool framing, stop badges, one guide, loading counts); #64 (vehicles: buses and stops survive a road
+split, dwells complete, trains keep running through rebuilds, a bus with no room waits in the depot); #65
+(realism step 1: lanes leave a place along its streets, from OS-measured priors); #66 (play: fields stay
+fields, parks walled with gates, no pond in every park; the review's play rows: riders a day honest,
+refunds only for roads the player paid for, the road-onto-stop warning and refund, a half-built village
+not saved as finished, the goal card, stop placement, Continue, track bulldozed); #67 (realism step 2: a
+place grown along its radials from OS-measured priors, seeded towns within the real ranges; lanes climb
+their ground; failed tiles retried then left; coarse growth bounded); #68 (cover-map pools 110 → 22 MB,
+farmsteads one a km²); #69 (vehicles round 2: stops clear of junctions, a bus with no way on turns back,
+even gaps on a line); #70 (farmsteads built in the live play area).
+
+**Sessions (this account), each on its own branch with PRs into integration; the coordinator merges on
+green CI after reading the description and screenshots:**
+
+| Stream | Branch | Session | On now |
+|---|---|---|---|
+| Play: the region played as a player; loop fixes | `claude/work-play` | session_01DGEkjY29QMXCGUF7EoXkuj | second playthrough on the radial town; money sanity (profit against running cost); the activation jump |
+| Realism: seeded places and roads as real UK ones, from OS data | `claude/work-realism` | session_01N2xhRAKzQWsSt6RZQH8jdG | PR #71: hamlets from the measured density, a park pond through the water system; then ribbons that bend and thin |
+| Vehicles: buses, trains, traffic | `claude/work-vehicles-fixes` | session_01EKUWb6f3c3TYr6jHSTbTjp | round 3: an adversarial review of rail on the new town; train and station cards |
+| Countryside: fields, hedges, woods, farms | `claude/work-country-2` (+ `-pools`, `-farms`) | session_016uD19qC4yiFZR8AhPrtiib | the dresser's barn kind; the countryside meeting the town's ragged edge |
+
+The coordinator owns `economy*.ts`, `econ*.ts`, `bridges/perf.review.test.ts`, PLAN.md and this file.
+
+**Still open from the logic review:** the guide's road step ticking on a pinch-out that activates a village
+(its test stays `it.fails`; the harm is gone with one guide at a time). **Not done:** ponds obeying the water
+rules (in #71); the economy's profit-to-running-cost ratio (the play session measures it, the coordinator
+tunes); the repo's default branch on GitHub is still the old `claude/runescape-transport-puzzle-game-q1uhy8`
+(only the user can change it); 52 of the remote branches are fully merged and can be deleted once the user
+agrees.
+
+## Earlier: a new coordinator, 26 Sep 2026 (20:10 UTC)
 
 Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (this account). The previous coordinator
 and the six region sessions ran on the user's other account and stopped answering at about 16:00 UTC; their
