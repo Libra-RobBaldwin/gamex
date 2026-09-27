@@ -6,10 +6,15 @@ import { LiveTowns } from './worldmap/live';
 import { migrate } from './game/save';
 import { isOldRealSave } from './real/worldmap';
 import { GONE } from './maps';
+import { REAL_REGION_LIST } from './real/list';
 // (src/app/menu.ts can't load in node: its fonts touch `document`. goneSave copied from menu.ts:44 verbatim)
 const savedMap = (e: { map: { id: string; query: string } }) => new URLSearchParams(e.map.query).get('map') ?? e.map.id;
-const goneSave = (e: { map: { id: string; query: string }; [k: string]: unknown }) => !!GONE[savedMap(e)] || !!GONE[e.map.id] || (savedMap(e) === 'region' && (new URLSearchParams(e.map.query).get('size') ?? '6') === '6');
+const oldReal = (e: { map: { id: string; query: string } }) => { const q = new URLSearchParams(e.map.query); return REAL_REGION_LIST.some((r) => r.id === q.get('map')) && !q.has('real'); };
+const goneSave = (e: { map: { id: string; query: string }; [k: string]: unknown }) => !!GONE[savedMap(e)] || !!GONE[e.map.id] || (savedMap(e) === 'region' && (new URLSearchParams(e.map.query).get('size') ?? '6') === '6') || oldReal(e);
 describe('the live area (worldmap/live.ts) and the guide', () => {
+  // (the guide no longer has a road step, so nothing of the guide's ticks when a village's streets are
+  // built; whether a village should come to life 3.3 km away at a 2 km view is the world's streaming
+  // call, worldmap/game.ts frame, so this stays as the review measured it)
   it.fails('a pinch-out over the start town (the guide\'s first step) does not bring a village to life on its own', () => {
     // The guide's "Build a road" step ticks when net.segs grows (src/app/guide.ts:31). A place coming to
     // life builds its streets on the Network (main.ts bringToLife, 755-763). main.ts asks
@@ -29,7 +34,7 @@ describe('the live area (worldmap/live.ts) and the guide', () => {
 
 // ---------- saves on the menu ----------
 describe('Continue and the list of saved towns (src/app/menu.ts goneSave)', () => {
-  it.fails('does not offer a town the game will refuse to open: one saved on a real region before it was 50 km', () => {
+  it('does not offer a town the game will refuse to open: one saved on a real region before it was 50 km', () => {
     // a save made on ?map=exe when Exeter was its own 6 km map (real/load.ts): main.ts turns it away
     // (isOldRealSave) and opens a new town instead
     const raw = { v: 1, id: 'old-exe', name: 'Exeter', savedAt: 1, map: { id: 'exe', query: 'map=exe' }, summary: { residents: 1, balance: 1, lines: 0, day: 1, time: '07:00' } };

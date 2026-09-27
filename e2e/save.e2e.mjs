@@ -130,6 +130,23 @@ ok(sb.segs.some((s) => s.split(':')[5]), 'bridges and their types are kept');
 ok(changed.stations === 2 && sb.stations.length === 2 && sb.raillines === 1, `railway stations and the rail line are kept (${JSON.stringify(changed)})`);
 ok(await B.evaluate(() => window.proto.railway.trains.length) === await A.evaluate(() => window.proto.railway.trains.length), 'the rail line runs as many trains');
 await shot(B, 'save-3-loaded');
+// ---- the bulldozer refunds the player's road, not the map's (and the save remembers which) ----
+{
+  const back = async (q) => B.evaluate((q) => {
+    const P = window.proto, net = P.net;
+    const n = net.nearestSeg(q, 30, (s) => net.def(s).cls === 'road' && !s.stops.length);
+    if (!n) return null;
+    P.startBulldozeTool();
+    const p = net.path(n.seg), m = p[Math.floor(p.length / 2)], sc = P.toScreen(m);
+    P.tapMap(sc.x, sc.y);
+    const t = document.querySelector('#tpanel')?.textContent ?? '';
+    P.endTool();
+    return { id: n.seg.id, back: /back/.test(t), text: t.slice(0, 80) };
+  }, q);
+  const mine = await back({ x: 120, z: -45 }), theirs = await back({ x: -85, z: 0 });
+  ok(mine && mine.back, `bulldozing the road the player built offers money back (${mine?.text})`);
+  ok(theirs && !theirs.back, `bulldozing a road the map gave offers nothing back (${theirs?.text})`);
+}
 
 // ---- both run on: the same town ----
 for (const p of [A, B]) await p.evaluate(() => window.proto.skip(2 * 1440));

@@ -7,6 +7,7 @@
 import { closestOnPath, kerbOf, pathLength, pointAt, type Lot, type Network, type P, type RSeg, type Stop } from '../roads';
 import { legsAt, type Junction } from '../junction';
 import { CELL, type Region } from '../infill';
+import { parkEntrances, parkPaths } from '../parkplan';
 import { USE, unitsOf } from '../buildgen';
 import { crossingAt } from '../jshape';
 import { pedCrossingsOn, type PedXKind } from '../pedx';
@@ -290,32 +291,32 @@ function parkSite(r: Region): ParkSite {
   const b = out.area;
   out.width = Math.min(b[1].x - b[0].x, b[2].z - b[1].z);
   if (r.kind === 'pocket' || r.kind === 'park') {
-    const pond = r.kind === 'park' ? block(4) : undefined;
-    const keep = pond ? { x: pond.x + 1.5 * S, z: pond.z + 1.5 * S, r: S * 1.6 + 2 } : null;
-    const clear = (x: number, z: number) => !keep || Math.hypot(x - keep.x, z - keep.z) > keep.r;
-    if (keep) out.pond = Array.from({ length: 10 }, (_, i) => ({ x: keep.x + Math.cos((i / 10) * Math.PI * 2) * S * 1.1, z: keep.z + Math.sin((i / 10) * Math.PI * 2) * S * 1.1 }));
-    const xs = cells.map((c) => c.x), zs = cells.map((c) => c.z);
-    const alongX = Math.max(...xs) - Math.min(...xs) >= Math.max(...zs) - Math.min(...zs);
-    const path = cells.filter((c) => (alongX ? Math.abs(c.z - centre.z) < 0.1 : Math.abs(c.x - centre.x) < 0.1) && clear(c.x, c.z));
-    path.forEach((c, i) => { if (i % 2 === 1) out.benches.push({ at: alongX ? { x: c.x, z: c.z + 2 } : { x: c.x + 2, z: c.z }, facing: alongX ? -Math.PI / 2 : Math.PI }); });
-    // the gravel runs cell to cell; a gap (the pond, a notch in the outline) splits it
-    const sorted = [...path].sort((p, q) => (alongX ? p.x - q.x : p.z - q.z));
-    let run: XZ[] = [];
-    const flush = () => {
-      if (run.length >= 2) {
-        const a = run[0], z = run[run.length - 1];
-        out.paths.push(alongX ? [{ x: a.x - h + 0.5, z: a.z }, { x: z.x + h - 0.5, z: z.z }] : [{ x: a.x, z: a.z - h + 0.5 }, { x: z.x, z: z.z + h - 0.5 }]);
-      }
-      run = [];
-    };
-    for (const c of sorted) { if (run.length && hyp(run[run.length - 1], c) > S * 1.05) flush(); run.push(c); }
-    flush();
+    // (no pond: a park's water waits for the water system to hold it in a hollow, docs/briefs/play.md)
+    // the paths run from the gates on the road edges (parkplan.ts), as they're drawn, with a bench
+    // beside the middle of each
+    const gates = parkEntrances(r.roadEdges, centre);
+    const paths = gates.length ? parkPaths(gates, centre) : oldPath(cells, centre, S);
+    for (const path of paths) {
+      out.paths.push(path);
+      const a = path[0], b = path[path.length - 1], L = hyp(a, b) || 1, nx = -(b.z - a.z) / L, nz = (b.x - a.x) / L;
+      const m = { x: (a.x + b.x) / 2 + nx * 2.2, z: (a.z + b.z) / 2 + nz * 2.2 };
+      if (L > 8) out.benches.push({ at: m, facing: Math.atan2(-nz, -nx) });
+    }
   } else if (r.kind === 'playground') {
     const p = block(2) ?? centre;
     out.play = { x: p.x + h, z: p.z + h };
     out.benches.push({ at: { x: p.x - h - 1.5, z: p.z + h }, facing: 0 });
   }
   return out;
+}
+// (a park with no road edge, which is rare: a straight path the long way through its middle)
+function oldPath(cells: XZ[], centre: XZ, S: number): XZ[][] {
+  const xs = cells.map((c) => c.x), zs = cells.map((c) => c.z), h = S / 2;
+  const alongX = Math.max(...xs) - Math.min(...xs) >= Math.max(...zs) - Math.min(...zs);
+  const row = cells.filter((c) => (alongX ? Math.abs(c.z - centre.z) < 0.1 : Math.abs(c.x - centre.x) < 0.1)).sort((p, q) => (alongX ? p.x - q.x : p.z - q.z));
+  if (row.length < 2) return [];
+  const a = row[0], z = row[row.length - 1];
+  return [alongX ? [{ x: a.x - h + 0.5, z: a.z }, { x: z.x + h - 0.5, z: z.z }] : [{ x: a.x, z: a.z - h + 0.5 }, { x: z.x, z: z.z + h - 0.5 }]];
 }
 // The biggest rectangle of whole cells about the middle one, grown a row or column at a time.
 function innerRect(c: XZ, inR: (x: number, z: number) => boolean, S: number): XZ[] {
