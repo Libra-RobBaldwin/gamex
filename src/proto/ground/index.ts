@@ -11,7 +11,7 @@
 // slopes) and needs no painting: `new Ground().material` is a drop-in for a flat green material.
 // See docs/ground.md.
 import * as THREE from 'three';
-import { CoverMap, type Region, TOWN_REACH } from './paint';
+import { CoverMap, type Region, type Spot, TOWN_REACH } from './paint';
 import { Layout, type GroundInput, type XZ } from './layout';
 import type { FieldSource } from './plan';
 import { Occupancy, planHedges, type HedgeGroup } from './hedgerows';
@@ -111,15 +111,26 @@ export class Ground {
     const t0 = performance.now();
     if (!this.cover) { this.layout.setInput(input); return; }
     const changed = this.layout.setInput(input, boxes);
-    // (a plot marks the town round it, TOWN_REACH out, where a field lies within that reach: that
+    // (a plot marks the town round it, TOWN_REACH out, where a field the town has reached lies within that reach: that
     // ground, and its hedges, change with it; in the town itself nothing round the plot changes)
-    const reach = (b: Box) => { const R = TOWN_REACH, B = { x0: b.x0 - R, z0: b.z0 - R, x1: b.x1 + R, z1: b.z1 + R }; return this.layout.fieldsIn(B).some((id) => this.layout.about(id).kind !== 'town') ? B : b; };
+    const reach = (b: Box) => {
+      const R = TOWN_REACH, B = { x0: b.x0 - R, z0: b.z0 - R, x1: b.x1 + R, z1: b.z1 + R };
+      if (!this.layout.fieldsIn(B).some((id) => this.layout.about(id).mixed)) return b;
+      // just the band round the plots in the box (a plot's spot is its middle), or, when the box
+      // holds none (a plot has gone), everything the band could have reached
+      const spots = this.layout.spotsIn(b).filter((s) => s.x >= b.x0 && s.x <= b.x1 && s.z >= b.z0 && s.z <= b.z1);
+      if (!spots.length) return B;
+      const out = { ...b };
+      for (const s of spots) { out.x0 = Math.min(out.x0, s.x - s.r - 1); out.z0 = Math.min(out.z0, s.z - s.r - 1); out.x1 = Math.max(out.x1, s.x + s.r + 1); out.z1 = Math.max(out.z1, s.z + s.r + 1); }
+      return out;
+    };
     const dirty: Box[] = [...boxes.map(reach), ...changed];
     if (this.plants && dirty.length) {
       // hedges within reach of the change (a hedge keeps 2 m off a plot, and off the town's reach),
       // and wherever a gateway (painted as worn earth) came or went
-      const plan = [...boxes.map((b) => ({ x0: b.x0 - 8, z0: b.z0 - 8, x1: b.x1 + 8, z1: b.z1 + 8 })), ...dirty.slice(boxes.length)];
-      for (const [k, b] of boxes.entries()) if (dirty[k] !== b) plan.push(dirty[k]); // (the town's reach round a plot at the fields' edge: the hedges in it go)
+      // (where the town's band reaches out from a plot at the fields' edge, the hedges in it go: one
+      // plan over the band and the plot, as a line touching either is walked whole)
+      const plan = [...boxes.map((b, k) => { const d = dirty[k]; return { x0: Math.min(b.x0 - 8, d.x0), z0: Math.min(b.z0 - 8, d.z0), x1: Math.max(b.x1 + 8, d.x1), z1: Math.max(b.z1 + 8, d.z1) }; }), ...dirty.slice(boxes.length)];
       const occ = new Occupancy(input);
       const gateBoxes: Box[] = [];
       let moved = false;
@@ -129,7 +140,10 @@ export class Ground {
           this.groups.set(g.key, g);
           if (was && same(was.pieces, g.pieces) && same(was.trees, g.trees) && same(was.gates, g.gates)) continue;
           moved = true;
-          for (const s of [...(was?.gates ?? []), ...g.gates]) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
+          // (a gateway that came or went is repainted; one that stayed where it was isn't)
+          const gate = (s: Spot, l: Spot[]) => l.some((o) => o.x === s.x && o.z === s.z && o.r === s.r && o.v === s.v);
+          for (const s of was?.gates ?? []) if (!gate(s, g.gates)) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
+          for (const s of g.gates) if (!was || !gate(s, was.gates)) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
         }
       }
       dirty.push(...gateBoxes);

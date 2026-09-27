@@ -77,10 +77,15 @@ https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, de
     ground within 20 m of a plot's middle (`TOWN_BAND`, the back fence and a few metres behind it) is painted
     as town texel by texel (`Layout.townAt`) with no hedge through it, so the crops run up to the back
     gardens; and only the next four plots in the queue (the building sites) mark the town, not the whole
-    queue. A repaint after a plot at the fields' edge reaches 21 m round it (`TOWN_REACH`) so it stays exact;
-    CI's first run of this failed its 2 ms repaint budget at 52 m (4.1 ms), so the band is exact per texel
-    rather than on 20 m cells and the reach 21 m: cold 2.5 ms here against the old 0.6 ms, warm 1.1 ms
-    against 0.3 ms, about 1.1 ms on CI's machine. Screenshots at 700 m, 350 m and 2 km, before and after:
+    queue. A repaint after a plot at the fields' edge reaches the band round that plot (`TOWN_REACH`, 21 m
+    from its middle) so it stays exact. CI failed its 2 ms repaint budget twice on this (4.1 ms at a 52 m
+    reach on 20 m cells; 4.2 ms with the band exact per texel but `townAt` asked texel by texel through a
+    Map keyed by doubles, and the hedges planned twice over overlapping boxes). Now the band is rasterised
+    once over the paint window, the spots grid has small-integer keys, the repaint box is the plot's band
+    circle rather than 21 m round its box, the hedges are planned once over that, and only a gateway that
+    came or went is repainted: median repaint after a plot at the fields' edge, 3 runs each with the full
+    suite running alongside, cold 1.1 ms here against the base's 0.7, warm 0.6 against 0.33 (the paint
+    window is 1.6 times the base's, the band's circle). Screenshots at 700 m, 350 m and 2 km, before and after:
     `docs/reports/country/before-edge-700-w.jpg`, `after-edge-700-w.jpg`, `before-edge-350-e.jpg`,
     `after-edge-350-e.jpg`, `before-edge-2km.jpg`, `after-edge-2km.jpg`. What's left round the town is its
     parks (the leftover land the game landscapes, 5 ha) and the 30 m band. A test in `ground.test.ts`.

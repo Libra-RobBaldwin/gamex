@@ -92,9 +92,10 @@ What a field becomes is its source's (arable, grass, wood, rough), unless:
 - the town has grown over it (more than half of it within 30 m of plots), which makes it town. A
   field the town has only reached stays a field, and the ground within 20 m of a plot's middle
   (`TOWN_BAND`: the back fence and a few metres behind it) is painted as town, texel by texel
-  (`Layout.townAt`), with no hedge through it: the crops run up to the back gardens, as they do
-  at a real town's ragged edge. A repaint after a plot at the fields' edge reaches `TOWN_REACH`
-  (21 m) round it, so it stays exact; in the town itself it reaches only the plot;
+  (`Layout.townAt`; a paint rasterises the band once over its window, `Layout.spotsIn`), with no
+  hedge through it: the crops run up to the back gardens, as they do at a real town's ragged edge.
+  A repaint after a plot at the fields' edge reaches the band round that plot (`TOWN_REACH`, 21 m
+  from its middle), so it stays exact; in the town itself it reaches only the plot;
 - industry has (more than 12%), which makes it rough;
 - it's arable at the water's edge, which makes it grass.
 

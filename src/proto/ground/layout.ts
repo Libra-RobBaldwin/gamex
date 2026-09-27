@@ -17,6 +17,8 @@ export type ParcelKind = 'arable' | 'grass' | 'wood' | 'rough' | 'town';
 // how far the town's ground reaches past a plot's middle (m): a garden's back fence and a few metres
 // of mown ground behind it, then the fields (`Layout.townAt`)
 export const TOWN_BAND = 20;
+// a 32 m cell's key in the spots grid: a small integer (a Map keyed by doubles is many times slower)
+const cell = (a: number, b: number) => ((a + 4096) << 13) | (b + 4096);
 
 // What the painter needs to know about the world. Every polygon is in world metres.
 export interface GroundInput {
@@ -151,7 +153,7 @@ export class Layout {
     const c = (this.coarse = new Coarse(this.fixed.coarse));
     // the town reaches 30 m past its plots and parks, the industrial estate likewise
     const spots = new Map<number, { x: number; z: number; r: number }[]>();
-    const spot = (x: number, z: number, r: number) => { const k = (Math.floor(x / 32) + 32768) * 65536 + (Math.floor(z / 32) + 32768), l = spots.get(k); if (l) l.push({ x, z, r }); else spots.set(k, [{ x, z, r }]); };
+    const spot = (x: number, z: number, r: number) => { const k = cell(Math.floor(x / 32), Math.floor(z / 32)), l = spots.get(k); if (l) l.push({ x, z, r }); else spots.set(k, [{ x, z, r }]); };
     for (const p of input.plots ?? []) { if (p.kind === 'track') continue; const m = centroid(p.poly); c.mark(p.kind === 'yard' ? INDUS : TOWN, m.x, m.z, 30); if (p.kind !== 'yard') spot(m.x, m.z, TOWN_BAND); }
     for (const p of input.town ?? []) { c.mark(TOWN, p.x, p.z, 30); spot(p.x, p.z, TOWN_BAND); }
     for (const p of input.parks ?? []) { const b = bbox(p.poly); spot((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, TOWN_BAND * 0.7); }
@@ -182,10 +184,21 @@ export class Layout {
   townAt(x: number, z: number) {
     const i = Math.floor(x / 32), j = Math.floor(z / 32);
     for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) {
-      const l = this.spots.get((a + 32768) * 65536 + (b + 32768));
+      const l = this.spots.get(cell(a, b));
       if (l) for (const s of l) if ((s.x - x) ** 2 + (s.z - z) ** 2 <= s.r * s.r) return true;
     }
     return false;
+  }
+  // the spots (each a circle of the town's band) reaching into a box: a paint rasterises them
+  // once over its window rather than asking `townAt` texel by texel
+  spotsIn(box: Box): { x: number; z: number; r: number }[] {
+    const out: { x: number; z: number; r: number }[] = [];
+    const i0 = Math.floor((box.x0 - TOWN_BAND) / 32), i1 = Math.floor((box.x1 + TOWN_BAND) / 32), j0 = Math.floor((box.z0 - TOWN_BAND) / 32), j1 = Math.floor((box.z1 + TOWN_BAND) / 32);
+    for (let a = i0; a <= i1; a++) for (let b = j0; b <= j1; b++) {
+      const l = this.spots.get(cell(a, b));
+      if (l) for (const s of l) if (s.x + s.r > box.x0 && s.x - s.r < box.x1 && s.z + s.r > box.z0 && s.z - s.r < box.z1) out.push(s);
+    }
+    return out;
   }
   // What a field is: what its source says, unless the town has grown over it (half of it within
   // 30 m of plots) or industry has, or it's a field at the water's edge (then it's grass). A field
