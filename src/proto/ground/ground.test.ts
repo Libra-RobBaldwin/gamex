@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { bandPolys, circlePoly, pointInPoly } from '../land';
-import { DIRS, packCover, SAMPLES, unpackCover, type GroundQuality } from './covers';
-import { Ground, type GroundInput, type XZ } from './index';
+import { CROP, CROP_NAMES, CROPS, cropLookAt, DIRS, packCover, SAMPLES, seasonOf, START_MONTH, unpackCover, type GroundQuality } from './covers';
+import { applySeason, Ground, onGroundSeason, setGroundSeason, type GroundInput, type XZ } from './index';
 import { Layout } from './layout';
 import { DETAIL_REPEAT, groundFragment, patchGround, groundUniforms, setOrigin } from './material';
 import { makeDetail, makeMacro, seamStats, MACRO_PERIOD } from './textures';
@@ -258,6 +258,57 @@ describe('budgets', () => {
     }
     expect(median(full.slice(3))).toBeLessThan(budget(30));
     expect(median(inc)).toBeLessThan(budget(2));
+  });
+});
+
+describe('the farming year', () => {
+  it('starts on the looks in CROPS, in mid-July, and rape apart is those looks then', () => {
+    for (const c of CROP_NAMES) {
+      const k = cropLookAt(c, START_MONTH / 12), want = CROPS[c];
+      if (c === 'rape') continue; // (rape is in flower in April and May: mid-July it is pods, browner than the toned-down flower CROPS keeps)
+      const hex = (v: [number, number, number]) => '#' + v.map((x) => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
+      expect(hex(k.a)).toBe(want.a); expect(hex(k.b)).toBe(want.b);
+      expect(k.rows).toBeCloseTo(want.rows, 6); expect(k.row).toBeCloseTo(want.row, 6); expect(k.tram).toBe(want.tram ? 1 : 0);
+    }
+    expect(seasonOf(0)).toBeCloseTo(START_MONTH / 12, 6);
+    expect(seasonOf(12 * 1440)).toBeCloseTo(START_MONTH / 12, 6); // (twelve game days: a year)
+  });
+  it('never jumps: a day moves any colour by under 2%, and the year wraps', () => {
+    for (const c of CROP_NAMES) {
+      let prev = cropLookAt(c, 0);
+      for (let d = 1; d <= 365; d++) {
+        const k = cropLookAt(c, (d % 365) / 365);
+        for (let i = 0; i < 3; i++) { expect(Math.abs(k.a[i] - prev.a[i])).toBeLessThan(0.02); expect(Math.abs(k.b[i] - prev.b[i])).toBeLessThan(0.02); }
+        expect(Math.abs(k.row - prev.row)).toBeLessThan(0.01);
+        prev = k;
+      }
+    }
+    // the same year again
+    expect(cropLookAt('wheat', 1.3)).toEqual(cropLookAt('wheat', 0.3));
+    expect(cropLookAt('wheat', -0.7).a[0]).toBeCloseTo(cropLookAt('wheat', 0.3).a[0], 9);
+  });
+  it('wheat is green in spring, gold in July, stubble in August and ploughed in September; rape flowers in spring', () => {
+    const w = (m: number) => cropLookAt('wheat', (m + 0.5) / 12).a;
+    expect(w(4)[1]).toBeGreaterThan(w(4)[0]); // May: greener than red
+    expect(w(6)[0]).toBeGreaterThan(w(6)[1]); // July: gold
+    expect(cropLookAt('wheat', 8 / 12).a[0] + cropLookAt('wheat', 8 / 12).a[1]).toBeLessThan(w(6)[0] + w(6)[1]); // September: darker (ploughed)
+    const r = cropLookAt('rape', 4.5 / 12).a;
+    expect(r[0]).toBeGreaterThan(0.7); expect(r[1]).toBeGreaterThan(0.65); expect(r[2]).toBeLessThan(0.4); // late April: yellow
+  });
+  it("sets a ground's crop uniforms, leaving a crop the map's style colours alone", () => {
+    const u = groundUniforms(new THREE.Texture());
+    u.uCropA.value[CROP.wheat].set('#cfb173');
+    applySeason(u, 4 / 12, { wheat: { a: '#cfb173', b: '#d8bb7c' } });
+    expect(u.uCropA.value[CROP.wheat].getHexString()).toBe('cfb173');
+    const may = cropLookAt('barley', 4 / 12);
+    expect(u.uCropA.value[CROP.barley].getHexString()).toBe(new THREE.Color().setRGB(may.a[0], may.a[1], may.a[2], THREE.SRGBColorSpace).getHexString());
+    expect(u.uCropRow.value[CROP.barley].y).toBeCloseTo(may.row, 6);
+    // listeners hear a move of the season, not a stand-still
+    let heard = 0;
+    const off = onGroundSeason(() => heard++);
+    setGroundSeason(0.25); setGroundSeason(0.25 + 1e-5); setGroundSeason(0.75);
+    off();
+    expect(heard).toBe(2);
   });
 });
 

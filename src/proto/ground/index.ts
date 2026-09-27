@@ -19,10 +19,10 @@ import { Hedges } from './hedges';
 import { packCover } from './covers';
 import { coverTexture, forgetGround, groundUniforms, patchGround, setOrigin, sharedTextures, type GroundUniforms } from './material';
 
-export { setGroundQuality, getGroundQuality, patchGround, sharedTextures } from './material';
+export { setGroundQuality, getGroundQuality, patchGround, sharedTextures, applySeason, setGroundSeason, onGroundSeason, groundSeason } from './material';
 export type { GroundInput, XZ } from './layout';
 export type { GroundQuality } from './covers';
-export { SAMPLES } from './covers';
+export { SAMPLES, seasonOf, cropLookAt, CROP_YEAR, START_MONTH } from './covers';
 
 export interface GroundOptions {
   region?: { x0: number; z0: number; size: number }; // the square of world to paint covers over

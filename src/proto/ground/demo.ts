@@ -6,7 +6,7 @@ import '../ui/fonts';
 import { markSvg } from '../ui/brand';
 import { bandPolys, circlePoly } from '../land';
 import { CROP, type CropName } from './covers';
-import { Ground, setGroundQuality, type Covers, type GroundInput, type GroundQuality, type XZ } from './index';
+import { Ground, setGroundQuality, setGroundSeason, type Covers, type GroundInput, type GroundQuality, type XZ } from './index';
 import { rng, worldNoise } from './noise';
 import { NavRig, SunFollow } from '../kit/camera';
 
@@ -291,6 +291,11 @@ function setDusk(on: boolean) {
   renderer.shadowMap.needsUpdate = true;
 }
 $('#dusk').onclick = () => setDusk(!dusk);
+// the farming year (covers.ts CROP_YEAR): a month at a time, mid-month
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+let month = 6;
+function setMonth(m: number) { month = ((m % 12) + 12) % 12; setGroundSeason((month + 0.5) / 12); $('#month').textContent = MONTHS[month]; }
+$('#month').onclick = () => setMonth(month + 1);
 
 // ---- loop, with a perf readout ----
 let last = performance.now(), frames = 0, acc = 0, shown = 0;
@@ -349,4 +354,4 @@ function pixelCost(frames = 20) {
   return out;
 }
 (window as unknown as { nav: NavRig }).nav = nav;
-(window as unknown as { groundDemo: unknown }).groundDemo = { pixelCost, setScene, setQuality, setDusk, view, nav, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };
+(window as unknown as { groundDemo: unknown }).groundDemo = { pixelCost, setScene, setQuality, setDusk, setMonth, view, nav, place, renderer, scene, cam, get ground() { return cur?.ground; }, setBefore: (b: boolean) => { before = b; applyBefore(); } };

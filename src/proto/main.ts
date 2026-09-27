@@ -22,7 +22,7 @@ import { parkEntrances, parkPaths, parkPond } from './parkplan';
 import type { LakeSpec } from './worldmap/water';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
-import { patchGround, setGroundQuality } from './ground';
+import { patchGround, setGroundQuality, seasonOf, setGroundSeason } from './ground';
 import { Occupancy, planHedges, type HedgeTree, type Piece } from './ground/hedgerows';
 import { GameWater, LAKE, WATER_LEVEL } from './game/water';
 import './ui/fonts';
@@ -2873,6 +2873,7 @@ function frame(now: number) {
   let merged = 0;
   for (const c of chunks.values()) if (c.dirty && merged++ < 2) rebuildChunk(c);
   clock += gdt * GAME_MIN_PER_S;
+  setGroundSeason(seasonOf(clock)); // (the fields' year: a game day is a month; ground/covers.ts CROP_YEAR)
   if (clock >= autoAt) { autoAt = clock + AUTOSAVE_EVERY; void saveGame('auto'); } // (every few game hours)
   const hour = (clock / 60) % 24;
   gameWater.update(now / 1000, hour); // ripples and reeds, and the water's light from the clock

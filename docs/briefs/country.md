@@ -32,6 +32,26 @@ its full paint passes.) Stages per change before the last two items: `setInput` 
 0.25, planting 0.06, paint 0.73. Checks: `tsc` clean; ground and game folders 29 files, 192 tests; the whole
 suite on the merged head (below, "Checks before the push").
 
+**Seasons and crop variety (item 3), branch `claude/work-country-seasons`, its own PR into the integration branch.**
+Done and checked on 412×915 screenshots (DPR 2, SwiftShader), `docs/reports/country/season-*.jpg`:
+
+12. **The farming year.** `ground/covers.ts` `CROP_YEAR` gives each crop keyframes through the year (colours and
+    rows), `cropLookAt` blends them (a day moves a colour under 2%, tested), and `material.ts` `applySeason` sets a
+    ground's crop uniforms for a date; a crop a style colours (desert, arctic) keeps its colours. One page-wide
+    season (`setGroundSeason`, `onGroundSeason`) reaches the live ground (`GameGround`) and the world's tiles
+    (`worldmap/view.ts`, one hunk: it re-applies its style with the season, far tiles toning the crops to the grass
+    as before). `main.ts` (one line) sets it from the clock each frame: a game day is a month, so a year is twelve
+    game days (72 minutes of play); the game starts in mid-July, on the looks CROPS already had (rape apart:
+    it flowers in April and May now, and is pods in July). Nothing is repainted and the tiles need no rebuild.
+    What the keys follow is in `docs/ground.md` "The farming year". Screenshots at 700 m west of the start town:
+    April (green wheat, rape in flower), May, July (gold), August (stubble), September (ploughed); at 2 km: January,
+    April, August. No tile edge shows, the woods and trees stay their summer green (not mine: baked colours).
+    The ground demo has a Month button.
+13. **Crop variety by the lie of the land** (`region/fields.ts`, `COUNTRYSIDE.upland`): a farm block high among
+    the map's land or steep grows less wheat and rape, more barley and grass leys. Same rng draws, so every other
+    field is unchanged. Over the middle 24 km of seed 7's map: arable fields in the lowest third of the land grow
+    wheat or rape 40% of the time, the highest quarter 14%; barley or a ley 37% against 58% (a test).
+
 ## Handover for country-3 (27 Sep 05:35 UTC)
 
 **What is unmerged: PR #74 only** (`claude/work-country-edge` into the integration branch, head af73094, pushed
@@ -238,9 +258,10 @@ e2e all pass, before the merge and after it.
   the lane, which is right. If world50 has the screenshot, the spot would settle it.
 - **Wood edges up close:** the canopy's crowns still make a sawtooth along a straight wood edge from far out
   (the domes' tips at the outline). Not a staircase, and #52 had the same; a smoother edge row is possible.
-- **Seasons and crop variety: not started** (the plan is in the handover above).
-- **The repaint budget on the runner** for the head pushed by country-3 (all three of the coordinator's fixes)
-  is not known at the time of writing; af73094 (the handover's fixes alone) gave 3.54 ms there against 2.84.
+- **Seasons: the trees' leaves, the woods' canopy and the far rim** keep their summer colours (baked into the
+  tiles and the tree materials; `game/edge.ts` is a fixed palette). Snow: none. Hedges: evergreen-looking all year.
+- (Done: **#74's repaint budget passes on the runner** at e9ed4f8, all three of the coordinator's fixes in; its
+  `check` and `phone` jobs are green at 06:31 UTC, and the coordinator merges. af73094 alone gave 3.54 ms against 2.84.)
 
 ## Files touched
 
