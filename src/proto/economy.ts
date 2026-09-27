@@ -1056,7 +1056,7 @@ export class Economy {
       v: 1, clock: this.clock, time: this.time, month: this.month, acc: this.acc, nextDay: this.nextDay, nextReview: this.nextReview, rand: this.rand.s,
       reqNo: this.reqNo, nextId: this.nextId, runningOwed: this.runningOwed, totals: structuredClone(this.totals),
       towns: [...this.townMap.values()].map((t) => ({
-        id: t.id, base: { ...t.base }, cal: { ...t.cal }, at: { ...t.at }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, assessed: t.assessed, labour: t.labour, customers: t.customers,
+        id: t.id, base: { ...t.base }, cal: { ...t.cal }, at: { ...t.at }, bias: { ...t.bias }, calibrated: t.calibrated, primed: t.primed, assessed: t.assessed, labour: t.labour, customers: t.customers, custBase: t.custBase, shopReach0: t.shopReach0,
         supply: { ...t.supply }, month: { ...t.month }, got: { ...t.got }, offmap: { ...t.offmap }, delivered: { ...t.delivered }, accept: { ...t.accept }, held: { ...t.held }, use: structuredClone(t.use), health: { ...t.health }, history: [...t.history],
         recent: structuredClone(t.recent), done: { ...t.done }, report: t.report ? structuredClone(t.report) : null,
         zoneOrder: t.zones.map((z) => z.id), // (the order its zones are summed in)
