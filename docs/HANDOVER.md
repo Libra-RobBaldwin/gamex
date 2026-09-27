@@ -1,6 +1,44 @@
 # Handover: where everything stands
 
-## Latest: the night of 26–27 Sep 2026 (02:30 UTC)
+## Latest: the morning of 27 Sep 2026 (04:55 UTC)
+
+Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU. Integration branch
+`claude/cloud-session-history-rvqkm1`; CI green on its head 0d16f39 (check and phone). The night's section below
+still holds; this is what changed since 02:30.
+
+**Merged this morning:** the lines e2e made honest on a slow runner (9742732: the even-gaps hold is judged only
+when every bus made three calls in the time; the calls budget is the line's own two buses; the vehicles session
+then took the run to 16× for six sim minutes in #72, the same sim time on any runner); #73 (play round 2: the
+radial town plays, a reload keeps the town, the line tool frames its stops clear of the hint, the rail
+blueprint says level crossing and railway, the far places' counts no longer jump); the money tuning (8abea60,
+PLAN.md decision 7: a bus's running cost doubled so a busy line makes about four times its running costs, the
+start balance £250,000 so a railway is saved up for, the fare still £2); #71 (realism step 3: 220 hamlets from
+the OS-measured density, the park pond's water and terrain side: `WorldWater.addPond`, a level surface in a
+hollow with a wandering shore, `docs/water.md` §6 says what the game must do); #72 (vehicles round 3: a
+right-angle rail junction and a line with no way between its stations refused before a train is paid for; the
+train and station cards; 55 review cases on doors, shared track, save mid-journey, 1× against 4×).
+
+**Open PRs:** #74 (countryside: the dresser builds a tile's barns; fields run up to the town's ragged edge with
+a 20 m mown band, no field-wide plain; its first run failed its own repaint budget at 4.1 ms against 2.8, fixed
+by an exact 20 m band from the plots' middles rather than the coarse grid's 52 m; CI running on 77232ef);
+#75 (realism step 4: ribbons bend and thin along their radials, a town's share of lanes; CI running).
+
+**Sessions now:** play takes the pond's game side (`docs/water.md` §6) then round 3 with the money table again;
+realism is on #75; vehicles measures a train line's fares against running over ten game days and sets rail
+running (`RUN` in `rail/game.ts`) to the same four-times rule, then its brief; countryside finishes #74 and
+then seasons or crop variety. The countryside session has used about three quarters of its context: when #74
+is in, start a fresh countryside session from its brief rather than push it further.
+
+**Money, the decision (loop.md, PLAN.md 7):** fares £2 a rider, a month's worth each game day; a decker
+£2,600 a game day to run; £250,000 to start. Measured next by play round 3 and the vehicles' rail measurement.
+
+**Still open:** the guide's road step on a pinch-out (`it.fails`); the real Teme region declines from day one
+with fares £0 and a JSON fetch error (for its owners: the real-map loader); the far cities' box buildings and
+the towers-on-a-lawn look (buildings); the default branch on GitHub and the 52 merged branches (the user).
+Vercel's free plan hit its 100 deploys a day at 04:32, so PR previews fail until it resets; the repo's own CI
+is what a PR needs.
+
+## The night of 26–27 Sep 2026 (02:30 UTC)
 
 Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU. The decisions are in
 `docs/briefs/PLAN.md` (top section); the logic review is `docs/reports/review-2026-09-26.md`; the V2 ideas
