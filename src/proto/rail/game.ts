@@ -29,7 +29,14 @@ export interface RailGameCtx {
 // the economy's ids for stations and rail lines, clear of the bus stops' and lines'
 export const RAIL_ID = 1_000_000;
 const kindOf = (t: TrainDef): VehicleKind => (t.id === 'intercity' || t.cars >= 4 ? 'intercity' : t.id === 'hs' ? 'hs' : t.id === 'tram' ? 'tram' : t.id === 'rack' ? 'rack' : 'dmu');
-const RUN: Partial<Record<VehicleKind, number>> = { dmu: 4000, intercity: 9000, hs: 12000, tram: 3000, rack: 3500 }; // £ a game day (its month)
+// Running a train for a game day (its month). Tuned 27 Sep 2026 against a measured line (docs/briefs/
+// vehicles.md, round 4): on the seed-42 region a branch from the start town to its nearest village
+// (Fellwick, 590 people, 2.1 km of track, one intercity: a single line with no loop runs one train)
+// took £13,080 of fares a game day over days six to ten (108 riders a town-day at £2 × 2 × 30),
+// against £9,000 running, 1.45 times; a line out in the fields took nothing against £8,000. At these
+// rates that line makes about four times its running, the loop's rule (docs/loop.md), and the
+// empty one loses £3,300 a day. The kinds keep their old proportions.
+const RUN: Partial<Record<VehicleKind, number>> = { dmu: 1500, intercity: 3300, hs: 4400, tram: 1100, rack: 1300 }; // £ a game day (its month)
 const money = (n: number) => `${n < 0 ? '−' : ''}£${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 const CAR_SEATS = 75;
