@@ -425,6 +425,14 @@ gives them. That is the economy owner's (round 1's item 6, and the coordinator's
     that is clear, puts the blueprint there and says "Moved 14 m along the road, clear of the junction";
     a tap that has no clear spot within reach is refused as before. The loop e2e taps 15 m from a
     junction and expects the moved blueprint with Build enabled.
+26. **The town grows with no service at all since the shops fix** (breaks the loop's premise, the
+    economy owner's; found 07:00). On the trunk at 28ded90 (the coordinator's 41e2456, shops follow their
+    customers) the start town, with a line for six days and then none, keeps growing: 1,775 on day 6 with
+    the line, then 1,794, 1,824, 1,858, 1,878, 1,891, 1,898, 1,902, 1,924 over eight days without one,
+    "growing" throughout, the panel saying "no bus or rail service" against "100% of workers can get to a
+    job within 30 min". `docs/loop.md`'s loop is build, watch it grow, withdraw, watch it shrink; the loop
+    e2e checks that and now fails on the trunk's own CI (run 233, "The loop": the town did not decline
+    when its line went). The e2e is left as it is: it says what the loop promises.
 - **The review's row 9** (a pinch-out over the start town brings a village to life) is world50's
   activation reach, not this session's; its test stays expected-to-fail.
 - Everything else still open from rounds 1 to 3 is another owner's: a short bridge refused on a grade
