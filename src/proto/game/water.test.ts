@@ -76,3 +76,31 @@ describe('game water', () => {
     expect(far).toBe(0);
   });
 });
+
+describe('a park pond added while the game runs (addPond)', () => {
+  const gw = new GameWater(676), land = new Land();
+  gw.claim(land);
+  const at = { x: 300, z: 300 }, square = [{ x: at.x - 1, z: at.z - 1 }, { x: at.x + 1, z: at.z - 1 }, { x: at.x + 1, z: at.z + 1 }, { x: at.x - 1, z: at.z + 1 }];
+  const before = { wet: gw.water.isWater(at.x, at.z), tiles: gw.tiles.length, meshes: gw.group.children.length, free: land.free(square) };
+  const tiles = gw.addPond({ x: at.x, z: at.z, r: 12, waves: [0.4, 1.3, 2.9], level: 0 }, land);
+  it('was dry ground, and is water afterwards: wet, its kind a lake, its shore where the bowl is', () => {
+    expect(before.wet).toBe(false);
+    expect(gw.water.isWater(at.x, at.z)).toBe(true);
+    expect(gw.water.kindAt(at.x, at.z)).toBe('lake');
+    expect(gw.isWater({ x: at.x + 12 + 3, z: at.z })).toBe(true); // (roads keep off the bank)
+    expect(gw.water.isWater(at.x + 40, at.z)).toBe(false);
+  });
+  it('builds its tile again, with a surface on the scene, and the outline and the claims take it in', () => {
+    expect(tiles.length).toBeGreaterThanOrEqual(1);
+    expect(gw.tiles.some((t) => t.ti === tiles[0].ti && t.tj === tiles[0].tj)).toBe(true);
+    expect(gw.group.children.length).toBeGreaterThan(before.meshes);
+    expect(gw.outline().some((poly) => poly.some((p) => Math.hypot(p.x - at.x, p.z - at.z) < 20))).toBe(true);
+    expect(before.free).toBe(true);
+    expect(land.free(square)).toBe(false);
+  });
+  it('builds a tile once more without doubling its meshes', () => {
+    const n = gw.group.children.length;
+    gw.addPond({ x: at.x + 60, z: at.z, r: 10, waves: [1, 2, 3], level: 0 }, land);
+    expect(gw.group.children.length).toBeLessThanOrEqual(n + 2);
+  });
+});

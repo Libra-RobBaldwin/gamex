@@ -59,6 +59,8 @@ export class Occupancy {
       }
     }
   }
+  // more plots (an input that only added some since this was built: the rest is as it was)
+  extend(plots: XZ[][]) { this.add(plots); }
   // clear by at least r metres?
   free(x: number, z: number, r = CLEAR): boolean {
     if (this.under && !this.under.free(x, z, r)) return false;
@@ -145,6 +147,7 @@ export function planHedges(layout: Layout, box: Box, occ: Occupancy, lanes = tru
     const ls = (Math.round(l.a.x) * 7919 + Math.round(l.a.z) * 104729 + Math.round(l.b.x) * 31 + Math.round(l.b.z) + layout.seed * 613) | 0;
     const g: HedgeGroup = { key: `p${ls}`, pieces: [], trees: [], gates: [] };
     walk(g, l.a, l.b, ls, occ, (x, z) => {
+      if (layout.townAt(x, z)) return false; // (within 30 m of the town's plots: no hedge through a close)
       const u = kindAt2(x + nx, z + nz), v = kindAt2(x - nx, z - nz);
       return u !== 'wood' && v !== 'wood' && !(u === 'town' && v === 'town') && !(u === 'rough' && v === 'rough');
     }, true, clip, hs, 0.15);
@@ -164,7 +167,7 @@ export function planHedges(layout: Layout, box: Box, occ: Occupancy, lanes = tru
         const p = path[s - 1], q = path[s], L = Math.hypot(q.x - p.x, q.z - p.z) || 1, nx = (-(q.z - p.z) / L) * side, nz = ((q.x - p.x) / L) * side;
         const off = ln.half + CLEAR + 0.3;
         const a = { x: p.x + nx * off, z: p.z + nz * off }, b = { x: q.x + nx * off, z: q.z + nz * off };
-        walk(g, a, b, (li * 131 + s * 7 + side) | 0, occ, (x, z) => kindAt(x + nx * 2, z + nz * 2).kind !== 'town', false, clip, hs);
+        walk(g, a, b, (li * 131 + s * 7 + side) | 0, occ, (x, z) => kindAt(x + nx * 2, z + nz * 2).kind !== 'town' && !layout.townAt(x + nx * 2, z + nz * 2), false, clip, hs);
       }
       out.push(g);
     }

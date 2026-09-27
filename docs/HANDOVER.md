@@ -1,6 +1,28 @@
 # Handover: where everything stands
 
-## Latest: the morning of 27 Sep 2026 (04:55 UTC)
+## Latest: the morning of 27 Sep 2026 (06:25 UTC)
+
+Since 04:55: **#75** (realism step 4: radials bend with a steady drift and a wandering curvature drawn from the
+OS priors, side streets end as closes or T junctions instead of being dropped, ribbons thin along their radials,
+a town gets its real share of lanes out: 11–12 against the real 11), **#76** (rail money measured on a
+town-to-village line and a train's running cost set at 0.37 of what it was: four times on a well-used line; in
+`docs/loop.md`), **#77** (the start menu's pictures retaken after step 4). The countryside session ran out of
+context and was archived after writing its handover into `docs/briefs/country.md`; a fresh one,
+**session_012DhwfJ2AbfvDW6ViDNqx4d** (country-3), took over `claude/work-country-edge` and #74 (the repaint
+budget: all three of the coordinator's fixes in e9ed4f8, measured under the trunk's repaint locally; CI running)
+and has started seasons and crop variety on `claude/work-country-seasons`.
+
+**The user, 05:55:** "Parked cars still look like horrible boxes, not actual vehicles; vehicles should actually
+use parking spaces, not just block them up." The drives and car parks already hold real fleet cars; the boxes are
+the kerbside bays on streets, drawn as solids in `roaddraw.ts` and never used. PLAN.md decision 8; the vehicles
+session has it as its first item.
+
+**Open PRs:** #74 (countryside, CI running on e9ed4f8), #78 (play round 3: money measured at 3.7–4.5 times with
+the tuning, the park pond's game side, building taps fixed; CI running). Round 3 also found the town stopping at
+2,078 people on day 16, "Steady", because shops within 20 minutes serve only 29% of residents and no tool answers
+that: the coordinator's (economy) next item.
+
+## Earlier that morning (04:55 UTC)
 
 Coordinator: https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU. Integration branch
 `claude/cloud-session-history-rvqkm1`; CI green on its head 0d16f39 (check and phone). The night's section below

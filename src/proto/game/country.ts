@@ -42,8 +42,9 @@ function houseLot(b: SceneBuilding): Lot {
 }
 
 // A barn as the tiles draw it: a box with a pitched roof, flat shaded, in the scenery's colours.
-const barnMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-function barnGeometry(b: SceneBuilding): THREE.BufferGeometry {
+// (The dresser builds a near tile's barns with these too: game/dress.ts.)
+export const barnMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+export function barnGeometry(b: SceneBuilding): THREE.BufferGeometry {
   const co = Math.cos(b.rot), si = Math.sin(b.rot), hw = b.w / 2, hd = b.d / 2, h = b.h, top = h + b.ridge;
   const wall = new THREE.Color(WALLS[b.wall] ?? WALLS[0]), roof = new THREE.Color(ROOFS[b.roof] ?? ROOFS[0]), foot = wall.clone().multiplyScalar(0.72);
   const at = (u: number, v: number, y: number) => [b.x + u * co - v * si, y, b.z + u * si + v * co];
