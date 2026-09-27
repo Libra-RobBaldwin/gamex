@@ -1659,7 +1659,9 @@ function civic(k: Kit, l: Lot, r: () => number) {
 export type RegionKind = 'verge' | 'pocket' | 'playground' | 'allotments' | 'park' | 'carpark' | 'scrub' | 'grounds';
 // (`leafy` scales how thickly its trees, shrubs and beds are planted: 1 unless said, as for the town's
 // small parks; a real map's big park is open lawn with trees dotted about: real/lay.ts parkLeafiness)
-export interface RegionShape { cells: P3[]; size: number; kind: RegionKind; seed: number; roadEdges: [number, number, number, number][]; leafy?: number }
+// (`pond`: a park's pond, where the water system holds it (parkplan.ts parkPond): the trees, beds and
+// bandstand keep off it and its bank; the water itself is the game's, drawn by game/water.ts)
+export interface RegionShape { cells: P3[]; size: number; kind: RegionKind; seed: number; roadEdges: [number, number, number, number][]; leafy?: number; pond?: { x: number; z: number; r: number } }
 type P3 = { x: number; z: number };
 const REGION_NAMES: Record<RegionKind, string> = {
   verge: 'Planted verge', pocket: 'Pocket park', playground: 'Playground', allotments: 'Allotments', park: 'Park', carpark: 'Car park', scrub: 'Rough ground', grounds: 'Gardens',
@@ -1684,7 +1686,9 @@ export function makeRegion(reg: RegionShape): BuiltShape {
   const inR = (x: number, z: number) => has.has(key({ x, z }));
   const cells = reg.cells;
   const ground = { verge: meadowM(), pocket: lawnM(1), playground: lawnM(1), allotments: lawnM(0.94), park: lawnM(1.03), carpark: tarmacM(), scrub: scrubM(), grounds: lawnM(1) }[reg.kind];
-  for (const c of cells) flat(k, c.x - h, c.z - h, c.x + h, c.z + h, 0.04, ground);
+  // (no lawn over a pond or its bank: the ground itself is there, dipping to the water with its beach)
+  const overPond = (c: P3) => !!reg.pond && Math.hypot(c.x - reg.pond.x, c.z - reg.pond.z) < reg.pond.r + 6;
+  for (const c of cells) if (!overPond(c)) flat(k, c.x - h, c.z - h, c.x + h, c.z + h, 0.04, ground);
   // the middle of the region and the longest way across it
   const cx = cells.reduce((t, c) => t + c.x, 0) / cells.length, cz = cells.reduce((t, c) => t + c.z, 0) / cells.length;
   const centre = cells.reduce((b, c) => (Math.hypot(c.x - cx, c.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? c : b), cells[0]);
@@ -1740,6 +1744,7 @@ export function makeRegion(reg: RegionShape): BuiltShape {
       for (let t = 0; t <= L; t += 3) keep.push({ x: a.x + ((b.x - a.x) * t) / L, z: a.z + ((b.z - a.z) * t) / L, r: 2.6 });
       if (L > 8) keep.push({ x: (a.x + b.x) / 2 + nx * 2.2, z: (a.z + b.z) / 2 + nz * 2.2, r: 2 });
     }
+    if (reg.pond) { keep.push({ x: reg.pond.x, z: reg.pond.z, r: reg.pond.r + 4 }); notes.push('a pond'); }
     const tn = trees(reg.kind === 'park' ? 0.3 : 0.4);
     for (const c of cells) if (r() < 0.12 * L && clear(c.x, c.z)) flat(k, c.x - 1.5, c.z - 1, c.x + 1.5, c.z + 1, 0.07, bedM());
     if (reg.kind === 'park' && cells.length > 80 && clear(centre.x, centre.z + S)) { k.prismN(centre.x, centre.z + S, 3.2, 8, 0, 0.6, plain('#c9c2b4')); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; k.box(centre.x + Math.cos(a) * 2.8, 0.6, centre.z + S + Math.sin(a) * 2.8, 0.15, 2.6, 0.15, plain('#2e5a45')); } k.prismN(centre.x, centre.z + S, 3.6, 8, 3.2, 0.2, plain('#2e5a45'), 1.4, plain('#2e5a45')); notes.push('bandstand'); }
