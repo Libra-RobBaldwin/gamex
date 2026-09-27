@@ -176,6 +176,30 @@ outline, so every claim is a simple polygon that `land.ts`'s tests handle as the
   says about the spot under the pointer.
 - URL options: `?preset=coast|valley|lake|uplands&light=day|dusk&at=x,z&h=metres&az=radians&t=seconds&bench=1`.
 
+## 6. Park ponds (`worldmap/water.ts` `addPond`, `worldmap/terrain.ts`)
+
+A park's pond is a level surface in a hollow with an irregular outline, never a circle (the user's
+rule, `docs/briefs/play.md` 12). It goes through the water system's own shapes rather than a disc
+drawn by the park: `WorldWater.addPond({ x, z, r, seed }, heightAt)` makes a small lake shape (the
+radius clamped to 8–30 m, the shore wandering with `waves` from the seed) at the ground's height
+where it is put, keeps it in `ponds`, and returns its `LakeSpec` (with `level`). From then on the
+terrain lays the ground level to it and a little past its shore, with the hollow's rim rising to the
+land within three times its radius and never falling below the water, so it holds (`heightAt`), and
+cuts its bed below the water (`bed`, from `lakesGround`); `kindAt`, `edgeDistance`, `wet`,
+`mayBeNear` and `pondAt` answer for it. `worldmap/pond.test.ts` checks all of that on a seeded map.
+
+What the game has to do when a park makes one (the play session's files, not done yet):
+
+1. `const L = WORLD.water.addPond({ x, z, r, seed }, WORLD.terrain.heightAt)` at the park's spot, then
+   `gameWater.shapes.addLake(L)` so the live water's own `MapWater` has the bowl too (`main.ts`
+   makes `GameWater` over `MAP.water`, a copy of the plan's water cut to the live area).
+2. Remake the relief field's box round it (`WORLD.terrain.partField`, the drape's grid), and the
+   ground mesh (`gameWater.groundGeometry`) and its paint round it, so the hollow shows.
+3. Rebuild the water tile it lies in (`WaterSystem.tile`, its surface mesh and reeds; the tile cache
+   must forget the old one) and claim its land (`gameWater.claim`), so plots and paths keep off it.
+
+Until then no pond is placed or drawn, as the play brief says.
+
 ## Integration plan
 
 In order; each step leaves the game working.

@@ -15,7 +15,7 @@
 //
 // Nothing here is a grid until `field` is asked for: a tile, the worker or a test can ask the height
 // anywhere. Pure: no three.js.
-import { LEVEL, RIM } from './water';
+import { LEVEL, RIM, lakeRadiusOf } from './water';
 import { mix } from '../region/random';
 import type { Relief } from '../region/options';
 import { PARAMS, noise2, rockAt, sampleGrid, sampleSmooth, type CoarseLand, type Rock } from './landform';
@@ -214,6 +214,14 @@ export class WorldTerrain {
     if (this.cor.length) h = this.corridor(x, z, h);
     const l = w.lakeAt(x, z);
     if (l) h = l.level + (Math.max(h, l.level) - l.level) * smooth(RIM + 10, 250, l.d);
+    // a park's pond (water.ts addPond): level to its shore and a little past it, the hollow's rim
+    // rising to the land within a few times its size (never falling below the water, so it holds)
+    if (w.ponds.length) for (const P of w.ponds) {
+      const dx = x - P.x, dz = z - P.z, reach = Math.max(3 * P.r, 40) + RIM;
+      if (dx > reach || dx < -reach || dz > reach || dz < -reach) continue;
+      const d = Math.hypot(dx, dz) - lakeRadiusOf(P, Math.atan2(dz, dx)), lv = P.level ?? h;
+      h = lv + (Math.max(h, lv) - lv) * smooth(RIM + 6, Math.max(3 * P.r, 40), d);
+    }
     return h;
   };
   // Ease the ground along the trunk routes once they're planned (plan.ts): each laid to a profile

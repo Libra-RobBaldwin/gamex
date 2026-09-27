@@ -79,6 +79,8 @@ for (const id of ['exe', 'teme']) { const t0 = performance.now(); const p = awai
 for (const s of SEEDS) { const t0 = performance.now(); const p = planWorld({ seed: s, size: 50 }); cols.push({ name: `seeded: ${s}`, m: measure(p), ms: performance.now() - t0 }); }
 const rows = Object.keys(cols[0].m);
 const F = PRIORS.follow;
+// a pair of measured values (the Exe's and the Teme's) as a range, low to high, or the one value
+const span = (a) => { const lo = Math.min(...a), hi = Math.max(...a); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
 let md = `# Seeded against real: the 50 km plans on the same yardsticks
 
 Made by \`tools/os/compare.mjs\` (${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC). The real columns are the
@@ -90,9 +92,9 @@ minor roads ${F.minor.gradeMedian.map((v) => (v * 100).toFixed(1)).join('–')}%
 routes over the plan's heights, so they read a little lower.) A lane's grade is mostly its land's: the
 real bakes' ground is two to three times steeper than a seeded lowland map's (the land slope row), so
 the fair yardstick for the router is a lane's grade over the slope of the ground under it, which real
-lanes take at about ${F.b.gradeOverSlope.join('–')} (B roads) to ${F.minor.gradeOverSlope.join('–')} (minor roads). The seeded lane km fall short of the
+lanes take at about ${span(F.b.gradeOverSlope)} (B roads) to ${span(F.minor.gradeOverSlope)} (minor roads). The seeded lane km fall short of the
 real minor road km because the plan has no hamlets: the real "villages" row counts every named place,
-and a real 50 km square has ${PRIORS.settlements.perThousandKm2.hamlet.join('–')} hamlets per 1,000 km² on top of its ${PRIORS.settlements.perThousandKm2.village.join('–')} villages, each with its lanes.
+and a real 50 km square has ${span(PRIORS.settlements.perThousandKm2.hamlet)} hamlets per 1,000 km² on top of its ${span(PRIORS.settlements.perThousandKm2.village)} villages, each with its lanes.
 
 | | ${cols.map((c) => c.name).join(' | ')} |
 |---|${cols.map(() => '---').join('|')}|
