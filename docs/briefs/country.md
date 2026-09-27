@@ -1,7 +1,8 @@
 # Brief: country (the countryside session, second run)
 
 Session https://claude.ai/code/session_016uD19qC4yiFZR8AhPrtiib, branch `claude/work-country-2`, PR #62 (merged) into
-`claude/cloud-session-history-rvqkm1`, then `claude/work-country-pools`. Written 26 Sep 2026, 21:00 UTC, updated 23:05. Coordinator:
+`claude/cloud-session-history-rvqkm1`, then `claude/work-country-pools` (#68, merged), `claude/work-country-farms` (#70,
+merged) and `claude/work-country-edge`. Written 26 Sep 2026, 21:00 UTC, updated 27 Sep 02:50. Coordinator:
 https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, decision 1).
 
 ## The state, honestly
@@ -63,8 +64,25 @@ https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, de
    main.ts got three small hunks. Screenshots at 700 m and 300 m of the farm nearest the start town, before
    and after: `docs/reports/country/before-farm0-700.jpg`, `after-farm0-700.jpg`, `before-farm0-300.jpg`,
    `after-farm0-300.jpg`; another beside a winding lane, `after-farm1-700.jpg`.
-9. Docs: `docs/regiongen.md` (the block size and the follow rule), `docs/ground.md` (the live farms); this
-   brief.
+9. **The dresser's barns** (branch `claude/work-country-edge`, its own PR): `game/dress.ts` (the play
+   session's; one hunk, listed on the PR) now takes a near tile's farmsteads from `farmsIn`: the farmhouse a
+   house lot as before, the barns the same plain pitched boxes `LiveFarms` builds (`barnGeometry`, exported
+   from `game/country.ts`). Before, a dressed tile hid its farms and rebuilt none of them. Checked at 300 m
+   on a farm just outside the live area: `docs/reports/country/dressed-farm-300.jpg`.
+10. **The town's ragged edge** (same PR). With #67 the start town grows along its radials. Checked at 2 km
+    and 700 m: no field ran under a ribbon of houses and no hedge ran through a close, but a field-wide plain
+    of mown "town" lay round the whole built area, because a field became town once 15% of it lay within
+    30 m of a plot, and every plot still in the queue (68, out to 480 m) marked the town round it. Now: a
+    field turns town only once half of it is built over; a field the town has reached stays a field, and the
+    ground within 30 m of the plots is painted as town texel by texel (`Layout.townAt`) with no hedge through
+    it, so the crops run up to the back gardens; and only the next four plots in the queue (the building
+    sites) mark the town, not the whole queue. A repaint after a plot reaches 52 m round it (`TOWN_REACH`)
+    so it stays exact. Screenshots at 700 m, 350 m and 2 km, before and after:
+    `docs/reports/country/before-edge-700-w.jpg`, `after-edge-700-w.jpg`, `before-edge-350-e.jpg`,
+    `after-edge-350-e.jpg`, `before-edge-2km.jpg`, `after-edge-2km.jpg`. What's left round the town is its
+    parks (the leftover land the game landscapes, 5 ha) and the 30 m band. A test in `ground.test.ts`.
+11. Docs: `docs/regiongen.md` (the block size and the follow rule), `docs/ground.md` (the live farms, the
+    town band); this brief.
 
 **Checks before the push**, on the branch merged with the integration head 58ec61a (PR #60, the economy
 fix): `tsc` clean; `vitest run --no-file-parallelism` 117 files, 1104 passed, 8 skipped, no failures (the

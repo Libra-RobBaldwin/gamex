@@ -11,7 +11,7 @@
 // slopes) and needs no painting: `new Ground().material` is a drop-in for a flat green material.
 // See docs/ground.md.
 import * as THREE from 'three';
-import { CoverMap, type Region } from './paint';
+import { CoverMap, type Region, TOWN_REACH } from './paint';
 import { Layout, type GroundInput, type XZ } from './layout';
 import type { FieldSource } from './plan';
 import { Occupancy, planHedges, type HedgeGroup } from './hedgerows';
@@ -110,7 +110,8 @@ export class Ground {
   change(input: GroundInput, boxes: Box[]) {
     const t0 = performance.now();
     if (!this.cover) { this.layout.setInput(input); return; }
-    const dirty: Box[] = [...boxes, ...this.layout.setInput(input, boxes)];
+    // (a plot marks the town round it, TOWN_REACH out: that ground, and its hedges, change with it)
+    const dirty: Box[] = [...boxes.map((b) => ({ x0: b.x0 - TOWN_REACH, z0: b.z0 - TOWN_REACH, x1: b.x1 + TOWN_REACH, z1: b.z1 + TOWN_REACH })), ...this.layout.setInput(input, boxes)];
     if (this.plants && dirty.length) {
       // hedges within reach of the change (a hedge keeps 2 m off a plot), and wherever a gateway
       // (painted as worn earth) came or went

@@ -13,6 +13,9 @@ export interface Rect { i0: number; j0: number; i1: number; j1: number } // texe
 
 const DT = 8; // how far (texels) distances are tracked: wet grass reaches this far from water
 const MARGIN = DT + 3;
+// the town's reach past a plot: its centroid marks the coarse grid (20 m cells) 30 m round, so a
+// texel up to about 50 m off can change with it (layout.ts townAt); a repaint's window reaches that far
+export const TOWN_REACH = 52;
 const POOL_KEEP = 1 << 20; // texels: the scratch layers of a bigger paint than this aren't kept (see CoverMap)
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
@@ -165,7 +168,8 @@ export class CoverMap {
     let tm = performance.now();
     const lap = (k: keyof CoverMap['times']) => { const n = performance.now(); this.times[k] = n - tm; tm = n; };
     // the window: the rectangle plus the margin, possibly past the map's edge
-    const ei0 = rect.i0 - MARGIN, ej0 = rect.j0 - MARGIN, W = rect.i1 - rect.i0 + 2 * MARGIN, H = rect.j1 - rect.j0 + 2 * MARGIN, N = W * H;
+    const M = Math.max(MARGIN, Math.ceil(TOWN_REACH / t) + 1);
+    const ei0 = rect.i0 - M, ej0 = rect.j0 - M, W = rect.i1 - rect.i0 + 2 * M, H = rect.j1 - rect.j0 + 2 * M, N = W * H;
     const x0 = R.x0 + ei0 * t, z0 = R.z0 + ej0 * t, x1 = x0 + W * t, z1 = z0 + H * t;
     const [lawn, field, wood, bare, rough, wet, dir, d, tmp, edge] = this.floats(N, 10);
     const [crop, town, blocked, water] = this.bytes(N, 4);
@@ -219,6 +223,8 @@ export class CoverMap {
       if (id < 0) continue; // (off the fields: plain pasture)
       if (id !== lastId) { lastId = id; inf = layout.about(id); }
       const ed = edge[k];
+      // (a field the town has reached: within 30 m of its plots the ground is the town's)
+      if (inf.mixed && layout.townAt(x0 + ((k % W) + 0.5) * t, z0 + (Math.floor(k / W) + 0.5) * t)) { lawn[k] = 0.5; town[k] = 1; continue; }
       switch (inf.kind) {
         case 'arable': case 'grass': {
           field[k] = ed >= 4.5 * sc ? 1 : smooth(1.5 * sc, 4.5 * sc, ed);

@@ -12,6 +12,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Lot, LotKind } from '../roads';
 import { settlementScene, type SceneBuilding, type SceneStreet } from '../worldmap/towns';
 import { LIVE_HALF, type WorldPlan } from '../worldmap/plan';
+import { farmsIn } from '../worldmap/country';
+import { barnGeometry, barnMat } from './country';
 
 export const DRESS_H = 700; // (view heights below which the scenery round the camera is dressed)
 const KEEP = 2500; // (dressed tiles further than this from the view are let go)
@@ -25,7 +27,7 @@ interface Host {
   trees?: { crown: THREE.BufferGeometry; trunk: THREE.BufferGeometry; crownMat: THREE.Material; trunkMat: THREE.Material }; // (street trees: the live town's own)
 }
 interface Box { x0: number; z0: number; x1: number; z1: number }
-interface Dressing { key: string; box: Box; todo: Lot[]; trees: number[]; parts: Map<THREE.Material, THREE.BufferGeometry[]>; group: THREE.Group | null }
+interface Dressing { key: string; box: Box; todo: Lot[]; barns: SceneBuilding[]; trees: number[]; parts: Map<THREE.Material, THREE.BufferGeometry[]>; group: THREE.Group | null }
 
 const KIND: Partial<Record<SceneBuilding['kind'], LotKind>> = { house: 'house', farm: 'house', terrace: 'terrace', shop: 'shop', flats: 'flats', office: 'office', tower: 'tower', church: 'civic', shed: 'industry' };
 const FRONT: Record<LotKind, number> = { house: 5, terrace: 2.5, shop: 1, flats: 3, office: 3, tower: 4, industry: 9, civic: 6 };
@@ -118,11 +120,12 @@ export class Dresser {
   constructor(private host: Host) {}
 
   // The buildings a near tile (or a not-yet-live place) has in the scenery.
-  private lotsFor(t: { box: Box; place?: number }): { lots: Lot[]; trees: number[] } {
+  private lotsFor(t: { box: Box; place?: number }): { lots: Lot[]; barns: SceneBuilding[]; trees: number[] } {
     const P = this.host.plan;
-    if (t.place !== undefined) { const sc = settlementScene(P, P.settlements[t.place]); return { lots: lotsOf(sc.buildings), trees: streetTrees(sc.streets, sc.buildings, sc.junctions, () => true) }; }
+    if (t.place !== undefined) { const sc = settlementScene(P, P.settlements[t.place]); return { lots: lotsOf(sc.buildings), barns: [], trees: streetTrees(sc.streets, sc.buildings, sc.junctions, () => true) }; }
     const b = t.box, inTile = (p: { x: number; z: number }) => p.x >= b.x0 && p.x < b.x1 && p.z >= b.z0 && p.z < b.z1 && Math.max(Math.abs(p.x), Math.abs(p.z)) >= LIVE_HALF;
-    const lots: Lot[] = [], trees: number[] = [];
+    // (the tile's farmsteads too: the farmhouse a house lot, the barns the plain boxes the tiles draw, as game/country.ts builds them in the live area)
+    const farms = farmsIn(P, b).filter(inTile), lots: Lot[] = lotsOf(farms.filter((f) => f.kind === 'farm')), barns = farms.filter((f) => f.kind === 'barn'), trees: number[] = [];
     for (const s of P.grid.inBox(b)) {
       if (Math.max(Math.abs(s.x), Math.abs(s.z)) < LIVE_HALF) continue; // (the live play area's are the game's)
       // (a row is kept whole in the tile its first house is in, as the tile keeps a building by its centre)
@@ -130,7 +133,7 @@ export class Dresser {
       lots.push(...lotsOf(sc.buildings.filter(inTile)));
       trees.push(...streetTrees(sc.streets, sc.buildings, sc.junctions, inTile)); // (a street's trees in the tile its middle is in, as its tarmac)
     }
-    return { lots, trees };
+    return { lots, barns, trees };
   }
 
   update(v: { x: number; z: number; h: number }, budgetMs = 5) {
@@ -139,7 +142,7 @@ export class Dresser {
     // start on the tiles close under the view
     if (v.h < DRESS_H) {
       const reach = v.h * 1.1 + 200;
-      for (const t of shown) if (!this.on.has(t.key) && distToBox(v.x, v.z, t.box) < reach) { const f = this.lotsFor(t); this.on.set(t.key, { key: t.key, box: t.box, todo: f.lots, trees: f.trees, parts: new Map(), group: null }); }
+      for (const t of shown) if (!this.on.has(t.key) && distToBox(v.x, v.z, t.box) < reach) { const f = this.lotsFor(t); this.on.set(t.key, { key: t.key, box: t.box, todo: f.lots, barns: f.barns, trees: f.trees, parts: new Map(), group: null }); }
     }
     // build, nearest tile first
     const busy = [...this.on.values()].filter((d) => !d.group).sort((a, b) => distToBox(v.x, v.z, a.box) - distToBox(v.x, v.z, b.box));
@@ -148,7 +151,8 @@ export class Dresser {
         const l = d.todo.pop()!;
         try { this.bake(d, this.host.make(l).group); this.stats.buildings++; } catch (e) { console.warn('dress', e); }
       }
-      if (d.todo.length) break;
+      while (d.barns.length && performance.now() - t0 < budgetMs) { const b = d.barns.pop()!; let l = d.parts.get(barnMat); if (!l) d.parts.set(barnMat, (l = [])); l.push(barnGeometry(b)); this.stats.buildings++; }
+      if (d.todo.length || d.barns.length) break;
       this.finish(d);
     }
     // show a dressed tile while its near tile is shown; let go of the ones far off (or gone live)

@@ -89,7 +89,11 @@ their bent and swirled edges, are gone.)
 
 What a field becomes is its source's (arable, grass, wood, rough), unless:
 
-- the town has grown over it (more than 15% of it within 30 m of plots), which makes it town;
+- the town has grown over it (more than half of it within 30 m of plots), which makes it town. A
+  field the town has only reached stays a field, and the ground within 30 m of the plots is
+  painted as town, texel by texel (`Layout.townAt`), with no hedge through it: the crops run up
+  to the back gardens, as they do at a real town's ragged edge, and a repaint after a plot
+  reaches `TOWN_REACH` (52 m) round it;
 - industry has (more than 12%), which makes it rough;
 - it's arable at the water's edge, which makes it grass.
 

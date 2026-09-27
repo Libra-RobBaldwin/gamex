@@ -39,7 +39,7 @@ export interface GroundInput {
 }
 
 // ---- what each parcel is ----
-export interface ParcelInfo { kind: ParcelKind; crop: number; dir: number; conifer?: boolean }
+export interface ParcelInfo { kind: ParcelKind; crop: number; dir: number; conifer?: boolean; mixed?: boolean } // (mixed: a field the town has reached but not grown over: the ground within 30 m of its plots is town, texel by texel: `townAt`)
 
 // A coarse grid (20 m cells, in 16x16 blocks) of flags marking the town, industry and water, for
 // deciding what parcels are.
@@ -151,9 +151,9 @@ export class Layout {
     for (const p of input.town ?? []) c.mark(TOWN, p.x, p.z, 30);
     const changed: Box[] = [];
     if (!near) return changed;
-    // every field with ground within 40 m of the box (a plot marks the town 30 m round it)
+    // every field with ground within 52 m of the box (a plot marks the town 30 m round it, on 20 m cells)
     const ids = new Set<number>();
-    for (const b of near) { const B = { x0: b.x0 - 40, z0: b.z0 - 40, x1: b.x1 + 40, z1: b.z1 + 40 }; this.ensure(B, 0); for (const n of this.plan.fieldsNear(B)) ids.add(n); }
+    for (const b of near) { const B = { x0: b.x0 - 52, z0: b.z0 - 52, x1: b.x1 + 52, z1: b.z1 + 52 }; this.ensure(B, 0); for (const n of this.plan.fieldsNear(B)) ids.add(n); }
     for (const id of ids) {
       const was = this.info.get(id);
       this.info.delete(id);
@@ -164,8 +164,13 @@ export class Layout {
     return changed;
   }
   boxOf(id: number) { return { ...this.plan.boxes[id] }; }
-  // What a field is: what its source says, unless the town has grown over it (15% of it within
-  // 30 m of plots) or industry has, or it's a field at the water's edge (then it's grass).
+  // is this spot within 30 m of the town's plots (or the ground the town has marked as its own)?
+  townAt(x: number, z: number) { return (this.coarse.at(x, z) & TOWN) !== 0; }
+  // What a field is: what its source says, unless the town has grown over it (half of it within
+  // 30 m of plots) or industry has, or it's a field at the water's edge (then it's grass). A field
+  // the town has reached but not grown over stays a field (`mixed`): the ground within 30 m of the
+  // plots is painted as town and gets no hedge, and the crop runs up to it, as fields do behind a
+  // town's back gardens.
   about(id: number): ParcelInfo {
     let inf = this.info.get(id);
     if (inf) return inf;
@@ -182,10 +187,10 @@ export class Layout {
       if (fl & WET) wet++;
     }
     n = Math.max(1, n);
-    let kind: ParcelKind = ind / n > 0.12 ? 'rough' : town / n > 0.15 ? 'town' : f.kind;
+    let kind: ParcelKind = ind / n > 0.12 ? 'rough' : town / n > 0.5 ? 'town' : f.kind;
     if (this.input.noFields && kind !== 'town' && kind !== 'rough') kind = 'grass';
     else if (kind === 'arable' && wet / n > 0.08) kind = 'grass';
-    inf = { kind, crop: kind === 'arable' || kind === 'grass' ? (kind === 'grass' && f.kind !== 'grass' ? CROP.grass : P.crops[id]) : CROP.grass, dir: f.dir, conifer: f.conifer };
+    inf = { kind, crop: kind === 'arable' || kind === 'grass' ? (kind === 'grass' && f.kind !== 'grass' ? CROP.grass : P.crops[id]) : CROP.grass, dir: f.dir, conifer: f.conifer, mixed: kind !== 'town' && town > 0 || undefined };
     this.info.set(id, inf);
     return inf;
   }

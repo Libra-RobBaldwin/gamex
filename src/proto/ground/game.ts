@@ -55,7 +55,9 @@ export class GameGround {
     for (const l of q) { if (this.sites.size >= SITES) break; if (net.lotFree(l)) this.sites.add(l); }
     for (const l of this.sites) plots.push({ poly: net.parcelRect(l), kind: 'site' });
     if (this.w.extra) plots.push(...this.w.extra().plots);
-    return { seed: this.seed, ...fixed, plots, trees: this.w.trees(), town: q.map((l) => ({ x: l.x, z: l.z })) };
+    // (the town's ground is its plots' and its parks': a plot still in the queue takes its field
+    // when it's built, not before, so the fields run up to the town's edge, as they do at a real one)
+    return { seed: this.seed, ...fixed, plots, trees: this.w.trees(), town: [...this.sites].map((l) => ({ x: l.x, z: l.z })) };
   }
   private fixedInput() {
     const { net } = this.w;
