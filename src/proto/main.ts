@@ -1286,6 +1286,7 @@ function showLineInfo(l: Line) {
     actions: [
       { label: `Bus · ${money(busPrice(l.offer))}`, title: `Add a bus for ${money(busPrice(l.offer))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(busPrice(l.offer)), onClick: () => { buyBus(l); showLineInfo(l); } },
       { label: 'Sell', title: `Sell a bus for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`Bus sold for ${money(sell)}`, 'bus'); setTimeout(() => showLineInfo(l), 50); } },
+      { label: `Even gaps · ${lines.spacing(l) ? 'on' : 'off'}`, title: 'A bus waits at a stop while the one ahead is too close, so they don’t bunch', icon: 'transport', onClick: () => { lines.setSpacing(l, !lines.spacing(l)); showLineInfo(l); } },
       { label: 'Withdraw', title: 'Withdraw the line and sell its vehicles', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} bus${k === 1 ? '' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
     ],
     onClose: () => { if (mode !== 'line') showLine(null); },
@@ -1300,6 +1301,7 @@ function showBusInfo(id: number) {
   const facts: [string, string][] = [['Line', l ? `${l.num} · ${lines.title(l)}` : 'Not on a line'], ['Model', b.model || 'Bus']];
   if (l && b.next !== undefined) facts.push([b.dwelling ? 'At' : 'Next stop', lines.name(b.next)]);
   if (b.waiting) facts.push(['Status', 'Waiting for room on the road']); // (in the depot: no road under it just now, traffic.ts)
+  else if (b.holding) facts.push(['Status', 'Holding here to even the gaps']); // (the line's even-gaps rule, traffic.ts holdOn)
   facts.push(['On board', `${people.aboard(id)}`], ['Speed', `${Math.round(b.speed * 2.237)} mph`]);
   if (l) showLine(l.bus.seq, l.stops);
   shell.openInfo({

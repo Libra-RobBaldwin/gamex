@@ -11,7 +11,31 @@ A second PR, the coordinator's follow-ups (23:18 UTC), is in the section at the 
 | R1 | A stop kept across a split standing hard against the new junction: move it clear along its road, the same distance a new stop must keep from a junction, rather than a bus holding the junction slot while it dwells. | **Done** (roads.ts `split`: the pair moves together until its lay-by is the road's half-width and 6 m clear of the new node; stays put only on a half too short for that) |
 | R2 | The suspected U-turn deletion of a line bus at a junction it has no path through (`pathFor` null for next === seg): build the case with a street ending into motorway-only legs; a line bus never counts as a give-up. | **Done** (traffic.ts `stepLane`: with no way on but back, the bus turns at the junction's stop line as at a dead end; test builds a street into a one-way motorway pair, 7 minutes, no give-up, both stops called, never in the junction) |
 | R3 | The "stop just past a junction's stop line" lap detour: confirm planStop refuses those placements, and if not, fix. | **Done, it didn't**: planStop's rule (half-width + 6 m) is looser than a roundabout's or a big junction's reach. `Network.stopRange`, set by the traffic from its start and end guards, now makes planStop refuse them ("Too close to the junction — a bus couldn't pull up here clear of it"); the test found such places on the roundabout scenario. Also a bus still calls at a stop it comes to rest up to 4 m past (`BEHIND`). |
-| R4 | Only if R1–R3 are done: the simplest anti-bunching a phone player would notice: a bus holds at a stop for up to a minute when the bus ahead is less than a third of the loop away, behind a per-line toggle default on; measure on the lines e2e that headways even out. | Not started |
+| R4 | Only if R1–R3 are done: the simplest anti-bunching a phone player would notice: a bus holds at a stop for up to a minute when the bus ahead is less than a third of the loop away, behind a per-line toggle default on; measure on the lines e2e that headways even out. | **Done** (traffic.ts `spacing`, `holdOn`, `hold`; lines.ts `spacing`/`setSpacing`, saved as `spacing: false` only when off; main.ts: an "Even gaps · on/off" action on the line sheet and a "Holding here to even the gaps" status on the bus sheet). See the notes below. |
+
+### R4 notes (what was measured, honestly)
+
+- **The rule.** When a bus's dwell is done, it looks at where its line's buses are round the loop
+  (each call's distance along `lineRoute`, less what the bus still has to drive to its next call).
+  It holds, a few seconds at a time and for at most a minute at one stop, while the bus ahead is
+  closer than a third of the loop (or the line's even spacing, `1/N`, when it runs more than three
+  buses) **and closer than the bus behind**. The second condition is not in the ask, but without
+  it the first only moved the bunch: a bus holding for its leader let its follower close up on it
+  (seen in a trace at t380–t440: gaps of 0.27–0.40 collapsed to 0.07).
+- **The measure is approximate.** A there-and-back line calls at whichever pole of a stop the
+  bus arrives on; after calling at the far pole a bus must loop round to the next call (522 m
+  where the canonical leg is 205 m), so its loop position reads well behind, which is true but
+  jumpy. So the test measures headways, not positions.
+- **Unit test** (`traffic.spacing.test.ts`, the starter town, a 3-stop there-and-back line, 3 buses
+  all started at the first call): over the second ten minutes the intervals between buses at each
+  of the line's calls vary by 3–17% of their mean with the switch on (12 holds), and by up to 118%
+  with it off (0 holds). Asserted at under 30% on, over 60% off. The switch survives a save.
+- **Lines e2e** (`e2e/lines.e2e.mjs`): a third bus is added (it starts 0.24 of the loop behind
+  another), and the run must show the rule engaging (at least one hold) and the smallest gap round
+  the loop no worse than at the start. A few sim minutes on SwiftShader is too little to measure
+  headways settling on the phone build; the e2e prints the gaps and the unit test carries the
+  20-minute evidence.
+- Not done: no anti-bunching for trains; no "holding" shown on the map itself (the bus sheet says it).
 
 Written 26 Sep 2026, 21:20 UTC, before any fix.
 

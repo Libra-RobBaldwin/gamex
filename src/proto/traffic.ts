@@ -65,6 +65,7 @@ interface Car {
   lane: number; off: number; // lane (0 = nearside) and current sideways position
   dwell?: number; served?: number; inBay?: boolean; bay?: Stop;
   atStop?: Stop; // the stop it is standing at (its dwell runs to the end there whatever its line does meanwhile)
+  heldSince?: number; // holding at this stop to open the gap to the bus ahead on its line (clock ms when the hold began)
   nextSeg?: number;
   oldLane?: number; lcAt?: number; lcHold?: number; v0?: number; uturn?: boolean;
   merge?: number; mergeBy?: number; // the lane it's waiting to be let into, and where it has to stop if it isn't
@@ -88,7 +89,9 @@ export interface Access { seg: RSeg; s: number; lot?: Lot } // (lot: the buildin
 // A bus line: the stops its buses call at, in order, over and over (A, B, C, B for A-B-C and
 // back). Each call is at the stop or at any stop facing it across the road, whichever side the
 // bus arrives on.
-export interface BusLine { id: number; seq: number[] }
+// (spacing: hold a bus at a stop while the one ahead of it on the line is too close, so the line's
+// buses stay spread out; on unless the player turns it off on the line's sheet)
+export interface BusLine { id: number; seq: number[]; spacing?: boolean }
 interface Place { key: number; seg: RSeg; stops: Stop[] }
 interface SegInfo { L: number; fwd: P[]; rev: P[]; ends: Ends2; spans: Map<number, [number, number]>; course?: Course; offs?: Map<number, Float32Array> }
 type Obstacle = (gap: number, vl: number, s0?: number) => void;
@@ -105,6 +108,8 @@ const E_IN = 10, E_OUT = 10; // how far either side of a junction its paths are 
 const E_PRE = 16; // how far back up the approach its courses run
 const BUSLANE = 8, BAYLANE = 9;
 const BEHIND = 4; // a bus still calls at a stop it comes to rest this far past (out of a junction whose exit reaches to the stand)
+const HOLD_MAX = 60; // seconds a bus will hold at a stop to let the bus ahead of it get away
+const HOLD_LOOK = 4; // seconds between looks, while holding, at whether the bus ahead is far enough away yet
 const LONGEST = 10; // the furthest any vehicle reaches in front of or behind its centre (an 18.5 m bendy bus)
 const WIDEST = 1.3; // half the widest vehicle's width (2.55 m buses and trailers, as game/fleet.ts rounds it)
 const GIVE_UP = 90; // seconds stood still before a driver gives up and goes another way
@@ -180,7 +185,7 @@ export class Traffic {
   parking?: Parking;
   private failed: 'guard' | 'room' = 'room'; // (why the last spawn couldn't place its vehicle)
   private pulling: { o: Access; d: Access; dressed: Dressed; car?: Car; since: number; tries: number; atGate?: number }[] = [];
-  stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0, pulledOut: 0, noRoom: 0, noPlan: 0 };
+  stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0, pulledOut: 0, noRoom: 0, noPlan: 0, holds: 0 };
   // A line's buses with no road under them: bought with no room to start (or loaded from a save
   // into a full road), or whose road was taken away. They're the line's still, counted and
   // saved with it, and go back on the road at the line's next call as soon as there's room.
@@ -234,6 +239,7 @@ export class Traffic {
     this.graph = null;
     this.placeC.clear();
     this.lineC.clear();
+    this.loopC.clear();
     this.edgeList = null;
     this.access.clear();
     this.gradeCache.clear();
@@ -311,7 +317,7 @@ export class Traffic {
     c.oldLane = undefined; c.lcAt = undefined; c.lcHold = undefined; c.uturn = undefined; c.merge = undefined; c.mergeBy = undefined; c.keep = undefined;
     c.merged = undefined; c.adm = undefined; c.admNode = undefined; c.after = undefined; c.entry = undefined; c.uref.length = 0; c.ne = 0;
     c.why = undefined; c.roomWait = undefined; c.divertAt = undefined; c.readmit = undefined; c.pose = undefined; c.axles = undefined;
-    c.wait = 0; c.held = undefined; c.heldAt = undefined;
+    c.wait = 0; c.held = undefined; c.heldAt = undefined; c.heldSince = undefined;
   }
 
   // ---------- cached geometry ----------
@@ -837,6 +843,66 @@ export class Traffic {
   }
   // the line's buses: on the road, and in the depot waiting for room
   busesOn(line: number) { return [...this.cars.filter((c) => c.bus && c.gone === undefined && !c.sold && c.line?.id === line), ...this.depot.filter((c) => c.line?.id === line)].map((c) => c.id); }
+  // ---------- keeping a line's buses apart ----------
+  // The line's loop as its buses drive it (docs/loop.md): each call's distance along it from the
+  // first call, and the whole way round (a there-and-back line is a loop too: out and back).
+  private loopC = new Map<string, { at: number[]; total: number }>();
+  private loopOf(line: BusLine) {
+    const key = line.seq.join(',');
+    let l = this.loopC.get(key);
+    if (!l) {
+      const at: number[] = [0];
+      let total = 0;
+      for (const leg of this.lineRoute(line.seq)) { for (const r of leg) total += Math.max(0, r.s1 - r.s0); at.push(total); }
+      l = { at: at.slice(0, Math.max(1, line.seq.length)), total };
+      this.loopC.set(key, l);
+    }
+    return l;
+  }
+  // how far a bus still has to drive to its next call (Infinity: no way there)
+  private remaining(c: Car) {
+    const call = c.line ? this.callOf(c) : null;
+    if (!call) return Infinity;
+    if (c.dwell !== undefined && c.atStop && call.stops.includes(c.atStop)) return 0;
+    const L = this.len(c.seg), dir = c.from === c.seg.a ? 1 : -1, along = (seg: RSeg, from: number, st: Stop) => (from === seg.a ? st.s : this.len(seg) - st.s);
+    if (call.seg === c.seg) { const st = call.stops.find((x) => x.side === dir && x.id !== c.served && along(c.seg, c.from, x) > c.s - BEHIND); if (st) return Math.max(0, along(c.seg, c.from, st) - c.s); }
+    const at = this.net.other(c.seg, c.from), way = this.search2(at, c.seg, call);
+    if (!way) return Infinity;
+    let d = L - c.s;
+    for (let i = 0; i < way.length - 1; i++) d += this.len(way[i].seg);
+    const last = way[way.length - 1], dirL = last.from === last.seg.a ? 1 : -1, end = call.stops.find((x) => x.side === dirL) ?? call.stops[0];
+    return d + along(last.seg, last.from, end);
+  }
+  // Where each of a line's buses is round its loop (0 to 1, from the first call), and the gaps to
+  // the buses ahead of and behind each, as fractions of the loop. For the line's sheet and the spacing rule.
+  spacing(lineId: number): { loop: number; buses: { id: number; at: number; ahead: number; behind: number; holding: boolean }[] } {
+    const on = this.cars.filter((c) => c.bus && c.gone === undefined && !c.sold && c.line?.id === lineId);
+    if (!on.length) return { loop: 0, buses: [] };
+    const loop = this.loopOf(on[0].line!), total = loop.total || 1;
+    const pos = on.map((c) => {
+      const k = (c.leg ?? 0) % Math.max(1, loop.at.length), rem = this.remaining(c);
+      const p = ((loop.at[k] ?? 0) - (Number.isFinite(rem) ? Math.min(rem, total) : 0) + total * 2) % total;
+      return { id: c.id, at: p / total, ahead: 1, behind: 1, holding: c.heldSince !== undefined };
+    });
+    for (const b of pos) {
+      let fwd = 1, back = 1;
+      for (const o of pos) if (o !== b) { const g = (o.at - b.at + 1) % 1; if (g > 1e-9 && g < fwd) fwd = g; const h = (b.at - o.at + 1) % 1; if (h > 1e-9 && h < back) back = h; }
+      if (on.length > 1) { b.ahead = fwd; b.behind = back; }
+    }
+    return { loop: total, buses: pos };
+  }
+  // Should this bus, its dwell done, hold on at the stop? Only on a line with spacing on, only
+  // while the bus ahead is closer than a third of the loop (or the line's even spacing, when it
+  // runs more than three buses) and closer than the bus behind (holding for a leader while a
+  // follower closes in only moves the bunch), and for at most HOLD_MAX seconds in all.
+  private holdOn(c: Car, now: number) {
+    if (!c.line || c.line.spacing === false || c.line.seq.length < 2) return false;
+    if (c.heldSince !== undefined && now - c.heldSince >= HOLD_MAX * 1000) return false;
+    const sp = this.spacing(c.line.id), me = sp.buses.find((b) => b.id === c.id);
+    if (!me || sp.buses.length < 2 || sp.loop < 50) return false;
+    const want = Math.min(1 / 3, 1 / sp.buses.length);
+    return me.ahead < want - 1e-6 && me.ahead < me.behind;
+  }
   // A line's calls changed (a stop lost): each of its buses goes on to the same call, or the next
   // one along the old order that's still made; never back to the start of the line.
   setLineSeq(line: BusLine, seq: number[]) {
@@ -851,13 +917,14 @@ export class Traffic {
     }
     line.seq = seq;
     this.lineC.clear();
+    this.loopC.clear();
   }
-  // what a bus is doing, for its info sheet
+  // what a bus is doing, for its info sheet (holding: standing on at a stop to let the bus ahead get away)
   bus(id: number) {
     const c = this.cars.find((x) => x.id === id && x.bus && x.gone === undefined) ?? this.depot.find((x) => x.id === id);
     if (!c) return null;
     const call = c.line ? this.callOf(c) : null, waiting = this.depot.includes(c);
-    return { id: c.id, line: c.line?.id, fleetNo: c.dress?.fleetNo ?? '', model: c.dress?.chain[0]?.name ?? '', next: call?.key, dwelling: c.dwell !== undefined, speed: c.v, x: c.pose?.x ?? 0, z: c.pose?.z ?? 0, waiting };
+    return { id: c.id, line: c.line?.id, fleetNo: c.dress?.fleetNo ?? '', model: c.dress?.chain[0]?.name ?? '', next: call?.key, dwelling: c.dwell !== undefined, holding: c.heldSince !== undefined, speed: c.v, x: c.pose?.x ?? 0, z: c.pose?.z ?? 0, waiting };
   }
   // the bus nearest a point on the ground, within r metres
   busNear(p: P, r = 7) {
@@ -1941,7 +2008,7 @@ export class Traffic {
     if (c.inBay) {
       if (c.dwell !== undefined) {
         c.dwell -= dt;
-        if (c.dwell <= 0) { c.served = c.bay?.id; c.dwell = undefined; this.called(c); }
+        if (c.dwell <= 0) { if (this.hold(c)) return true; c.served = c.bay?.id; c.dwell = undefined; this.called(c); }
         return true;
       }
       if (c.served !== c.bay?.id) {
@@ -1960,7 +2027,7 @@ export class Traffic {
     // meanwhile and this stop is no longer one of them)
     if (c.dwell !== undefined) {
       c.dwell -= dt;
-      if (c.dwell <= 0) { c.served = c.atStop?.id ?? c.served; c.atStop = undefined; c.dwell = undefined; this.called(c); }
+      if (c.dwell <= 0) { if (this.hold(c)) return true; c.served = c.atStop?.id ?? c.served; c.atStop = undefined; c.dwell = undefined; this.called(c); }
       return true;
     }
     const ns = this.nextStop(c);
@@ -1975,6 +2042,14 @@ export class Traffic {
     }
     if (togo < 60) ob(togo, 0, 0.2);
     if (togo < 0.8 && c.v < 0.6) { c.atStop = ns.st; c.dwell = this.onBusStop?.(c.seg, ns.st, c.id) ?? 7; }
+    return false;
+  }
+  // its dwell done: stay a while longer if the bus ahead on its line is too close (holdOn), a few
+  // seconds at a time, up to a minute; false, and the hold is over, when it's time to go
+  private hold(c: Car) {
+    const now = this.clock;
+    if (this.holdOn(c, now)) { if (c.heldSince === undefined) { c.heldSince = now; this.stats.holds++; } c.dwell = HOLD_LOOK; return true; }
+    c.heldSince = undefined;
     return false;
   }
   // a bus in the last few metres of drawing up to its stop, at walking pace
