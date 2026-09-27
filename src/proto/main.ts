@@ -1583,7 +1583,7 @@ function renderBar() {
     ${stopsLostNote(lost)}
     ${lift}
     ${c.ok ? bridgeLines(c) : ''}
-    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}</span></div>`}
+    ${c.ok ? '' : `<div class="bad">${icon('alert')}<span>${c.reason}${mode === 'rail' && opts.cross === 'junction' && /clear the road/.test(c.reason ?? '') ? ' · Or cross the road square-on, clear of its junctions, and the track gets a level crossing instead' : ''}</span></div>`}
     <p class="why">Drag the white handles to adjust${c.ok ? ', then Build' : ''}</p>`, bindIx);
   // (demolishing, it's red with the bulldozer; the card above says what goes)
   tool.avoid(handles().map((h) => toScreen(h.p)));
