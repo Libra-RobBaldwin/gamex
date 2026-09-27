@@ -97,3 +97,22 @@ town and 3 per village as measured; junctions in towns 0.33 dead ends / 0.65 T /
 Still to judge as a player: the ribbons run far out along every radial (real towns are linear on one or
 two roads, not all); the closes end in the fields (real ones end in a turning head); the estate's rows
 are square to its road where real ones bend with the land.
+
+## Side by side at 412×915: Moretonhampstead (Exe bake, 2,180 people) and the seeded start town (seed 42, 1,858 people)
+
+The same phone view, 6 km up and 1 km up, over the real town as the game streams it from the OS bake
+and over the seeded start town as the game builds it. At 1 km the real region draws its buildings as
+footprints and only its main road, so that pair compares layout, not looks.
+
+From 6 km: both are a compact blob at a meeting of roads, with the houses running out along them.
+The real town has more lanes round it (the density item, `seeded-vs-real.md`, is still ahead), and
+its roads show darker at this height than the seeded lanes do.
+
+![Moretonhampstead from 6 km](side-real-6km.jpg) ![the seeded start town from 6 km](side-seeded-6km.jpg)
+
+From 1 km: both are ribbons of houses along three to five radials meeting near the middle, side
+streets off them, a ragged edge. The real town's ribbons bend with its roads and thin out further
+along; the seeded town's are straighter and end more squarely, and its centre is towers (vernacular's
+choice for a town centre, not this stream's).
+
+![Moretonhampstead from 1 km](side-real-1km.jpg) ![the seeded start town from 1 km](side-seeded-1km.jpg)
