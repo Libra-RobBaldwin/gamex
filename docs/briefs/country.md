@@ -53,7 +53,18 @@ https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, de
    `docs/reports/country/before-farms-2km.jpg`, `after-farms-2km.jpg` (three in view, then four; farm
    buildings are small from 2 km). Farmsteads are tile scenery, and no scenery is made inside the 8 km
    live play area (`tilegen.ts` `inLive`), so the live area has no farmsteads at all; see "Not done".
-8. Docs: `docs/regiongen.md` (the block size and the follow rule); this brief.
+8. **Farmsteads in the live play area** (branch `claude/work-country-farms`, its own PR). Found while judging
+   the density: the 8 km live square had no farms at all (tile scenery, and none is made there).
+   `game/country.ts` `LiveFarms` builds the same farms in the same places with buildgen (the farmhouse in
+   the place's tradition) and plain barns as the tiles draw them, a few a frame after start-up into one mesh
+   a material; claims each yard on the land registry (no road through a farm); and `farmGround` gives the
+   live ground the yards and tracks to paint. Seed 42: 60 farms, 165 buildings, +16 draw calls and about
+   +21k triangles in any live-area view; the plan's roads build exactly as before with the claims in place.
+   main.ts got three small hunks. Screenshots at 700 m and 300 m of the farm nearest the start town, before
+   and after: `docs/reports/country/before-farm0-700.jpg`, `after-farm0-700.jpg`, `before-farm0-300.jpg`,
+   `after-farm0-300.jpg`; another beside a winding lane, `after-farm1-700.jpg`.
+9. Docs: `docs/regiongen.md` (the block size and the follow rule), `docs/ground.md` (the live farms); this
+   brief.
 
 **Checks before the push**, on the branch merged with the integration head 58ec61a (PR #60, the economy
 fix): `tsc` clean; `vitest run --no-file-parallelism` 117 files, 1104 passed, 8 skipped, no failures (the
@@ -71,12 +82,10 @@ e2e all pass, before the merge and after it.
   the lane, which is right. If world50 has the screenshot, the spot would settle it.
 - **Wood edges up close:** the canopy's crowns still make a sawtooth along a straight wood edge from far out
   (the domes' tips at the outline). Not a staircase, and #52 had the same; a smoother edge row is possible.
-- **No farmsteads in the live play area.** They are tile scenery (`worldmap/country.ts` `farmsIn`), and the
-  tiles make nothing inside the 8 km live square, whose ground is the game's own. The live ground paints
-  no farm yards either (its `GroundInput` comes from `ground/game.ts`, not `countryInput`). So the start
-  town's own countryside has hedges, fields and woods but no farms. Fixing it means the live area asking
-  `countryFor(plan).farmsNear` for its farms and placing them as buildings on the Network's land (or as
-  scenery), and painting their yards and tracks; a day's work with the play session, not started.
+- **The dresser drops barns.** `game/dress.ts` (the play session's) builds real buildings for a near tile's
+  scenery but has no lot kind for a barn, so when a tile is dressed its farmhouses become houses and its
+  barns vanish until the view goes up again. `LiveFarms` builds barns itself; the dresser could do the same
+  (a plain pitched box) or buildgen could grow a barn.
 
 ## Files touched
 
