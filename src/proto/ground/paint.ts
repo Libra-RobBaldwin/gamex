@@ -13,6 +13,7 @@ export interface Rect { i0: number; j0: number; i1: number; j1: number } // texe
 
 const DT = 8; // how far (texels) distances are tracked: wet grass reaches this far from water
 const MARGIN = DT + 3;
+const POOL_KEEP = 1 << 20; // texels: the scratch layers of a bigger paint than this aren't kept (see CoverMap)
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 // Fill a polygon's texels (centres inside) within the window, calling f(first, last) with the
@@ -133,7 +134,9 @@ export class CoverMap {
     this.a = new Uint8Array(region.n * region.n * 4);
     this.texel = region.size / region.n;
   }
-  // scratch layers, kept between paints (zeroed for each)
+  // scratch layers, kept between paints (zeroed for each), and dropped after a paint of a window
+  // over POOL_KEEP texels: the live area's first whole-area paint (about 2048² texels) sized them
+  // at some 205 MB, kept for good, on a phone; the repaints after it are small (a building, a road)
   private fpool: Float32Array[] = [];
   private bpool: Uint8Array[] = [];
   private floats(N: number, k: number) {
@@ -303,6 +306,7 @@ export class CoverMap {
       }
     }
     lap('write');
+    if (N > POOL_KEEP) { this.fpool = []; this.bpool = []; this.ipool = new Int32Array(0); }
     return rect;
   }
 }

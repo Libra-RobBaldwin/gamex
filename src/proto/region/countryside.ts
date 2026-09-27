@@ -31,7 +31,7 @@ export const COUNTRYSIDE = {
     conifer: { high: 0.8, onHigh: 0.55, elsewhere: 0.12 }, // plantations (a farm block at a time)
   },
   // ---- farmsteads ----
-  farms: { none: 0.35, two: 0.45, reach: 700, beside: 260, off: 30, apart: 380, town: 160 },
+  farms: { none: 0.15, two: 0.6, reach: 700, beside: 260, off: 30, apart: 380, town: 160 }, // (none: blocks with no farm; two: of the rest, blocks with two. About one farm a km² with 800 m blocks, as with the 650 m ones before)
   // ---- lanes (lanes.ts): what a winding country road's route costs, per metre, on top of 1 ----
   lanes: {
     grid: 40, corridor: { share: 0.3, least: 360 }, // the grid (m), and how far either side of the straight line it may wander
