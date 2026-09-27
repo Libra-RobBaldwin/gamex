@@ -45,8 +45,11 @@ Done and checked on 412×915 screenshots (DPR 2, SwiftShader), `docs/reports/cou
     it flowers in April and May now, and is pods in July). Nothing is repainted and the tiles need no rebuild.
     What the keys follow is in `docs/ground.md` "The farming year". Screenshots at 700 m west of the start town:
     April (green wheat, rape in flower), May, July (gold), August (stubble), September (ploughed); at 2 km: January,
-    April, August. No tile edge shows, the woods and trees stay their summer green (not mine: baked colours).
-    The ground demo has a Month button.
+    April, August; and a field of each crop kind at 300 m in July and April (`crop-<crop>-<month>-300.jpg`, the
+    nearest field of each crop to the start town, 700 m or more out). No tile edge shows, the woods and trees stay
+    their summer green (not mine: baked colours). The ground demo has a Month button. The paint budgets, measured
+    as for #74 (the budget test's workload alone, three runs): full paint 34.6 / 34.4 / 42.4 ms, repaint after one
+    building 0.78 / 0.77 / 0.84 ms, the same as #74's head (nothing here touches the painter).
 13. **Crop variety by the lie of the land** (`region/fields.ts`, `COUNTRYSIDE.upland`): a farm block high among
     the map's land or steep grows less wheat and rape, more barley and grass leys. Same rng draws, so every other
     field is unchanged. Over the middle 24 km of seed 7's map: arable fields in the lowest third of the land grow
@@ -260,8 +263,13 @@ e2e all pass, before the merge and after it.
   (the domes' tips at the outline). Not a staircase, and #52 had the same; a smoother edge row is possible.
 - **Seasons: the trees' leaves, the woods' canopy and the far rim** keep their summer colours (baked into the
   tiles and the tree materials; `game/edge.ts` is a fixed palette). Snow: none. Hedges: evergreen-looking all year.
-- (Done: **#74's repaint budget passes on the runner** at e9ed4f8, all three of the coordinator's fixes in; its
-  `check` and `phone` jobs are green at 06:31 UTC, and the coordinator merges. af73094 alone gave 3.54 ms against 2.84.)
+- (Done: **#74 merged** at 06:43 UTC, green at e9ed4f8 with the repaint under the trunk's; af73094 alone had
+  given 3.54 ms against 2.84 on the runner.)
+- **A farm-sites export for the realism session** (the coordinator, 06:48): the plan wants the countryside's
+  farmsteads so it can lay a farm lane from each to its nearest lane. `Countryside.farmsNear(box)` already gives
+  every farm in the blocks touching a box (`Farm`: x, z, heading, side of its lane, and its track if it stands
+  back); the field it sits in is `Layout.fieldAt(x, z)`. To be agreed on #80 when the realism session asks: an
+  export from `worldmap/country.ts` (a list of farm sites with their field) that `routes.ts` consumes. Not done.
 
 ## Files touched
 
