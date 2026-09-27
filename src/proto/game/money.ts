@@ -8,9 +8,11 @@
 export const FARE = 2; // £ a passenger, whatever the distance (the UK's capped bus fare)
 export const MONTH = 30; // days of the town's life in each game day
 export const PRICE_SHARE = 0.1; // of the list prices (roads, bridges, stops, vehicles)
-export const START = 400_000; // £ in the bank on a new game
-// running a bus for a game day (its month): driver, fuel, upkeep
-export const RUNNING: Record<'minibus' | 'bus' | 'decker' | 'coach', number> = { minibus: 700, bus: 1100, decker: 1300, coach: 1500 };
+export const START = 250_000; // £ in the bank on a new game: the first line and a road or two, and the rest saved up
+// running a bus for a game day (its month): driver, fuel, upkeep. Tuned after play round 2 (docs/loop.md):
+// a two-decker line carrying 380 riders a town-day takes about £22,900 a game day, so at these rates it
+// makes about four times its running costs, the ratio the loop is designed round, not eight.
+export const RUNNING: Record<'minibus' | 'bus' | 'decker' | 'coach', number> = { minibus: 1400, bus: 2200, decker: 2600, coach: 3000 };
 
 export interface Books { fares: number; running: number; building: number; vehicles: number; sold: number; grants: number }
 const empty = (): Books => ({ fares: 0, running: 0, building: 0, vehicles: 0, sold: 0, grants: 0 });
