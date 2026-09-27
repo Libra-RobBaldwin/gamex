@@ -203,6 +203,13 @@ test once its fix is in; the rest are `it.fails` (expected to fail), so CI stays
   rest of the play list, each its own commit (table above). Row 9's test stays expected-to-fail (world50's
   activation radius); row 2's two tests pass since the vehicles session's PR #64 keeps stops across a split.
 
+## Also fixed after PR #66: the activation jump
+
+A far place's count over the map (and in Places) was the coarse economy's plan figure, about 7,900 for a
+town, and dropped to its built homes' 2,300 the moment it came to life. `countIn` now scales the coarse
+figure by what the live places show (built homes against plan population), so the towns round Stoatbury
+read 2,100–2,350 beside its 2,196 (`round2/00-labels-scaled.png`).
+
 ## Test results (second PR, on the rebased branch)
 
 - `npx tsc --noEmit`: clean.
