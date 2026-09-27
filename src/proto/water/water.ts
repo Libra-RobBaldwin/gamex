@@ -217,6 +217,8 @@ export class WaterSystem {
     return t;
   }
   forget() { this.tiles.clear(); }
+  // (one tile, at any size: the ground under it changed, so it's built again when next asked for)
+  forgetTile(ti: number, tj: number) { for (const k of [...this.tiles.keys()]) if (k.startsWith(`${ti},${tj},`)) this.tiles.delete(k); }
 
   // The ground (channels cut) on any grid, fast: base heights in one go, then each river segment
   // stamped onto the points it reaches. Hits per point match near() exactly.

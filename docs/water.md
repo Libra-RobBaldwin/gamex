@@ -188,7 +188,8 @@ land within three times its radius and never falling below the water, so it hold
 cuts its bed below the water (`bed`, from `lakesGround`); `kindAt`, `edgeDistance`, `wet`,
 `mayBeNear` and `pondAt` answer for it. `worldmap/pond.test.ts` checks all of that on a seeded map.
 
-What the game has to do when a park makes one (the play session's files, not done yet):
+What the game does when a park makes one (the play session's files: `main.ts` `addInfill` and
+`applyPonds`, `parkplan.ts` `parkPond`, `game/water.ts` `addPond`):
 
 1. `const L = WORLD.water.addPond({ x, z, r, seed }, WORLD.terrain.heightAt)` at the park's spot, then
    `gameWater.shapes.addLake(L)` so the live water's own `MapWater` has the bowl too (`main.ts`
@@ -198,7 +199,10 @@ What the game has to do when a park makes one (the play session's files, not don
 3. Rebuild the water tile it lies in (`WaterSystem.tile`, its surface mesh and reeds; the tile cache
    must forget the old one) and claim its land (`gameWater.claim`), so plots and paths keep off it.
 
-Until then no pond is placed or drawn, as the play brief says.
+The park planner picks the spot: the lowest in a park of 2,000 m² or more where the water lies a
+metre inside the park with its bank clear of the roads and the paths (`parkplan.ts` `parkPond`); the
+park's lawn, trees, beds and bandstand keep off it (`buildgen.ts` `makeRegion`). A pond is made once
+per spot: a park found again (a road edit nearby, a reload) asks for the same spot and keeps its pond.
 
 ## Integration plan
 
