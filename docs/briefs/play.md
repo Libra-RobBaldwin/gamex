@@ -1,8 +1,9 @@
 # Play brief: the 50 km region played as a player (26 Sep 2026)
 
 Session: https://claude.ai/code/session_01DGEkjY29QMXCGUF7EoXkuj. Branch `claude/work-play`. PR #63 (the
-play-through, six loop fixes and the review's tests) is merged into `claude/cloud-session-history-rvqkm1`;
-the parks, the walls and the review's play rows follow on a second PR from the same branch. Screenshots in `docs/reports/play/`, all 412×915, DPR 2, touch,
+play-through, six loop fixes and the review's tests) and PR #66 (the parks, the walls and the review's play
+rows) are merged into `claude/cloud-session-history-rvqkm1`; round 2 (the radial town, below) follows on a
+third PR from the same branch. Screenshots in `docs/reports/play/` (round 2 in `round2/`), all 412×915, DPR 2, touch,
 Chromium with SwiftShader, on the production build (`npm run build`, `vite preview`).
 
 What was played, in order: Start menu > New game > Region (Lowland vale, Temperate, Villages, seed 42) with
@@ -202,6 +203,11 @@ test once its fix is in; the rest are `it.fails` (expected to fail), so CI stays
 - From the logic review, on the second PR: rows 3, 4, 2 (play half), the half-built village, 8, 7, 10 and the
   rest of the play list, each its own commit (table above). Row 9's test stays expected-to-fail (world50's
   activation radius); row 2's two tests pass since the vehicles session's PR #64 keeps stops across a split.
+- Round 2, on the third PR, each its own commit: 14 (the address names the saved town, with a save e2e
+  reload), 15 (the card's actions wrap), 16 (the line tool's framing, with a lines e2e check), 17 (the
+  slanted-crossing hint), 18 (the rail blueprint's name and the bulldoze card's), 20 (the activation jump).
+  Reported, not done: the money ratio (eight times running), the town's look (towers on a lawn, streets
+  ending in the fields), a slanted rail crossing, the Teme region (below).
 
 ## Also fixed after PR #66: the activation jump
 
@@ -209,6 +215,103 @@ A far place's count over the map (and in Places) was the coarse economy's plan f
 town, and dropped to its built homes' 2,300 the moment it came to life. `countIn` now scales the coarse
 figure by what the live places show (built homes against plan population), so the towns round Stoatbury
 read 2,100–2,350 beside its 2,196 (`round2/00-labels-scaled.png`).
+
+## Round 2: the radial town (27 Sep 2026)
+
+Played after PR #67 (the town grown along its radials) and PR #69 (vehicles round 2) landed, exactly as
+round 1: the start menu, New game > Region (seed 42) with the guide, two stops by touch, a line, twelve
+game days, the town panel, the cards, a bridge, bulldoze, rail by touch, Menu > Save town, a reload, Main
+menu, Continue, pinch and zoom out, a city, a portal, the real Teme region. Head played: the integration
+branch at 89f6662 (PR #68) with #67 and #69 merged in locally, built and served with `vite preview`
+(#70's farmsteads came after; the fixes below were then checked on the merged integration head 28593b5).
+Screenshots in `docs/reports/play/round2/`, 412×915, DPR 2, touch, SwiftShader.
+
+### The new town as a player
+
+- **Stops go where a player would put them.** The high street (150 m, 37 buildings on it) takes a stop
+  anywhere from 30 m to 120 m along it, a lay-by or kerbside, and a radial 300 m out (186 m, 28 buildings)
+  from 30 m to 155 m: the 30 m at each end are the junction's (`11-stop1-preview.png`,
+  `12-stop2-built.png`). The first tap of round 1's script, at a street's very middle, was "Too close to
+  a junction" on a short high-street piece; a player nudges along and it takes. Nothing to fix.
+- **The line earns and the town grows.** Two stops 300 m apart, two buses: 307 riders on day one, 381 on
+  day twelve; Stoatbury "Growing" from day three, 1,858 to 2,061 people, 96% of homes near a stop
+  (`15-town-after-12-days.png`, `16-town-panel.png`). The goal strip moves as in round 1.
+- **The town reads as towers on a lawn.** The first view (`08-first-view-10s.png`) is a cluster of
+  office towers and car parks on open grass, one long terrace, a strip of allotments, and houses along the
+  radials further out; a lone tower stands 300 m out on grass (`15-town-after-12-days.png`, top left). Side
+  streets end in the fields without a turning head (`64b-station-b-card.png`, left). That is the
+  buildings' and the town plan's owners' to look at; the streets themselves are easy to read and to
+  place stops on.
+
+### Money, now that riders a day is honest
+
+| day | status | people | balance | fares | running | riders a day |
+|---|---|---|---|---|---|---|
+| 1 | stable | 1,858 | £357,618 | £16,267 | £1,635 | 307 |
+| 2 | stable | 1,858 | £374,449 | £19,399 | £2,601 | 323 |
+| 4 | growing | 1,858 | £408,888 | £20,109 | £2,601 | 337 |
+| 8 | growing | 1,944 | £480,934 | £20,858 | £2,602 | 348 |
+| 12 | growing | 2,061 | £559,854 | £22,839 | £2,601 | 381 |
+
+One two-stop line with two buses (£58,000 with the stops) pays for itself in three days and then makes
+£20,000 a day against £2,600 running: about eight times its running costs. `docs/loop.md` says a busy
+line should make about four times. The line card's numbers agree with the purse
+(`17-line-card.png`: 381 riders a day, £20,238 profit a day, "the buses cost £2,601 a day to run").
+The tuning is the coordinator's (round 1's item 6): the fare or the month multiplier, halved, would give
+the four times loop.md wants; the balance rises so fast that money never constrains a player.
+
+### Problems found in round 2
+
+14. **A reload of the page starts a new town** (breaks the loop, fixed in this PR). Save town, then reload
+    the tab: day one, £400,000, no stops, no line (`21-reloaded.png`); the start menu's Continue then
+    offered that fresh town, "saved just now" (`22-menu-continue.png`), with the real one only under Load
+    town. The address of a town started from the menu named only its map, so a phone restoring a
+    discarded tab, or a pull to refresh, opened a new one. The first save now puts the save's id in the
+    address and the app keeps its game entry at it; the save e2e checks the address and reloads the page.
+15. **The line card's four actions ran off the edge** (confusing, fixed in this PR). "Bus · £29,000",
+    "Sell", "Even gaps · on" (from #69) and "Withdraw" on one row overflowed the sheet
+    (`17-line-card.png`); the actions row wraps now (`18-line-card-wrapped-dev.png`).
+16. **The line tool's badges sat under the chrome** (confusing, fixed in this PR). One badge at the top
+    edge under the status bar, the other half under the "Tap the stop the line starts from" hint
+    (`13-line-tool.png`). The framing now leaves the hint's band under the badges and a tenth to spare;
+    the lines e2e checks every badge is inside the clear part of the screen.
+17. **A railway across a radial at a slant is refused with a grade message** (confusing, hint added). A
+    branch line dragged across the fields met a radial at 30° and the blueprint said "Can't climb 7.8 m to
+    clear the road in 44 m" (`62-rail-draft.png`), as if a bridge were the only way. The same track square
+    across the radial, clear of its junctions, is a level crossing and builds (`62b-rail-draft-square.png`,
+    `63b-rail-built.png`). The blueprint now adds "Or cross the road square-on, clear of its junctions, and
+    the track gets a level crossing instead". Whether a slanted crossing should be allowed is the rail
+    owner's call.
+18. **The rail blueprint said "New road 460 m"** (cosmetic, fixed in this PR): "New railway" now, and the
+    bulldoze card names railways as its hint does.
+19. **Rail by touch on the new town** (fine, as far as it got). Build > Rail > Branch line, a finger
+    dragged square across a radial 450 m out: a level crossing, "Built for £73,600"
+    (`63b-rail-built.png`). Build > Stops > Railway station, a tap on the track: the card offers a
+    passing loop with two platforms for £166,500 or one platform for £53,800, and "Central" builds with
+    its sheet and "New line from here" (`64b-station-a-card.png`, `65b-station-a-built.png`). A tap at
+    the track's very end is refused with "Not enough track here · a station needs about 180 m of level
+    line", which is right. The second station, the line and the train were not reached by touch this
+    round: the script's second tap missed the track twice (its aim, not the game's), and the rail e2e on
+    the merged head covers two stations, a line and a train calling at both.
+20. **A far place's count jumped when it came to life** (confusing, fixed before this round: the section
+    above).
+
+Also seen: the bridge that round 1's item 4 refused builds here: a 320 m road over the river gets a 42 m
+concrete beam and a 6% approach (`23-bridge-draft.png`, `24-bridge-built.png`). The bulldozer, a pinch
+out to the region and the full zoom out (`26-pinched-out.png`, `27-zoom-max.png`), a city close up
+(`28-city-close.png`: its roads still unmarked, the buildings' owners'), and a portal sign's card
+(`30-portal-card.png`: "Little Vetchton · Lane · north · 6 miles off the map · 422 in a day") all work as
+in round 1. No console errors in any stage beyond the SwiftShader shader-compile warning.
+
+### The real Teme region, again
+
+As in round 1 (item 7): Ludlow loads in 37 s, 19,900 people, but declines from day one whatever is built.
+Two stops (£600 each, kerbside) and a line with two buses (`83-real-stop2.png`, `84-real-line.png`), six
+days on: "Declining", 19,979 to 18,801 people, fares £0, "Homes near a stop 0%" with the stops on its
+streets, "only 43% of workers can get to a job within 30 min; not enough jobs: 9,400 workers for 5,054
+jobs" (`85-real-town-panel.png`). The console still logs `Unexpected token '<' … is not valid JSON` from
+a fetch that gets the page instead of a region file. Nothing here is the play session's: the real-region
+economy and its fetch are the real-region and economy owners' (round 1's item 7 stands).
 
 ## Test results (second PR, on the rebased branch)
 

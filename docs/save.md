@@ -18,7 +18,9 @@ kept in the browser's IndexedDB on the phone, so they're there offline and after
 - Each town has one save, made when it starts and kept up to date. A loaded town saves over the
   save it came from.
 
-A save is played at its map's address with `&save=<id>`, e.g. `/?map=region&seed=42&save=…`.
+A save is played at its map's address with `&save=<id>`, e.g. `/?map=region&seed=42&save=…`. A new town
+starts at its map's address alone; its first save (manual or auto) puts `&save=<id>` in the address, so a
+reload of the page (a phone restoring a discarded tab, a pull to refresh) opens the same town, not a new one.
 A save that's gone, or one this version can't read, opens a new town with a hint saying why. A
 save from a map the game no longer has (the starter town, the sandbox, a 6 km region) is listed
 under Saved towns as made on a map that no longer exists, with only Delete.
