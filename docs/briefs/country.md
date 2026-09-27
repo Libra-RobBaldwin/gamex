@@ -49,7 +49,11 @@ Done and checked on 412×915 screenshots (DPR 2, SwiftShader), `docs/reports/cou
     nearest field of each crop to the start town, 700 m or more out). No tile edge shows, the woods and trees stay
     their summer green (not mine: baked colours). The ground demo has a Month button. The paint budgets, measured
     as for #74 (the budget test's workload alone, three runs): full paint 34.6 / 34.4 / 42.4 ms, repaint after one
-    building 0.78 / 0.77 / 0.84 ms, the same as #74's head (nothing here touches the painter).
+    building 0.78 / 0.77 / 0.84 ms, the same as #74's head (nothing here touches the painter). Phone e2es on
+    this head: lines, rail, save, stations and the menu pass; **the loop e2e fails on the trunk itself** since
+    41e2456 (the economy's supply cap: the town keeps growing after its line is withdrawn, 1898 → 2054 people),
+    the trunk's run 233 and this branch giving the same numbers; it passed here before that merge. The
+    economy is the coordinator's; noted on #80, merged in when fixed.
 13. **Crop variety by the lie of the land** (`region/fields.ts`, `COUNTRYSIDE.upland`): a farm block high among
     the map's land or steep grows less wheat and rape, more barley and grass leys. Same rng draws, so every other
     field is unchanged. Over the middle 24 km of seed 7's map: arable fields in the lowest third of the land grow
