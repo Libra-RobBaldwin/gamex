@@ -2322,11 +2322,11 @@ await loading.stage('Starting the traffic and the town', 0.15);
 const traffic = new Traffic(net, scene, rng(5));
 // the drives and car parks, filled with cars of the traffic's own sorts for where they are
 const PRIVATE = (style: string) => !['taxi', 'police', 'ambulance', 'ice-cream', 'refuse', 'gritter', 'recovery'].includes(style);
-parking = new Parking(traffic.fleet, rng(11), (lot, heavy) => {
-  const a = traffic.accessOf(lot);
-  if (!a) return null;
+parking = new Parking(traffic.fleet, rng(11), (lot, heavy, seg) => {
+  const sg = lot ? traffic.accessOf(lot)?.seg : seg; // (a plot's road, or the street a kerbside space is on)
+  if (!sg) return null;
   for (let i = 0; i < 10; i++) {
-    const d = traffic.fleet.dress(a.seg, heavy), m = d.dress.chain[0];
+    const d = traffic.fleet.dress(sg, heavy), m = d.dress.chain[0];
     if (d.dress.chain.length !== 1 || !PRIVATE(m.style)) continue;
     if (heavy ? m.category === 'lorry' && m.dims.length < 12.5 : m.category === 'car' || (m.category === 'van' && m.dims.length < 5.6)) return d;
   }
