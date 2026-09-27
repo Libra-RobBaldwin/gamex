@@ -934,7 +934,7 @@ function switchType(t: RoadType) {
 // comes back. ----
 let doomed: { seg: RSeg; stop?: Stop } | null = null;
 function startBulldozeTool() {
-  tool = shell.startTool({ name: 'Bulldoze', spec: 'Tap a road or a bus stop', icon: 'bulldozer', tone: 'bulldoze', onDone: endTool, onCancel: endTool });
+  tool = shell.startTool({ name: 'Bulldoze', spec: 'Tap a road, a railway or a bus stop', icon: 'bulldozer', tone: 'bulldoze', onDone: endTool, onCancel: endTool });
   setMode('bulldoze');
   doomed = null;
   hint();
