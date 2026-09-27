@@ -131,7 +131,12 @@ The trees along the woods' edges (`fringe`) stand out of it close up.
 where the lanes are. Their yards are plots of kind `yard` (hedges and fields keep off them). A farm
 standing back from its road has a farm track, routed over the land like a lane (`region/lanes.ts`
 `laneRoute`: round hills, woods and water) and painted as a `track` plot. On a 50 km map the
-buildings are tile scenery (`worldmap/country.ts` `farmsIn`).
+buildings are tile scenery (`worldmap/country.ts` `farmsIn`) beyond the live play area; inside it,
+where no scenery is made, `game/country.ts` (`LiveFarms`) builds the same farms in the same places
+with the town's own building generator (the farmhouse in the place's tradition, the barns as the
+tiles draw them), a few a frame after start-up into one mesh a material, claims each yard on the
+land registry as a site (no road through a farm), and gives the live ground the yards and tracks to
+paint (`farmGround`, through `GameWorld.extra`).
 
 ### Painting and repainting
 

@@ -15,6 +15,7 @@ import { CIVIC, grassMats, makeBuilding as generate, makeRegion, setGround, setP
 import { Parking } from './game/parking'; // drives and car parks in use (the traffic's own cars park in them)
 import { groupShops } from './complexes'; // shopping complexes in place of clumps of shops
 import { Dresser } from './game/dress'; // the 50 km map's scenery as real buildings up close
+import { farmGround, LiveFarms } from './game/country';
 import { placeResolver, REAL_VERN, setGeology, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
 import { NavRig, SunFollow } from './kit/camera';
@@ -169,7 +170,7 @@ window.addEventListener('resize', resize);
 
 // ---------------- ground, water ----------------
 // the shared ground (src/proto/ground): pasture, fields and hedgerows, lawns, woods, verges
-const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => worldGame!.extra() : undefined }, BOUND, 4, false, undefined, WORLD ? GROUND_SEED : undefined, WORLD ? countryFor(WORLD) : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
+const gameGround = new GameGround({ net, queue: () => queue, trees: () => trees, lake: LAKE, water: () => gameWater.outline(), industrial: INDUSTRIAL, parks: () => infill.map((b) => ({ cells: b.region?.cells ?? [], size: CELL })), extra: WORLD ? () => { const e = worldGame!.extra(), f = farmGround(WORLD); return { plots: [...e.plots, ...f.plots], blocked: [...e.blocked, ...f.blocked] }; } : undefined }, BOUND, 4, false, undefined, WORLD ? GROUND_SEED : undefined, WORLD ? countryFor(WORLD) : undefined); // (no 3D hedgerows on a big map until it streams: docs/region.md R4; the town's fields run to its edge)
 gameGround.setStyle(LOOK);
 if (WORLD) gameGround.ground.uniforms.uSlope.value.set(...slopeLook()); // (the hills' rock and moor: worldmap/terrain.ts, as the far tiles have it)
 if (WORLD?.terrain.geologyAt) setGeology(WORLD.terrain.geologyAt); // (the buildings' stone from the rock under them: worldmap/landform.ts)
@@ -242,6 +243,8 @@ for (const m of [crowns, pines, trunks]) { m.castShadow = true; m.receiveShadow 
 // a 50 km map: the rest of the map beyond the live area, streamed in tiles from workers (worldmap/)
 const worldGame = WORLD ? new WorldGame({ scene, plan: WORLD, field: RELIEF, drape, look: LOOK, trees: { crown: crownGeo, pine: pineGeo, trunk: trunkGeo, crownMat, pineMat, trunkMat }, live: SAVED?.world?.live ?? (REAL ? WORLD.settlements.filter((st) => Math.max(Math.abs(st.x), Math.abs(st.z)) < LIVE_HALF).map((st) => st.id) : [WORLD.start]) }) : null; // (a real region's live area is all there from the start: its pack)
 const dresser = worldGame ? new Dresser({ scene, plan: WORLD!, make: generate, view: worldGame.view, trees: { crown: crownGeo, trunk: trunkGeo, crownMat, trunkMat } }) : null;
+const liveFarms = WORLD ? new LiveFarms(WORLD, net, generate) : null; // (the live area's farmsteads: game/country.ts)
+if (liveFarms) scene.add(liveFarms.group);
 
 // Is a woodland tree standing somewhere it shouldn't? Roads and junctions answer through the land
 // registry (a spatial hash, so this looks only at claims near the tree); plots through `lots`.
@@ -1297,6 +1300,7 @@ function showLineInfo(l: Line) {
     actions: [
       { label: `Bus · ${money(busPrice(l.offer))}`, title: `Add a bus for ${money(busPrice(l.offer))}`, icon: 'plus', kind: 'primary', disabled: !purse.can(busPrice(l.offer)), onClick: () => { buyBus(l); showLineInfo(l); } },
       { label: 'Sell', title: `Sell a bus for ${money(sell)}`, icon: 'minus', disabled: n === 0, onClick: () => { lines.removeBus(l); purse.refund(sell); hint(`Bus sold for ${money(sell)}`, 'bus'); setTimeout(() => showLineInfo(l), 50); } },
+      { label: `Even gaps · ${lines.spacing(l) ? 'on' : 'off'}`, title: 'A bus waits at a stop while the one ahead is too close, so they don’t bunch', icon: 'transport', onClick: () => { lines.setSpacing(l, !lines.spacing(l)); showLineInfo(l); } },
       { label: 'Withdraw', title: 'Withdraw the line and sell its vehicles', icon: 'trash', kind: 'danger', onClick: () => { const k = lines.buses(l).length; lines.remove(l); purse.refund(sell * k); closeSheet(); hint(`Line ${l.num} withdrawn · ${k} bus${k === 1 ? '' : 'es'} sold for ${money(sell * k)}`, 'transport'); } },
     ],
     onClose: () => { if (mode !== 'line') showLine(null); },
@@ -1311,6 +1315,7 @@ function showBusInfo(id: number) {
   const facts: [string, string][] = [['Line', l ? `${l.num} · ${lines.title(l)}` : 'Not on a line'], ['Model', b.model || 'Bus']];
   if (l && b.next !== undefined) facts.push([b.dwelling ? 'At' : 'Next stop', lines.name(b.next)]);
   if (b.waiting) facts.push(['Status', 'Waiting for room on the road']); // (in the depot: no road under it just now, traffic.ts)
+  else if (b.holding) facts.push(['Status', 'Holding here to even the gaps']); // (the line's even-gaps rule, traffic.ts holdOn)
   facts.push(['On board', `${people.aboard(id)}`], ['Speed', `${Math.round(b.speed * 2.237)} mph`]);
   if (l) showLine(l.bus.seq, l.stops);
   shell.openInfo({
@@ -2877,6 +2882,7 @@ function frame(now: number) {
     const next = worldGame.frame(view, canvas.clientWidth / Math.max(1, canvas.clientHeight), !activating);
     if (next !== null) void activatePlace(next);
     dresser?.update(view, loaded ? Math.min(30, Math.max(5, rawMs * 0.2)) : 0); // (real buildings for the scenery close under the view: game/dress.ts)
+    liveFarms?.update(loaded ? 4 : 0);
     worldIdle(loaded ? 5 : 0);
     worldGame.liveCanopy(gameGround.ground.uniforms, view.h);
   }

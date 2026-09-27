@@ -5,7 +5,8 @@
 // the same call or the next one made.
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { DEFAULT_OPTS, Network, rng } from './roads';
+import { DEFAULT_OPTS, Network, rng, stopSpan } from './roads';
+import { design, landFits, legsAt } from './junction';
 import { Traffic } from './traffic';
 import { SCENARIOS, town } from './trafficsim';
 import { starterStops } from './game/crowdsites';
@@ -154,5 +155,91 @@ describe('a line that loses a call', () => {
     traffic.setLineSeq(l.bus, [B, C, A, C]); // back to A, B, C order with A last: [B, C, A, C]
     // heading for B (0), B (0), C out (1), B (0) stay where they point
     expect(buses.map((c) => (c as unknown as CarView).leg)).toEqual([0, 0, 1, 0]);
+  });
+});
+
+describe('a line bus at a junction with no way on', () => {
+  // a street ending at a junction whose other legs are a motorway's: no bus may go on, and the
+  // only way is back. Before, planOf found no path through (pathFor null for next === seg) and
+  // the bus was deleted as a give-up; now it turns round at the junction's mouth as at a dead end.
+  it('turns back and keeps calling at its stops; never a give-up, never lost', () => {
+    const net = new Network(() => false, 900);
+    const A = net.addNode(-300, 0), B = net.addNode(0, 0), C = net.addNode(400, 0), D = net.addNode(400, -80);
+    const street = net.addSeg(A, B, [], 'street');
+    net.addSeg(B, C, [], 'motorway-2', [], true);
+    net.addSeg(D, B, [], 'motorway-2', [], true);
+    expect(legsAt(net, B).length).toBe(3);
+    const j = design(net, B, { fits: (polys) => landFits(net, B, polys) });
+    expect(j, 'a junction at B').toBeTruthy();
+    const traffic = new Traffic(net, new THREE.Scene(), rng(2));
+    traffic.junctions = new Map([[B, j!]]);
+    const p1 = net.planStop(street, 100, 1), p2 = net.planStop(street, 180, -1);
+    expect(p1.plans[0], p1.reason).toBeTruthy(); expect(p2.plans[0], p2.reason).toBeTruthy();
+    net.addStop(street, 100, 1, p1.plans[0]); net.addStop(street, 180, -1, p2.plans[0]);
+    const [s1, s2] = net.segs.get(street)!.stops.map((st) => st.id);
+    const lines = new Lines(traffic);
+    const l = lines.add([s1, s2], false, 1);
+    const id = traffic.busesOn(l.id)[0];
+    const calls: number[] = [];
+    traffic.onBusStop = (_seg, st, bus) => { if (bus === id) calls.push(st.id); return 5; };
+    const dt = 1 / 30;
+    let turned = 0, lastFrom = -1;
+    for (let i = 0; i < 30 * 420; i++) {
+      traffic.update(dt, i * dt * 1000);
+      const c = cars(traffic).find((x) => x.id === id);
+      if (c && c.seg.id === street && c.from !== lastFrom) { if (lastFrom >= 0) turned++; lastFrom = c.from; }
+    }
+    expect(traffic.stats.gaveUp, 'give-ups').toBe(0);
+    expect(traffic.busesOn(l.id)).toEqual([id]);
+    expect(traffic.depot.length, 'in the depot').toBe(0);
+    expect(cars(traffic).find((x) => x.id === id && x.gone === undefined), 'still on the road').toBeTruthy();
+    expect(turned, 'turned round at the junction').toBeGreaterThanOrEqual(2);
+    expect(calls.filter((x) => x === s1).length, `calls at the first stop (${calls})`).toBeGreaterThanOrEqual(2);
+    expect(calls.filter((x) => x === s2).length, `calls at the second stop (${calls})`).toBeGreaterThanOrEqual(2);
+    // never in the junction: on the street its centre stays short of the junction's stop line
+    for (let i = 0; i < 30 * 60; i++) {
+      traffic.update(dt, (30 * 420 + i) * dt * 1000);
+      const c = cars(traffic).find((x) => x.id === id)!;
+      if (c.seg.id === street && c.from === A) expect(c.s).toBeLessThan(net.length(net.segs.get(street)!) - 4);
+    }
+  }, 120_000);
+});
+
+describe('a stop just past a junction’s stop line', () => {
+  // planStop keeps a stop the road's half-width and 6 m from its ends; a roundabout's or a big
+  // signalled junction's stop line, and the point where traffic is out of it, reach further. A
+  // stop between the two would be missed (the bus is in the junction, or already past the stand
+  // as it comes out) and its line would lap the block to come back. The traffic now tells
+  // planStop where a bus can stand (Network.stopRange), and it refuses the rest.
+  it('is refused by planStop wherever the traffic says a bus could not pull up there', () => {
+    const sc = SCENARIOS.find((s) => s.name === 'roundabout, single-lane approaches')!;
+    const { net, junctions } = town({ ...sc, buses: 0 });
+    const traffic = new Traffic(net, new THREE.Scene(), rng(1));
+    traffic.junctions = junctions;
+    let checked = 0, tighter = 0;
+    for (const seg of net.segs.values()) {
+      if (net.def(seg).cls !== 'road' || seg.stops.length) continue;
+      const L = net.length(seg);
+      for (const side of [1, -1] as const) {
+        const range = net.stopRange!(seg.id, side);
+        expect(range).toBeTruthy();
+        const [lo, hi] = range!;
+        if (hi - lo < 20) continue;
+        // the widest span planStop's own rule allows for this side
+        const probe = (t: number) => stopSpan({ id: 0, s: t, side, kind: 'layby', take: { pave: 0, lane: 0, land: 0, park: 0 } });
+        const ownLo = (() => { let t = 0; while (t < L && probe(t)[0] < net.nodeHalf(seg.a) + 6) t += 0.5; return t; })();
+        const ownHi = (() => { let t = L; while (t > 0 && probe(t)[1] > L - net.nodeHalf(seg.b) - 6) t -= 0.5; return t; })();
+        for (const [t, inside] of [[lo - 3, true], [hi + 3, true], [lo + 3, false], [hi - 3, false]] as const) {
+          if (t < ownLo || t > ownHi || t < 0 || t > L) continue; // (its own rule already refuses it, or off the road)
+          checked++;
+          if (inside) tighter++;
+          const r = net.planStop(seg.id, t, side);
+          if (inside) expect(r.reason, `seg ${seg.id} side ${side} at ${t.toFixed(1)} (bus range ${lo.toFixed(1)}–${hi.toFixed(1)})`).toMatch(/Too close to the junction/);
+          else expect(r.plans.length, `seg ${seg.id} side ${side} at ${t.toFixed(1)} (bus range ${lo.toFixed(1)}–${hi.toFixed(1)}): ${r.reason}`).toBeGreaterThan(0);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+    expect(tighter, 'places the traffic forbids that planStop alone allowed').toBeGreaterThan(0);
   });
 });

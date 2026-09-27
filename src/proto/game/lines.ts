@@ -15,12 +15,12 @@ import type { BusLine, Traffic } from '../traffic';
 
 export interface Line {
   id: number; num: number; stops: number[]; loop: boolean; offer?: string;
-  bus: BusLine; // what the traffic follows (the same object, so edits reach the buses at once)
+  bus: BusLine; // what the traffic follows (the same object, so edits reach the buses at once; its `spacing` is the line's even-gaps switch)
 }
 
 export interface LinesSave {
   nextId: number; used: number; names: [number, string][];
-  list: { id: number; num: number; stops: number[]; loop: boolean; offer?: string; mode?: 'bus' | 'rail'; vehicles: number }[]; // (mode: in saves from before the interim stations went)
+  list: { id: number; num: number; stops: number[]; loop: boolean; offer?: string; mode?: 'bus' | 'rail'; vehicles: number; spacing?: boolean }[]; // (mode: in saves from before the interim stations went)
 }
 
 const NAMES = [
@@ -87,6 +87,9 @@ export class Lines {
     }
   }
   buses(l: Line) { return this.traffic.busesOn(l.id); }
+  // Even gaps: a bus holds at a stop while the one ahead of it is too close (traffic.ts holdOn). On unless turned off.
+  spacing(l: Line) { return l.bus.spacing !== false; }
+  setSpacing(l: Line, on: boolean) { l.bus.spacing = on; }
 
   // ---------- saving (game/save.ts) ----------
   // The lines, how many vehicles each runs, and the stops' names. The vehicles themselves start
@@ -94,7 +97,7 @@ export class Lines {
   save(): LinesSave {
     return {
       nextId: this.nextId, used: this.used, names: [...this.names],
-      list: this.list.map((l) => ({ id: l.id, num: l.num, stops: [...l.stops], loop: l.loop, offer: l.offer, vehicles: this.buses(l).length })),
+      list: this.list.map((l) => ({ id: l.id, num: l.num, stops: [...l.stops], loop: l.loop, offer: l.offer, vehicles: this.buses(l).length, ...(l.bus.spacing === false ? { spacing: false } : {}) })),
     };
   }
   // (after the stops are back, into an empty list; false for a vehicle with no room)
@@ -103,7 +106,7 @@ export class Lines {
     let all = true;
     // (a save from before the loop's interim stations went may have rail lines on them: they're gone)
     for (const x of s.list.filter((x) => x.mode !== 'rail')) {
-      const l: Line = { id: x.id, num: x.num, stops: [...x.stops], loop: x.loop, offer: x.offer, bus: { id: x.id, seq: callOrder(x.stops, x.loop) } };
+      const l: Line = { id: x.id, num: x.num, stops: [...x.stops], loop: x.loop, offer: x.offer, bus: { id: x.id, seq: callOrder(x.stops, x.loop), ...(x.spacing === false ? { spacing: false } : {}) } };
       this.list.push(l);
       for (let i = 0; i < x.vehicles; i++) if (!this.addBus(l)) all = false;
     }

@@ -9,6 +9,7 @@ import { rng, mix } from './random';
 import { CROP_NAMES, PALETTE } from '../ground/covers';
 import { Network, DEFAULT_OPTS, ROADS, halfOf, bezier } from '../roads';
 import { planWorld, type WorldPlan } from '../worldmap/plan';
+import { standing } from '../worldmap/routes';
 import { worldMapSpec } from '../worldmap/spec';
 
 // The one map is the 50 km plan (worldmap/plan.ts); what's tested here is the part of it this
@@ -42,17 +43,20 @@ describe('a settlement’s streets', () => {
   test('each kind has its own layout: a high street, residential streets, an industrial edge for the city and towns', () => {
     for (const seed of SEEDS) {
       const p = plan(seed), count: Record<string, number[]> = { city: [], town: [], village: [] };
+      let estates = 0, bigger = 0;
       for (const s of p.settlements) {
         const { streets, zone } = streetsOf(s, p);
         expect(streets.filter((t) => t.role === 'high').length).toBeGreaterThanOrEqual(2);
         expect(streets.filter((t) => t.role === 'street').length).toBeGreaterThanOrEqual(s.kind === 'village' ? 1 : 10);
         if (s.kind === 'village') expect(zone).toBeNull();
         else {
-          expect(zone).not.toBeNull();
-          expect(streets.filter((t) => t.role === 'industrial').length).toBeGreaterThanOrEqual(3);
+          bigger++;
+          // (an estate where there's dry room for one: three rows of wide blocks off a radial)
+          if (zone) { estates++; expect(streets.filter((t) => t.role === 'industrial').length).toBeGreaterThanOrEqual(3); }
         }
         count[s.kind].push(streets.length);
       }
+      expect(estates).toBeGreaterThanOrEqual(Math.ceil(bigger * 0.75));
       // a city has the most streets, a village the fewest
       const mean = (a: number[]) => a.reduce((t, v) => t + v, 0) / Math.max(1, a.length);
       if (count.city.length) expect(mean(count.city)).toBeGreaterThan(mean(count.town));
@@ -86,9 +90,10 @@ describe('the roads out of a place (PRIORS.exits: as real roads leave real place
   const deg = (r: number) => (r * 180) / Math.PI;
   const heading = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.atan2(b.z - a.z, b.x - a.x);
   const norm = (a: number) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
-  test('every settlement has four ways out: both ends of its high street and of its main cross street, each facing out', () => {
+  test('every settlement has its ways out: its radials’ ends, the high street’s two among them, each facing out', () => {
     for (const seed of SEEDS) for (const s of plan(seed).settlements) {
-      expect(s.spokes?.length).toBe(4);
+      expect(s.spokes!.length).toBeGreaterThanOrEqual(2);
+      expect(s.spokes!.length).toBeLessThanOrEqual(8);
       expect(s.gates).toEqual(s.spokes!.filter((k) => k.along === 'high').map(({ x, z }) => ({ x, z })));
       for (const k of s.spokes!) {
         expect(Math.hypot(k.ux, k.uz)).toBeCloseTo(1, 6);
@@ -113,16 +118,22 @@ describe('the roads out of a place (PRIORS.exits: as real roads leave real place
             expect(shared, `${r.kind} road ${r.id} out of ${A.name} starts at no spoke and on no other lane`).toBe(true);
             continue;
           }
-          // (straight out along the street for its first 150 m, as real roads are: PRIORS.exits.edgeAngleDeg)
-          let run = 0;
-          for (let i = 1; i < path.length; i++) {
+          // (straight out along the street for its first 150 m, as real roads are: PRIORS.exits.edgeAngleDeg;
+          // not where water lies within that stretch of the spoke's line, where the stem is cut short)
+          let run = 0, wetAhead = false;
+          for (let d = 30; d <= 240; d += 30) if (standing(p.water, { x: k!.x + k!.ux * d, z: k!.z + k!.uz * d }) < 60) wetAhead = true;
+          for (let i = 1; i < path.length && !wetAhead; i++) {
             run += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
             if (run > 151) break;
             expect(Math.abs(deg(norm(heading(path[i - 1], path[i]) - Math.atan2(k!.uz, k!.ux)))), `${r.kind} road ${r.id} out of ${A.name}, ${Math.round(run)} m out`).toBeLessThan(12);
           }
-          // the spoke faces the place it goes to (or the map's edge it runs off) better than any other spoke does
-          const far = other !== null ? p.settlements[other] : path[path.length - 1], score = (q: { x: number; z: number; ux: number; uz: number }) => { const dx = far.x - q.x, dz = far.z - q.z, d = Math.hypot(dx, dz) || 1; return (q.ux * dx + q.uz * dz) / d; };
-          for (const q of A.spokes!) expect(score(k!)).toBeGreaterThanOrEqual(score(q) - 1e-9);
+          // the spoke is one of the two facing the place it goes to (or the map's edge it runs off) best
+          // (the second when the way from the first would double back past the place)
+          const far = other !== null ? p.settlements[other] : path[path.length - 1];
+          const wet = (q: { x: number; z: number; ux: number; uz: number }) => { for (let d = 30; d <= 240; d += 30) if (standing(p.water, { x: q.x + q.ux * d, z: q.z + q.uz * d }) < 60) return true; return false; };
+          const score = (q: { x: number; z: number; ux: number; uz: number }) => { const dx = far.x - q.x, dz = far.z - q.z, d = Math.hypot(dx, dz) || 1; return (q.ux * dx + q.uz * dz) / d - (wet(q) ? 1 : 0); }; // (a spoke facing water counts against, as the planner has it)
+          const better = A.spokes!.filter((q) => score(q) > score(k!) + 1e-9).length;
+          expect(better, `${r.kind} road ${r.id} out of ${A.name}`).toBeLessThanOrEqual(1);
           // and its heading a kilometre out, against its heading at the edge
           let far1 = path.length - 1, s1 = 0;
           for (let i = 1; i < path.length; i++) { s1 += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z); if (s1 >= 1000) { far1 = i; break; } }

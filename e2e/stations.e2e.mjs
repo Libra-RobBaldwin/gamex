@@ -97,16 +97,16 @@ await page.tap('#ugbtn');
 await wait(1200);
 if ((await page.getAttribute('#ugbtn', 'aria-pressed')) !== 'true') fail('the underground view button isn’t lit');
 if (!(await page.evaluate(() => window.proto.underView.on))) fail('the underground view didn’t come on');
-const d1 = await buildStation('underground-1', -250, -60, -14, -4);
+const d1 = await buildStation('underground-1', 400, -60, -14, -4);
 await close();
-const d2 = await buildStation('underground-2', 200, -60, -14, -4); // (clear of the start town's streets above: an underground station needs its entrances)
+const d2 = await buildStation('underground-2', 650, -60, -14, -4); // (east of the start town, clear of its streets above: an underground station needs its entrances, and level track deep down)
 for (const d of [d1, d2]) if (!d || d.structure !== 'underground') fail(`an underground station wasn't built (${d?.structure})`);
 // the second's sheet is open: New line from here, tap the first, Create
 let started = false;
 for (const b of await page.$$('#sheet button')) if ((await b.textContent())?.includes('New line from here')) { await b.tap(); started = true; break; }
 if (!started) fail('no New line from here on the station sheet');
 await wait(600);
-await page.evaluate(() => window.proto.focusOn({ x: 0, z: -60 }, 700));
+await page.evaluate(() => window.proto.focusOn({ x: 525, z: -60 }, 700));
 await wait(600);
 await settle();
 if (d1) {
@@ -123,9 +123,9 @@ if (!line || !d1 || !d2 || line.stops.length !== 2 || !line.stops.includes(d1.id
 // run: its train calls at both, doors open at the platform, deep down (with the view off: under
 // SwiftShader it draws at half the frame rate, and the game's clock with it)
 await page.tap('#ugbtn');
-await page.evaluate(() => { window.proto.setSpeed(4); window.proto.focusOn({ x: -250, z: -60 }, 200); });
+await page.evaluate(() => { window.proto.setSpeed(4); window.proto.focusOn({ x: 400, z: -60 }, 200); });
 let doorsSeen = false;
-// (up to 5 min: the region's two underground stations are 450 m apart, clear of the start town's
+// (up to 5 min: the region's two underground stations are 250 m apart, east of the start town and clear of its
 // streets above, and SwiftShader draws the region at a couple of frames a second)
 for (let i = 0; line && i < 300; i++) {
   await wait(1000);
@@ -152,7 +152,7 @@ for (let i = 0; line && i < 300; i++) {
 }
 await page.evaluate(() => window.proto.setSpeed(0));
 await page.tap('#ugbtn');
-await page.evaluate(() => window.proto.focusOn({ x: 0, z: -60 }, 420));
+await page.evaluate(() => window.proto.focusOn({ x: 525, z: -60 }, 420));
 await wait(1000);
 await settle();
 await page.screenshot({ path: `${out}/stations-underground-view.png` });

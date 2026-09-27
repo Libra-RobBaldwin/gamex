@@ -277,6 +277,10 @@ export class Network {
   bound: number;
   // where the ground ends (half its width): roads running off the map are drawn out to here
   edge: number;
+  // Where along a road (from its a end) a bus on this side can stand clear of the junctions at
+  // its ends, as the traffic drives them: set by Traffic, which knows each junction's reach.
+  // Without it planStop keeps a stop the road's half-width and 6 m from each end.
+  stopRange?: (segId: number, side: 1 | -1) => [number, number] | null;
   private rand: Rng;
   zoneAt: (p: P) => Zone = () => 'town';
   turningHeads = false; // a dead end just stops, as a standard UK dead end does; true draws a turning circle at each one (the old look)
@@ -398,9 +402,12 @@ export class Network {
     const L = pathLength(path);
     // Stops go with whichever half their stand is on, a pair (a stop and the one facing it, which
     // share a name and a line's call) together on the half the pole further from the split is on.
-    // A stop the split runs through is kept: it ends up hard against the new junction (check()
-    // reports it, so the road tool can warn), never silently gone with the line that calls there.
-    const keepA: Stop[] = [], keepB: Stop[] = [], done = new Set<Stop>();
+    // A stop the split runs through is kept, never silently gone with the line that calls there:
+    // it's moved along its road until its lay-by is as clear of the new junction as a new stop
+    // must be (planStop: the road's half-width and 6 m), together with the one facing it, so a bus
+    // calling there isn't standing in the junction's mouth. (check() reports it, so the road tool
+    // can warn.) Only on a half too short for that does it stay where it lies.
+    const keepA: Stop[] = [], keepB: Stop[] = [], done = new Set<Stop>(), clear = this.half(s) + 6;
     for (const st of s.stops) {
       if (done.has(st)) continue;
       const group = [st, ...s.stops.filter((o) => o !== st && !done.has(o) && o.side !== st.side && Math.abs(o.s - st.s) < 45)];
@@ -408,8 +415,12 @@ export class Network {
       const far = group.reduce((m, o) => (Math.abs(o.s - c.s) > Math.abs(m.s - c.s) ? o : m), group[0]);
       // (on its half, no closer than 2 m to either end, so it's still somewhere on the road)
       const within = (v: number, len: number) => (len < 4 ? len / 2 : Math.max(2, Math.min(len - 2, v)));
-      if (far.s < c.s) for (const o of group) keepA.push({ ...o, s: within(o.s, c.s) });
-      else for (const o of group) keepB.push({ ...o, s: within(o.s - c.s, L - c.s) });
+      const onA = far.s < c.s, len = onA ? c.s : L - c.s, at = group.map((o) => (onA ? o.s : o.s - c.s));
+      const lo = Math.min(...at.map((v, i) => stopSpan({ ...group[i], s: v })[0])), hi = Math.max(...at.map((v, i) => stopSpan({ ...group[i], s: v })[1]));
+      // the shift that clears the junction end (n is at len on A, at 0 on B), if the half has room for it
+      let shift = onA ? Math.min(0, len - clear - hi) : Math.max(0, clear - lo);
+      if (onA ? lo + shift < 0 : hi + shift > len) shift = 0;
+      for (const [i, o] of group.entries()) (onA ? keepA : keepB).push({ ...o, s: within(at[i] + shift, len) });
     }
     keepA.sort((x, y) => x.s - y.s); keepB.sort((x, y) => x.s - y.s);
     const sa = this.addSeg(s.a, n, subPath(path, 0, c.s).slice(1, -1), s.type, keepA, !!s.oneway);
@@ -956,6 +967,10 @@ export class Network {
     const probe: Stop = { id: 0, s: t, side, kind: 'layby', take: { pave: 0, lane: 0, land: 0, park: 0 } };
     const [s0, s1] = stopSpan(probe);
     if (s0 < this.nodeHalf(s.a) + 6 || s1 > L - this.nodeHalf(s.b) - 6) return { plans: [], reason: 'Too close to a junction or the end of the road — stops need about 35 m clear' };
+    // (a big junction reaches further along the road than its width: a bus stopping in its mouth
+    // would be past the stop line, or not yet out of the junction, and would miss the stop)
+    const range = this.stopRange?.(segId, side);
+    if (range && (t < range[0] || t > range[1])) return { plans: [], reason: 'Too close to the junction — a bus couldn’t pull up here clear of it' };
     if (s.stops.some((o) => o.side === side && stopSpan(o)[0] < s1 && stopSpan(o)[1] > s0)) return { plans: [], reason: 'There’s already a stop here' };
     const plans: StopPlan[] = [];
     const multi = def.lanes > 1;

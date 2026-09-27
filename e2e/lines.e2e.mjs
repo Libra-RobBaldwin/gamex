@@ -22,7 +22,7 @@ const none = await page.evaluate(() => ({ lines: window.proto.lines.list.length,
 if (none.lines || none.stops) fail('the game starts with stops or lines already built');
 await page.evaluate(() => {
   const P = window.proto, net = P.net;
-  for (const q of [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }]) {
+  for (const q of [{ x: -80, z: -50 }, { x: -110, z: 30 }, { x: 60, z: 100 }]) {
     const n = net.nearestSeg(q, 80, (s) => net.def(s).cls === 'road' && net.def(s).family !== 'Motorway' && net.def(s).family !== 'Rural');
     if (n) for (const side of [1, -1]) for (const d of [0, 15, -15, 30, -30]) { const { plans } = net.planStop(n.seg.id, n.s + d, side); const pl = plans.find((x) => x.ok && x.kind === 'kerb') ?? plans.find((x) => x.ok); if (pl) { net.addStop(n.seg.id, n.s + d, side, pl); break; } }
   }
@@ -60,9 +60,10 @@ await settle();
     const P = window.proto, c = P.shell.clearRect(), h = document.querySelector('#hint'), hb = h && !h.hidden ? h.getBoundingClientRect().top : c.bottom;
     return P.markers.places().map((m) => ({ id: m.id, ...P.toScreen(m.p) })).filter((s) => s.x < c.left + 20 || s.x > c.right - 20 || s.y < c.top + 20 || s.y > hb - 20).map((s) => `${s.id} at ${Math.round(s.x)},${Math.round(s.y)}`);
   });
-  ok(out.length === 0, `New line frames every stop clear of the chrome and the hint${out.length ? ` (${out.join('; ')})` : ''}`);
+  if (out.length) fail(`New line should frame every stop clear of the chrome and the hint: ${out.join('; ')}`);
+  else console.log('New line frames every stop clear of the chrome and the hint');
 }
-const targets = [{ x: -95, z: -290 }, { x: 0, z: 150 }, { x: 120, z: 0 }];
+const targets = [{ x: -80, z: -50 }, { x: -110, z: 30 }, { x: 60, z: 100 }];
 const pickOf = (q) => page.evaluate((q) => {
   const P = window.proto, places = P.markers.places();
   const b = places.map((m) => ({ m, d: Math.hypot(m.p.x - q.x, m.p.z - q.z) })).sort((a, b) => a.d - b.d)[0].m, s = P.toScreen(b.p);
@@ -89,6 +90,13 @@ await page.screenshot({ path: `${out}/m1-3-line-sheet.png` });
 const line = await page.evaluate(() => { const L = window.proto.lines.list; const l = L[L.length - 1]; return { id: l.id, stops: l.stops, seq: l.bus.seq, buses: window.proto.lines.buses(l) }; });
 console.log('new line', JSON.stringify(line));
 
+// a third bus, which starts close behind one of the two (the line spreads new buses by the golden
+// ratio: 0, 0.62, 0.24 of the way round), so the even-gaps rule has something to do
+const third = await page.evaluate(() => { const L = window.proto.lines.list, l = L[L.length - 1]; const c = window.proto.lines.addBus(l); return c ? c.id : null; });
+if (third === null) fail('a third bus could not be added'); else line.buses.push(third);
+const gapsAt = () => page.evaluate((id) => { const sp = window.proto.traffic.spacing(id); return { min: sp.buses.length ? Math.min(...sp.buses.map((b) => b.ahead)) : 0, at: sp.buses.map((b) => +b.at.toFixed(2)), holds: window.proto.traffic.stats.holds }; }, line.id);
+const gap0 = await gapsAt();
+console.log('gaps round the loop at the start', JSON.stringify(gap0));
 // run the clock at 4x and log every call
 await page.evaluate(() => {
   const T = window.proto.traffic, orig = T.onBusStop;
@@ -99,6 +107,14 @@ await page.evaluate(() => {
 await page.tap('.close').catch(() => {});
 // until every bus on it has made three calls (SwiftShader runs a few frames a second), or 4 minutes
 await page.waitForFunction((ids) => ids.every((id) => window.__calls.filter(([b]) => b === id).length >= 3), line.buses, { timeout: 240000, polling: 2000 }).catch(() => {});
+// even gaps: the rule engaged (a bus held at a stop for the one ahead to get away), and the
+// smallest gap between buses is no worse than where the third bus started. (A few sim minutes
+// on SwiftShader is too little to measure headways settling; traffic.spacing.test.ts does that
+// over twenty minutes: bunched buses end up calling at intervals within 30% of even.)
+const gap1 = await gapsAt();
+console.log('gaps round the loop at the end', JSON.stringify(gap1));
+if (gap1.holds === 0) fail('no bus held at a stop to even the gaps');
+if (gap1.min < gap0.min - 0.05) fail(`the smallest gap round the loop closed up: ${gap0.min.toFixed(2)} -> ${gap1.min.toFixed(2)}`);
 const res = await page.evaluate((line) => {
   const P = window.proto, placeOf = (id) => line.stops.findIndex((k) => P.traffic.place(k)?.stops.some((s) => s.id === id));
   const by = {};

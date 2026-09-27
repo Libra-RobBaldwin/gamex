@@ -66,6 +66,16 @@ describe('a road joined where a stop stands', () => {
     const again = w.traffic.place(r.pl.stops[0].id)!;
     expect(again.stops.length).toBe(r.pl.stops.length);
     for (const st of again.stops) { expect(st.s).toBeGreaterThan(0); expect(st.s).toBeLessThan(w.net.length(again.seg)); }
+    // moved clear of the new junction, as a new stop must be (the road's half-width and 6 m), the pair together
+    const { stopSpan } = await import('../roads');
+    const L = w.net.length(again.seg), half = w.net.half(again.seg), atA = w.net.segsAt(again.seg.a).length > 2, atB = w.net.segsAt(again.seg.b).length > 2;
+    for (const st of again.stops) {
+      const [s0, s1] = stopSpan(st);
+      if (atA) expect(s0, `stop ${st.id} clear of the junction at a`).toBeGreaterThanOrEqual(half + 6 - 1e-6);
+      if (atB) expect(L - s1, `stop ${st.id} clear of the junction at b`).toBeGreaterThanOrEqual(half + 6 - 1e-6);
+    }
+    const gap = Math.abs(again.stops[0].s - again.stops[1].s), was = Math.abs(r.pl.stops[0].s - r.pl.stops[1].s);
+    expect(gap).toBeCloseTo(was, 3);
     // and a road joined clear of every stop reports none, one across a stop's road at the stop reports it
     const { Network } = await import('../roads');
     const n = new Network();
