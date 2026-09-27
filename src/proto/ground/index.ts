@@ -11,7 +11,7 @@
 // slopes) and needs no painting: `new Ground().material` is a drop-in for a flat green material.
 // See docs/ground.md.
 import * as THREE from 'three';
-import { CoverMap, type Region } from './paint';
+import { CoverMap, type Region, type Spot } from './paint';
 import { Layout, type GroundInput, type XZ } from './layout';
 import type { FieldSource } from './plan';
 import { Occupancy, planHedges, type HedgeGroup } from './hedgerows';
@@ -110,21 +110,30 @@ export class Ground {
   change(input: GroundInput, boxes: Box[]) {
     const t0 = performance.now();
     if (!this.cover) { this.layout.setInput(input); return; }
-    const dirty: Box[] = [...boxes, ...this.layout.setInput(input, boxes)];
+    // (a plot at the fields' edge marks the town's band round it: that ground, and its hedges,
+    // change with it, `band`; in the town itself nothing round the plot changes)
+    const { changed, band, added } = this.layout.setInput(input, boxes);
+    const dirty: Box[] = [...boxes, ...band, ...changed];
     if (this.plants && dirty.length) {
-      // hedges within reach of the change (a hedge keeps 2 m off a plot), and wherever a gateway
-      // (painted as worn earth) came or went
-      const plan = dirty.map((b) => ({ x0: b.x0 - 8, z0: b.z0 - 8, x1: b.x1 + 8, z1: b.z1 + 8 }));
-      const occ = new Occupancy(input);
+      // hedges within reach of the change (a hedge keeps 2 m off a plot), in a field that became
+      // something else, and in the town's band round a plot at the fields' edge (they go; a band
+      // that only grew and has no hedge in it needs no planning), and wherever a gateway (painted
+      // as worn earth) came or went
+      const plan = [...boxes.map((b) => ({ x0: b.x0 - 8, z0: b.z0 - 8, x1: b.x1 + 8, z1: b.z1 + 8 })), ...changed];
+      for (const b of band) if (!added || this.hedgeIn(b)) plan.push(b);
+      const occ = this.occupancy(input);
       const gateBoxes: Box[] = [];
       let moved = false;
-      for (const b of plan) {
+      for (const b of merge(plan)) { // (a plot's box and its band lie together: planned once)
         for (const g of planHedges(this.layout, b, occ, true, this.clip())) {
           const was = this.groups.get(g.key);
           this.groups.set(g.key, g);
           if (was && same(was.pieces, g.pieces) && same(was.trees, g.trees) && same(was.gates, g.gates)) continue;
           moved = true;
-          for (const s of [...(was?.gates ?? []), ...g.gates]) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
+          // (a gateway that came or went is repainted; one that stayed where it was isn't)
+          const gate = (s: Spot, l: Spot[]) => l.some((o) => o.x === s.x && o.z === s.z && o.r === s.r && o.v === s.v);
+          for (const s of was?.gates ?? []) if (!gate(s, g.gates)) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
+          for (const s of g.gates) if (!was || !gate(s, was.gates)) gateBoxes.push({ x0: s.x - s.r, z0: s.z - s.r, x1: s.x + s.r, z1: s.z + s.r });
         }
       }
       dirty.push(...gateBoxes);
@@ -143,9 +152,37 @@ export class Ground {
     this.stats.change = performance.now() - t0;
   }
 
+  // is any hedge piece or gateway within a box (and a piece's reach, 5 m, round it)?
+  private hedgeIn(b: Box) {
+    const m = 5, x0 = b.x0 - m, z0 = b.z0 - m, x1 = b.x1 + m, z1 = b.z1 + m;
+    for (const g of this.groups.values()) {
+      for (const p of g.pieces) if (p.x >= x0 && p.x <= x1 && p.z >= z0 && p.z <= z1) return true;
+      for (const s of g.gates) if (s.x >= x0 && s.x <= x1 && s.z >= z0 && s.z <= z1) return true;
+    }
+    return false;
+  }
   // the painted map, less a few metres: hedges stay on it
   private clip() { const R = this.cover!.region, m = 5; return { x0: R.x0 + m, z0: R.z0 + m, x1: R.x0 + R.size - m, z1: R.z0 + R.size - m }; }
-  private replan(box: Box, occ = new Occupancy(this.layout.input), plant = true) {
+  // the hedges' occupancy (roads, plots, parks, water): kept while the roads, parks and water stay
+  // the same and the plots only grow (a repaint after one building adds that plot to it, rather
+  // than bucketing every plot in the town again)
+  private occ: { occ: Occupancy; blocked: unknown; parks: unknown; water: unknown; plots: Set<object> } | null = null;
+  private occupancy(input: GroundInput) {
+    const plots = input.plots ?? [], o = this.occ;
+    if (o && o.blocked === input.blocked && o.parks === input.parks && o.water === input.water) {
+      let kept = 0;
+      for (const p of plots) if (o.plots.has(p)) kept++;
+      if (kept === o.plots.size) {
+        const fresh = plots.filter((p) => !o.plots.has(p));
+        o.occ.extend(fresh.map((p) => p.poly));
+        for (const p of fresh) o.plots.add(p);
+        return o.occ;
+      }
+    }
+    this.occ = { occ: new Occupancy(input), blocked: input.blocked, parks: input.parks, water: input.water, plots: new Set(plots) };
+    return this.occ.occ;
+  }
+  private replan(box: Box, occ = this.occupancy(this.layout.input), plant = true) {
     const t0 = performance.now();
     for (const g of planHedges(this.layout, box, occ, true, this.clip())) this.groups.set(g.key, g);
     if (plant) this.plantAll();
