@@ -18,7 +18,7 @@ export interface GameWorld {
   industrial: (p: XZ) => boolean;
   parks?: () => { cells: XZ[]; size: number }[]; // leftover land the game landscaped (parks, verges): cell centres
   // what else stands on the ground (a 50 km map's places not live yet: worldmap/, drawn as scenery)
-  extra?: () => { plots: { poly: XZ[]; kind: 'garden' | 'yard' }[]; blocked: XZ[][] };
+  extra?: () => { plots: { poly: XZ[]; kind: 'garden' | 'yard' | 'track' }[]; blocked: XZ[][] }; // (and the live area's farm yards and tracks: game/country.ts)
 }
 
 // how many plots at the front of the queue show as building sites (bare earth, cleared)
