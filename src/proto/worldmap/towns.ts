@@ -9,6 +9,7 @@
 // A place is worked out whole, once (a city takes a few tens of milliseconds), and kept; a tile takes
 // the streets whose middles and the buildings whose centres fall in it, so every one is drawn once
 // and they meet seamlessly across tile borders. Pure: no three.js.
+import { PRIORS } from '../region/priors';
 import { ROADS, halfOf, kerbOf } from '../catalog';
 import { KINDS, layStreets, type Kind, type StreetCall } from '../region/generate';
 import { mix, rng, type Rand } from '../region/random';
@@ -17,7 +18,7 @@ import { ROUTE_HALF, type Route, type Rail } from './routes';
 import type { WorldPlan, WorldSettlement } from './plan';
 import { REAL_VERN, paletteOf, placeResolver, type Vern } from '../vernacular';
 
-export interface SceneStreet { path: XZ[]; kerb: number; half: number; role: StreetCall['role']; settlement: number }
+export interface SceneStreet { path: XZ[]; kerb: number; half: number; role: StreetCall['role']; settlement: number; along?: [number, number] }
 // A building: its footprint (centre, width along the street, depth, turn), eaves height, roof
 // (0 flat, else the ridge's height above the eaves, gable along the width), and its colours.
 export interface SceneBuilding { x: number; z: number; w: number; d: number; rot: number; h: number; ridge: number; wall: number; roof: number; kind: BKind; settlement: number; wc?: string; rc?: string } // (wc, rc: the place's own wall and roof colours, from vernacular.ts, over the indices)
@@ -71,7 +72,7 @@ class Occ {
 }
 
 // How "central" a spot is, in the town's metres (region/mapspec.ts centrality): what gets built there.
-const central: Record<Kind, (d: number) => number> = { town: (d) => d, city: (d) => d / 2, village: (d) => 70 + 1.2 * d };
+const central: Record<Kind, (d: number) => number> = { town: (d) => d, city: (d) => d / 2, village: (d) => 70 + 1.2 * d, hamlet: (d) => 180 + d };
 interface Spec { kind: BKind; w: [number, number]; d: [number, number]; h: [number, number]; setback: number; ridge: number; walls: number[]; roofs: number[]; back: number; gap: number }
 function specFor(c: number, kind: Kind, industrial: boolean, r: Rand): Spec {
   if (industrial) return { kind: 'shed', w: [26, 48], d: [22, 40], h: [7, 11], setback: 9, ridge: 0, walls: pickOf(r, [0, 1]) ? W.concrete : [10, 13], roofs: R.sheet, back: 8, gap: 8 };
@@ -79,7 +80,7 @@ function specFor(c: number, kind: Kind, industrial: boolean, r: Rand): Spec {
   if (c < 70) return { kind: 'shop', w: [6.5, 9], d: [12, 16], h: [7, 10], setback: 0.5, ridge: r() < 0.5 ? 3.5 : 0, walls: [...W.brick, ...W.render, ...W.buff], roofs: [...R.slate, ...R.tile], back: 6, gap: 0 };
   if (c < 115) return r() < (kind === 'city' ? 0.55 : 0.25) ? { kind: 'flats', w: [18, 28], d: [12, 16], h: [10, 16], setback: 3, ridge: 0, walls: [...W.brick, ...W.concrete, ...W.buff], roofs: R.flat, back: 10, gap: 5 } : { kind: 'terrace', w: [5, 6.2], d: [8, 10], h: [5.6, 6.4], setback: 2, ridge: 3, walls: [...W.brick, ...W.brick, ...W.render], roofs: R.slate, back: 11, gap: 0 };
   if (c < 170) return r() < 0.5 ? { kind: 'terrace', w: [5.2, 6.4], d: [8, 10], h: [5.4, 6.2], setback: 3, ridge: 3, walls: [...W.brick, ...W.render, ...W.buff], roofs: [...R.slate, ...R.tile], back: 14, gap: 0 } : { kind: 'house', w: [8, 10], d: [8, 10], h: [5.2, 5.8], setback: 5, ridge: 3.2, walls: [...W.brick, ...W.render], roofs: [...R.tile, ...R.slate], back: 16, gap: 2.5 };
-  return { kind: 'house', w: [9, 13], d: [8, 11], h: [5, 6], setback: 7, ridge: 3.4, walls: kind === 'village' ? [...W.brick, ...W.stone, ...W.render, ...W.buff] : [...W.brick, ...W.render, ...W.buff], roofs: [...R.tile, ...R.slate], back: 18, gap: 4 };
+  return { kind: 'house', w: [9, 13], d: [8, 11], h: [5, 6], setback: 7, ridge: 3.4, walls: kind === 'village' || kind === 'hamlet' ? [...W.brick, ...W.stone, ...W.render, ...W.buff] : [...W.brick, ...W.render, ...W.buff], roofs: [...R.tile, ...R.slate], back: 18, gap: 4 };
 }
 
 // the trunk routes and railways near a place, for keeping clear of
@@ -120,7 +121,7 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
   const { streets: calls, zone } = layStreets({ ...s, gates: [] }, plan.water, plan.half);
   const r = rng(mix(s.seed, 77));
   const occ = new Occ();
-  const streets: SceneStreet[] = calls.map((c) => { const d = ROADS[c.type] ?? ROADS.street; return { path: streetPath(c), kerb: kerbOf(d), half: halfOf(d), role: c.role, settlement: s.id }; });
+  const streets: SceneStreet[] = calls.map((c) => { const d = ROADS[c.type] ?? ROADS.street; return { path: streetPath(c), kerb: kerbOf(d), half: halfOf(d), role: c.role, settlement: s.id, along: c.along }; });
   for (const st of streets) occ.band(st.path, st.half + 0.5);
   for (const c of corridors(plan, s)) occ.band(c.path, c.half);
   // junctions: where two or more streets meet (their ends), a patch of carriageway over the crossing
@@ -151,20 +152,27 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
       return;
     }
   };
-  if (s.kind !== 'city') addChurch();
+  if (s.kind !== 'city' && s.kind !== 'hamlet') addChurch();
   // frontage: both sides of every street, in the order the streets were laid out (the centre first)
+  const prof = PRIORS.towns.housesPer100mByQuarter[s.kind === 'village' || s.kind === 'hamlet' ? 'village' : 'town'], mid = (prof[1] + prof[2]) / 2;
+  // the share of the middle's houses a radial keeps at `f` of its length: all to half way, then down
+  // through the measured third and last quarters, to 0.6 of the last quarter's at its end
+  const ribbon = (f: number) => { const k = [[0.5, 1], [0.625, Math.min(1, prof[2] / mid)], [0.875, prof[3] / mid], [1, (0.6 * prof[3]) / mid]]; if (f <= 0.5) return 1; for (let i = 1; i < k.length; i++) if (f <= k[i][0]) { const t = (f - k[i - 1][0]) / (k[i][0] - k[i - 1][0]); return k[i - 1][1] + (k[i][1] - k[i - 1][1]) * t; } return k[k.length - 1][1]; };
   for (const st of streets) {
     const P = st.path, L = P.reduce((t, p, i) => (i ? t + Math.hypot(p.x - P[i - 1].x, p.z - P[i - 1].z) : 0), 0);
     if (L < 25) continue;
     for (const side of [1, -1]) {
-      let at = 12; // (clear of the junction at the start)
+      let at = s.kind === 'hamlet' ? 6 : 12; // (clear of the junction at the start; a hamlet's lane is short, its houses come right up to its bends)
       let row: Spec | null = null, rowLeft = 0, rowH = 0, rowWall = 0, rowRoof = 0;
-      while (at < L - 12) {
+      while (at < L - (s.kind === 'hamlet' ? 6 : 12)) {
         const p = pointAt(P, at);
         const c = central[s.kind](Math.hypot(p.x - s.x, p.z - s.z));
         const industrial = st.role === 'industrial' || inZone(p);
         // (a village thins out into the country: gaps between the houses further out)
-        if (s.kind === 'village' && c > 170 && r() < 0.35) { at += 14; row = null; continue; }
+        if ((s.kind === 'village' || s.kind === 'hamlet') && c > 170 && r() < (s.kind === 'hamlet' ? 0.25 : 0.35)) { at += 14; row = null; continue; }
+        // (and a ribbon thins out along its radial, to half the middle's houses over the last
+        // quarter and fewer at its end: PRIORS.towns.housesPer100mByQuarter)
+        if (st.along && r() > ribbon(st.along[0] + (st.along[1] - st.along[0]) * (at / L))) { at += 14; row = null; continue; }
         let sp: Spec;
         if (row && rowLeft > 0) sp = row;
         else {
@@ -173,7 +181,7 @@ function makeScene(plan: WorldPlan, s: WorldSettlement): Scene {
           else row = null;
         }
         const w = sp.w[0] + r() * (sp.w[1] - sp.w[0]), d = sp.d[0] + r() * (sp.d[1] - sp.d[0]);
-        if (at + w > L - 12) break;
+        if (at + w > L - (s.kind === 'hamlet' ? 6 : 12)) break;
         const q = pointAt(P, at + w / 2), off = st.half + sp.setback + d / 2;
         const x = q.x + (-q.uz * side) * off, z = q.z + (q.ux * side) * off, rot = Math.atan2(q.uz, q.ux);
         const ok = occ.rect(x, z, w, d, rot, false, sp.gap > 0 ? 0.6 : 0.05) && !wet({ x, z });

@@ -28,7 +28,7 @@ defaults become:
 
 ## Settlements' streets and links (`generate.ts`)
 
-- **`KINDS`:** how big a city, a market town and a village is, its block spacing, and the road types of
+- **`KINDS`:** how big a city, a market town, a village and a hamlet is, its block spacing, and the road types of
   its high street, main cross street, side streets and industrial edge.
 - **`layStreets(s, water, bound)`:** one settlement's streets as `net.build` calls, grown along its
   radials as real places are (`PRIORS.towns`, measured by `tools/os/towns.mjs`): the high street's two
@@ -36,9 +36,19 @@ defaults become:
   30–40° of another and each starting on a high-street node a block or two off the middle (a T, not one
   great crossroads); the houses run further out along the radials than between them; cross streets join
   neighbouring radials part way out; side streets and closes branch off every radial at the measured rate
-  and lengths, through side streets on one side joined end to end by a back street; an organic plan
-  wanders and bends, a grid plan runs square. No street crosses another: one that would meet a radial
-  ends on it as a T, one that would cross another street or run within 25 m of its node is left out. The
+  and lengths, through side streets on one side joined end to end by a back street. Every radial bends
+  as real ones do, grid plan or not (`PRIORS.towns` `radialTurnInsideDegPerKm`,
+  `radialWanderInsideDegPer100m`): a steady drift one way and a curvature that carries over from block
+  to block and wanders, drawn from a random stream of their own (`rng(mix(seed, 41))`, so the rest of
+  the layout's draws are what they were before radials bent); the high street runs straight through the
+  middle; a radial that would cross one laid before it ends at the block before. An organic plan's side
+  streets wander too, a grid plan's run square. No street crosses another: one that would meet a
+  radial or a street already laid ends on it as a T; one that would meet it too flat for a junction, or
+  within 40 m, or pass within 25 m of another street's node, ends 25–30 m short of it as a close, if
+  that leaves it 40 m, else it is left out. The scenery thins the houses along a radial to the measured
+  profile (`worldmap/towns.ts`, `housesPer100mByQuarter`: all of the middle's to half way out, half over
+  the last quarter, fewer at the end), knowing where a piece lies along its radial from the street
+  call's `along`. The
   city's and the towns' industrial estate is a small grid of wide blocks beside one radial's outer end,
   its way in a T off the radial (with a zone rule). Streets that would touch water or leave the map are
   dropped, and the rest come out in the order they're reached from the centre along the streets, so every
@@ -53,8 +63,13 @@ defaults become:
   measured by `tools/os/exits.mjs`). `docs/reports/os/seeded-vs-real.md` puts the seeded places on the
   real towns' yardsticks.
 - **`suggestLinks(settlements, water)`:** which places to join: A roads on the Gabriel graph of the cities
-  and towns, B roads bringing each village in by its two shortest links, and whatever keeps everywhere
-  reachable. `worldmap/routes.ts` turns them into the lanes of a seeded start.
+  and towns; B roads on the Gabriel graph of everything, a town or city taking every neighbour's, a
+  village up to four, a hamlet two (`PRIORS.exits.minorPerPlace`: a real town has about eight B roads
+  and lanes out of it, a village four); a town or village still short of its share takes lanes to its
+  nearest neighbours, nearest first, within 6 km, none through a third place, none to a place already a
+  lane over its share, and none within 12° of a lane it already has (that one would fork off it outside,
+  a fan); and whatever keeps everywhere reachable. `worldmap/routes.ts` turns them into the lanes of a
+  seeded start: towns come out with 11–12 ways out on three seeds (real 11), villages 4 (real 5).
 - **`reach(kind, r)`:** how far a settlement's land reaches, built-up area and industrial edge.
 
 ## Names (`names.ts`)

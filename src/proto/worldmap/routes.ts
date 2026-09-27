@@ -187,7 +187,8 @@ class LaneFinder {
       if (bad[k]) return bad[k] < 0;
       const x = x0 + i * C, z = x0 + j * C;
       let no = Math.abs(x) > c.half - 20 && !(i === ti && j === tj) || this.water(i, j) < 0;
-      if (!no) for (const s of c.grid.near(x, z)) if (!serves.includes(s.id) && Math.hypot(x - s.x, z - s.z) < s.reach + P.keep) { no = true; break; }
+      // (a hamlet is a few houses: a trunk road keeps off it only as a lane would, not by its own margin)
+      if (!no) for (const s of c.grid.near(x, z)) if (!serves.includes(s.id) && Math.hypot(x - s.x, z - s.z) < s.reach + (s.kind === 'hamlet' ? PROFILES.B.keep : P.keep)) { no = true; break; }
       // (motorways keep out of the live play area round the start town: its roads are the player's to join them to)
       if (!no && P.live && Math.max(Math.abs(x), Math.abs(z)) < LIVE_HALF + 500) no = true;
       if (!no && Math.abs(z) > c.half - 20 && !(i === ti && j === tj)) no = true;

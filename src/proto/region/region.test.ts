@@ -42,13 +42,13 @@ describe('a settlement’s streets', () => {
 
   test('each kind has its own layout: a high street, residential streets, an industrial edge for the city and towns', () => {
     for (const seed of SEEDS) {
-      const p = plan(seed), count: Record<string, number[]> = { city: [], town: [], village: [] };
+      const p = plan(seed), count: Record<string, number[]> = { city: [], town: [], village: [], hamlet: [] };
       let estates = 0, bigger = 0;
       for (const s of p.settlements) {
         const { streets, zone } = streetsOf(s, p);
         expect(streets.filter((t) => t.role === 'high').length).toBeGreaterThanOrEqual(2);
-        expect(streets.filter((t) => t.role === 'street').length).toBeGreaterThanOrEqual(s.kind === 'village' ? 1 : 10);
-        if (s.kind === 'village') expect(zone).toBeNull();
+        expect(streets.filter((t) => t.role === 'street').length).toBeGreaterThanOrEqual(s.kind === 'hamlet' ? 0 : s.kind === 'village' ? 1 : 10);
+        if (s.kind === 'village' || s.kind === 'hamlet') expect(zone).toBeNull();
         else {
           bigger++;
           // (an estate where there's dry room for one: three rows of wide blocks off a radial)
@@ -61,6 +61,7 @@ describe('a settlement’s streets', () => {
       const mean = (a: number[]) => a.reduce((t, v) => t + v, 0) / Math.max(1, a.length);
       if (count.city.length) expect(mean(count.city)).toBeGreaterThan(mean(count.town));
       expect(mean(count.town)).toBeGreaterThan(mean(count.village));
+      expect(mean(count.village)).toBeGreaterThan(mean(count.hamlet)); // (a hamlet: its lane through, a close at most)
     }
   });
 
@@ -91,17 +92,23 @@ describe('the roads out of a place (PRIORS.exits: as real roads leave real place
   const heading = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.atan2(b.z - a.z, b.x - a.x);
   const norm = (a: number) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
   test('every settlement has its ways out: its radials’ ends, the high street’s two among them, each facing out', () => {
+    const off: number[] = [];
     for (const seed of SEEDS) for (const s of plan(seed).settlements) {
       expect(s.spokes!.length).toBeGreaterThanOrEqual(2);
       expect(s.spokes!.length).toBeLessThanOrEqual(8);
       expect(s.gates).toEqual(s.spokes!.filter((k) => k.along === 'high').map(({ x, z }) => ({ x, z })));
       for (const k of s.spokes!) {
         expect(Math.hypot(k.ux, k.uz)).toBeCloseTo(1, 6);
-        // (facing away from the centre: within 45° of the line out from it)
+        // (facing away from the centre: a radial bends on its way out, so its end is off the line
+        // out from the middle, as a real road's last 400 m is, PRIORS.exits.insideOffCentreDeg:
+        // 29° at the median, 88° at the 90th)
         const out = Math.atan2(k.z - s.z, k.x - s.x);
-        expect(Math.abs(deg(norm(Math.atan2(k.uz, k.ux) - out)))).toBeLessThan(45);
+        off.push(Math.abs(deg(norm(Math.atan2(k.uz, k.ux) - out))));
+        expect(off[off.length - 1]).toBeLessThan(90);
       }
     }
+    off.sort((p, q) => p - q);
+    expect(off[Math.floor(off.length / 2)]).toBeLessThan(45);
   });
   test('each lane leaves by the spoke facing where it goes, straight out along its street, and bends only once clear of the place', () => {
     const turns: number[] = [];
@@ -161,22 +168,32 @@ describe('suggested links', () => {
       const parent = ss.map((_, i) => i), find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
       for (const l of links) parent[find(l.a)] = find(l.b);
       expect(new Set(ss.map((s) => find(s.id))).size).toBe(1);
-      const major = ss.filter((s) => s.kind !== 'village');
+      const major = ss.filter((s) => s.kind !== 'village' && s.kind !== 'hamlet');
       for (const l of links) {
         const a = ss[l.a], b = ss[l.b], m = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
-        expect(l.road).toBe(a.kind === 'village' || b.kind === 'village' ? 'B' : 'A');
-        // Gabriel: nobody of its tier inside the circle on the link
+        expect(l.road).toBe(a.kind === 'village' || b.kind === 'village' || a.kind === 'hamlet' || b.kind === 'hamlet' ? 'B' : 'A');
+        // Gabriel (nobody of its tier inside the circle on the link), or a top-up lane to a near
+        // neighbour that runs through no third place (PRIORS.exits.minorPerPlace)
         const tier = l.road === 'A' ? major : ss;
-        for (const c of tier) if (c !== a && c !== b) expect(Math.hypot(c.x - m.x, c.z - m.z)).toBeGreaterThanOrEqual(l.length / 2 - 1);
+        const gabriel = tier.every((c) => c === a || c === b || Math.hypot(c.x - m.x, c.z - m.z) >= l.length / 2 - 1);
+        if (!gabriel) {
+          expect(l.length).toBeLessThanOrEqual(6000);
+          for (const c of ss) if (c !== a && c !== b) { const t = ((c.x - a.x) * (b.x - a.x) + (c.z - a.z) * (b.z - a.z)) / (l.length * l.length); if (t > 0 && t < 1) expect(Math.hypot(a.x + (b.x - a.x) * t - c.x, a.z + (b.z - a.z) * t - c.z)).toBeGreaterThanOrEqual(c.r + 150 - 1); }
+        }
         expect(links.filter((k) => (k.a === l.a && k.b === l.b) || (k.a === l.b && k.b === l.a))).toHaveLength(1);
       }
-      // every city and town has an A road; every village a B road, and at most a few
+      // every city and town has an A road, and as many ways out as a real town (PRIORS.exits.perPlace:
+      // 7–15) at the median; every village a B road, and about four (a real village's lanes)
       for (const s of major) expect(links.some((l) => l.road === 'A' && (l.a === s.id || l.b === s.id))).toBe(true);
-      for (const s of ss.filter((x) => x.kind === 'village')) {
-        const n = links.filter((l) => l.a === s.id || l.b === s.id).length;
-        expect(n).toBeGreaterThanOrEqual(1);
-        expect(n).toBeLessThanOrEqual(6);
-      }
+      const ways = (s: Settlement) => links.filter((l) => l.a === s.id || l.b === s.id).length;
+      const med = (xs: number[]) => [...xs].sort((p, q) => p - q)[Math.floor(xs.length / 2)];
+      const towns = ss.filter((x) => x.kind === 'town');
+      expect(med(towns.map(ways))).toBeGreaterThanOrEqual(PRIORS.exits.perPlace.town[0]);
+      expect(med(towns.map(ways))).toBeLessThanOrEqual(PRIORS.exits.perPlace.town[4]);
+      const villages = ss.filter((x) => x.kind === 'village');
+      expect(med(villages.map(ways))).toBeGreaterThanOrEqual(3);
+      for (const s of villages) { expect(ways(s)).toBeGreaterThanOrEqual(1); expect(ways(s)).toBeLessThanOrEqual(6); }
+      for (const s of ss.filter((x) => x.kind === 'hamlet')) expect(ways(s)).toBeLessThanOrEqual(3);
     }
   }, 30000);
 });

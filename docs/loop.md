@@ -108,8 +108,13 @@ the screenshots, and frame time no worse than before the milestone at the same q
     offices. It needs a decision, so it's not merged. It doesn't affect the game's single town.
   - Growth is judged for the whole town, not per district.
   - The "Stop catchments" layer is still off: a 400 m catchment covers the whole invented town.
-  - Money is generous: a busy line makes about four times its running costs. Tune it after
-    playing.
+  - Money is generous by design: a busy line makes about four times its running costs. Tuned
+    after play round 2 (27 Sep): a two-decker line carrying 380 riders a town-day took £22,900 a
+    game day against £2,600 running (eight times), so a bus's running cost is doubled
+    (`RUNNING` in `game/money.ts`: a decker £2,600 a game day) and the start balance is
+    £250,000, not £400,000, so a railway (£520,000 for two stations and a train) is saved up
+    for over two or three weeks of game days rather than affordable in the second. The fare
+    stays £2 a rider. The next playthrough judges it.
 
 ## Estimates
 
