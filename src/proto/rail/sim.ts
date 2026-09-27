@@ -18,7 +18,8 @@ import { LevelCrossing, type CrossingSite } from './crossing';
 // The same shape as a bus line (game/lines.ts): stops in order, looping or there and back. Here the
 // stops are stations, and `depot` names the station whose siding the line's trains come from.
 // (`other`: run by another company, through the map between its ways off (game/portals.ts): not the player's)
-export interface RailLine { id: number; num: number; stops: number[]; loop: boolean; offer?: string; depot?: number; colour?: string; other?: string }
+// (`spacing`: false when the line's even-gaps switch is off, see holdOn; on otherwise)
+export interface RailLine { id: number; num: number; stops: number[]; loop: boolean; offer?: string; depot?: number; colour?: string; other?: string; spacing?: boolean }
 export function callOrder(stops: number[], loop: boolean) { return loop || stops.length < 3 ? [...stops] : [...stops, ...stops.slice(1, -1).reverse()]; }
 
 export type TrainState = 'run' | 'dwell' | 'held';
@@ -30,17 +31,21 @@ export interface Train {
   state: TrainState; dwell: number; dwellFor: number; doors: 0 | 1; doorSide: 1 | -1; // doors: open on the left (+1) or right of the way it's facing
   flipped: boolean; // the driver has changed ends: its first car is now at the back
   waited: number; replanAt: number; station?: number; // standing at this station
+  lastCall?: { k: number; t: number }; // its last call: which of the line's calls, and when (for the even-gaps rule)
+  holdSince?: number; heldLeg?: number; // holding at this platform to open the gap to the train ahead (sim time the hold began); the call it last held at
   held: Set<number>;
   dress?: unknown; // how the game draws it (game/fleet.ts)
   calls: number; // calls made
 }
-export interface CallEvent { train: number; line: number; station: number; t: number }
+export interface CallEvent { train: number; line: number; station: number; call: number; t: number } // (call: which of the line's calls, in callOrder)
 const LA_MIN = 250; // reserve at least this far ahead
 const PLAT_MPH = 40, DEPOT_MPH = 15, POINTS_MPH = 50;
 const DWELL = 15; // seconds at a platform, before anyone boards (onCall adds to it)
 const REVERSE_COST = 400;
 export const SIGNAL_BACK = 12; // a signal stands this far short of the end of its block (clear of the points beyond)
 const STOP_BACK = 2; // a train calling draws up this far short of the platform's end
+const HOLD_MAX = 60; // seconds a train will hold at a platform to let the train ahead of it get away
+const HOLD_LOOK = 4; // seconds between looks, while holding, at whether the train ahead is far enough away yet
 
 export class RailSim {
   owner: Int32Array;
@@ -53,7 +58,11 @@ export class RailSim {
   crossingSites: CrossingSite[] = [];
   time = 0;
   log: CallEvent[] = [];
-  stats = { redPassed: 0, reservations: 0, calls: 0, replans: 0 };
+  stats = { redPassed: 0, reservations: 0, calls: 0, replans: 0, holds: 0 };
+  // how long each of a line's legs takes (call to next call, dwell included), by line id: measured
+  // as its trains run them, estimated from the planned route until one has
+  private legT = new Map<number, (number | undefined)[]>();
+  private legEst = new Map<number, (number | undefined)[]>();
   // is the road over this crossing clear of vehicles? (the traffic says; nothing on it in tests)
   roadClear: (c: CrossingSite) => boolean = () => true;
   // a train has pulled up at a platform: how long it should stand (the crowds board it)
@@ -172,6 +181,7 @@ export class RailSim {
   removeLine(line: RailLine) {
     for (const t of [...this.trains, ...this.pending.map((p) => p.train)]) if (t.line === line) this.removeTrain(t);
     this.lines = this.lines.filter((l) => l !== line);
+    this.legT.delete(line.id); this.legEst.delete(line.id);
   }
   removeTrain(t: Train) {
     this.trains = this.trains.filter((x) => x !== t);
@@ -423,6 +433,13 @@ export class RailSim {
   private step(t: Train, dt: number, want: Set<number>) {
     if (t.state === 'dwell') {
       t.dwell += dt;
+      // its boarding done (the doors would shut now): hold on, doors open, while the train ahead
+      // on its line is too close (holdOn), looking again every few seconds; then the doors shut and it's off
+      if (t.dwell >= t.dwellFor - 3 && (t.holdSince !== undefined || t.heldLeg !== t.leg)) {
+        if (this.holdOn(t)) { if (t.holdSince === undefined) { t.holdSince = this.time; this.stats.holds++; } t.dwellFor = t.dwell + 3 + HOLD_LOOK; }
+        else if (t.holdSince !== undefined) { t.holdSince = undefined; t.heldLeg = t.leg; }
+        else t.heldLeg = t.leg;
+      }
       t.doors = t.dwell > 1 && t.dwell < t.dwellFor - 3 ? 1 : 0;
       if (t.dwell < t.dwellFor) return;
       t.doors = 0;
@@ -430,6 +447,7 @@ export class RailSim {
       t.state = 'held';
       t.station = undefined;
       if (!this.plan(t)) { t.leg--; t.state = 'dwell'; t.dwell = t.dwellFor - 2; t.station = t.stop?.station ?? this.stationAt(t); return; }
+      this.estimateLeg(t);
     }
     if (t.state === 'held') {
       if (!t.route.length && !t.stop && this.time >= t.replanAt) { t.replanAt = this.time + 5; this.plan(t); }
@@ -480,13 +498,90 @@ export class RailSim {
       t.doorSide = ((fp2.plat?.side ?? 1) * this.front(t).dir) as 1 | -1;
       t.dwellFor = Math.max(8, DWELL + (this.onCall?.(t, st, t.doorSide) ?? 0));
       this.stats.calls++;
-      this.log.push({ train: t.id, line: t.line?.id ?? 0, station: st, t: this.time });
+      const k = t.line ? t.leg % callOrder(t.line.stops, t.line.loop).length : 0;
+      if (t.line && t.lastCall && (t.lastCall.k + 1) % callOrder(t.line.stops, t.line.loop).length === k) this.noteLeg(this.legT, t.line, t.lastCall.k, this.time - t.lastCall.t);
+      t.lastCall = { k, t: this.time };
+      this.log.push({ train: t.id, line: t.line?.id ?? 0, station: st, call: k, t: this.time });
       if (this.log.length > 2000) this.log.splice(0, 1000);
       this.dropHeld(t);
       return;
     }
     // held at a signal a long while: look for another way (another platform)
     if (t.waited > 20 && this.time >= t.replanAt) { t.replanAt = this.time + 10; if (t.resv === 0) this.plan(t); }
+  }
+
+  // ---------- even gaps (anti-bunching) ----------
+  // A line's cycle in time: how long each leg (one call to the next, its dwell included) takes.
+  // Measured as the line's trains run it; until a leg has been run, estimated from its planned
+  // route at two thirds of line speed plus a dwell; a leg with neither takes the mean of the rest.
+  private noteLeg(m: Map<number, (number | undefined)[]>, l: RailLine, k: number, secs: number) {
+    const n = callOrder(l.stops, l.loop).length;
+    let a = m.get(l.id);
+    if (!a || a.length !== n) { a = new Array<number | undefined>(n).fill(undefined); m.set(l.id, a); }
+    a[k] = m === this.legT && a[k] !== undefined ? a[k]! * 0.5 + secs * 0.5 : secs;
+  }
+  private estimateLeg(t: Train) {
+    if (!t.line || !t.stop) return;
+    const n = callOrder(t.line.stops, t.line.loop).length, k = (t.leg - 1 + n) % n;
+    if (this.legEst.get(t.line.id)?.[k] !== undefined) return;
+    let d = this.piece(this.front(t)).len - t.u, mph = 0;
+    for (const s of t.route) { const p = this.piece(s); d += p.len; mph = Math.max(mph, p.mph); }
+    d += t.stop.k >= 0 ? t.stop.u - this.piece(t.route[t.route.length - 1]).len : 0;
+    const v = trainSpeed(t.def, { mph: mph || 60, rack: false } as RoadDef, 0) * 0.67;
+    this.noteLeg(this.legEst, t.line, k, Math.max(1, d) / Math.max(1, v) + DWELL);
+  }
+  private legTimes(l: RailLine): number[] | null {
+    const n = callOrder(l.stops, l.loop).length, m = this.legT.get(l.id), e = this.legEst.get(l.id);
+    const legs: (number | undefined)[] = [];
+    for (let k = 0; k < n; k++) legs.push(m?.[k] ?? e?.[k]);
+    const known = legs.filter((x): x is number => x !== undefined);
+    if (!known.length) return null;
+    const mean = known.reduce((a, b) => a + b, 0) / known.length;
+    return legs.map((x) => x ?? mean);
+  }
+  // Where each of a line's trains is round its cycle (0 to 1, from the first call, in time), and
+  // the gaps to the trains ahead of and behind each, as fractions of the cycle. A train at a
+  // platform is at its call; one running is past its last call by the time since. For the line's
+  // sheet and the spacing rule; empty until a leg of the line has been planned or run.
+  spacing(l: RailLine): { cycle: number; trains: { id: number; at: number; ahead: number; behind: number; holding: boolean }[] } {
+    const on = this.trains.filter((t) => t.line === l), legs = this.legTimes(l);
+    if (!on.length || !legs) return { cycle: 0, trains: [] };
+    const n = legs.length, start = [0];
+    for (const x of legs) start.push(start[start.length - 1] + x);
+    const cycle = start[n] || 1;
+    const pos = on.map((t) => {
+      const lc = t.lastCall;
+      let p = start[t.leg % n];
+      if (t.state !== 'dwell' && lc) p = start[lc.k] + Math.min(this.time - lc.t, legs[lc.k] * 0.999);
+      return { id: t.id, at: (p % cycle) / cycle, ahead: 1, behind: 1, holding: t.holdSince !== undefined };
+    });
+    for (const b of pos) {
+      let fwd = 1, back = 1;
+      for (const o of pos) {
+        if (o === b) continue;
+        let g = (o.at - b.at + 1) % 1, h = (b.at - o.at + 1) % 1;
+        // (two trains at the very same place, as when both start at one station: the lower id counts as the one ahead)
+        if (g < 1e-9 || h < 1e-9) { if (o.id < b.id) { g = 0; h = 1; } else { g = 1; h = 0; } }
+        if (g < fwd) fwd = g;
+        if (h < back) back = h;
+      }
+      if (on.length > 1) { b.ahead = fwd; b.behind = back; }
+    }
+    return { cycle, trains: pos };
+  }
+  // Should this train, its dwell done, hold on at the platform? Only on a line with spacing on,
+  // once per call, only while the train ahead is closer than the line's even spacing (half the
+  // cycle with two trains, a third with three) and closer than the train behind (holding for a
+  // leader while a follower closes in only moves the bunch), and for at most HOLD_MAX seconds in all. A hold is bounded, so it can never lock a line up: the train behind waits at
+  // its signal a minute at the worst.
+  private holdOn(t: Train) {
+    const l = t.line;
+    if (!l || l.spacing === false || t.heldLeg === t.leg) return false;
+    if (t.holdSince !== undefined && this.time - t.holdSince >= HOLD_MAX) return false;
+    const sp = this.spacing(l), me = sp.trains.find((x) => x.id === t.id);
+    if (!me || sp.trains.length < 2) return false;
+    const want = 1 / sp.trains.length;
+    return me.ahead < want - 1e-6 && me.ahead < me.behind;
   }
 
   // ---------- the track changed ----------

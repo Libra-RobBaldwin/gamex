@@ -899,15 +899,15 @@ export class Traffic {
     return { loop: total, buses: pos };
   }
   // Should this bus, its dwell done, hold on at the stop? Only on a line with spacing on, only
-  // while the bus ahead is closer than a third of the loop (or the line's even spacing, when it
-  // runs more than three buses) and closer than the bus behind (holding for a leader while a
-  // follower closes in only moves the bunch), and for at most HOLD_MAX seconds in all.
+  // while the bus ahead is closer than the line's even spacing (half the loop with two buses, a
+  // third with three) and closer than the bus behind (holding for a leader while a follower
+  // closes in only moves the bunch), and for at most HOLD_MAX seconds in all.
   private holdOn(c: Car, now: number) {
     if (!c.line || c.line.spacing === false || c.line.seq.length < 2) return false;
     if (c.heldSince !== undefined && now - c.heldSince >= HOLD_MAX * 1000) return false;
     const sp = this.spacing(c.line.id), me = sp.buses.find((b) => b.id === c.id);
     if (!me || sp.buses.length < 2 || sp.loop < 50) return false;
-    const want = Math.min(1 / 3, 1 / sp.buses.length);
+    const want = 1 / sp.buses.length;
     return me.ahead < want - 1e-6 && me.ahead < me.behind;
   }
   // A line's calls changed (a stop lost): each of its buses goes on to the same call, or the next

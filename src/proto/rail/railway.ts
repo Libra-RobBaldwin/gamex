@@ -177,6 +177,9 @@ export class Railway {
   addTrain(l: RailLine, def: TrainDef, dress?: unknown): Train | string { return this.sim.addTrain(def, l, dress); }
   removeTrain(t: Train) { this.sim.removeTrain(t); }
   trainsOn(l: RailLine) { return this.trains.filter((t) => t.line === l); }
+  // Even gaps: a train holds at a platform while the one ahead of it is too close (sim.ts holdOn). On unless turned off.
+  spacing(l: RailLine) { return l.spacing !== false; }
+  setSpacing(l: RailLine, on: boolean) { if (on) delete l.spacing; else l.spacing = false; }
   calls(l: RailLine) { return callOrder(l.stops, l.loop); }
   // Give a station a depot siding if it hasn't one and there's room past either end of its platforms.
   private depotFor(id: number): number | undefined {
