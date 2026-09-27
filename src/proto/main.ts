@@ -1551,7 +1551,7 @@ function renderBar() {
   if (slipPlan) { renderSlipBar(slipPlan); return; }
   const c = draftCheck;
   const n = c.clears.length;
-  const kind = ctrlOf(draft) ? 'Curved road' : 'New road';
+  const kind = mode === 'rail' ? (ctrlOf(draft) ? 'Curved railway' : 'New railway') : ctrlOf(draft) ? 'Curved road' : 'New road';
   const demo = n ? demolitionSummary(c.clears) : null;
   const pr = c.profile;
   const lift = pr && pr.maxY > 0.05
