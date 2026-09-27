@@ -2132,7 +2132,20 @@ function peopleIn(st: SettlementInfo) {
 const goTo = (st: SettlementInfo) => { closeSheet(); focusOn(st, Math.max(260, st.r * 2.6)); };
 // (a 50 km map: every place on it, those not live yet with the coarse economy's figures: worldmap/econ.ts)
 const PLACES = worldGame ? worldGame.infos : MAP.settlements;
-const countIn = (st: SettlementInfo) => (worldGame && !worldGame.towns.places.some((q) => q.id === st.id && q.live) ? worldGame.people(st.id, clock / 1440) : peopleIn(st));
+// A place not yet live shows the coarse economy's figure scaled by what the live places show: the
+// people in their built homes against their plan population (the plan says 7,500 for a town whose
+// homes hold about 2,200), so a place's count doesn't jump the moment it comes to life (the review).
+let liveRatioAt = -1, liveRatio = 1;
+function coarseScale() {
+  if (!worldGame || !WORLD) return 1;
+  if (performance.now() - liveRatioAt < 4000) return liveRatio;
+  liveRatioAt = performance.now();
+  let built = 0, plan = 0;
+  for (const q of worldGame.towns.places) { if (!q.live) continue; const st = MAP.settlements.find((x) => x.id === q.id); if (!st) continue; built += peopleIn(st); plan += worldGame.people(q.id, clock / 1440); }
+  liveRatio = built > 0 && plan > 0 ? Math.min(1, built / plan) : 1;
+  return liveRatio;
+}
+const countIn = (st: SettlementInfo) => (worldGame && !worldGame.towns.places.some((q) => q.id === st.id && q.live) ? Math.round(worldGame.people(st.id, clock / 1440) * coarseScale()) : peopleIn(st));
 // a sign at each way off the map; tapped, what flows through it (game/portals.ts)
 let portalSigns: PortalSigns | null = null, showPortalRef: ((p: Portal) => void) | null = null;
 const placeLabels = PLACES.length > 1 ? new PlaceLabels($('#ui'), PLACES, { toScreen, onPick: goTo, count: countIn }) : null;
