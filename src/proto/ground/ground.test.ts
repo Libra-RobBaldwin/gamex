@@ -133,7 +133,7 @@ describe('painting', () => {
     expect(pools(big)).toBe(0);
     small.dispose(); big.dispose();
   });
-  it('keeps a field the town has only reached, painted as town within 30 m of the plots and unhedged there', () => {
+  it('keeps a field the town has only reached, painted as town in the band round its plots and unhedged there', () => {
     // (a row of gardens along one side of a field, as a ribbon of houses at a town's ragged edge)
     const A = town(), B = { ...A, plots: [...A.plots!] };
     const gardens: XZ[] = [];
@@ -144,14 +144,14 @@ describe('painting', () => {
     const f = L.fieldAt(-240, 400), inf = L.about(f);
     expect(inf.kind === 'arable' || inf.kind === 'grass').toBe(true); // (still a field: the gardens reach it, they don't cover it)
     expect(inf.mixed).toBe(true);
-    expect(L.townAt(-240, 345)).toBe(true); // (within 30 m of the gardens)
-    expect(at(-240, 345).field).toBe(0);
-    expect(at(-240, 345).lawn).toBeGreaterThan(0.3);
+    expect(L.townAt(-240, 331)).toBe(true); // (just past the gardens' back fence: in the band)
+    expect(at(-240, 331).field).toBe(0);
+    expect(at(-240, 331).lawn).toBeGreaterThan(0.2);
     // (further into the field, if it's still the same field: its crop)
     const far = L.fieldAt(-240, 420);
     if (far === f && !L.townAt(-240, 420)) expect(at(-240, 420).field).toBeGreaterThan(0.5);
-    // no hedge piece within 30 m of the gardens
-    for (const h of g.hedgeList().pieces) for (const q of gardens) expect(Math.hypot(h.x - q.x, h.z - q.z)).toBeGreaterThan(24);
+    // no hedge piece in the band round the gardens
+    for (const h of g.hedgeList().pieces) for (const q of gardens) expect(Math.hypot(h.x - q.x, h.z - q.z)).toBeGreaterThan(16);
     g.dispose();
   });
   it('is deterministic', () => {

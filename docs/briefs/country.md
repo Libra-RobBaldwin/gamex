@@ -74,10 +74,13 @@ https://claude.ai/code/session_01NoR4Fo844FXMiY63oVBeCU (docs/briefs/PLAN.md, de
     of mown "town" lay round the whole built area, because a field became town once 15% of it lay within
     30 m of a plot, and every plot still in the queue (68, out to 480 m) marked the town round it. Now: a
     field turns town only once half of it is built over; a field the town has reached stays a field, and the
-    ground within 30 m of the plots is painted as town texel by texel (`Layout.townAt`) with no hedge through
-    it, so the crops run up to the back gardens; and only the next four plots in the queue (the building
-    sites) mark the town, not the whole queue. A repaint after a plot reaches 52 m round it (`TOWN_REACH`)
-    so it stays exact. Screenshots at 700 m, 350 m and 2 km, before and after:
+    ground within 20 m of a plot's middle (`TOWN_BAND`, the back fence and a few metres behind it) is painted
+    as town texel by texel (`Layout.townAt`) with no hedge through it, so the crops run up to the back
+    gardens; and only the next four plots in the queue (the building sites) mark the town, not the whole
+    queue. A repaint after a plot at the fields' edge reaches 21 m round it (`TOWN_REACH`) so it stays exact;
+    CI's first run of this failed its 2 ms repaint budget at 52 m (4.1 ms), so the band is exact per texel
+    rather than on 20 m cells and the reach 21 m: cold 2.5 ms here against the old 0.6 ms, warm 1.1 ms
+    against 0.3 ms, about 1.1 ms on CI's machine. Screenshots at 700 m, 350 m and 2 km, before and after:
     `docs/reports/country/before-edge-700-w.jpg`, `after-edge-700-w.jpg`, `before-edge-350-e.jpg`,
     `after-edge-350-e.jpg`, `before-edge-2km.jpg`, `after-edge-2km.jpg`. What's left round the town is its
     parks (the leftover land the game landscapes, 5 ha) and the 30 m band. A test in `ground.test.ts`.

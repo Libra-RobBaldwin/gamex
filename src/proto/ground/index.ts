@@ -110,12 +110,16 @@ export class Ground {
   change(input: GroundInput, boxes: Box[]) {
     const t0 = performance.now();
     if (!this.cover) { this.layout.setInput(input); return; }
-    // (a plot marks the town round it, TOWN_REACH out: that ground, and its hedges, change with it)
-    const dirty: Box[] = [...boxes.map((b) => ({ x0: b.x0 - TOWN_REACH, z0: b.z0 - TOWN_REACH, x1: b.x1 + TOWN_REACH, z1: b.z1 + TOWN_REACH })), ...this.layout.setInput(input, boxes)];
+    const changed = this.layout.setInput(input, boxes);
+    // (a plot marks the town round it, TOWN_REACH out, where a field lies within that reach: that
+    // ground, and its hedges, change with it; in the town itself nothing round the plot changes)
+    const reach = (b: Box) => { const R = TOWN_REACH, B = { x0: b.x0 - R, z0: b.z0 - R, x1: b.x1 + R, z1: b.z1 + R }; return this.layout.fieldsIn(B).some((id) => this.layout.about(id).kind !== 'town') ? B : b; };
+    const dirty: Box[] = [...boxes.map(reach), ...changed];
     if (this.plants && dirty.length) {
-      // hedges within reach of the change (a hedge keeps 2 m off a plot), and wherever a gateway
-      // (painted as worn earth) came or went
-      const plan = dirty.map((b) => ({ x0: b.x0 - 8, z0: b.z0 - 8, x1: b.x1 + 8, z1: b.z1 + 8 }));
+      // hedges within reach of the change (a hedge keeps 2 m off a plot, and off the town's reach),
+      // and wherever a gateway (painted as worn earth) came or went
+      const plan = [...boxes.map((b) => ({ x0: b.x0 - 8, z0: b.z0 - 8, x1: b.x1 + 8, z1: b.z1 + 8 })), ...dirty.slice(boxes.length)];
+      for (const [k, b] of boxes.entries()) if (dirty[k] !== b) plan.push(dirty[k]); // (the town's reach round a plot at the fields' edge: the hedges in it go)
       const occ = new Occupancy(input);
       const gateBoxes: Box[] = [];
       let moved = false;

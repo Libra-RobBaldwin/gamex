@@ -14,6 +14,9 @@ import { Countryside } from '../region/fields';
 
 export interface XZ { x: number; z: number }
 export type ParcelKind = 'arable' | 'grass' | 'wood' | 'rough' | 'town';
+// how far the town's ground reaches past a plot's middle (m): a garden's back fence and a few metres
+// of mown ground behind it, then the fields (`Layout.townAt`)
+export const TOWN_BAND = 20;
 
 // What the painter needs to know about the world. Every polygon is in world metres.
 export interface GroundInput {
@@ -147,8 +150,12 @@ export class Layout {
     }
     const c = (this.coarse = new Coarse(this.fixed.coarse));
     // the town reaches 30 m past its plots and parks, the industrial estate likewise
-    for (const p of input.plots ?? []) { if (p.kind === 'track') continue; const m = centroid(p.poly); c.mark(p.kind === 'yard' ? INDUS : TOWN, m.x, m.z, 30); }
-    for (const p of input.town ?? []) c.mark(TOWN, p.x, p.z, 30);
+    const spots = new Map<number, { x: number; z: number; r: number }[]>();
+    const spot = (x: number, z: number, r: number) => { const k = (Math.floor(x / 32) + 32768) * 65536 + (Math.floor(z / 32) + 32768), l = spots.get(k); if (l) l.push({ x, z, r }); else spots.set(k, [{ x, z, r }]); };
+    for (const p of input.plots ?? []) { if (p.kind === 'track') continue; const m = centroid(p.poly); c.mark(p.kind === 'yard' ? INDUS : TOWN, m.x, m.z, 30); if (p.kind !== 'yard') spot(m.x, m.z, TOWN_BAND); }
+    for (const p of input.town ?? []) { c.mark(TOWN, p.x, p.z, 30); spot(p.x, p.z, TOWN_BAND); }
+    for (const p of input.parks ?? []) { const b = bbox(p.poly); spot((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, TOWN_BAND * 0.7); }
+    this.spots = spots;
     const changed: Box[] = [];
     if (!near) return changed;
     // every field with ground within 52 m of the box (a plot marks the town 30 m round it, on 20 m cells)
@@ -164,8 +171,22 @@ export class Layout {
     return changed;
   }
   boxOf(id: number) { return { ...this.plan.boxes[id] }; }
-  // is this spot within 30 m of the town's plots (or the ground the town has marked as its own)?
-  townAt(x: number, z: number) { return (this.coarse.at(x, z) & TOWN) !== 0; }
+  // the town's plots, points and parks, on a 32 m grid, for `townAt`
+  private spots = new Map<number, { x: number; z: number; r: number }[]>();
+  // the fields with ground in a box (laid out if they aren't yet)
+  fieldsIn(box: Box): number[] { this.ensure(box, 0); return this.plan.fieldsNear(box); }
+  // is this spot within the town's band: TOWN_BAND of a plot's middle (or a point the town marked
+  // as its own), less of a park's? Exact, texel by texel, so a repaint after a plot need only
+  // reach that far (paint.ts TOWN_REACH); the coarse grid above, on 20 m cells, decides what a
+  // whole parcel is.
+  townAt(x: number, z: number) {
+    const i = Math.floor(x / 32), j = Math.floor(z / 32);
+    for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) {
+      const l = this.spots.get((a + 32768) * 65536 + (b + 32768));
+      if (l) for (const s of l) if ((s.x - x) ** 2 + (s.z - z) ** 2 <= s.r * s.r) return true;
+    }
+    return false;
+  }
   // What a field is: what its source says, unless the town has grown over it (half of it within
   // 30 m of plots) or industry has, or it's a field at the water's edge (then it's grass). A field
   // the town has reached but not grown over stays a field (`mixed`): the ground within 30 m of the

@@ -6,16 +6,16 @@ import { CROP, DIRS } from './covers';
 import { worldNoise } from './noise';
 
 const DPI = DIRS / Math.PI;
-import { bbox, Layout, type ParcelInfo, type XZ } from './layout';
+import { bbox, Layout, type ParcelInfo, type XZ, TOWN_BAND } from './layout';
 
 export interface Region { x0: number; z0: number; size: number; n: number } // n texels across
 export interface Rect { i0: number; j0: number; i1: number; j1: number } // texels, i1/j1 exclusive
 
 const DT = 8; // how far (texels) distances are tracked: wet grass reaches this far from water
 const MARGIN = DT + 3;
-// the town's reach past a plot: its centroid marks the coarse grid (20 m cells) 30 m round, so a
-// texel up to about 50 m off can change with it (layout.ts townAt); a repaint's window reaches that far
-export const TOWN_REACH = 52;
+// the town's reach past a plot: the ground within TOWN_BAND of its middle is the town's (layout.ts
+// townAt, exact), so a repaint after a plot reaches that far, and a little more for the texel
+export const TOWN_REACH = TOWN_BAND + 1;
 const POOL_KEEP = 1 << 20; // texels: the scratch layers of a bigger paint than this aren't kept (see CoverMap)
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
