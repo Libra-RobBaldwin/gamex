@@ -174,8 +174,7 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
   // folded in, PRIORS.settlements.villagesLoadedPerThousandKm2: placed after the hamlets so every
   // place before them keeps its spot, and none near the start town)
   const nMore = o.villages === -1 ? Math.max(0, Math.round((between(PRIORS.settlements.villagesLoadedPerThousandKm2, t) * land) / 1000) - nVillages) : 0;
-  const kinds: Kind[] = [...(o.city ? ['city' as const, 'city' as const] : []), ...Array<Kind>(nTowns).fill('town'), ...Array<Kind>(nVillages).fill('village'), ...Array<Kind>(nHamlets).fill('hamlet'), ...Array<Kind>(nMore).fill('village')];
-  const firstMore = kinds.length - nMore;
+  const kinds: Kind[] = [...(o.city ? ['city' as const, 'city' as const] : []), ...Array<Kind>(nTowns).fill('town'), ...Array<Kind>(nVillages).fill('village'), ...Array<Kind>(nHamlets).fill('hamlet')];
   const out: WorldSettlement[] = [];
   const names = rng(mix(seed, 204)); // (a stream of their own: renaming never moves a place)
   const everyName = new Set<string>();
@@ -205,7 +204,7 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
   add(make('town', 0, 0, START_R, 0));
   const edge = Math.min(1600, H * 0.12);
   // one place of a kind, somewhere `at` picks (null: nowhere left), clear of the others
-  const place = (kind: Kind, n: number, at: (R: number) => XZ | null, maxTries = 2500, patchy = kind === 'village' || kind === 'hamlet') => {
+  const place = (kind: Kind, n: number, at: (R: number) => XZ | null, maxTries = 2500, patchy = kind === 'village' || kind === 'hamlet', later = false) => {
     const K = KINDS[kind];
     const radius = Math.round(kind === 'city' && n === 1 ? range(r, 380, 420) : range(r, K.r[0], K.r[1]));
     const R = reach(kind, radius);
@@ -222,7 +221,7 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
       if (kind === 'hamlet' && Math.hypot(x, z) < 3600) continue;
       // (and none of the later villages within 6.5 km of it: its first view and its own lanes, which
       // go to its nearest neighbours, stay what they were)
-      if (n >= firstMore && Math.hypot(x, z) < 6500) continue;
+      if (later && Math.hypot(x, z) < 6500) continue;
       // (villages thin out and thicken in patches a few kilometres across)
       if (patchy && r() > 0.35 + 0.65 * patch(x, z, seed)) continue;
       if (w.edgeDistance({ x, z }, R + 200) < R + 90) continue;
@@ -230,7 +229,9 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
       if (Math.max(Math.abs(x), Math.abs(z)) > LIVE_HALF - R - 150 && Math.max(Math.abs(x), Math.abs(z)) < LIVE_HALF + R + 150) continue;
       const clash = nearby(x, z, R + 12000).some((s) => Math.hypot(s.x - x, s.z - z) < (s.reach + R + gapFor(s.kind, kind)) * slack);
       if (clash) continue;
-      add(make(kind, x, z, radius, n + 1));
+      const s = make(kind, x, z, radius, n + 1);
+      if (later) s.later = true;
+      add(s);
       return true;
     }
   };
@@ -242,6 +243,9 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
     });
   });
   fillSquares(r, H, w, out, (kind, n, at) => place(kind, n, at, 400, false), kinds.length, RUGGED[o.relief] ?? 1);
+  // (the rest of the villages last of all, so every place before them, and every draw that placed it,
+  // is what it was without them)
+  for (let i = 0; i < nMore; i++) place('village', 5000 + i, (R) => { const lim = H - R - edge; return { x: range(r, -lim, lim), z: range(r, -lim, lim) }; }, 2500, true, true);
   return out;
 }
 // the map's land (km²): all of it bar the sea, on a 1 km lattice

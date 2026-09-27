@@ -178,7 +178,10 @@ describe('suggested links', () => {
         const gabriel = tier.every((c) => c === a || c === b || Math.hypot(c.x - m.x, c.z - m.z) >= l.length / 2 - 1);
         if (!gabriel) {
           expect(l.length).toBeLessThanOrEqual(6000);
-          for (const c of ss) if (c !== a && c !== b) { const t = ((c.x - a.x) * (b.x - a.x) + (c.z - a.z) * (b.z - a.z)) / (l.length * l.length); if (t > 0 && t < 1) expect(Math.hypot(a.x + (b.x - a.x) * t - c.x, a.z + (b.z - a.z) * t - c.z)).toBeGreaterThanOrEqual(c.r + 150 - 1); }
+          // (among the places there were when the lane was chosen: a village placed after everything
+          // else may stand by a lane chosen before it; its own lanes keep clear of everyone)
+          const among = a.later || b.later ? ss : ss.filter((c) => !c.later);
+          for (const c of among) if (c !== a && c !== b) { const t = ((c.x - a.x) * (b.x - a.x) + (c.z - a.z) * (b.z - a.z)) / (l.length * l.length); if (t > 0 && t < 1) expect(Math.hypot(a.x + (b.x - a.x) * t - c.x, a.z + (b.z - a.z) * t - c.z)).toBeGreaterThanOrEqual(c.r + 150 - 1); }
         }
         expect(links.filter((k) => (k.a === l.a && k.b === l.b) || (k.a === l.b && k.b === l.a))).toHaveLength(1);
       }
