@@ -18,6 +18,8 @@ import { Dresser } from './game/dress'; // the 50 km map's scenery as real build
 import { farmGround, LiveFarms } from './game/country';
 import { placeResolver, REAL_VERN, setGeology, VERNS, type Vern } from './vernacular'; // buildings in their place's tradition (docs/vernacular.md)
 import { CELL, findRegions, type Region } from './infill';
+import { parkEntrances, parkPaths, parkPond } from './parkplan';
+import type { LakeSpec } from './worldmap/water';
 import { NavRig, SunFollow } from './kit/camera';
 import { GameGround } from './ground/game';
 import { patchGround, setGroundQuality } from './ground';
@@ -611,11 +613,54 @@ function refreshInfill() {
   const { regions, civics } = findRegions(net, queue);
   for (const l of civics) spawnLot(l, false);
   for (const r of regions) addInfill(r);
+  applyPonds();
   refreshTrees();
   gameGround.invalidate();
 }
+// The ponds the parks asked for since last time, put in the game: the relief grid round each is
+// taken again from the terrain, which now lays the ground level to the pond with its hollow (the
+// drape draws from the same heights), the ground mesh is made again over it, the live water gets
+// the pond (its tile, its surface and reeds, its land claimed), and the ground's paint and the
+// trees round it follow.
+function applyPonds() {
+  if (!pondsDue.length || !WORLD || !RELIEF) return;
+  const due = pondsDue.splice(0), boxes: Box[] = [], F = RELIEF;
+  for (const L of due) {
+    const m = L.r * 3 + F.step;
+    const i0 = Math.max(0, Math.floor((L.x - m - F.x0) / F.step)), i1 = Math.min(F.n - 1, Math.ceil((L.x + m - F.x0) / F.step));
+    const j0 = Math.max(0, Math.floor((L.z - m - F.z0) / F.step)), j1 = Math.min(F.n - 1, Math.ceil((L.z + m - F.z0) / F.step));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) F.h[j * F.n + i] = WORLD.terrain.heightAt(F.x0 + i * F.step, F.z0 + j * F.step);
+    gameWater.addPond(L, net.land);
+    boxes.push({ x0: L.x - m, z0: L.z - m, x1: L.x + m, z1: L.z + m });
+  }
+  if (drape) drape.texture.needsUpdate = true;
+  ground.geometry.dispose();
+  ground.geometry = gameWater.groundGeometry(gameWater.half * 2, F, SWELL_AMP);
+  gameGround.changed(boxes);
+  regionView?.groundChanged(boxes);
+  refreshTrees(boxes);
+}
+// A park's pond (the user's rule, docs/briefs/play.md 12): a level surface in a hollow with an
+// irregular outline, through the water system. The park planner picks the spot (parkplan.ts
+// parkPond: the lowest that fits clear of the paths and the edge), the plan's water makes the
+// shape and the terrain lays the ground to it (worldmap/water.ts addPond), and `applyPonds` then
+// puts it in the game: the relief grid, the ground mesh and its paint, the water tile and its land.
+// A pond stays where it is when the park is found again (a road nearby, a reload: the same park
+// asks for the same spot, and gets the pond already there).
+const ponds: LakeSpec[] = [];
+let pondsDue: LakeSpec[] = [];
 function addInfill(r: Region) {
-  const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges, leafy: REAL ? parkLeafiness(r.cells.length) : undefined });
+  let pond: { x: number; z: number; r: number } | undefined;
+  if (WORLD && !REAL && r.kind === 'park') {
+    const gates = parkEntrances(r.roadEdges, r.centre), paths = gates.length ? parkPaths(gates, r.centre) : [];
+    const spot = parkPond(r.cells, CELL, paths, r.roadEdges, WORLD.terrain.heightAt, r.seed);
+    if (spot) {
+      const old = ponds.find((L) => Math.hypot(L.x - spot.x, L.z - spot.z) < L.r + spot.r + 8);
+      if (old) pond = { x: old.x, z: old.z, r: old.r };
+      else { const L = WORLD.water.addPond({ ...spot, seed: Math.floor(r.seed * 1e6) }, WORLD.terrain.heightAt); ponds.push(L); pondsDue.push(L); pond = { x: L.x, z: L.z, r: L.r }; }
+    }
+  }
+  const shape = makeRegion({ cells: r.cells, size: CELL, kind: r.kind, seed: r.seed, roadEdges: r.roadEdges, leafy: REAL ? parkLeafiness(r.cells.length) : undefined, pond });
   const lot: Lot = { id: -1, x: r.centre.x, z: r.centre.z, rot: 0, w: 0, d: 0, h: 0, kind: 'civic', seg: -1, seed: r.seed, row: 0, front: 0, back: 0, px: 0, pw: 0, arch: r.kind };
   const b: Built = { lot, born: 0, height: shape.height, name: shape.name, detail: shape.detail, parts: bakeGroup(shape.group), solo: null, chunk: null, region: r };
   toChunk(b);
@@ -645,6 +690,7 @@ function refreshInfillWithin(boxes: Box[]) {
   infill = infill.filter((b) => !gone.includes(b));
   for (const l of res.civics) spawnLot(l, false);
   for (const r of res.regions) addInfill(r);
+  applyPonds();
   refreshTrees([G]);
   gameGround.changed([G]);
   regionView?.groundChanged([G]);
@@ -2924,7 +2970,7 @@ loading.finish();
 let loaded = false;
 requestAnimationFrame(frame);
 
-(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street', more: Partial<RoadOpts> = {}) => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type, ...more }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, overlays: { flowGroup, cover: () => coverMesh }, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
+(window as unknown as { proto: unknown }).proto = { renderer, setTier, quality: (t: number | 'auto') => { tierAuto = t === 'auto'; if (t !== 'auto') setTier(t); }, perf: () => ({ tier: TIERS[tier].name }), buildRoad: (a: P, b: P, type = 'street', more: Partial<RoadOpts> = {}) => buildRoad(net.snapStart(a, 4), net.snapStart(b, 4), undefined, { ...opts, type, ...more }), junctions, rebuild: () => rebuildRoads(), net, view, nav, buildings, infill: () => infill, refreshInfill: () => refreshInfill(), setMode, setKind, groundAt, toScreen, cam, THREE, pickBuilding, traffic, chunks, setClock: (m: number) => { clock = m; }, setSpeed, speed: () => speed, shell, startRoadTool, startStopTool, startLineTool, startBulldozeTool, overlays: { flowGroup, cover: () => coverMesh }, tapMap, endTool, lines, markers, focusOn, people, town, showTown, purse, skip: (min: number) => { for (let m = 0; m < min; m += 60) { clock += 60; town.advance(60); } town.sync(); }, saveGame, saveId: SAVE_ID, snapshot, clock: () => clock, ground: gameGround, water: gameWater, ponds, growAll: () => { gameGround.invalidate(); for (const l of queue.splice(0)) if (net.lotFree(l)) spawnLot(l, false); refreshTrees(); } };
 Object.assign((window as unknown as { proto: object }).proto, { underView, toggleUnderground }); // (the underground view: game/underview.ts)
 Object.assign((window as unknown as { proto: object }).proto, { industries, showSite }); // (game/industry.ts)
 // (motorway junctions: the ones built, and a blueprint from a to b in the road tool, for tests)
