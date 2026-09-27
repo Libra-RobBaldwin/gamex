@@ -1007,10 +1007,14 @@ function startLineTool() {
   const pts = markers.places().map((m) => m.p);
   if (pts.length) {
     const c = shell.clearRect(), M = 44; // px round the badges
+    // (the hint sits on the clear part's bottom edge: the lowest badge must clear it too)
+    const hintEl = document.querySelector<HTMLElement>('#hint'), hh = hintEl && !hintEl.hidden ? hintEl.offsetHeight + 8 : 0;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const q of pts) { const s = toScreen(q); x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y); }
-    const k = Math.max(1, (x1 - x0 + 2 * M) / (c.right - c.left), (y1 - y0 + 2 * M) / (c.bottom - c.top)); // (an orthographic view: distances on screen scale with 1/h)
-    const mid = nav.screenToGround((x0 + x1) / 2, (y0 + y1) / 2);
+    // (distances on screen scale with about 1/h, with a tenth to spare for the lens's foreshortening)
+    const k = Math.max(1, 1.1 * (x1 - x0 + 2 * M) / (c.right - c.left), 1.1 * (y1 - y0 + 2 * M + hh) / (c.bottom - c.top));
+    // (the point that lands in the middle of the clear part: half the hint's band below the badges' middle, so they sit that much higher)
+    const mid = nav.screenToGround((x0 + x1) / 2, (y0 + y1) / 2 + (k * hh) / 2);
     focusOn(mid ? { x: mid.x, z: mid.z } : pts[0], Math.min(1400, view.h * k));
   }
 }
