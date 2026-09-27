@@ -2,7 +2,7 @@
 
 Session https://claude.ai/code/session_01EKUWb6f3c3TYr6jHSTbTjp, branch `claude/work-vehicles-fixes`.
 PR #64 (the five review rows below) merged into `claude/cloud-session-history-rvqkm1` at 22:59 UTC.
-A second PR, the coordinator's follow-ups (23:18 UTC), is in the section at the end.
+A second PR, #69, the coordinator's follow-ups (asked 23:18 UTC), is the section right below; opened 27 Sep 00:46 UTC, CI green locally (122 unit files, six phone e2es).
 
 # Round 2: the coordinator's follow-ups (asked 23:18 UTC)
 
