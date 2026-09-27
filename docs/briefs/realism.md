@@ -98,10 +98,10 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 | Spokes and stems | live (#65), checked at 412×915 |
 | PR open | #67 (the radial town), open, subscribed; #65 merged (integration head 2338450, 26 Sep) |
 | Radials, edge, T-junctions, closes, village shapes measured | committed: `tools/os/towns.mjs`, `PRIORS.towns`, a section in the report; on this branch, not live |
-| Generator: town grown along its radials | committed (`layStreets` rewritten, then made crossing-free: side streets end on radials as Ts, the estate beside its radial, radials start where they cross no other); the careful builder refuses nothing on five seeds; region and worldmap tests pass; tsc clean; the start town checked at 412×915 from 900 m and 400 m (report, `town-radial-900.jpg`, `-400.jpg`): a market town with radials, ribbons and an estate; the six phone suites and the full unit suite running on the merged head; not live |
+| Generator: town grown along its radials | committed on PR #67 (`layStreets` rewritten, then made crossing-free); the careful builder refuses nothing on five seeds; region and worldmap tests pass; tsc clean; the full unit suite green on the merged head (121 files, 1104 tests); the start town checked at 412×915 from 900 m and 400 m (report); the six phone suites first all failed on their fixed positions (stops, the rail branch, the underground stations), moved with each suite's intent kept (listed in the PR), rerunning; not live |
 | Lanes: the best-facing spoke, water at the stem, a blend into the course | committed with the above; `region.test.ts` checks every lane on three plans |
 | Compare yardsticks: radials, junction shares, street pieces, orientation order | committed (`compare.mjs`, the places table in `seeded-vs-real.md`), within the real ranges |
 | Lane grades and density | not started |
 | Side-by-side evidence at whole map / 6 km / 1 km, hero pictures retaken | hero pictures to retake after the suites pass; side-by-sides not started |
-| Review bug 11 (failed tiles asked for for ever) | not started |
-| Review: bounded coarse growth, no jump on activation | not started |
+| Review bug 11 (failed tiles asked for for ever) | committed (`view.ts`: three tries, each wait twice the last, then left alone; `view.fail.test.ts`, the review's test); on PR #67, not live |
+| Review: bounded coarse growth, no jump on activation | growth bounded, committed (`econ.ts` eases off towards half again the planned size; `econ.test.ts`); the jump on activation is `main.ts`, the play session's, noted in the PR; not live |
