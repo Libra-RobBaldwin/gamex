@@ -248,7 +248,6 @@ const liningMat = lit('#6b6861', { side: THREE.DoubleSide }); // (a covered tunn
 const shelterGlass = lit('#b9d6e2', { transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide });
 const shelterFrame = lit('#2e3136', { side: THREE.DoubleSide });
 const stopRed = lit('#c9302c', { side: THREE.DoubleSide });
-const carCols = ['#c9302c', '#2f6fb8', '#e8e6e0', '#2b2b2b'].map((c) => lit(c));
 // what the ground is told to leave out, so cuttings can be seen into
 export const holeMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1, stencilZPass: THREE.ReplaceStencilOp, stencilFunc: THREE.AlwaysStencilFunc });
 export const LAMP_OFF = new THREE.MeshBasicMaterial({ color: '#1b1d20' });
@@ -471,6 +470,54 @@ export interface Lamp { mesh: THREE.Mesh; node: number; seg: number; col: 'red' 
 
 // Only some of the roads and junctions (a streamed map draws a tile at a time: game/regionview.ts).
 // Each road and junction is drawn exactly as it is when everything is drawn together.
+// Kerbside parking spaces along a road with parking bays (game/parking.ts parks the traffic's own
+// cars in them; the drawer marks each with a dash): one every 6 m along each side's band, where
+// the road has its own full width, clear of the stretch a stop paints out (the whole space must
+// be clear of it) and of a pedestrian crossing and its zig-zags. `t` is the space's start along
+// the course, `pm` the band's middle out from the centreline; a car stands with its middle 3 m in.
+// Traffic keeps left, so the band on side 1 (the left, a to b) is that way's and its cars face a to b.
+export const KERB_SPACE = 6;
+function kerbSpaces(net: Network, s: RSeg, C: Course, ends: Ends, pxs: PedX[]) {
+  const d = net.def(s), CL = C.len, out: { k: 1 | -1; t: number; pm: number }[] = [];
+  if (!d.parking || d.cls !== 'road') return out;
+  const S = (r: number) => section(net, s, C, r);
+  const T = C.taper, k0 = C.rhoOf(T.A ? TAPER.median * T.A.len : 0), k1 = C.rhoOf(CL - (T.B ? TAPER.median * T.B.len : 0));
+  const [s0, s1] = [ends.strip[0], CL - ends.strip[1]];
+  const ks0 = Math.max(s0, k0), ks1 = Math.min(s1, k1);
+  if (ks1 - ks0 < 1) return out;
+  const pxBack = (x: PedX) => (x.kind === 'zebra' ? 1.5 : 2.5) + 0.3;
+  for (const k of (d.oneway ? [1] : [1, -1]) as (1 | -1)[]) {
+    for (let t = ks0 + 4; t < ks1 - 5; t += KERB_SPACE) {
+      const secs = [S(t), S(t + 3), S(t + 6)].map((x) => (k === 1 ? x.L : x.R));
+      if (secs.some((sd) => sd.park < d.parking - 0.1)) continue; // painted out by a stop
+      if (pxs.some((x) => t + 6 > x.r - x.w / 2 - pxBack(x) - PEDX.zigzags * PEDX.zig && t < x.r + x.w / 2 + pxBack(x) + PEDX.zigzags * PEDX.zig)) continue; // (nor on a crossing's zig-zags)
+      out.push({ k, t, pm: secs[1].lane + d.bus + d.cycle + d.parking / 2 });
+    }
+  }
+  return out;
+}
+// A road's kerbside spaces as parking bays (game/parking.ts), by side: where each car stands and
+// faces, `s` along the road from its a end, and the way in from the running lane (via). A road's
+// bays are the same however it's drawn, so the traffic can keep them without the drawer.
+// (out: where a car pulling out of the space joins the running lane, a car's length or two ahead)
+export interface KerbBay { x: number; z: number; hx: number; hz: number; via: { x: number; z: number }[]; out: { x: number; z: number }; s: number; heavy?: false }
+export function kerbsideBays(net: Network, s: RSeg, junctions: Map<number, Junction>): { side: 1 | -1; bays: KerbBay[] }[] {
+  const d = net.def(s);
+  if (!d.parking || d.cls !== 'road') return [];
+  const C = courseOf(net, s), ends = endsOf(junctions, s, C), pxs = pedCrossingsOn(net, s, C, ends), cp = C.path;
+  const laneC = laneBase(d) + d.lanes * d.lane - d.lane / 2; // the nearside lane's middle, out from the centreline
+  const out = new Map<1 | -1, KerbBay[]>();
+  for (const sp of kerbSpaces(net, s, C, ends, pxs)) {
+    const k = sp.k, at = (t: number, o: number) => { const q = pointAt(cp, t); return { x: q.x + q.uz * k * o, z: q.z - q.ux * k * o, ux: q.ux, uz: q.uz }; };
+    const m = at(sp.t + 3, sp.pm), v = at(sp.t + 3 - k * 5.5, (sp.pm + laneC) / 2), o = at(sp.t + 3 + k * 7.5, laneC);
+    const b: KerbBay = { x: m.x, z: m.z, hx: k * m.ux, hz: k * m.uz, via: [{ x: v.x, z: v.z }], out: { x: o.x, z: o.z }, s: Math.max(0, Math.min(net.length(s), C.tau(sp.t + 3))) };
+    let l = out.get(k);
+    if (!l) out.set(k, (l = []));
+    l.push(b);
+  }
+  return [...out].map(([side, bays]) => ({ side, bays }));
+}
+
 export interface DrawOnly { seg: (s: RSeg) => boolean; node: (id: number) => boolean }
 export function drawRoads(net: Network, group: THREE.Group, junctions: Map<number, Junction>, trunkMat: THREE.Material, crownMat: THREE.Material, editing: number | null = null, only?: DrawOnly): Lamp[] {
   for (const c of [...group.children]) { group.remove(c); (c as THREE.Mesh).geometry.dispose(); }
@@ -479,7 +526,6 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   const ballast = F(), sleepers = F(), railsF = F(), rack = F(), holes = F(), hint = F(), island = F(), wires = F();
   const tactileBuff = F(), tactileRed = F();
   const cut = new Solid(), body = new Solid(), rails = new Solid(), barrier = new Solid(), kerbs = new Solid(), portal = new Solid(), poles = new Solid(), lining = new Solid();
-  const parked = carCols.map(() => new Solid());
   const furn = { glass: new Solid(), frame: new Solid(), red: new Solid() };
   const boards = new Boards();
   const trees: THREE.BufferGeometry[] = [];
@@ -768,18 +814,8 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
       }
       if (d.parking) {
         band(bays, q, (i) => { const p0 = S2(q.sec[i]).lane + d.bus + d.cycle; return span(p0 + d.parking - Math.max(0, S2(q.sec[i]).park), p0 + d.parking); }, 0.26);
-        let n = 0;
-        for (let t = ks0 + 4; t < ks1 - 5; t += 6) {
-          const x = S(t + 3), side = S2(x);
-          if (side.park < d.parking - 0.1) continue; // painted out by a stop
-          if (pxs.some((x) => t + 6 > x.r - x.w / 2 - pxBack(x) - PEDX.zigzags * PEDX.zig && t < x.r + x.w / 2 + pxBack(x) + PEDX.zigzags * PEDX.zig)) continue; // (nor on a crossing's zig-zags)
-          const pm = side.lane + d.bus + d.cycle + d.parking / 2;
-          lines.dashes(cp, () => k * pm, t, t + 0.12, 0.12, 1, d.parking / 2, 0.35);
-          if ((Math.sin(s.id * 7 + t * 13.7) + 1) / 2 < 0.65) {
-            const q2 = pointAt(cp, t + 3), o = k * pm;
-            parked[(n++ + s.id) % parked.length].box(q2.x + q2.uz * o, q2.z - q2.ux * o, q2.ux, q2.uz, 2.1, 0.88, q2.y + 0.3, q2.y + 1.35);
-          }
-        }
+        // a dash at the start of each space (the cars in them are the traffic's: game/parking.ts)
+        for (const sp of kerbSpaces(net, s, C, ends, pxs)) if (sp.k === k) lines.dashes(cp, () => k * sp.pm, sp.t, sp.t + 0.12, 0.12, 1, d.parking / 2, 0.35);
       }
     }
     // "lane ends" arrows (bent, TSRGD diagram 1014) in each lane that tapers away, before the taper,
@@ -1203,7 +1239,6 @@ export function drawRoads(net: Network, group: THREE.Group, junctions: Map<numbe
   add(bus, busMat); add(cyc, cycleMat); add(bays, bayMat); add(hint, hintMat); add(tactileBuff, tactileBuffMat); add(tactileRed, tactileRedMat);
   add(ballast, ballastMat); add(sleepers, sleeperMat); add(railsF, railMat); add(rack, rackMat); add(wires, poleMat);
   add(island, islandMat); add(kerbs, kerbMat); add(poles, poleMat); add(portal, portalMat); add(lining, liningMat);
-  parked.forEach((p, i) => add(p, carCols[i]));
   lift = null;
   add(cut, cutMat); add(body, concreteMat); add(rails, parapetMat); add(barrier, barrierMat);
   add(furn.glass, shelterGlass); add(furn.frame, shelterFrame); add(furn.red, stopRed); add(beacons, beaconWhite);

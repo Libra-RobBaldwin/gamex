@@ -359,3 +359,21 @@ When the track did change, `RailSim.rebuild` puts every train back on it. A trai
 the same as before (the pieces its body, its way ahead and its held blocks are on, blocked the same
 way) keeps its speed, its route and its reservations, only re-numbered. Anywhere else it's put back
 on the nearest track, stopped, and plans afresh; one that no longer fits waits in its depot.
+
+## Even gaps
+
+Trains on a line bunch as buses do: two that leave the depot together run nose to tail all day,
+the second at a red signal behind the first at every station. So a train whose boarding is done
+holds at the platform, doors open, while the train ahead of it on its line is closer than the
+line's even spacing (half the cycle with two trains, a third with three) and closer than the
+train behind (holding for a leader while a follower closes in only moves the bunch), looking
+again every four seconds and for a minute at the most at one call. A hold is bounded, so it can
+never lock a line up: the train behind waits at its signal a minute at the worst. The line's
+sheet has the switch, "Even gaps", on unless turned off (`RailLine.spacing`, saved with the line).
+
+Where a train is round its cycle is measured in time (`RailSim.spacing`): the sim keeps how long
+each leg of the line takes, call to next call with the dwell, measured as its trains run it and
+estimated from the planned route before one has. A train at a platform is at its call; one running
+is past its last call by the time since. On a 3 km double line with three stations, two trains
+started together settle to 180 s headways at every call within two game days (58 s and 295 s
+with the switch off); three trains to 117 s (`rail/spacing.test.ts`).

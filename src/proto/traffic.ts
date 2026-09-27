@@ -11,7 +11,7 @@
 // when a vehicle commits to a junction: the road with priority, the ring, the green light, or a gap
 // big enough that nobody has to brake for you. Nobody goes in unless there's room beyond.
 import * as THREE from 'three';
-import { section } from './roaddraw'; // (people: where a bus stands at a stop)
+import { kerbsideBays, section } from './roaddraw'; // (people: where a bus stands at a stop; kerbside parking spaces)
 import { BAY, bayWeight, closestOnPath, HALF, pathLength, pointAt, type Lot, type Network, type P, type RSeg, type Stop } from './roads';
 import { junctionLift, legsAt, moveOf, type Junction, type Leg, type Move } from './junction';
 import { TRAINS, laneBase, trainSpeed, type TrainDef } from './catalog';
@@ -19,7 +19,7 @@ import { courseOf, laneSpan, sectionAt, taperOf, type Course, type Ends2 } from 
 import { BODIES, DIMS, overlapping, steered, type Axles, type Kind, type Pose } from './footprint';
 import { STEP, Track, View, table, tableStats, type Cls } from './conflicts';
 import { Fleet, type Dress, type Dressed } from './game/fleet';
-import type { Parking } from './game/parking';
+import { kerbKey, type Parking, type PullOut } from './game/parking';
 
 export interface Places { homes: Lot[]; jobs: Lot[]; shops: Lot[]; works: Lot[]; weight: (l: Lot) => number }
 
@@ -62,6 +62,7 @@ interface Car {
   born: number; gone?: number; wait: number;
   heldAt?: number;
   held?: boolean; // pulling out of a parking space: stands, unseen, where it'll join the road until the parked car reaches it (game/parking.ts)
+  kerb?: { key: number; i: number } | null; // the kerbside space it's making for at the end of its trip (null: decided against one)
   lane: number; off: number; // lane (0 = nearside) and current sideways position
   dwell?: number; served?: number; inBay?: boolean; bay?: Stop;
   atStop?: Stop; // the stop it is standing at (its dwell runs to the end there whatever its line does meanwhile)
@@ -108,6 +109,7 @@ const E_IN = 10, E_OUT = 10; // how far either side of a junction its paths are 
 const E_PRE = 16; // how far back up the approach its courses run
 const BUSLANE = 8, BAYLANE = 9;
 const BEHIND = 4; // a bus still calls at a stop it comes to rest this far past (out of a junction whose exit reaches to the stand)
+const KERB_REACH = 60; // how far along its street from a plot a car will park at the kerb, or set off from it
 const HOLD_MAX = 60; // seconds a bus will hold at a stop to let the bus ahead of it get away
 const HOLD_LOOK = 4; // seconds between looks, while holding, at whether the bus ahead is far enough away yet
 const LONGEST = 10; // the furthest any vehicle reaches in front of or behind its centre (an 18.5 m bendy bus)
@@ -181,8 +183,10 @@ export class Traffic {
   barriers = new Map<number, [number, number][]>();
   // drawn along with the traffic, inside the fleet's frame (the railway's trains: rail/draw.ts)
   onDraw?: (dt: number) => void;
-  // the town's drives and car parks (game/parking.ts): trips end in them and start from them
+  // the town's drives, car parks and kerbside bays (game/parking.ts): trips end in them and start from them
   parking?: Parking;
+  private kerbAt = -Infinity; // when the kerbside spots were last brought up to date
+  private kerbDone = new Set<number>(); // the roads whose kerbside spots are as the network is now
   private failed: 'guard' | 'room' = 'room'; // (why the last spawn couldn't place its vehicle)
   private pulling: { o: Access; d: Access; dressed: Dressed; car?: Car; since: number; tries: number; atGate?: number }[] = [];
   stats = { spawned: 0, arrived: 0, gaveUp: 0, rerouted: 0, lapsed: 0, laneChanges: 0, pulledOut: 0, noRoom: 0, noPlan: 0, holds: 0 };
@@ -237,6 +241,7 @@ export class Traffic {
   // the road network changed: routes, access points and anyone on a removed road are reset
   invalidate() {
     this.graph = null;
+    this.kerbDone.clear();
     this.placeC.clear();
     this.lineC.clear();
     this.loopC.clear();
@@ -317,7 +322,7 @@ export class Traffic {
     c.oldLane = undefined; c.lcAt = undefined; c.lcHold = undefined; c.uturn = undefined; c.merge = undefined; c.mergeBy = undefined; c.keep = undefined;
     c.merged = undefined; c.adm = undefined; c.admNode = undefined; c.after = undefined; c.entry = undefined; c.uref.length = 0; c.ne = 0;
     c.why = undefined; c.roomWait = undefined; c.divertAt = undefined; c.readmit = undefined; c.pose = undefined; c.axles = undefined;
-    c.wait = 0; c.held = undefined; c.heldAt = undefined; c.heldSince = undefined;
+    c.wait = 0; c.held = undefined; c.heldAt = undefined; c.heldSince = undefined; c.kerb = undefined;
   }
 
   // ---------- cached geometry ----------
@@ -632,8 +637,10 @@ export class Traffic {
     else if (evening) { o = this.rand() < 0.85 ? job() : shopA(); d = home(); }
     else { const out = this.rand() < 0.5; o = out ? home() : shopA() ?? job(); d = out ? shopA() ?? job() : home(); }
     if (!o || !d || (o.seg.id === d.seg.id && Math.abs(o.s - d.s) < 8)) return;
-    // (from a plot with a car parked there, that car pulls out first)
-    const po = !lorry && o.lot && this.pulling.length < 40 ? this.parking?.pullOut(o.lot) : null;
+    // (from a plot with a car parked there, that car pulls out first; from one with none of its
+    // own, a car parked at the kerb on its street)
+    let po = !lorry && o.lot && this.pulling.length < 40 ? this.parking?.pullOut(o.lot) ?? null : null;
+    if (!po && !lorry && o.lot && this.pulling.length < 40) { const k = this.kerbPull(o, d); if (k) { po = k.po; o = k.o; } }
     if (po && d) {
       const pu: Traffic['pulling'][number] = { o, d, dressed: po.dressed, since: now, tries: 0 };
       this.pulling.push(pu);
@@ -641,6 +648,77 @@ export class Traffic {
       return;
     }
     this.spawn(o, d, lorry, now);
+  }
+
+  // ---------- kerbside parking (game/parking.ts) ----------
+  // A car parked at the kerb on the plot's street, on the side the trip sets off along, within
+  // KERB_REACH of the plot's way in: it pulls out forwards into the lane and the trip starts from
+  // there (a car's length or two ahead of its space).
+  private kerbPull(o: Access, d: Access): { po: PullOut; o: Access } | null {
+    if (!this.parking || !o.lot) return null;
+    const p = this.plan(o, d);
+    if (!p) return null;
+    const side: 1 | -1 = p.from === o.seg.a ? 1 : -1;
+    const k = this.parking.pullOutKerb(o.seg.id, side, o.s, KERB_REACH);
+    if (!k) return null;
+    return { po: k, o: { seg: o.seg, s: Math.max(0, Math.min(this.len(o.seg), k.s + side * 9)), lot: o.lot } };
+  }
+  // A car nearing the end of its trip at a plot with no free space of its own: the free kerbside
+  // space on its side of the street nearest the plot, within KERB_REACH, if any, becomes where it
+  // stops (ten metres short of the space, to pull in nose first). Decided once, on the last road.
+  private kerbTarget(c: Car, L: number) {
+    const pk = this.parking!, lot = c.dest!.lot!;
+    c.kerb = null;
+    if (pk.hasRoom(lot)) return;
+    const side: 1 | -1 = c.from === c.seg.a ? 1 : -1, hi = this.endGuard(c.seg, c.from) - c.front;
+    let best: { i: number; goal: number; d: number } | null = null;
+    for (const b of pk.kerbFree(c.seg.id, side)) {
+      const sd = side === 1 ? b.s : L - b.s, goal = sd - 10, d = Math.abs(sd - c.goal);
+      if (d > KERB_REACH || goal < c.s + 2 || goal > hi) continue;
+      if (!best || d < best.d) best = { i: b.i, goal, d };
+    }
+    if (!best) return;
+    c.kerb = { key: kerbKey(c.seg.id, side), i: best.i };
+    c.goal = best.goal;
+  }
+  // The kerbside spots, kept for the roads with parking bays near the view (the parking draws
+  // and fills what's near it): made from the roads as they are (roaddraw.ts kerbsideBays) once
+  // a second for any road not yet done since the network last changed, dropped for roads gone
+  // or far away. A dropped spot's cars wait a moment for the spot that replaces them, so a road
+  // rebuilt or split keeps its parked cars where they stood.
+  private syncKerbs(now: number) {
+    const pk = this.parking;
+    if (!pk || now - this.kerbAt < 1000) return;
+    this.kerbAt = now;
+    const v = pk.view, near = v.r * 1.6 + 100, far = v.r * 3 + 300;
+    for (const k of pk.kerbs()) {
+      const s = this.net.segs.get(k.seg.id);
+      if (!s || s !== k.seg) pk.dropKerb(k.key);
+      else if (Math.hypot(k.cx - v.x, k.cz - v.z) > far) { pk.dropKerb(k.key); this.kerbDone.delete(s.id); }
+    }
+    let budget = 40; // roads a second (a first look at a big town spreads over a few seconds)
+    for (const s of this.net.segs.values()) {
+      if (this.kerbDone.has(s.id)) continue;
+      const d = this.net.def(s);
+      if (!d.parking || d.cls !== 'road') { this.kerbDone.add(s.id); continue; }
+      const p = this.net.path(s), m = p[Math.floor(p.length / 2)];
+      if (Math.hypot(m.x - v.x, m.z - v.z) > near) continue;
+      if (budget-- <= 0) break;
+      const kind = this.streetKind(s), sides = kerbsideBays(this.net, s, this.junctions);
+      for (const side of [1, -1] as const) {
+        const b = sides.find((x) => x.side === side);
+        if (b) pk.setKerb(s, side, kind, b.bays); else pk.dropKerb(kerbKey(s.id, side));
+      }
+      this.kerbDone.add(s.id);
+    }
+  }
+  // what a street is lined with (its kerbside spaces fill as its plots' do: homes' at night)
+  private streetKind(s: RSeg): Lot['kind'] {
+    const n = new Map<Lot['kind'], number>();
+    for (const l of this.net.lots) if (l.seg === s.id) n.set(l.kind, (n.get(l.kind) ?? 0) + 1);
+    let best: Lot['kind'] = 'shop', k = 0;
+    for (const [kind, c] of n) if (c > k) { best = kind; k = c; }
+    return best;
   }
 
   // A bus that tours the network, calling at every stop on its side of the road: one of the
@@ -899,15 +977,15 @@ export class Traffic {
     return { loop: total, buses: pos };
   }
   // Should this bus, its dwell done, hold on at the stop? Only on a line with spacing on, only
-  // while the bus ahead is closer than a third of the loop (or the line's even spacing, when it
-  // runs more than three buses) and closer than the bus behind (holding for a leader while a
-  // follower closes in only moves the bunch), and for at most HOLD_MAX seconds in all.
+  // while the bus ahead is closer than the line's even spacing (half the loop with two buses, a
+  // third with three) and closer than the bus behind (holding for a leader while a follower
+  // closes in only moves the bunch), and for at most HOLD_MAX seconds in all.
   private holdOn(c: Car, now: number) {
     if (!c.line || c.line.spacing === false || c.line.seq.length < 2) return false;
     if (c.heldSince !== undefined && now - c.heldSince >= HOLD_MAX * 1000) return false;
     const sp = this.spacing(c.line.id), me = sp.buses.find((b) => b.id === c.id);
     if (!me || sp.buses.length < 2 || sp.loop < 50) return false;
-    const want = Math.min(1 / 3, 1 / sp.buses.length);
+    const want = 1 / sp.buses.length;
     return me.ahead < want - 1e-6 && me.ahead < me.behind;
   }
   // A line's calls changed (a stop lost): each of its buses goes on to the same call, or the next
@@ -1825,6 +1903,7 @@ export class Traffic {
     this.cars = this.cars.filter((c) => !(c.gone !== undefined && now - c.gone > 600) && net.segs.has(c.seg.id) && (!c.turn || net.segs.has(c.turn.next.id)));
     this.index();
     this.fromDepot(now);
+    this.syncKerbs(now);
     for (const c of this.cars) {
       if (c.gone !== undefined) { if (c.away) c.s += c.v * dt; continue; } // (one leaving the map drives on out as it fades)
       if (c.sold && !c.turn && c.adm === undefined && c.dwell === undefined && !c.inBay) { c.gone = now; continue; }
@@ -1942,12 +2021,17 @@ export class Traffic {
     c.s += ds;
     c.wait = v < 0.3 && c.dwell === undefined ? c.wait + dt : 0;
     if (c.wait > GIVE_UP && !c.bus) { c.gone = now; this.stats.gaveUp++; return; } // gives up and finds another way
+    // (nearing the end of its trip: a kerbside space on this street, if the plot has no room of its own)
+    if (last && c.kerb === undefined && !c.away && !c.bus && !c.lorry && c.dest?.lot && this.parking && c.goal - c.s < 80) this.kerbTarget(c, L);
     if (last && c.s >= c.goal - 1) {
       this.stats.arrived++;
-      // into a free space at the plot, if it has one (the parking draws it from here: it's gone from the road at once)
+      // into a free space at the plot, if it has one, or the kerbside space it made for (the
+      // parking draws it from here: it's gone from the road at once)
       const q = c.pose?.parts[0];
-      if (!c.away && !c.bus && !c.lorry && c.dress && c.dest?.lot && q && this.parking?.arrive(c.dest.lot, { kind: c.kind, heavy: c.lorry, cls: c.cls ?? 0, front: c.front, back: c.back, hw: c.hw ?? 0.9, top: c.vmax / 0.95, dress: c.dress }, { x: q.x, z: q.z, hx: Math.cos(c.heading), hz: Math.sin(c.heading) }, c.v)) c.gone = now - 600;
-      else c.gone = now;
+      const dm = c.dress ? { kind: c.kind, heavy: c.lorry, cls: c.cls ?? 0, front: c.front, back: c.back, hw: c.hw ?? 0.9, top: c.vmax / 0.95, dress: c.dress } : null;
+      const at = q ? { x: q.x, z: q.z, hx: Math.cos(c.heading), hz: Math.sin(c.heading) } : null;
+      const parked = !c.away && !c.bus && !c.lorry && dm && at && this.parking && (c.kerb ? this.parking.arriveKerb(c.kerb.key, c.kerb.i, dm, at, c.v) : !!c.dest?.lot && this.parking.arrive(c.dest.lot, dm, at, c.v));
+      c.gone = parked ? now - 600 : now;
       return;
     }
     if (pl) { if (admitted && c.s >= pl.path.lineS) this.enter(c, pl); return; }

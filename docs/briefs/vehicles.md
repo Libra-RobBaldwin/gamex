@@ -4,6 +4,37 @@ Session https://claude.ai/code/session_01EKUWb6f3c3TYr6jHSTbTjp, branch `claude/
 PR #64 (the five review rows below) merged into `claude/cloud-session-history-rvqkm1` at 22:59 UTC.
 A second PR, #69, the coordinator's follow-ups (asked 23:18 UTC), is the section right below; opened 27 Sep 00:46 UTC, CI green locally (122 unit files, six phone e2es).
 
+# Round 5: the next items from this brief (asked 27 Sep 05:51 UTC, after #76 merged)
+
+The coordinator: merge integration and carry on with what the brief left; then (06:03 UTC) the
+user's ask on parked cars, which came before the rest. PR #81, opened 27 Sep 06:55 UTC; locally:
+typecheck clean, 133 unit files (1206 tests) green on the merged tree, five phone e2es and the
+menu green; the loop e2e fails on this branch and identically on the untouched integration head
+(the town keeps growing after its line is withdrawn: the economy's, said on the PR).
+
+| # | Item | Status |
+|---|---|---|
+| N1 | Anti-bunching for trains. | **Done** (`rail/sim.ts` `spacing`, `holdOn`; `railway.ts` `spacing`/`setSpacing`; the line's sheet gets "Even gaps · on/off" and the train's sheet says "holding to even the gaps"). A train whose boarding is done holds at the platform, doors open, while the train ahead on its line is closer than the line's even spacing and closer than the train behind, looking again every four seconds, a minute at the most per call. Bounded, so it can never lock a line up (the train behind waits at its signal a minute at the worst). Where a train is round the cycle is measured in time: the sim keeps how long each leg takes, measured as trains run it and estimated from the planned route before one has. `docs/rail.md`, "Even gaps". |
+| N2 | The even spacing itself. | **Changed for buses too**: the rule held while the vehicle ahead was closer than a third of the loop, which with two vehicles leaves them a third and two thirds apart (headways 1:2). Now it holds while the one ahead is closer than the line's even spacing, `1/N` (a half with two, a third with three, as before, with more). The bus tests (3 buses) measure the same. |
+| N3 | The loop-position measure behind the buses' even gaps (approximate at a far pole). | **Left as it is.** The train's measure is in time and exact; the bus's is in metres along the canonical loop and reads a bus behind when it has to loop round from a far pole, which is true in time. Its evidence is headways (3–17% uneven with the rule, up to 118% without), which is what a player sees; rewriting a working rule for a smoother number wasn't worth the risk to the lines e2e. |
+| N4 | A saved train or bus restarts from its depot. | **Left, by design**: `game/save.ts` says what the game remakes as it runs (the traffic, each line's vehicles) isn't saved, and who's aboard is the crowds' (not mine). Positions would need the sim's block reservations saved too; a bigger change than this round. |
+| N5 | The station card's Demolish. | Stays: the bulldozer refusing stations is the play session's row. |
+| N7 | **Found on the way (the likely reason the user saw boxes and no cars):** on the region map no fleet vehicle was drawn at all: `Fleet.seen` culled every car, bus, train and parked car against the camera at the vehicle's unlifted height, while the drape draws them 245 m up on the hills under the start town. In the phone build's screenshots the road drawer's boxes showed and the real cars never did (a car park at the mid level of detail shows the building generator's stand-ins). | **Fixed** (`fleet.ts` `lift`, set from the relief in `main.ts`, one hunk): culling looks where the drape draws. `fleet.cull.test.ts` reproduces the bug and the fix. Every screenshot below is with this fix. |
+| N6 | **The user's ask (06:03 UTC, before the rest):** "Parked cars still look like horrible boxes, not actual vehicles. And vehicles should actually use parking spaces, not just block them up." | **Done.** The boxes were the road drawer's stand-ins on streets with parking bays (`roaddraw.ts`), which nothing used. Now the drawer only marks the spaces; `kerbsideBays` lists them (one every 6 m along each side's band, nose along the kerb the way that side's traffic drives, clear of a stop's painted-out stretch and a crossing's zig-zags, never in the lane); the traffic keeps them as the parking's kerbside spots near the view (`Traffic.syncKerbs`) and the parking fills them with the area's real cars, drawn through `Fleet.drawCar` as the drives are. A trip ending at a plot with no room parks at the kerb within 60 m, nose first from the lane; one starting at a plot with no car of its own begins with a kerbside car pulling out (the `held` gap). A split or rebuilt street keeps its cars. `docs/parking.md`, `game/parking.test.ts` (four new tests). One hunk in `main.ts`: the parking's car picker takes the street for a kerbside space as it takes a plot. |
+
+## Measured (`rail/spacing.test.ts`: a 3 km double line, three stations, a there-and-back line, its trains all started at the first station, four game days, headways over the last two)
+
+| Trains | Switch | Holds | Headways at each call | Uneven (sd/mean) |
+|---|---|---|---|---|
+| 2 | on | 7 | 179–181 s | 0.00–0.02 |
+| 2 | off | 0 | 58 s then 295 s, all day | 0.52–0.82 |
+| 3 | on | 4 | 110–123 s | 0.04–0.05 |
+| 3 | off | 0 | 55 s, 55 s, then 240 s | 0.70–0.80 |
+
+Calls a day are the same within one (30 against 31 with two trains). Asserted at under 0.3 with
+the switch on, over 0.6 off, no red passed, no shared block, no hold over a minute, doors open
+throughout a hold, the switch saved with the line.
+
 # Round 4: rail money (asked 27 Sep 04:24 UTC)
 
 The coordinator: RUN in `rail/game.ts` (a train's running cost a game day) had never been measured
@@ -39,15 +70,14 @@ their old proportions, 0.37 of what they were). The town-to-village line then ma
 economy's, not mine): a train's day now costs less than a decker bus's (£2,600), because a rail rider
 pays twice a bus fare and a village line carries a third of a busy bus line's riders.
 
-## What's left from this brief, after round 4
+## What's left from this brief, after round 4 (round 5 above took the first)
 
-- No anti-bunching for trains (they run under signals; a held train blocks a block).
-- The loop-position measure behind even gaps is approximate (a bus that calls at a stop's far pole
-  loops round to its next call); the evidence is headways, which is what a player sees.
+- ~~No anti-bunching for trains~~ (round 5, N1).
+- The loop-position measure behind the buses' even gaps is approximate (round 5, N3: left).
 - The station card keeps Demolish because nothing else offers it; the bulldozer refusing stations is
   the play session's row.
 - A saved train restarts from its depot, as a saved bus restarts along its line; positions, calls
-  and who's aboard aren't saved.
+  and who's aboard aren't saved (round 5, N4: by design, left).
 - Not played by hand on a phone: checked by the e2es and the unit tests only.
 
 # Round 3: an adversarial review of rail on the new town (asked 27 Sep 01:51 UTC)

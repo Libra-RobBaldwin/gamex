@@ -352,6 +352,7 @@ export class RailGame {
       actions: [
         { label: `Add a train · ${money(this.trainPrice(trains[0]?.def ?? TRAINS.dmu))}`, icon: 'plus', kind: 'primary', disabled: !this.can(this.trainPrice(trains[0]?.def ?? TRAINS.dmu)), onClick: () => { const r = this.buy(l, trains[0]?.def ?? TRAINS.dmu); this.c.hint(typeof r === 'string' ? r : `A train joins line ${l.num}`, typeof r === 'string' ? 'alert' : 'train'); this.showLine(l); } },
         { label: 'Remove a train', icon: 'minus', disabled: !trains.length, onClick: () => { railway.removeTrain(trains[trains.length - 1]); this.showLine(l); } },
+        { label: `Even gaps · ${railway.spacing(l) ? 'on' : 'off'}`, title: 'A train waits at a platform while the one ahead is too close, so they don’t bunch', icon: 'transport', onClick: () => { railway.setSpacing(l, !railway.spacing(l)); this.showLine(l); } },
         { label: 'Delete line', icon: 'trash', kind: 'danger', onClick: () => { railway.removeLine(l); shell.closeSheet(); this.c.hint(`Line ${l.num} withdrawn`, 'train'); } },
       ],
       onClose: () => { if (this.active !== 'line') this.showBadges(null); },
@@ -362,7 +363,7 @@ export class RailGame {
     const at = t.state === 'dwell' && t.station !== undefined ? railway.station(t.station)?.name : undefined, next = t.stop ? railway.station(t.stop.station)?.name : undefined;
     const waiting = t.state !== 'dwell' && t.v < 0.1 && t.waited > 3;
     const model = (t.dress as { chain?: { name?: string }[] } | undefined)?.chain?.[0]?.name ?? (t.def as { label?: string }).label ?? 'Train';
-    const doing = t.state === 'dwell' ? (t.doors ? 'doors open' : 'about to leave') : waiting ? 'waiting at a red signal' : 'running';
+    const doing = t.state === 'dwell' ? (t.holdSince !== undefined ? 'holding to even the gaps' : t.doors ? 'doors open' : 'about to leave') : waiting ? 'waiting at a red signal' : 'running';
     // a small card, as a bus's: the name, three numbers, one thing to do
     shell.openInfo({
       key: `train:${t.id}`, title: `Train ${t.id}`, sub: `${model} · ${t.def.cars} car${t.def.cars === 1 ? '' : 's'}${l ? ` · Line ${l.num}` : ''} · ${doing}`, icon: 'train', tone: 'rail',
