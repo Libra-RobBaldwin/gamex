@@ -96,7 +96,7 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 |---|---|
 | Exits measured, priors written | live (#65) |
 | Spokes and stems | live (#65), checked at 412×915 |
-| PR open | none; #67 (the radial town, the review fixes, the lane climb) merged 27 Sep 01:45 UTC, #65 merged 26 Sep; the next PR is the park pond and the hamlet proposal |
+| PR open | #71 (the park pond, the hamlet proposal), open, subscribed; #67 merged 27 Sep 01:45 UTC, #65 merged 26 Sep |
 | Radials, edge, T-junctions, closes, village shapes measured | live (#67): `tools/os/towns.mjs`, `PRIORS.towns`, a section in the report |
 | Generator: town grown along its radials | on PR #67 (`layStreets` rewritten, then made crossing-free); the careful builder refuses nothing on five seeds; tsc clean; the full unit suite green (126 files, 1120 tests); all six phone suites green locally on their moved positions (listed in the PR); the start town checked at 412×915 from 900 m and 400 m (report); live (#67) |
 | Lanes: the best-facing spoke, water at the stem, a blend into the course | live (#67); `region.test.ts` checks every lane on three plans |
