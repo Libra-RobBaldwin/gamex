@@ -32,7 +32,7 @@ its full paint passes.) Stages per change before the last two items: `setInput` 
 0.25, planting 0.06, paint 0.73. Checks: `tsc` clean; ground and game folders 29 files, 192 tests; the whole
 suite on the merged head (below, "Checks before the push").
 
-**Seasons and crop variety (item 3), branch `claude/work-country-seasons`, its own PR into the integration branch.**
+**Seasons and crop variety (item 3), branch `claude/work-country-seasons`, PR #80 into the integration branch.**
 Done and checked on 412×915 screenshots (DPR 2, SwiftShader), `docs/reports/country/season-*.jpg`:
 
 12. **The farming year.** `ground/covers.ts` `CROP_YEAR` gives each crop keyframes through the year (colours and
