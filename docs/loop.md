@@ -90,12 +90,22 @@ the screenshots, and frame time no worse than before the milestone at the same q
   `game/econ.ts`, measured with Playwright sweeps:
   - A review every game day, so a day is the town's month. Money runs at the same pace: each
     game day's riders pay a month's fares at £2 each.
-  - The town finds its own goods and materials until freight exists. Finding all of a supply caps
-    nothing (27 Sep): the library's local share is of what the town started with, so until then the
-    shops could never grow past the ones the map made while the offices grew on the buses' visitors,
-    and by day 16 "shops within 20 min can serve only 29% of residents" with no tool to answer it
-    (play round 3). Now shops follow their customers; `game/econ.shops.test.ts` holds the shop
-    reach above 90% over twenty days of growth.
+  - The town finds its own goods and materials until freight exists, all its shops and works ever
+    need (`selfSupplied` in the tune, 27 Sep): the library's local share is of what the town started
+    with, so until then the shops could never grow past the ones the map made. Visitors stay a share
+    of the start, since they are what the lines bring: the offices beyond it stand on those alone,
+    and fall back when the service goes (the loop's withdraw-and-shrink); works stay as the map made
+    them too, or with materials to spare they would grow on the town's own workers, service or none.
+    Shops follow their customers from where the town started (customers per shop place against the
+    start's): a town the map gave few shops keeps its share as it grows and never falls further
+    behind, and shops with more custom than at the start take on staff whatever the labour market. A
+    town whose offices grow on its buses' visitors has more jobs than workers, and before this its
+    shops closed for want of staff while its people queued at them, until by day 16 "shops within 20
+    min can serve only 29% of residents" with no tool to answer it (play round 3). The panel's shops
+    line now warns only when shops have fallen behind the start; a thin high street is the map's to
+    mend (the realism stream's). `game/econ.shops.test.ts` holds the shop reach through twenty days
+    of growth and the town's decline within a week of its line going; `e2e/loop.e2e.mjs` checks the
+    same on the region's start town.
   - Offices live mostly on visitors your buses bring.
   - Taking the bus carries no fixed penalty. The town is small enough to walk across, so
     otherwise almost nobody rides.

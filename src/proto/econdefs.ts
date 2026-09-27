@@ -161,6 +161,11 @@ export const TUNE = {
   // share of what the town started with that it finds for itself: homes for people who don't
   // need to get to work (the retired, those working from home), and supplies for its businesses
   local: { homes: 0.5, goods: 0.55, materials: 0.55, visitors: 0.6 },
+  // A supply the town finds all of for itself, for whatever stands and is asked for, not just a
+  // share of what it started with: nothing it finds then caps how far those businesses grow, only
+  // their workers and custom do. (A game without freight sets goods and materials; visitors stay
+  // a share of the start, since they are what the player's lines bring.)
+  selfSupplied: { goods: false, materials: false, visitors: false },
   // A town is lifted or held back into balance when the map is made, within this range: one far
   // short of what it needs (an estate with no jobs in reach) still shrinks, towards its floor.
   calibrateMin: 0.5, calibrateMax: 1.6,
