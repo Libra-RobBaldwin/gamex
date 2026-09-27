@@ -36,6 +36,17 @@ their old proportions, 0.37 of what they were). The town-to-village line then ma
 economy's, not mine): a train's day now costs less than a decker bus's (£2,600), because a rail rider
 pays twice a bus fare and a village line carries a third of a busy bus line's riders.
 
+## What's left from this brief, after round 4
+
+- No anti-bunching for trains (they run under signals; a held train blocks a block).
+- The loop-position measure behind even gaps is approximate (a bus that calls at a stop's far pole
+  loops round to its next call); the evidence is headways, which is what a player sees.
+- The station card keeps Demolish because nothing else offers it; the bulldozer refusing stations is
+  the play session's row.
+- A saved train restarts from its depot, as a saved bus restarts along its line; positions, calls
+  and who's aboard aren't saved.
+- Not played by hand on a phone: checked by the e2es and the unit tests only.
+
 # Round 3: an adversarial review of rail on the new town (asked 27 Sep 01:51 UTC)
 
 The coordinator: on the town grown along its radials (#67, #70), review rail as the review did for
