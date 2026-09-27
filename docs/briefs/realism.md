@@ -104,4 +104,5 @@ Lower priority than step 4's PR and the stream above; in this PR or a small one 
 | Lane grades and density | not started |
 | Side-by-side evidence at whole map / 6 km / 1 km, hero pictures retaken | hero pictures to retake after the suites pass; side-by-sides not started |
 | Review bug 11 (failed tiles asked for for ever) | committed (`view.ts`: three tries, each wait twice the last, then left alone; `view.fail.test.ts`, the review's test); on PR #67, not live |
+| Park pond (coordinator, 26 Sep 23:46 UTC, on PR #67: after it lands, a park pond as a level surface in a hollow with an irregular outline, through the water system, or a clear note here on why not yet) | not started; taken up after #67 lands |
 | Review: bounded coarse growth, no jump on activation | growth bounded, committed (`econ.ts` eases off towards half again the planned size; `econ.test.ts`); the jump on activation is `main.ts`, the play session's, noted in the PR; not live |
