@@ -20,7 +20,7 @@ defaults become:
 | `lakes` | 0–12, or −1 for the seed to decide | −1 |
 | `city` | 1 or 0: two cities, the biggest places | 1 |
 | `towns` | 0–30, or −1 for the seed to decide | −1 |
-| `villages` | 0–250, or −1 | −1 |
+| `villages` | 0–250, or −1 (as many as a real region shows: `PRIORS.settlements`, 129–157 village-sized places per 1,000 km² and 65–170 hamlets, capped at 220) | −1 |
 | `style` | `temperate`, `desert`, `arctic`: the ground's palette and crops, the woods and the sky (`styles.ts`) | temperate |
 | `relief` | `flat`, `lowland`, `rolling`, `upland`, `mountain` | rolling |
 | `real` | a real region's id (`public/regions/<id>`): the map is that region, not made up | |

@@ -170,7 +170,12 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
   // (and the hamlets on top, as the bakes have them: a few houses on a lane, 65–170 per 1,000 km²,
   // capped so a plan is still made in a few seconds)
   const nHamlets = o.villages === -1 ? Math.max(AUTO.hamlets[0], Math.min(AUTO.hamlets[1], Math.round((between(S.hamlet, t) * land) / 1000))) : Math.round(o.villages * 1.2);
-  const kinds: Kind[] = [...(o.city ? ['city' as const, 'city' as const] : []), ...Array<Kind>(nTowns).fill('town'), ...Array<Kind>(nVillages).fill('village'), ...Array<Kind>(nHamlets).fill('hamlet')];
+  // (and the rest of the villages a real region shows, 129–157 per 1,000 km² with the bigger hamlets
+  // folded in, PRIORS.settlements.villagesLoadedPerThousandKm2: placed after the hamlets so every
+  // place before them keeps its spot, and none near the start town)
+  const nMore = o.villages === -1 ? Math.max(0, Math.round((between(PRIORS.settlements.villagesLoadedPerThousandKm2, t) * land) / 1000) - nVillages) : 0;
+  const kinds: Kind[] = [...(o.city ? ['city' as const, 'city' as const] : []), ...Array<Kind>(nTowns).fill('town'), ...Array<Kind>(nVillages).fill('village'), ...Array<Kind>(nHamlets).fill('hamlet'), ...Array<Kind>(nMore).fill('village')];
+  const firstMore = kinds.length - nMore;
   const out: WorldSettlement[] = [];
   const names = rng(mix(seed, 204)); // (a stream of their own: renaming never moves a place)
   const everyName = new Set<string>();
@@ -215,6 +220,9 @@ function placeSettlements(r: Rand, seed: number, H: number, w: WorldWater, o: Re
       if (Math.abs(x) > lim || Math.abs(z) > lim) continue;
       // (no hamlet within the start town's first view: a pinch-out over it must not bring a place to life)
       if (kind === 'hamlet' && Math.hypot(x, z) < 3600) continue;
+      // (and none of the later villages within 6.5 km of it: its first view and its own lanes, which
+      // go to its nearest neighbours, stay what they were)
+      if (n >= firstMore && Math.hypot(x, z) < 6500) continue;
       // (villages thin out and thicken in patches a few kilometres across)
       if (patchy && r() > 0.35 + 0.65 * patch(x, z, seed)) continue;
       if (w.edgeDistance({ x, z }, R + 200) < R + 90) continue;

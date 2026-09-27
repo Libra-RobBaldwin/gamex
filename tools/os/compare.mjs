@@ -62,7 +62,7 @@ function measure(p) {
     'towns and cities per 1,000 km²': +(towns.length / landKm2 * 1000).toFixed(1),
     'villages per 1,000 km²': +(villages.length / landKm2 * 1000).toFixed(1),
     'hamlets per 1,000 km² (the bakes: those of 150 people or more count as villages above, the rest are not loaded)': hamlets.length ? +(hamlets.length / landKm2 * 1000).toFixed(1) : 'n/a',
-    'villages and hamlets per 1,000 km²': +((villages.length + hamlets.length) / landKm2 * 1000).toFixed(1),
+    'villages and hamlets together per 1,000 km² (the bakes load only their villages; Open Names has 139–241 villages and hamlets per 1,000 km², PRIORS.settlements)': +((villages.length + hamlets.length) / landKm2 * 1000).toFixed(1),
     'town to nearest town (km, median)': +(median(nn(towns, towns)) / 1000).toFixed(1),
     'village to nearest place (km, median)': +(median(nn(villages, S)) / 1000).toFixed(1),
     'largest places (people)': S.map((s) => s.pop).sort((a, b) => b - a).slice(0, 3).map((v) => Math.round(v / 100) * 100).join(', '),
@@ -98,7 +98,10 @@ the fair yardstick for the router is a lane's grade over the slope of the ground
 lanes take at about ${span(F.b.gradeOverSlope)} (B roads) to ${span(F.minor.gradeOverSlope)} (minor roads). The seeded lane km fall short of the
 real minor road km where the plan has fewer of the smallest places: a real 50 km square has
 ${span(PRIORS.settlements.perThousandKm2.hamlet)} hamlets per 1,000 km² on top of its ${span(PRIORS.settlements.perThousandKm2.village)} villages, each with its lanes (the plan now makes
-hamlets from that prior, capped so a plan is still made in a few seconds; the hamlets row).
+hamlets from that prior, capped so a plan is still made in a few seconds; the hamlets row). A baked
+region shows 129–157 villages per 1,000 km² because it folds its hamlets of 150 people or more into
+its villages; the plan makes as many village-sized places (\`villagesLoadedPerThousandKm2\`; the
+villages row), the later ones placed after the hamlets and none within 6.5 km of the start town.
 
 | | ${cols.map((c) => c.name).join(' | ')} |
 |---|${cols.map(() => '---').join('|')}|

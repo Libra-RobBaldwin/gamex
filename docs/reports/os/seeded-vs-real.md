@@ -1,6 +1,6 @@
 # Seeded against real: the 50 km plans on the same yardsticks
 
-Made by `tools/os/compare.mjs` (2026-09-27 03:47 UTC). The real columns are the
+Made by `tools/os/compare.mjs` (2026-09-27 06:41 UTC). The real columns are the
 bakes through `real/world.ts`; the seeded ones are `planWorld` for those seeds, at its defaults.
 Seeded maps start with lanes only (PLAN.md decision 3), so their A road rows are empty; the trunk
 planner's A roads are the priors' concern. `PRIORS.follow` measured every 50 m of the real roads
@@ -12,27 +12,30 @@ the fair yardstick for the router is a lane's grade over the slope of the ground
 lanes take at about 0.52–0.54 (B roads) to 0.6 (minor roads). The seeded lane km fall short of the
 real minor road km where the plan has fewer of the smallest places: a real 50 km square has
 65.1–170 hamlets per 1,000 km² on top of its 71.2–74 villages, each with its lanes (the plan now makes
-hamlets from that prior, capped so a plan is still made in a few seconds; the hamlets row).
+hamlets from that prior, capped so a plan is still made in a few seconds; the hamlets row). A baked
+region shows 129–157 villages per 1,000 km² because it folds its hamlets of 150 people or more into
+its villages; the plan makes as many village-sized places (`villagesLoadedPerThousandKm2`; the
+villages row), the later ones placed after the hamlets and none within 6.5 km of the start town.
 
 | | real: exe | real: teme | seeded: 42 | seeded: 7 | seeded: 1234 |
 |---|---|---|---|---|---|
 | land (km²) | 2077 | 2401 | 2006 | 1884 | 1290 |
 | towns and cities per 1,000 km² | 8.7 | 5 | 7 | 7.4 | 10.9 |
-| villages per 1,000 km² | 129 | 156.6 | 72.3 | 71.1 | 102.4 |
+| villages per 1,000 km² | 129 | 156.6 | 152.1 | 156.1 | 148.1 |
 | hamlets per 1,000 km² (the bakes: those of 150 people or more count as villages above, the rest are not loaded) | n/a | n/a | 109.7 | 116.8 | 132.6 |
-| villages and hamlets per 1,000 km² | 129 | 156.6 | 182 | 187.9 | 235 |
+| villages and hamlets together per 1,000 km² (the bakes load only their villages; Open Names has 139–241 villages and hamlets per 1,000 km², PRIORS.settlements) | 129 | 156.6 | 261.7 | 272.9 | 280.7 |
 | town to nearest town (km, median) | 6.2 | 11.1 | 6.5 | 8.3 | 6.4 |
-| village to nearest place (km, median) | 1.4 | 1.4 | 1.5 | 1.5 | 1.4 |
+| village to nearest place (km, median) | 1.4 | 1.4 | 1.4 | 1.4 | 1.4 |
 | largest places (people) | 120900, 38100, 33500 | 15800, 15600, 14600 | 28400, 23500, 8000 | 27500, 23300, 7900 | 26600, 23300, 8100 |
 | A road km | 419 | 373 | 0 | 0 | 0 |
-| B and minor road km | 3368 | 2523 | 1655 | 1583 | 1313 |
+| B and minor road km | 3368 | 2523 | 2045 | 1963 | 1438 |
 | A road grade, median / 90th (%) | 2.1 / 6.1 | 1.6 / 5.8 | n/a | n/a | n/a |
-| B road and lane grade, median / 90th (%) | 3.1 / 9.3 | 2.6 / 7.9 | 1.7 / 4.3 | 1.5 / 4.3 | 2.0 / 4.3 |
-| land slope, median / 90th (%) | 8.1 / 19.5 | 6.7 / 19.1 | 3.1 / 8.9 | 2.7 / 9.0 | 3.4 / 11.2 |
-| lane grade over the slope of its ground (median) | 0.6 | 0.57 | 0.55 | 0.57 | 0.54 |
+| B road and lane grade, median / 90th (%) | 3.1 / 9.3 | 2.6 / 7.9 | 1.8 / 4.3 | 1.6 / 4.3 | 2.0 / 4.3 |
+| land slope, median / 90th (%) | 8.1 / 19.5 | 6.7 / 19.1 | 3.0 / 9.0 | 2.6 / 9.0 | 3.4 / 11.2 |
+| lane grade over the slope of its ground (median) | 0.6 | 0.57 | 0.58 | 0.58 | 0.55 |
 | land height, median / 90th (m) | 119 / 240 | 159 / 290 | 244 / 303 | 256 / 305 | 234 / 300 |
 | railway km | 172 | 95 | 0 | 0 | 0 |
-| plan made in (ms) | 4847 | 3017 | 3984 | 3401 | 2592 |
+| plan made in (ms) | 5767 | 3966 | 4406 | 4082 | 2810 |
 
 ## The places: the seeded street layouts on the real towns' yardsticks
 
@@ -53,12 +56,12 @@ a parade of shops as one footprint, where the scenery builds each house and shop
 | ways out of a town (median; the real count has its A roads, the seeded one its lanes) | 11 | 11 | 12 | 12 |
 | ways out of a village (median) | 5 | 4 | 4 | 4 |
 | a radial's wander inside a town, from one 100 m to the next (°, median) | 11.3 | 6.2 | 6.6 | 7.2 |
-| a radial's wander inside a village (°, median) | 11.3 | 2.0 | 1.5 | 1.9 |
+| a radial's wander inside a village (°, median) | 11.3 | 2.1 | 1.9 | 2.0 |
 | houses along a town's radials by quarter, over the middle quarters' (the ribbon thinning) | 0.79 / 1.06 / 0.94 / 0.51 | 1.51 / 1.19 / 0.81 / 0.60 | 1.84 / 1.12 / 0.88 / 0.66 | 1.70 / 1.12 / 0.88 / 0.66 |
-| houses along a village's radials by quarter | 0.59 / 1.03 / 0.97 / 0.44 | 2.29 / 1.19 / 0.81 / 0.44 | 2.24 / 1.18 / 0.82 / 0.47 | 2.24 / 1.18 / 0.82 / 0.44 |
+| houses along a village's radials by quarter | 0.59 / 1.03 / 0.97 / 0.44 | 2.27 / 1.19 / 0.81 / 0.45 | 2.31 / 1.15 / 0.85 / 0.47 | 2.28 / 1.17 / 0.83 / 0.44 |
 | junctions in towns: dead ends / T / crossroads | 0.31 / 0.65 / 0.04 | 0.34 / 0.64 / 0.02 | 0.31 / 0.67 / 0.02 | 0.32 / 0.66 / 0.02 |
-| junctions in villages: dead ends / T / crossroads | (as towns) | 0.40 / 0.54 / 0.06 | 0.41 / 0.53 / 0.06 | 0.40 / 0.53 / 0.06 |
+| junctions in villages: dead ends / T / crossroads | (as towns) | 0.41 / 0.53 / 0.06 | 0.41 / 0.53 / 0.06 | 0.40 / 0.54 / 0.06 |
 | street piece between junctions, towns (m, median) | 71–79 | 69 | 71 | 69 |
 | street piece, villages (m, median) | (as towns) | 68 | 68 | 68 |
 | orientation order, towns (1 a grid, 0 every bearing alike) | 0.01–0.05 (core), 0–0.01 (suburb) | 0.03 | 0.02 | 0.02 |
-| orientation order, villages | (as towns) | 0.02 | 0.01 | 0.01 |
+| orientation order, villages | (as towns) | 0.01 | 0 | 0.01 |

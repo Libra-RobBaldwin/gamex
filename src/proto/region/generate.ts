@@ -374,11 +374,22 @@ function reachOrder(edges: LEdge[], root: LNode) {
 // `water` says the straight line crosses water (a bridge is needed, or a way round).
 export function suggestLinks(ss: Settlement[], mw: MapWater): Link[] {
   const d = (a: Settlement, b: Settlement) => Math.hypot(a.x - b.x, a.z - b.z);
+  // (the Gabriel graph: a pair is joined when no third place lies in the circle on their line; the
+  // places in a 2 km grid, so a pair looks only at the cells its circle covers, and pairs further
+  // apart than 14 km are not tried, a circle that wide always holding someone on a 50 km map)
   const gabriel = (set: Settlement[]) => {
-    const out: [Settlement, Settlement][] = [];
+    const out: [Settlement, Settlement][] = [], cell = 2000, grid = new Map<string, Settlement[]>();
+    const key = (x: number, z: number) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+    for (const s of set) { const k = key(s.x, s.z); const l = grid.get(k); if (l) l.push(s); else grid.set(k, [s]); }
+    const inCircle = (a: Settlement, b: Settlement, m: XZ, R: number) => {
+      for (let i = Math.floor((m.x - R) / cell); i <= Math.floor((m.x + R) / cell); i++) for (let j = Math.floor((m.z - R) / cell); j <= Math.floor((m.z + R) / cell); j++) for (const c of grid.get(`${i},${j}`) ?? []) if (c !== a && c !== b && Math.hypot(c.x - m.x, c.z - m.z) < R) return true;
+      return false;
+    };
+    const far = set.length > 40 ? 14000 : Infinity;
     for (let i = 0; i < set.length; i++) for (let j = i + 1; j < set.length; j++) {
-      const a = set[i], b = set[j], m = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }, R = d(a, b) / 2;
-      if (!set.some((c) => c !== a && c !== b && Math.hypot(c.x - m.x, c.z - m.z) < R)) out.push([a, b]);
+      const a = set[i], b = set[j], L = d(a, b);
+      if (L > far) continue;
+      if (!inCircle(a, b, { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }, L / 2)) out.push([a, b]);
     }
     return out.sort((p, q) => d(...p) - d(...q));
   };
@@ -402,7 +413,7 @@ export function suggestLinks(ss: Settlement[], mw: MapWater): Link[] {
   const want = (s: Settlement) => (s.kind === 'hamlet' ? 2 : s.kind === 'village' ? PRIORS.exits.minorPerPlace.village : PRIORS.exits.minorPerPlace.town);
   for (const a of ss) {
     if (a.kind === 'hamlet') continue;
-    const near = ss.filter((b) => b !== a).sort((p, q) => d(a, p) - d(a, q)).slice(0, 24);
+    const near = ss.filter((b) => b !== a && Math.abs(b.x - a.x) < 6000 && Math.abs(b.z - a.z) < 6000).sort((p, q) => d(a, p) - d(a, q)).slice(0, 24);
     for (const b of near) {
       if ((count.get(a.id) ?? 0) >= want(a)) break;
       if (has(a, b) || (count.get(b.id) ?? 0) > want(b) || d(a, b) > 6000 || through(a, b)) continue;
