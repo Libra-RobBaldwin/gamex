@@ -52,9 +52,17 @@ const drafted = () => page.evaluate(() => document.querySelector('#tpanel')?.tex
 
 // New line: frame the town, tap three stop badges
 await page.tap('[data-newline]');
-await page.evaluate(() => window.proto.focusOn({ x: 0, z: -60 }, 900));
 await page.waitForTimeout(1000);
 await settle();
+// (the tool frames every stop itself: each badge inside the part of the screen the chrome leaves clear, above the hint)
+{
+  const out = await page.evaluate(() => {
+    const P = window.proto, c = P.shell.clearRect(), h = document.querySelector('#hint'), hb = h && !h.hidden ? h.getBoundingClientRect().top : c.bottom;
+    return P.markers.places().map((m) => ({ id: m.id, ...P.toScreen(m.p) })).filter((s) => s.x < c.left + 20 || s.x > c.right - 20 || s.y < c.top + 20 || s.y > hb - 20).map((s) => `${s.id} at ${Math.round(s.x)},${Math.round(s.y)}`);
+  });
+  if (out.length) fail(`New line should frame every stop clear of the chrome and the hint: ${out.join('; ')}`);
+  else console.log('New line frames every stop clear of the chrome and the hint');
+}
 const targets = [{ x: -80, z: -50 }, { x: -110, z: 30 }, { x: 60, z: 100 }];
 const pickOf = (q) => page.evaluate((q) => {
   const P = window.proto, places = P.markers.places();
@@ -89,24 +97,33 @@ if (third === null) fail('a third bus could not be added'); else line.buses.push
 const gapsAt = () => page.evaluate((id) => { const sp = window.proto.traffic.spacing(id); return { min: sp.buses.length ? Math.min(...sp.buses.map((b) => b.ahead)) : 0, at: sp.buses.map((b) => +b.at.toFixed(2)), holds: window.proto.traffic.stats.holds }; }, line.id);
 const gap0 = await gapsAt();
 console.log('gaps round the loop at the start', JSON.stringify(gap0));
-// run the clock at 4x and log every call
+// log every call, then run the game six sim minutes at 16x: the frame loop takes at most 0.1 s of
+// real time a frame (main.ts) in steps of 1/30 s, so on SwiftShader at half a second a frame the
+// clock at 4x gives a slow runner too little sim time for three buses to call three times each,
+// and the run would measure the runner, not the buses; at 16x each frame is 1.6 s of sim whatever
+// the frame rate, and the traffic, the people and the railway all step together as they always do
 await page.evaluate(() => {
   const T = window.proto.traffic, orig = T.onBusStop;
   window.__calls = [];
+  window.__t0 = T.clock;
   T.onBusStop = (seg, st, bus) => { window.__calls.push([bus, st.id]); return orig(seg, st, bus); };
-  window.proto.setSpeed(4);
+  window.proto.setSpeed(16);
 });
 await page.tap('.close').catch(() => {});
-// until every bus on it has made three calls (SwiftShader runs a few frames a second), or 4 minutes
-const ran = await page.waitForFunction((ids) => ids.every((id) => window.__calls.filter(([b]) => b === id).length >= 3), line.buses, { timeout: 240000, polling: 2000 }).then(() => true, () => false);
-// even gaps: the rule engaged (a bus held at a stop for the one ahead to get away). Only judged when
-// the four minutes were enough for every bus to make three calls: on a slow runner (a few frames a
-// second) the buses have barely gone round, and where the third bus happened to start decides the
-// gaps. traffic.spacing.test.ts measures the headways settling over twenty sim minutes: bunched buses
-// end up calling at intervals within 30% of even.
+const ran = await page.waitForFunction(() => window.proto.traffic.clock - window.__t0 >= 6 * 60 * 1000, null, { timeout: 360000, polling: 2000 }).then(() => true, () => false);
+console.log('sim minutes run', await page.evaluate(() => ((window.proto.traffic.clock - window.__t0) / 60000).toFixed(1)), ran ? '' : '(short: the wall-clock limit came first)');
+console.log('buses after', JSON.stringify(await page.evaluate((ids) => ids.map((id) => { const c = window.proto.traffic.cars.find((x) => x.id === id); return c ? { id, seg: c.seg.id, v: +c.v.toFixed(1), why: c.why, leg: c.leg, wait: +c.wait.toFixed(0) } : { id, depot: true }; }), line.buses)));
+// even gaps: the rule engaged (a bus held at a stop for the one ahead to get away), and the
+// smallest gap between buses is no worse than where the third bus started. Only judged when the
+// six minutes were enough for every bus to make three calls: a runner that stalls, or a town whose
+// traffic holds a bus in a queue, can't fail the suite on the even-gaps rule; traffic.spacing.test.ts
+// measures the headways settling over twenty sim minutes (bunched buses end up calling at intervals
+// within 30% of even).
+const made = await page.evaluate((ids) => ids.every((id) => window.__calls.filter(([b]) => b === id).length >= 3), line.buses);
 const gap1 = await gapsAt();
-console.log('gaps round the loop at the end', JSON.stringify(gap1), ran ? '' : '(the runner was too slow for three calls a bus: the even-gaps rule is judged by traffic.spacing.test.ts)');
-if (ran && gap1.holds === 0) fail('no bus held at a stop to even the gaps');
+console.log('gaps round the loop at the end', JSON.stringify(gap1), made ? '' : '(not every bus made three calls in six sim minutes: the even-gaps rule is judged by traffic.spacing.test.ts)');
+if (made && gap1.holds === 0) fail('no bus held at a stop to even the gaps');
+if (made && gap1.min < gap0.min - 0.05) fail(`the smallest gap round the loop closed up: ${gap0.min.toFixed(2)} -> ${gap1.min.toFixed(2)}`);
 const res = await page.evaluate((line) => {
   const P = window.proto, placeOf = (id) => line.stops.findIndex((k) => P.traffic.place(k)?.stops.some((s) => s.id === id));
   const by = {};
@@ -122,9 +139,10 @@ for (const [bus, seq] of Object.entries(res)) {
   const st = order.indexOf(seq[0]);
   seq.forEach((k, i) => { if (k !== order[(st + i) % order.length]) fail(`bus ${bus} call ${i} out of order: ${seq}`); });
 }
-// (SwiftShader runs a few frames a second: at least one call for each of the line's own two buses here,
-// the third being there for the even-gaps check; game/lines.test.ts checks many)
-if (calls < 2) fail(`only ${calls} calls`);
+// (six sim minutes in this town's traffic, where a bus can stand a minute in a queue: at least a
+// call for each of the line's own two buses, the third being there for the even-gaps check;
+// game/lines.test.ts checks many more, in order)
+if (calls < 2) fail(`only ${calls} calls in six sim minutes`);
 
 // tap one of its buses
 await page.evaluate(() => window.proto.setSpeed(0));

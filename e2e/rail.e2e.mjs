@@ -27,6 +27,25 @@ await page.evaluate(() => window.proto.focusOn({ x: -480, z: 116 }, 220));
 await wait(2500);
 await page.screenshot({ path: `${out}/rail-0-starter.png` });
 
+// the rail tool by touch: Build > Rail > Branch line, a finger dragged across the fields north of town; the blueprint calls it a railway
+{
+  await page.tap('[data-bar="build"]'); await wait(400);
+  await page.tap('[data-tab="rail"]'); await wait(400);
+  let hit = false;
+  for (const c of await page.$$('[data-item]')) if ((await c.getAttribute('aria-label'))?.startsWith('Branch line')) { await c.tap(); hit = true; break; }
+  if (!hit) fail('no Branch line card under Build > Rail');
+  await page.evaluate(() => window.proto.focusOn({ x: 0, z: 760 }, 900)); await wait(2000);
+  const cdp = await page.context().newCDPSession(page);
+  const [a, b] = await page.evaluate(() => [window.proto.toScreen({ x: -200, z: 760 }), window.proto.toScreen({ x: 200, z: 760 })]);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: a.x, y: a.y, id: 1 }] }); await wait(150);
+  for (let i = 1; i <= 12; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: a.x + ((b.x - a.x) * i) / 12, y: a.y + ((b.y - a.y) * i) / 12, id: 1 }] }); await wait(40); }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await wait(1500);
+  const panel = (await page.textContent('#tpanel').catch(() => '')) ?? '';
+  if (!/New railway|Curved railway/.test(panel)) fail(`the rail blueprint should say it's a railway, not a road: "${panel.slice(0, 60)}"`);
+  else console.log('rail blueprint:', panel.slice(0, 40));
+  await page.tap('#t-cancel'); await wait(500);
+}
+
 // a branch line just west of the start town, north to south: it crosses the lane west on the level
 const laid = await page.evaluate(() => {
   const P = window.proto;
@@ -87,7 +106,7 @@ if (!line || line.stops.length !== 2) fail('the rail line was not created');
 
 // run: calls at both stations, doors open at a platform, the crossing shuts and holds the road
 await page.evaluate(() => window.proto.focusOn({ x: -480, z: 116 }, 160));
-let doorsSeen = false, closedSeen = false, carsHeld = 0, onTrack = 0;
+let doorsSeen = false, closedSeen = false, carsHeld = 0, onTrack = 0, doorsWrong = 0, doorsChecked = 0;
 for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a second)
   await wait(1000);
   const s = await page.evaluate((lid) => {
@@ -97,8 +116,17 @@ for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a
     const on = c ? P.traffic.onStretch(c.site.road, c.site.z0, c.site.z1) : false;
     const waitingCars = c ? (P.traffic.barriers.get(c.site.road)?.length ?? 0) : 0;
     const calls = sim.log.filter((e) => e.line === lid).map((e) => e.station);
-    return { doors, closed: c?.down ?? false, held, on, waitingCars, calls, red: sim.stats.redPassed };
+    // doors open on the platform side: every open door is at a platform edge of the station the train stands at
+    let wrong = 0, checked = 0;
+    for (const t of sim.trains) {
+      if (t.line !== l || t.state !== 'dwell' || t.doors !== 1 || t.station === undefined) continue;
+      const sh = R.shapes.get(t.station), pts = P.railDraw.doorsOf(t);
+      const near = (q) => (sh?.platforms ?? []).some((pl) => [pl.edge, ...(pl.twoFaced ? [pl.back] : [])].some((ln) => ln.some((e, i) => i && (() => { const A = ln[i - 1], B = e, dx = B.x - A.x, dz = B.z - A.z, L2 = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((q.x - A.x) * dx + (q.z - A.z) * dz) / L2)); return Math.hypot(A.x + dx * u - q.x, A.z + dz * u - q.z) < 1.2; })())));
+      for (const q of pts) { checked++; if (!near(q)) wrong++; }
+    }
+    return { doors, closed: c?.down ?? false, held, on, waitingCars, calls, red: sim.stats.redPassed, wrong, checked };
   }, line.id);
+  doorsWrong += s.wrong; doorsChecked += s.checked;
   if (s.doors && !doorsSeen) await page.screenshot({ path: `${out}/rail-3-doors.png` });
   doorsSeen ||= s.doors;
   closedSeen ||= s.closed;
@@ -110,6 +138,9 @@ for (let i = 0; i < 180; i++) { // (up to 3 min: SwiftShader runs a few frames a
   if (s.red) fail('a train passed a red signal');
 }
 if (onTrack) fail(`a car was on the level crossing while a train held its block (${onTrack} samples)`);
+console.log('doors checked against the platform edges', doorsChecked, 'wrong side', doorsWrong);
+if (!doorsChecked) fail('no open door was seen to check against a platform');
+if (doorsWrong) fail(`${doorsWrong} open doors were not at a platform edge`);
 await page.evaluate(() => window.proto.focusOn({ x: -480, z: 340 }, 120));
 await wait(2500);
 await page.screenshot({ path: `${out}/rail-5-station.png` });

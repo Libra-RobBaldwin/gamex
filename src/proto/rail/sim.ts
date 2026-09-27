@@ -126,7 +126,28 @@ export class RailSim {
     const loops = [...stations].filter((s) => { const ps = (g.platforms.get(s) ?? []).map((i) => g.pieces[i]); return ps.length >= 2 && ps.every((p) => p.oneWay === 0); }).length;
     return { lines, cap: 1 + loops };
   }
-  // Why a train can't run a line (null if it can): too long for a platform, or track it can't use.
+  // Is there a way by rail for a train of this kind from one station's platforms to another's,
+  // through the points as trains take them (track.ts exits), setting off either way (reversals)?
+  reachable(from: number, to: number, def: TrainDef) {
+    const g = this.graph, goal = new Set((g.platforms.get(to) ?? []).filter((i) => g.usable(g.pieces[i], def)));
+    if (!goal.size) return false;
+    const key = (s: Step) => s.piece * 2 + (s.dir === 1 ? 1 : 0), seen = new Set<number>(), open: Step[] = [];
+    for (const i of g.platforms.get(from) ?? []) {
+      const p = g.pieces[i];
+      if (!g.usable(p, def)) continue;
+      for (const d of (p.oneWay ? [p.oneWay] : [1, -1]) as Dir[]) { open.push({ piece: i, dir: d }); open.push(...g.reversals(i, d)); }
+    }
+    while (open.length) {
+      const s = open.pop()!;
+      if (seen.has(key(s))) continue;
+      seen.add(key(s));
+      if (goal.has(s.piece)) return true;
+      for (const e of g.exits(s.piece, s.dir)) if (g.usable(g.pieces[e.piece], def) && g.pieces[e.piece].depot === undefined) open.push(e);
+    }
+    return false;
+  }
+  // Why a train can't run a line (null if it can): too long for a platform, track it can't use,
+  // or no way by rail between two of its calls.
   fits(def: TrainDef, length: number, line: RailLine, adding = false): string | null {
     if (adding) {
       const { lines, cap } = this.group(line), n = this.trains.filter((t) => t.line && lines.has(t.line)).length + this.pending.filter((p) => p.train.line && lines.has(p.train.line)).length;
@@ -139,6 +160,11 @@ export class RailSim {
       const longest = Math.max(...plats.map((i) => { const p = this.graph.pieces[i]; return p.plat ? p.plat.u1 - p.plat.u0 : 0; }));
       if (length > longest - STOP_BACK + 0.5) return `Too long for the platforms (${Math.round(length)} m train, ${Math.round(longest)} m platform)`;
       if (!plats.some((i) => this.graph.usable(this.graph.pieces[i], def))) return def.needsWires ? 'It needs electrified line' : def.rack ? 'Rack track only at one of the stations' : 'The line is too steep for it';
+    }
+    const calls = callOrder(line.stops, line.loop);
+    for (let i = 0; i < calls.length; i++) {
+      const a = calls[i], b = calls[(i + 1) % calls.length];
+      if (a !== b && !this.reachable(a, b, def)) return `No way by rail from station ${a} to station ${b}`;
     }
     return null;
   }
